@@ -1,0 +1,14 @@
+[Unit]
+Description=Gorangen Bot Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/home/root/gay_boy_packet_pro_deploy
+Environment=TG_TOKEN=
+Environment=TG_CHATID=
+ExecStart=/usr/bin/gunicorn bot.bot_server:app --bind 0.0.0.0:5000 --workers 2 --threads 4
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
