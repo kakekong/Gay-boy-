@@ -1,0 +1,12 @@
+{
+    "symbol": "ADRO",
+    "entry": "1190",
+    "TP1": "1207",
+    "TP2": "1225",
+    "TP3": "1249",
+    "SL": "1178",
+    "EMER_SL": "1150",
+    "ATR": "22.5",
+    "auto_move_SL": "true",
+    "trailing_ATR_mult": "1.5"
+}
