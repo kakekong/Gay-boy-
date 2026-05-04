@@ -1,0 +1,40 @@
+{
+  "name": "Supply Risk Weekly Scan",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "weeks", "weeksInterval": 1, "triggerAtDay": 1 }] } },
+      "id": "1", "name": "Weekly Mon 02:00",
+      "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INDUSTRIA_API_URL }}/api/v1/ai/supply-risk",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "2", "name": "Fetch risk dashboard",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": { "string": [{ "value1": "={{ $json.risk_level }}", "operation": "equals", "value2": "high" }] }
+      },
+      "id": "3", "name": "Filter high",
+      "type": "n8n-nodes-base.if", "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": { "text": "High supplier risk: {{$json.name}}" },
+      "id": "4", "name": "Notify Purchasing",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Weekly Mon 02:00":     { "main": [[{ "node": "Fetch risk dashboard", "type": "main", "index": 0 }]] },
+    "Fetch risk dashboard": { "main": [[{ "node": "Filter high", "type": "main", "index": 0 }]] },
+    "Filter high":          { "main": [[{ "node": "Notify Purchasing", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "Quotation Follow-up T+3",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "days", "daysInterval": 1 }] } },
+      "id": "1", "name": "Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INDUSTRIA_API_URL }}/api/v1/quotations?status_eq=sent",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "2", "name": "List sent quotations",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INDUSTRIA_API_URL }}/api/v1/ai/assistant/suggest",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={ \"intent\": \"wa_followup\", \"customer_id\": $json.customer_id }"
+      },
+      "id": "3", "name": "AI compose",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [720, 300]
+    },
+    {
+      "parameters": { "text": "Send via WA Cloud" },
+      "id": "4", "name": "WA Send",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Daily 09:00":           { "main": [[{ "node": "List sent quotations", "type": "main", "index": 0 }]] },
+    "List sent quotations":  { "main": [[{ "node": "AI compose", "type": "main", "index": 0 }]] },
+    "AI compose":            { "main": [[{ "node": "WA Send", "type": "main", "index": 0 }]] }
+  }
+}

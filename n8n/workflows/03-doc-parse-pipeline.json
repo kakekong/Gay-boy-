@@ -1,0 +1,41 @@
+{
+  "name": "Doc Parse Pipeline",
+  "nodes": [
+    {
+      "parameters": { "mailbox": "INBOX", "format": "raw" },
+      "id": "1", "name": "Email Trigger (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap", "typeVersion": 2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INDUSTRIA_API_URL }}/api/v1/ai/document/parse",
+        "method": "POST",
+        "sendBinaryData": true,
+        "options": {}
+      },
+      "id": "2", "name": "POST /ai/document/parse",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "conditions": { "boolean": [{ "value1": "={{ $json.needs_review }}", "value2": false }] }
+      },
+      "id": "3", "name": "Confidence OK?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": { "channel": "doc-parse-review", "text": "Manual review needed" },
+      "id": "4", "name": "Notify Slack/WA",
+      "type": "n8n-nodes-base.slack", "typeVersion": 2,
+      "position": [960, 320]
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP)":   { "main": [[{ "node": "POST /ai/document/parse", "type": "main", "index": 0 }]] },
+    "POST /ai/document/parse":{ "main": [[{ "node": "Confidence OK?", "type": "main", "index": 0 }]] },
+    "Confidence OK?":         { "main": [[], [{ "node": "Notify Slack/WA", "type": "main", "index": 0 }]] }
+  }
+}

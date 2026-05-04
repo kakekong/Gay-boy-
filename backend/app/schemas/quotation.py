@@ -1,0 +1,58 @@
+from datetime import date
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class QuotationItemIn(BaseModel):
+    line_no: int
+    source: str = Field(default="product", pattern="^(product|custom)$")
+    product_id: UUID | None = None
+    description: str
+    spec: dict = Field(default_factory=dict)
+    qty: float
+    uom: str = "pcs"
+    unit_price: float
+    cost_estimate: float = 0
+
+
+class QuotationItemOut(QuotationItemIn):
+    id: UUID
+    line_total: float
+
+    model_config = {"from_attributes": True}
+
+
+class QuotationCreate(BaseModel):
+    customer_id: UUID
+    variant: str = Field(default="detailed", pattern="^(short|detailed)$")
+    items: list[QuotationItemIn]
+    discount_pct: float = 0
+    tax_pct: float = 11
+    valid_until: date | None = None
+    notes: str | None = None
+
+
+class QuotationOut(BaseModel):
+    id: UUID
+    number: str
+    customer_id: UUID
+    version: int
+    variant: str
+    status: str
+    sales_pic_id: UUID | None
+    currency: str
+    subtotal: float
+    discount_pct: float
+    discount_amount: float
+    tax_pct: float
+    total: float
+    valid_until: date | None
+    notes: str | None
+    items: list[QuotationItemOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class QuotationDecide(BaseModel):
+    notes: str | None = None

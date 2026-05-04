@@ -1,0 +1,40 @@
+{
+  "name": "Approval Fanout",
+  "nodes": [
+    {
+      "parameters": { "path": "approval-requested", "options": {} },
+      "id": "1", "name": "API webhook",
+      "type": "n8n-nodes-base.webhook", "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.required_role }}", "operation": "equals", "value2": "director" }
+          ]
+        }
+      },
+      "id": "2", "name": "Director?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": { "text": "Director approval needed: {{$json.target_type}} {{$json.target_id}}" },
+      "id": "3", "name": "Notify Director(s) WA",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [720, 200]
+    },
+    {
+      "parameters": { "text": "Manager approval needed: {{$json.target_type}} {{$json.target_id}}" },
+      "id": "4", "name": "Notify Manager(s) WA",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [720, 400]
+    }
+  ],
+  "connections": {
+    "API webhook": { "main": [[{ "node": "Director?", "type": "main", "index": 0 }]] },
+    "Director?":   { "main": [[{ "node": "Notify Director(s) WA", "type": "main", "index": 0 }],
+                              [{ "node": "Notify Manager(s) WA",  "type": "main", "index": 0 }]] }
+  }
+}

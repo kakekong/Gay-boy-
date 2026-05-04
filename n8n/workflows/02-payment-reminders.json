@@ -1,0 +1,49 @@
+{
+  "name": "Payment Reminders",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] } },
+      "id": "1", "name": "Cron Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.INDUSTRIA_API_URL }}/api/v1/finance/reminders/run",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "2", "name": "Get reminders",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "to_remind",
+        "options": {}
+      },
+      "id": "3", "name": "Split list",
+      "type": "n8n-nodes-base.itemLists", "typeVersion": 3,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v20.0/={{$env.WA_PHONE_ID}}/messages",
+        "method": "POST",
+        "authentication": "headerAuth",
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={ \"messaging_product\": \"whatsapp\", \"to\": $json.customer_id, \"type\": \"template\", \"template\": { \"name\": \"payment_reminder\", \"language\": { \"code\": \"id\" } } }"
+      },
+      "id": "4", "name": "Send WA template",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Cron Hourly":   { "main": [[{ "node": "Get reminders", "type": "main", "index": 0 }]] },
+    "Get reminders": { "main": [[{ "node": "Split list",    "type": "main", "index": 0 }]] },
+    "Split list":    { "main": [[{ "node": "Send WA template","type": "main","index": 0 }]] }
+  }
+}
