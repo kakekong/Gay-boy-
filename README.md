@@ -1,133 +1,252 @@
-# IndustriaCRM — Enterprise CRM + ERP + AI for Project-Based Engineering Companies
+# IndustriaCRM — A Smart Office Assistant for Industrial Engineering Companies
 
-A production-ready scaffold of a unified CRM, ERP and AI Automation platform tailored for **project-based industrial engineering companies** (Mining, PLTU/Power Plant, Fertilizer, Sugar, Cement, Pulp & Paper, Food).
-
-This is **not** a generic CRM. The whole architecture follows the actual sales cycle of a custom industrial product business:
-
-> Lead → Presentation → Engineering → Quotation → Negotiation → PO → Drawing Approval → Purchasing → Delivery → Invoicing → Payment
-
----
-
-## 1. What's inside
-
-| Layer | Tech | Purpose |
-|---|---|---|
-| Backend API | **FastAPI (Python 3.11)** | REST API, RBAC, business logic, AI orchestration |
-| Database | **PostgreSQL 15** | Transactional data, JSONB for flexible engineering specs |
-| Cache / Queue | **Redis** | Sessions, rate limiting, Celery broker |
-| Background workers | **Celery** | Reminders, scoring jobs, document parsing |
-| Automation | **n8n** | WhatsApp 2-way sync, payment alerts, follow-up flows |
-| AI layer | **OpenAI / LLM API** + scikit-learn | Lead scoring, deal risk, AI assistant, doc parsing |
-| Frontend | **React 18 + Vite + TypeScript + TailwindCSS** | Modern dashboard UI |
-| Auth | **JWT + role-based** (Sales / Admin / Manager / Director) | Approval workflows |
-| Infra | **Docker Compose** | One-command local stack |
+> Imagine if your sales, purchasing, warehouse, and finance teams all worked from
+> the **same notebook**, and an AI assistant quietly read that notebook all day,
+> looking for problems before they happen.
+>
+> That's what this software does.
 
 ---
 
-## 2. Modules
+## Who is this for?
 
-1. **CRM** — Customers, contacts, activity log, reminders, WhatsApp 2-way
-2. **Quotation** — Standard + custom engineering, multi-version, approval workflow, discount rules
-3. **Purchasing** — PR → RFQ → Supplier PO → Drawing → Inspection → GR → QC → Payment
-4. **Operation** — Receiving, Warehousing, QC, Packaging, Delivery, Work Orders, split delivery, resi tracking
-5. **Finance** — DO, Invoice, AR/AP, payment terms (DP, Tempo, Termin), tax report
-6. **KPI & Analytics** — Sales / Purchasing / Operation / Finance KPIs
-7. **Executive Dashboard** — Pipeline, forecast, lost deal analysis
-8. **AI Command Center** — At-Risk Deals, Top Priority Actions, Forecast vs Reality, Profit Alerts
+This is built for companies that **make custom industrial products** for big
+factories — things like:
 
-### AI sub-modules
-- Lead Scoring AI
-- Auto Quotation AI
-- Sales AI Assistant (WA suggestions, closing strategy, stalled-deal detection)
-- **Deal Risk Detector** — early warning system
-- **Profit Intelligence Engine** — real-time margin per project
-- **Smart Reminder Engine** — AI-timed follow-ups
-- **Opportunity Expansion AI** — upsell engine
-- **Document Intelligence** — parse PO PDF / image / WA / email
-- **Loss Analysis AI** — win/lose pattern brain
-- **Sales Performance AI Coach**
-- **Auto Workflow Orchestrator**
-- **Supply Risk Monitor**
-- **Knowledge Base AI** — company memory
+- ⛏️ Mining
+- ⚡ Power plants (PLTU)
+- 🌱 Fertilizer plants
+- 🍬 Sugar mills
+- 🏗️ Cement plants
+- 📰 Pulp & paper mills
+- 🍞 Food factories
 
----
+Selling to these customers is **not like selling on a website**. Each deal is
+big, takes months, and follows a long path:
 
-## 3. Quickstart
-
-```bash
-# 1. Configure
-cp infra/.env.example .env
-
-# 2. Boot the full stack (db, redis, api, frontend, n8n, worker)
-docker compose -f infra/docker-compose.yml --env-file .env up -d
-
-# 3. Seed initial roles, demo data
-docker compose -f infra/docker-compose.yml exec api python -m app.scripts.seed
-
-# 4. Open
-# API docs : http://localhost:8000/docs
-# Frontend : http://localhost:5173
-# n8n      : http://localhost:5678
+```
+Customer asks for a quote
+        ↓
+We do a presentation
+        ↓
+Our engineers design the product
+        ↓
+We send a quotation (a price offer)
+        ↓
+We negotiate
+        ↓
+Customer sends a Purchase Order (PO)
+        ↓
+Customer approves the technical drawings
+        ↓
+We buy the materials
+        ↓
+We build it
+        ↓
+We deliver
+        ↓
+We send the invoice
+        ↓
+We receive payment
 ```
 
-Default users (after seed):
-
-| Role | Email | Password |
-|---|---|---|
-| Director | director@demo.local | demo1234 |
-| Manager | manager@demo.local | demo1234 |
-| Sales | sales1@demo.local | demo1234 |
-| Admin | admin@demo.local | demo1234 |
+That's a **lot** to track. Most companies do this in spreadsheets, WhatsApp
+chats, and emails. Things slip through the cracks. Customers go cold. Margins
+get eaten. This software is the fix.
 
 ---
 
-## 4. Documentation
+## What does it actually do?
 
-| File | Topic |
+Think of it as **three tools in one**:
+
+### 1. 🧲 CRM — "Customer Notebook"
+Keeps a tidy record of every customer, every phone call, every WhatsApp
+message, and where each deal is in the pipeline. So nobody forgets to follow
+up, and nobody has to ask "who's handling this customer?"
+
+### 2. 🏭 ERP — "The Factory Brain"
+Once a customer says yes, the system tracks the entire job: buying materials,
+managing the workshop, doing quality checks, packing, delivering, invoicing,
+and getting paid. All in one place.
+
+### 3. 🤖 AI Assistant — "The Quiet Co-Worker"
+This is the special part. An AI quietly watches everything and:
+
+- Warns you when a deal is going cold ("you haven't called PT Bara in 8 days")
+- Suggests the **best message** to send the customer next, in Bahasa Indonesia
+- Reads incoming Purchase Order PDFs and automatically creates the project
+- Tells you which deals are losing money before it's too late
+- Reminds customers about overdue payments via WhatsApp
+- Suggests upsell opportunities ("PT Cement A probably needs new chains soon")
+
+---
+
+## The 4 types of users
+
+Different people in the company see different things:
+
+| Person | What they can do |
 |---|---|
-| [`docs/01-architecture.md`](docs/01-architecture.md) | High-level architecture & service breakdown |
-| [`docs/02-database-schema.md`](docs/02-database-schema.md) | Full ERD, tables, relations, key fields |
-| [`docs/03-api-design.md`](docs/03-api-design.md) | REST endpoints per module |
-| [`docs/04-uiux-design.md`](docs/04-uiux-design.md) | Page structure, key components |
-| [`docs/05-automation-flows.md`](docs/05-automation-flows.md) | n8n workflows & triggers |
-| [`docs/06-ai-logic-design.md`](docs/06-ai-logic-design.md) | Prompts, scoring models, message generation |
-| [`docs/07-deployment.md`](docs/07-deployment.md) | Production deployment notes |
+| 👤 **Sales** | See only their own customers. Make quotations. Talk to customers. |
+| 📝 **Admin** | Help enter data, but every change must be approved by a Manager. |
+| 👔 **Manager** | Approve quotations and small discounts. See everything. |
+| 👑 **Director** | Full access. Approve big discounts. See the whole company. |
+
+### How discounts work (a real example)
+
+Say a salesperson wants to give a customer a discount:
+
+- 💚 **5% or less** → goes through automatically
+- 🟡 **Between 5% and 15%** → the Manager has to say yes
+- 🔴 **More than 15%** → the Director has to say yes
+
+The system checks this **automatically**. No more "boss, can I give 10% to
+this client?" over WhatsApp.
 
 ---
 
-## 5. Repository layout
+## What you'll see on the screen
+
+The software is a website. After logging in, there's a menu on the left:
+
+- **Dashboard** — your daily summary
+- **CRM** — your list of customers
+- **Quotations** — the price offers you've sent
+- **Approvals** — things waiting for the boss to say yes
+- **Projects** — jobs in progress
+- **Purchasing** — materials being bought
+- **Operation** — what's happening in the workshop
+- **Finance** — invoices and payments
+- **KPI** — performance numbers
+- **Executive Dashboard** — the big-picture view (for managers/directors)
+- **🧠 AI Command Center** — the smart room
+
+### The 🧠 AI Command Center (the cool part)
+
+This page is the **war room**. Open it in the morning and you instantly see:
+
+- 🚨 **At-Risk Deals** — deals about to slip away, with the reason why
+- ⚡ **Top Priority Actions** — your personal to-do list, ranked by importance
+- 💰 **Profit Alerts** — projects losing money so you can act fast
+- 📊 **Forecast vs Reality** — what was promised vs what actually closed
+- 💡 **AI Recommendations** — opportunities the AI spotted for you
+
+It's like having a smart assistant who already read every email and message
+overnight and prepared a briefing.
+
+---
+
+## How does the WhatsApp part work?
+
+This is built for Indonesia, so WhatsApp is the main channel.
+
+- 📥 **Incoming**: when a customer messages your business WhatsApp, the message
+  is automatically saved in their customer record. No more "where did I see
+  that message?"
+- 📤 **Outgoing**: the system sends payment reminders, quotation follow-ups,
+  and after-sales messages on its own — but only at the **smart times** when
+  that customer usually replies.
+
+---
+
+## What's actually inside this folder?
+
+If you opened this folder on your computer, here's what you'd see:
 
 ```
 .
-├── backend/        FastAPI app (API, services, AI, workers)
-├── frontend/       React + Vite dashboard
-├── n8n/            n8n workflow exports (WhatsApp, reminders, alerts)
-├── infra/          Docker Compose, nginx, .env.example
-├── docs/           System design documentation
-└── README.md
+├── README.md          ← this file
+├── docs/              ← detailed design (for the technical team)
+├── backend/           ← the engine that runs behind the scenes
+├── frontend/          ← the website you click around in
+├── n8n/               ← the automation rules (WhatsApp, reminders, etc.)
+├── infra/             ← instructions for putting it all on a server
+└── .github/           ← rules for testing the code automatically
 ```
 
----
-
-## 6. Roles & permissions (summary)
-
-| Capability | Sales | Admin | Manager | Director |
-|---|---|---|---|---|
-| See own customers | ✅ | ✅ | ✅ | ✅ |
-| See all customers | ❌ | ✅ | ✅ | ✅ |
-| Create quotation | ✅ | ✅ | ✅ | ✅ |
-| Approve quotation | ❌ | ❌ | ✅ | ✅ |
-| Discount ≤ 5% | auto | auto | auto | auto |
-| Discount 5–15% | request | request | ✅ | ✅ |
-| Discount > 15% | request | request | request | ✅ |
-| Edit data (with approval) | ❌ | ✅ | ✅ | ✅ |
-| Approve data changes | ❌ | ❌ | ✅ | ✅ |
-| Full system access | ❌ | ❌ | ❌ | ✅ |
-
-Implementation: [`backend/app/core/permissions.py`](backend/app/core/permissions.py)
+You don't need to open any of these unless you're working with a developer.
+The README in each folder explains what's there.
 
 ---
 
-## 7. License & ownership
+## How do you actually run it?
 
-Internal enterprise system. All rights reserved by the issuing organization.
+This software needs a developer (or someone comfortable with the command line)
+to set it up the first time. Once it's set up, **you just open a website**.
+
+The technical setup, in plain words:
+
+1. Install **Docker** on a server (Docker is a tool that runs the software).
+2. Copy the example settings file and fill in things like the WhatsApp token
+   and the OpenAI key.
+3. Run **one command** that starts everything: the website, the database, the
+   automation engine, the AI worker.
+4. Open the website in a browser and log in.
+
+The full step-by-step is in [`docs/07-deployment.md`](docs/07-deployment.md).
+
+---
+
+## Demo logins (for trying it out)
+
+After your developer runs the setup, you can log in with these demo accounts:
+
+| Role | Email | Password |
+|---|---|---|
+| Director | `director@demo.local` | `demo1234` |
+| Manager | `manager@demo.local` | `demo1234` |
+| Sales | `sales1@demo.local` | `demo1234` |
+| Admin | `admin@demo.local` | `demo1234` |
+
+Each one shows a slightly different view, so you can see how permissions work.
+
+---
+
+## What's special about this vs. a generic CRM?
+
+Most CRMs (HubSpot, Salesforce, Zoho) are designed for selling **standard
+products** to **many customers**. This one is the opposite:
+
+- 🎯 Built for **few, high-value, custom-engineered deals**
+- 🇮🇩 Speaks **Bahasa Indonesia** by default (WhatsApp messages, quotations)
+- 📋 Knows the **drawing approval** stage (custom products need this)
+- 💰 Tracks **profit per project** in real time (not just revenue)
+- 🚛 Handles **split delivery** (one PO can be delivered in pieces)
+- 💳 Knows **DP / Tempo / Termin** payment terms (not just credit cards)
+- 🤝 Built around the **approval culture** of Indonesian B2B (manager OKs everything)
+- 🤖 The AI is trained to think like a **B2B industrial salesperson**, not a
+  marketing chatbot
+
+---
+
+## What this software is NOT
+
+To be honest:
+
+- ❌ It's **not a finished product** you download and click "install" on. It's
+  a **scaffold** — a strong starting structure that a developer customizes for
+  your company.
+- ❌ It does **not replace** your accounting software for tax filing. It hands
+  off cleanly to one.
+- ❌ The AI is **a helper, not a decision-maker.** It suggests; humans approve.
+
+---
+
+## Where to go next
+
+| If you are… | Read this |
+|---|---|
+| The business owner | This README is enough. Hand the rest to your dev team. |
+| A non-technical manager | Skim `docs/04-uiux-design.md` to see the screens. |
+| A developer | Start at `docs/01-architecture.md` then `docs/03-api-design.md`. |
+| Curious about the AI | Read `docs/06-ai-logic-design.md`. |
+| Ready to deploy | Read `docs/07-deployment.md`. |
+
+---
+
+## In one sentence
+
+> **A modern, AI-powered, WhatsApp-native digital office for companies that
+> sell custom-engineered industrial products to factories — built so nothing
+> falls through the cracks, and your best deals don't go cold.**
