@@ -1,46 +1,72 @@
 import { useQuery } from "@tanstack/react-query";
+import { Plus, FileText } from "lucide-react";
+import clsx from "clsx";
 import { api } from "@/api/client";
 import type { Quotation } from "@/types";
+
+const STATUS: Record<string, string> = {
+  draft:             "bg-ink-100 text-ink-700",
+  pending_approval:  "bg-amber-50 text-amber-700",
+  approved:          "bg-emerald-50 text-emerald-700",
+  rejected:          "bg-red-50 text-red-700",
+  sent:              "bg-blue-50 text-blue-700",
+  won:               "bg-emerald-100 text-emerald-800",
+  lost:              "bg-red-100 text-red-800",
+};
 
 export default function QuotationsPage() {
   const q = useQuery({
     queryKey: ["quotations"],
     queryFn: () => api.get("/quotations").then((r) => r.data as Quotation[]),
   });
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between">
-        <h1 className="text-xl font-semibold">Quotations</h1>
-        <button className="bg-brand-500 hover:bg-brand-700 text-white px-3 py-1.5 rounded text-sm">
-          + New quotation
-        </button>
+    <div className="space-y-5">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Quotations</h1>
+          <p className="text-sm muted">Price offers across every stage.</p>
+        </div>
+        <button className="btn-primary"><Plus size={15} /> New quotation</button>
       </div>
-      <div className="bg-white border rounded">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-500 border-b">
+
+      <div className="table-shell">
+        <table className="w-full">
+          <thead className="bg-ink-50/60">
             <tr>
-              <th className="px-4 py-2">Number</th>
-              <th className="px-4 py-2">Variant</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2 text-right">Discount</th>
-              <th className="px-4 py-2 text-right">Total</th>
+              <th className="th">Number</th>
+              <th className="th">Variant</th>
+              <th className="th">Status</th>
+              <th className="th text-right">Discount</th>
+              <th className="th text-right">Total</th>
             </tr>
           </thead>
           <tbody>
             {(q.data ?? []).map((qt) => (
-              <tr key={qt.id} className="border-b">
-                <td className="px-4 py-2 font-mono text-xs">{qt.number}</td>
-                <td className="px-4 py-2">{qt.variant}</td>
-                <td className="px-4 py-2">{qt.status}</td>
-                <td className="px-4 py-2 text-right">{qt.discount_pct}%</td>
-                <td className="px-4 py-2 text-right">
-                  {new Intl.NumberFormat("id-ID").format(qt.total)}
+              <tr key={qt.id} className="tr-hover border-t border-ink-100">
+                <td className="td">
+                  <div className="flex items-center gap-2">
+                    <FileText size={14} className="text-ink-400" />
+                    <span className="font-mono text-xs text-ink-700">{qt.number}</span>
+                  </div>
                 </td>
+                <td className="td capitalize muted">{qt.variant}</td>
+                <td className="td">
+                  <span className={clsx("chip", STATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
+                    {qt.status.replace(/_/g, " ")}
+                  </span>
+                </td>
+                <td className="td text-right tabular-nums">{qt.discount_pct}%</td>
+                <td className="td text-right font-medium tabular-nums">{idr(qt.total)}</td>
               </tr>
             ))}
             {!q.data?.length && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No quotations</td></tr>
+              <tr>
+                <td colSpan={5} className="td text-center muted py-12">
+                  No quotations yet — create your first one.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

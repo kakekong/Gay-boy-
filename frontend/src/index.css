@@ -1,5 +1,75 @@
+@import url("https://rsms.me/inter/inter.css");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root { height: 100%; }
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  html {
+    font-family: "Inter var", "Inter", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-ink-50 text-ink-800 antialiased;
+  }
+  /* Slim scrollbar */
+  ::-webkit-scrollbar       { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d3d8e2; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #b8bfcd; border: 2px solid transparent; background-clip: padding-box; }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-ink-200/70 rounded-xl shadow-soft;
+  }
+  .card-hover {
+    @apply transition-shadow hover:shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 shadow-soft;
+  }
+  .btn-ghost {
+    @apply btn text-ink-700 hover:bg-ink-100;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .btn-success {
+    @apply btn bg-emerald-600 text-white hover:bg-emerald-700;
+  }
+  .input {
+    @apply w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm shadow-soft
+           placeholder:text-ink-400
+           focus:border-brand-400 focus:ring-2 focus:ring-brand-100 focus:outline-none;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
+  }
+  .table-shell {
+    @apply card overflow-hidden;
+  }
+  .th {
+    @apply px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold;
+  }
+  .td {
+    @apply px-4 py-3 text-sm text-ink-800 align-middle;
+  }
+  .tr-hover {
+    @apply hover:bg-ink-50 transition-colors;
+  }
+  .section-title {
+    @apply text-lg font-semibold tracking-tight text-ink-900;
+  }
+  .muted { @apply text-ink-500; }
+  .kbd {
+    @apply rounded border border-ink-200 bg-ink-50 px-1.5 py-0.5 text-[10px] font-mono text-ink-600;
+  }
+}

@@ -1,56 +1,105 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { Plus, Search, Filter, Download } from "lucide-react";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
 import type { Customer } from "@/types";
 
 export default function CustomersPage() {
+  const [search, setSearch] = useState("");
+  const [stage, setStage] = useState("");
   const q = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => api.get("/customers").then((r) => r.data),
+    queryKey: ["customers", search, stage],
+    queryFn: () =>
+      api
+        .get("/customers", { params: { q: search || undefined, stage: stage || undefined } })
+        .then((r) => r.data),
   });
   const rows: Customer[] = q.data?.data ?? [];
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between">
-        <h1 className="text-xl font-semibold">Customers</h1>
-        <button className="bg-brand-500 hover:bg-brand-700 text-white px-3 py-1.5 rounded text-sm">
-          + New customer
+    <div className="space-y-5">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Customers</h1>
+          <p className="text-sm muted">
+            {q.data?.total ?? rows.length} record{(q.data?.total ?? rows.length) === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn-ghost"><Download size={15} /> Export</button>
+          <button className="btn-primary"><Plus size={15} /> New customer</button>
+        </div>
+      </div>
+
+      <div className="card p-3 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by company name…"
+            className="input pl-9"
+          />
+        </div>
+        <select
+          value={stage}
+          onChange={(e) => setStage(e.target.value)}
+          className="input max-w-[200px]"
+        >
+          <option value="">All stages</option>
+          {["lead", "presentation", "engineering", "quotation", "negotiation",
+            "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
+            "closed_won", "closed_lost"].map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <button className="btn-ghost">
+          <Filter size={15} /> More filters
         </button>
       </div>
-      <div className="bg-white border rounded">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-500 border-b">
-            <tr>
-              <th className="px-4 py-2">Company</th>
-              <th className="px-4 py-2">Industry</th>
-              <th className="px-4 py-2">PIC</th>
-              <th className="px-4 py-2">Stage</th>
-              <th className="px-4 py-2 text-right">LTV</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} className="border-b hover:bg-slate-50">
-                <td className="px-4 py-2">
-                  <Link to={`/customers/${c.id}`} className="text-brand-700 hover:underline">
-                    {c.company_name}
-                  </Link>
-                </td>
-                <td className="px-4 py-2">{c.industry}</td>
-                <td className="px-4 py-2">{c.pic_name ?? "—"}</td>
-                <td className="px-4 py-2"><StageBadge stage={c.stage} /></td>
-                <td className="px-4 py-2 text-right">
-                  {new Intl.NumberFormat("id-ID").format(c.lifetime_value ?? 0)}
-                </td>
+
+      <div className="table-shell">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Company</th>
+                <th className="th">Industry</th>
+                <th className="th">PIC</th>
+                <th className="th">Stage</th>
+                <th className="th text-right">Lifetime value</th>
               </tr>
-            ))}
-            {!rows.length && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No data</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.id} className="tr-hover border-t border-ink-100">
+                  <td className="td">
+                    <Link
+                      to={`/customers/${c.id}`}
+                      className="font-medium text-ink-900 hover:text-brand-700"
+                    >
+                      {c.company_name}
+                    </Link>
+                  </td>
+                  <td className="td capitalize muted">{c.industry}</td>
+                  <td className="td">{c.pic_name ?? "—"}</td>
+                  <td className="td"><StageBadge stage={c.stage} /></td>
+                  <td className="td text-right tabular-nums">{idr(c.lifetime_value ?? 0)}</td>
+                </tr>
+              ))}
+              {!rows.length && (
+                <tr>
+                  <td colSpan={5} className="td text-center muted py-12">
+                    No customers match your filter.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

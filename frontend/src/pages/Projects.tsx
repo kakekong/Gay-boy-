@@ -1,44 +1,92 @@
 import { useQuery } from "@tanstack/react-query";
+import { Briefcase } from "lucide-react";
+import clsx from "clsx";
 import { api } from "@/api/client";
+
+const STATUS_COLOR: Record<string, string> = {
+  new:               "bg-ink-100 text-ink-700",
+  drawing:           "bg-cyan-50 text-cyan-700",
+  drawing_approved:  "bg-cyan-100 text-cyan-800",
+  purchasing:        "bg-teal-50 text-teal-700",
+  production:        "bg-violet-50 text-violet-700",
+  qc:                "bg-amber-50 text-amber-700",
+  packaging:         "bg-yellow-50 text-yellow-700",
+  delivered:         "bg-lime-50 text-lime-700",
+  invoiced:          "bg-orange-50 text-orange-700",
+  paid:              "bg-emerald-50 text-emerald-700",
+  closed:            "bg-emerald-100 text-emerald-800",
+};
 
 export default function ProjectsPage() {
   const q = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data),
   });
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Projects</h1>
-      <div className="bg-white border rounded">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase text-slate-500 border-b">
+    <div className="space-y-5">
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <Briefcase size={22} className="text-brand-600" /> Projects
+          </h1>
+          <p className="text-sm muted">Won deals turned into deliverables.</p>
+        </div>
+      </div>
+
+      <div className="table-shell">
+        <table className="w-full">
+          <thead className="bg-ink-50/60">
             <tr>
-              <th className="px-4 py-2">Code</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2 text-right">PO Value</th>
-              <th className="px-4 py-2 text-right">Margin (est / act)</th>
-              <th className="px-4 py-2">Target delivery</th>
+              <th className="th">Code</th>
+              <th className="th">Status</th>
+              <th className="th text-right">PO Value</th>
+              <th className="th">Margin (est / act)</th>
+              <th className="th">Target delivery</th>
             </tr>
           </thead>
           <tbody>
             {(q.data ?? []).map((p: any) => (
-              <tr key={p.id} className="border-b">
-                <td className="px-4 py-2 font-mono text-xs">{p.code}</td>
-                <td className="px-4 py-2">{p.status}</td>
-                <td className="px-4 py-2 text-right">
-                  {new Intl.NumberFormat("id-ID").format(p.po_value)}
+              <tr key={p.id} className="tr-hover border-t border-ink-100">
+                <td className="td font-mono text-xs">{p.code}</td>
+                <td className="td">
+                  <span className={clsx("chip capitalize",
+                    STATUS_COLOR[p.status] ?? "bg-ink-100 text-ink-600")}>
+                    {p.status.replace(/_/g, " ")}
+                  </span>
                 </td>
-                <td className="px-4 py-2 text-right">
-                  {(p.margin_estimate * 100).toFixed(1)}% / {(p.margin_actual * 100).toFixed(1)}%
+                <td className="td text-right tabular-nums">{idr(p.po_value)}</td>
+                <td className="td">
+                  <MarginBar est={p.margin_estimate * 100} act={p.margin_actual * 100} />
                 </td>
-                <td className="px-4 py-2">{p.target_delivery ?? "—"}</td>
+                <td className="td muted">{p.target_delivery ?? "—"}</td>
               </tr>
             ))}
             {!q.data?.length && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No projects</td></tr>
+              <tr>
+                <td colSpan={5} className="td text-center muted py-12">
+                  No projects yet.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function MarginBar({ est, act }: { est: number; act: number }) {
+  return (
+    <div className="w-44">
+      <div className="flex justify-between text-[10px] muted">
+        <span>est {est.toFixed(1)}%</span>
+        <span>act {act.toFixed(1)}%</span>
+      </div>
+      <div className="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden flex">
+        <div className="h-full bg-ink-300" style={{ width: `${Math.max(0, Math.min(100, est))}%` }} />
+        <div className="h-full bg-emerald-500 -ml-px" style={{ width: `${Math.max(0, Math.min(100, act))}%` }} />
       </div>
     </div>
   );

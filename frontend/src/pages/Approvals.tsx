@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Check, X, ShieldCheck } from "lucide-react";
 import { api } from "@/api/client";
 
 export default function ApprovalsPage() {
@@ -14,32 +15,53 @@ export default function ApprovalsPage() {
   });
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Approval inbox</h1>
-      <div className="space-y-2">
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+          <ShieldCheck size={22} className="text-brand-600" /> Approval inbox
+        </h1>
+        <p className="text-sm muted">
+          Discount and data-change requests routed to you by the rule engine.
+        </p>
+      </div>
+
+      <div className="space-y-3">
         {(q.data ?? []).map((r: any) => (
-          <div key={r.id} className="bg-white border rounded p-4 flex justify-between">
-            <div>
-              <div className="text-sm font-medium">
-                {r.target_type} · {r.required_role.toUpperCase()} approval
+          <div key={r.id} className="card p-5 flex flex-wrap items-start gap-4 justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="chip bg-brand-50 text-brand-700 capitalize">
+                  {r.target_type}
+                </span>
+                <span className="chip bg-amber-50 text-amber-700 uppercase">
+                  {r.required_role} approval
+                </span>
               </div>
-              <div className="text-xs text-slate-500">{r.reason}</div>
-              <pre className="text-xs mt-2 text-slate-600">{JSON.stringify(r.payload, null, 2)}</pre>
+              <div className="mt-2 text-sm font-medium text-ink-900">{r.reason}</div>
+              <pre className="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-[11px] font-mono text-ink-600 overflow-x-auto">
+                {JSON.stringify(r.payload, null, 2)}
+              </pre>
             </div>
-            <div className="flex items-start gap-2">
-              <button
-                onClick={() => decide.mutate({ id: r.id, approve: true })}
-                className="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded"
-              >Approve</button>
+            <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => decide.mutate({ id: r.id, approve: false })}
-                className="px-3 py-1.5 bg-red-600 text-white text-sm rounded"
-              >Reject</button>
+                className="btn-danger"
+              >
+                <X size={15} /> Reject
+              </button>
+              <button
+                onClick={() => decide.mutate({ id: r.id, approve: true })}
+                className="btn-success"
+              >
+                <Check size={15} /> Approve
+              </button>
             </div>
           </div>
         ))}
         {!q.data?.length && (
-          <div className="text-sm text-slate-500">No pending approvals.</div>
+          <div className="card p-12 text-center muted text-sm">
+            No pending approvals — inbox zero.
+          </div>
         )}
       </div>
     </div>

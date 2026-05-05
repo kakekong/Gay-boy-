@@ -1,25 +1,27 @@
 import clsx from "clsx";
 
-const COLOR: Record<string, string> = {
-  lead: "bg-slate-200 text-slate-700",
-  presentation: "bg-blue-100 text-blue-700",
-  engineering: "bg-indigo-100 text-indigo-700",
-  quotation: "bg-violet-100 text-violet-700",
-  negotiation: "bg-amber-100 text-amber-700",
-  po: "bg-emerald-100 text-emerald-700",
-  drawing: "bg-cyan-100 text-cyan-700",
-  purchasing: "bg-teal-100 text-teal-700",
-  delivery: "bg-lime-100 text-lime-700",
-  invoicing: "bg-yellow-100 text-yellow-700",
-  payment: "bg-orange-100 text-orange-700",
-  closed_won: "bg-green-200 text-green-800",
-  closed_lost: "bg-red-200 text-red-800",
+const STYLES: Record<string, { bg: string; dot: string; label?: string }> = {
+  lead:          { bg: "bg-ink-100 text-ink-700",            dot: "bg-ink-400",     label: "Lead" },
+  presentation:  { bg: "bg-blue-50 text-blue-700",           dot: "bg-blue-500",    label: "Presentation" },
+  engineering:   { bg: "bg-indigo-50 text-indigo-700",       dot: "bg-indigo-500",  label: "Engineering" },
+  quotation:     { bg: "bg-violet-50 text-violet-700",       dot: "bg-violet-500",  label: "Quotation" },
+  negotiation:   { bg: "bg-amber-50 text-amber-700",         dot: "bg-amber-500",   label: "Negotiation" },
+  po:            { bg: "bg-emerald-50 text-emerald-700",     dot: "bg-emerald-500", label: "PO" },
+  drawing:       { bg: "bg-cyan-50 text-cyan-700",           dot: "bg-cyan-500",    label: "Drawing" },
+  purchasing:    { bg: "bg-teal-50 text-teal-700",           dot: "bg-teal-500",    label: "Purchasing" },
+  delivery:      { bg: "bg-lime-50 text-lime-700",           dot: "bg-lime-500",    label: "Delivery" },
+  invoicing:     { bg: "bg-yellow-50 text-yellow-700",       dot: "bg-yellow-500",  label: "Invoicing" },
+  payment:       { bg: "bg-orange-50 text-orange-700",       dot: "bg-orange-500",  label: "Payment" },
+  closed_won:    { bg: "bg-emerald-100 text-emerald-800",    dot: "bg-emerald-600", label: "Won" },
+  closed_lost:   { bg: "bg-red-100 text-red-800",            dot: "bg-red-600",     label: "Lost" },
 };
 
 export function StageBadge({ stage }: { stage: string }) {
+  const s = STYLES[stage] ?? { bg: "bg-ink-100 text-ink-600", dot: "bg-ink-400" };
   return (
-    <span className={clsx("px-2 py-0.5 rounded text-xs", COLOR[stage] ?? "bg-slate-100 text-slate-600")}>
-      {stage}
+    <span className={clsx("chip", s.bg)}>
+      <span className={clsx("h-1.5 w-1.5 rounded-full", s.dot)} />
+      {s.label ?? stage}
     </span>
   );
 }
