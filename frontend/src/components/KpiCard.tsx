@@ -1,12 +1,12 @@
 import clsx from "clsx";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, type LucideIcon } from "lucide-react";
 
 interface Props {
   label: string;
   value: string | number;
   delta?: { value: string; trend?: "up" | "down" | "flat" };
   hint?: string;
-  icon?: React.ComponentType<{ size?: number; className?: string }>;
+  icon?: LucideIcon;
   accent?: "brand" | "emerald" | "amber" | "violet" | "red" | "ink";
 }
 

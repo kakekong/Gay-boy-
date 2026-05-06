@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory,
+  type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAuthStore } from "@/store/auth";
@@ -40,7 +41,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 interface NavItem {
   to: string;
   label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: LucideIcon;
   roles?: string[];
   accent?: boolean;
 }
