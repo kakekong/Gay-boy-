@@ -172,19 +172,25 @@ The README in each folder explains what's there.
 
 ## How do you actually run it?
 
-This software needs a developer (or someone comfortable with the command line)
-to set it up the first time. Once it's set up, **you just open a website**.
+You can try this on your **own laptop in about 30 minutes**, or put it on a
+small cloud server for your team to use. Both options use **one tool** called
+Docker.
 
-The technical setup, in plain words:
+The whole thing in plain words:
 
-1. Install **Docker** on a server (Docker is a tool that runs the software).
-2. Copy the example settings file and fill in things like the WhatsApp token
-   and the OpenAI key.
-3. Run **one command** that starts everything: the website, the database, the
-   automation engine, the AI worker.
-4. Open the website in a browser and log in.
+1. Install Docker (it's free, takes 5 minutes)
+2. Download the code (one command)
+3. Copy the example settings file
+4. Run **one start command** — Docker fetches the database, the website, the
+   automation engine, and starts them all
+5. Run the database setup command (one-time)
+6. Open the website in your browser
 
-The full step-by-step is in [`docs/07-deployment.md`](docs/07-deployment.md).
+👉 **Beginner-friendly step-by-step (with copy-paste commands, screenshots-style
+guidance, troubleshooting):** see **[`INSTALL.md`](INSTALL.md)**.
+
+👉 **Production deployment, security hardening, scaling, backups:** see
+[`docs/07-deployment.md`](docs/07-deployment.md).
 
 ---
 
@@ -237,11 +243,12 @@ To be honest:
 
 | If you are… | Read this |
 |---|---|
+| **Just trying to install it** | **[`INSTALL.md`](INSTALL.md)** — 30-min beginner guide |
 | The business owner | This README is enough. Hand the rest to your dev team. |
-| A non-technical manager | Skim `docs/04-uiux-design.md` to see the screens. |
-| A developer | Start at `docs/01-architecture.md` then `docs/03-api-design.md`. |
-| Curious about the AI | Read `docs/06-ai-logic-design.md`. |
-| Ready to deploy | Read `docs/07-deployment.md`. |
+| A non-technical manager | Skim [`docs/04-uiux-design.md`](docs/04-uiux-design.md) to see the screens. |
+| A developer | Start at [`docs/01-architecture.md`](docs/01-architecture.md) then [`docs/03-api-design.md`](docs/03-api-design.md). |
+| Curious about the AI | Read [`docs/06-ai-logic-design.md`](docs/06-ai-logic-design.md). |
+| Ready to deploy to production | Read [`docs/07-deployment.md`](docs/07-deployment.md). |
 
 ---
 
