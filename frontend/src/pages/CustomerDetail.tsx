@@ -1,14 +1,21 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity,
+  Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
+import { Modal } from "@/components/Modal";
+import { LogActivityForm } from "@/components/forms/LogActivityForm";
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const q = useQuery({
+  const qc = useQueryClient();
+  const [openLog, setOpenLog] = useState(false);
+  const [openAI, setOpenAI] = useState(false);
+
+  const customer = useQuery({
     queryKey: ["customer", id],
     queryFn: () => api.get(`/customers/${id}`).then((r) => r.data),
     enabled: !!id,
@@ -18,11 +25,33 @@ export default function CustomerDetailPage() {
     queryFn: () => api.get(`/ai/lead-score/${id}`).then((r) => r.data),
     enabled: !!id,
   });
-  const c = q.data;
+  const activities = useQuery({
+    queryKey: ["activities", id],
+    queryFn: () => api.get(`/customers/${id}/activities`).then((r) => r.data),
+    enabled: !!id,
+  });
+
+  const aiSuggest = useMutation({
+    mutationFn: () =>
+      api.post("/ai/assistant/suggest", { intent: "wa_followup", customer_id: id })
+        .then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["activities", id] }),
+  });
+
+  const c = customer.data;
   if (!c) return <div className="muted">Loading…</div>;
 
   const s: number = score.data?.score ?? 0;
   const ring = `conic-gradient(#3a5cf5 ${s * 3.6}deg, #eef0f4 0deg)`;
+
+  function openWhatsApp() {
+    const phone = (c.whatsapp || c.phone || "").replace(/[^\d]/g, "");
+    if (!phone) {
+      alert("No WhatsApp/phone number on file for this customer.");
+      return;
+    }
+    window.open(`https://wa.me/${phone}`, "_blank");
+  }
 
   return (
     <div className="space-y-6">
@@ -43,8 +72,17 @@ export default function CustomerDetailPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <button className="btn-ghost"><MessageCircle size={15} /> WhatsApp</button>
-            <button className="btn-primary"><Sparkles size={15} /> AI suggest</button>
+            <button className="btn-ghost" onClick={openWhatsApp}>
+              <MessageCircle size={15} /> WhatsApp
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => { setOpenAI(true); aiSuggest.mutate(); }}
+              disabled={aiSuggest.isPending}
+            >
+              {aiSuggest.isPending ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              AI suggest
+            </button>
           </div>
         </div>
 
@@ -104,12 +142,94 @@ export default function CustomerDetailPage() {
       <div className="card p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="font-semibold text-ink-900">Activity timeline</div>
-          <button className="btn-ghost"><Activity size={15} /> Log activity</button>
+          <button className="btn-ghost" onClick={() => setOpenLog(true)}>
+            <Activity size={15} /> Log activity
+          </button>
         </div>
-        <div className="rounded-xl border border-dashed border-ink-200 p-8 text-center text-sm muted">
-          No activity yet — incoming WhatsApp will appear here automatically.
-        </div>
+        {(activities.data ?? []).length === 0 ? (
+          <div className="rounded-xl border border-dashed border-ink-200 p-8 text-center text-sm muted">
+            No activity yet. Click "Log activity" to add one, or incoming WhatsApp will appear here automatically.
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {(activities.data ?? []).map((a: any) => (
+              <li key={a.id} className="flex gap-3">
+                <div className="h-8 w-8 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-xs shrink-0">
+                  {a.type.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm capitalize">
+                    <b>{a.type.replace(/_/g, " ")}</b>{" "}
+                    <span className="muted">· {a.direction}</span>
+                  </div>
+                  {a.notes && <div className="text-xs muted mt-0.5">{a.notes}</div>}
+                  <div className="text-[11px] text-ink-400 mt-0.5">
+                    {new Date(a.occurred_at).toLocaleString()}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
+
+      <Modal
+        open={openLog}
+        onClose={() => setOpenLog(false)}
+        title="Log activity"
+        subtitle="Record a call, meeting, or note for this customer."
+      >
+        <LogActivityForm customerId={id!} onClose={() => setOpenLog(false)} />
+      </Modal>
+
+      <Modal
+        open={openAI}
+        onClose={() => setOpenAI(false)}
+        title="AI follow-up suggestion"
+        subtitle="Generated by the Sales AI Assistant."
+        size="lg"
+        footer={
+          <div className="flex justify-between items-center">
+            <span className="text-xs muted">
+              Tip: copy and edit before sending. Never paste prices the AI invented.
+            </span>
+            <button
+              className="btn-primary"
+              disabled={!aiSuggest.data?.output}
+              onClick={() => {
+                navigator.clipboard.writeText(aiSuggest.data?.output ?? "");
+              }}
+            >
+              Copy to clipboard
+            </button>
+          </div>
+        }
+      >
+        {aiSuggest.isPending && (
+          <div className="py-8 text-center muted text-sm flex items-center justify-center gap-2">
+            <Loader2 size={16} className="animate-spin" /> Thinking…
+          </div>
+        )}
+        {!aiSuggest.isPending && aiSuggest.data && (
+          <div className="space-y-3">
+            <div className="rounded-xl bg-gradient-to-br from-brand-50 to-violet-50 border border-brand-100 p-4 whitespace-pre-wrap text-sm text-ink-800">
+              {aiSuggest.data.output}
+            </div>
+            <details className="text-xs">
+              <summary className="cursor-pointer muted hover:text-ink-700">Context used</summary>
+              <pre className="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 font-mono text-ink-600 overflow-x-auto">
+                {JSON.stringify(aiSuggest.data.context_used, null, 2)}
+              </pre>
+            </details>
+          </div>
+        )}
+        {!aiSuggest.isPending && aiSuggest.isError && (
+          <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
+            Failed to get a suggestion. Make sure OPENAI_API_KEY is set in .env, or the
+            assistant will fall back to a template.
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

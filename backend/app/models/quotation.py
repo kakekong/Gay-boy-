@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import Date, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
 from app.models.base import AuthorshipMixin, SoftDeleteMixin, TimestampMixin, UUIDPK
@@ -51,6 +51,13 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     notes: Mapped[str | None] = mapped_column(Text)
     pdf_url: Mapped[str | None] = mapped_column(String(500))
 
+    items: Mapped[list["QuotationItem"]] = relationship(
+        back_populates="quotation",
+        cascade="all, delete-orphan",
+        order_by="QuotationItem.line_no",
+        lazy="selectin",
+    )
+
 
 class QuotationItem(Base, UUIDPK, TimestampMixin):
     __tablename__ = "quotation_items"
@@ -71,3 +78,5 @@ class QuotationItem(Base, UUIDPK, TimestampMixin):
     unit_price: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     cost_estimate: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     line_total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+
+    quotation: Mapped["Quotation"] = relationship(back_populates="items")

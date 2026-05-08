@@ -1,7 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
-import { Plus, FileText } from "lucide-react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, FileText, Send } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { Modal } from "@/components/Modal";
+import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import type { Quotation } from "@/types";
 
 const STATUS: Record<string, string> = {
@@ -15,11 +18,19 @@ const STATUS: Record<string, string> = {
 };
 
 export default function QuotationsPage() {
+  const qc = useQueryClient();
+  const [openNew, setOpenNew] = useState(false);
+
   const q = useQuery({
     queryKey: ["quotations"],
     queryFn: () => api.get("/quotations").then((r) => r.data as Quotation[]),
   });
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
+
+  const submit = useMutation({
+    mutationFn: (id: string) => api.post(`/quotations/${id}/submit`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotations"] }),
+  });
 
   return (
     <div className="space-y-5">
@@ -28,7 +39,9 @@ export default function QuotationsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Quotations</h1>
           <p className="text-sm muted">Price offers across every stage.</p>
         </div>
-        <button className="btn-primary"><Plus size={15} /> New quotation</button>
+        <button className="btn-primary" onClick={() => setOpenNew(true)}>
+          <Plus size={15} /> New quotation
+        </button>
       </div>
 
       <div className="table-shell">
@@ -40,6 +53,7 @@ export default function QuotationsPage() {
               <th className="th">Status</th>
               <th className="th text-right">Discount</th>
               <th className="th text-right">Total</th>
+              <th className="th text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -59,11 +73,22 @@ export default function QuotationsPage() {
                 </td>
                 <td className="td text-right tabular-nums">{qt.discount_pct}%</td>
                 <td className="td text-right font-medium tabular-nums">{idr(qt.total)}</td>
+                <td className="td text-right">
+                  {qt.status === "draft" && (
+                    <button
+                      onClick={() => submit.mutate(qt.id)}
+                      className="btn-ghost text-brand-700"
+                      disabled={submit.isPending}
+                    >
+                      <Send size={13} /> Submit
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {!q.data?.length && (
               <tr>
-                <td colSpan={5} className="td text-center muted py-12">
+                <td colSpan={6} className="td text-center muted py-12">
                   No quotations yet — create your first one.
                 </td>
               </tr>
@@ -71,6 +96,16 @@ export default function QuotationsPage() {
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={openNew}
+        onClose={() => setOpenNew(false)}
+        title="New quotation"
+        subtitle="Pick a customer, add line items, set discount. Discount tier is auto-detected."
+        size="xl"
+      >
+        <NewQuotationForm onClose={() => setOpenNew(false)} />
+      </Modal>
     </div>
   );
 }

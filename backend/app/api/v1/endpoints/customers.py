@@ -1,6 +1,8 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +10,7 @@ from app.core.approval import evaluate_data_change, request_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_view_customer, filter_to_role_scope
-from app.models.crm import Customer
+from app.models.crm import Activity, Customer
 from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.customer import CustomerCreate, CustomerOut, CustomerUpdate
@@ -111,3 +113,69 @@ async def update_customer(
         payload={"changes": changes},
     )
     raise HTTPException(status.HTTP_202_ACCEPTED, "Change requested; awaiting approval")
+
+
+# ─── Activities ──────────────────────────────────────────────────────────────
+
+class ActivityIn(BaseModel):
+    type: str  # call, presentation, technical_meeting, follow_up, note, ...
+    direction: str = "internal"
+    notes: str | None = None
+    occurred_at: datetime | None = None
+    meta: dict = {}
+
+
+@router.get("/{customer_id}/activities")
+async def list_activities(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    limit: int = 50,
+):
+    obj = await db.get(Customer, customer_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not can_view_customer(user, obj.sales_pic_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    rows = (await db.scalars(
+        select(Activity).where(Activity.customer_id == customer_id)
+        .order_by(Activity.occurred_at.desc()).limit(limit)
+    )).all()
+    return [
+        {
+            "id": str(a.id),
+            "type": a.type,
+            "direction": a.direction,
+            "notes": a.notes,
+            "occurred_at": a.occurred_at,
+            "user_id": str(a.user_id) if a.user_id else None,
+            "meta": a.meta,
+        }
+        for a in rows
+    ]
+
+
+@router.post("/{customer_id}/activities", status_code=201)
+async def create_activity(
+    customer_id: UUID,
+    payload: ActivityIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    obj = await db.get(Customer, customer_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not can_view_customer(user, obj.sales_pic_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    a = Activity(
+        customer_id=customer_id,
+        user_id=user.id,
+        type=payload.type,
+        direction=payload.direction,
+        occurred_at=payload.occurred_at or datetime.now(UTC),
+        notes=payload.notes,
+        meta=payload.meta or {},
+    )
+    db.add(a)
+    await db.flush()
+    return {"id": str(a.id), "ok": True}

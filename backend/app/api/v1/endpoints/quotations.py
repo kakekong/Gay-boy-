@@ -167,10 +167,10 @@ async def mark_lost(q_id: UUID, reason: str,
 
 async def _load(q_id: UUID, db: AsyncSession) -> Quotation:
     return await db.scalar(
-        select(Quotation).options(
-            selectinload(Quotation.__mapper__.relationships)  # noqa
-        ).where(Quotation.id == q_id)
-    ) or await db.get(Quotation, q_id)
+        select(Quotation)
+        .options(selectinload(Quotation.items))
+        .where(Quotation.id == q_id)
+    )
 
 
 @router.get("", response_model=list[QuotationOut])

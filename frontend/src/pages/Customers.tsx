@@ -4,11 +4,15 @@ import { Link } from "react-router-dom";
 import { Plus, Search, Filter, Download } from "lucide-react";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
+import { Modal } from "@/components/Modal";
+import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
 import type { Customer } from "@/types";
 
 export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
+  const [openNew, setOpenNew] = useState(false);
+
   const q = useQuery({
     queryKey: ["customers", search, stage],
     queryFn: () =>
@@ -18,6 +22,20 @@ export default function CustomersPage() {
   });
   const rows: Customer[] = q.data?.data ?? [];
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
+
+  function exportCsv() {
+    const header = "company_name,industry,pic_name,stage,lifetime_value\n";
+    const body = rows.map((r) =>
+      [r.company_name, r.industry, r.pic_name ?? "", r.stage, r.lifetime_value ?? 0]
+        .map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")
+    ).join("\n");
+    const blob = new Blob([header + body], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "customers.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   return (
     <div className="space-y-5">
@@ -29,8 +47,10 @@ export default function CustomersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn-ghost"><Download size={15} /> Export</button>
-          <button className="btn-primary"><Plus size={15} /> New customer</button>
+          <button className="btn-ghost" onClick={exportCsv}><Download size={15} /> Export</button>
+          <button className="btn-primary" onClick={() => setOpenNew(true)}>
+            <Plus size={15} /> New customer
+          </button>
         </div>
       </div>
 
@@ -44,11 +64,7 @@ export default function CustomersPage() {
             className="input pl-9"
           />
         </div>
-        <select
-          value={stage}
-          onChange={(e) => setStage(e.target.value)}
-          className="input max-w-[200px]"
-        >
+        <select value={stage} onChange={(e) => setStage(e.target.value)} className="input max-w-[200px]">
           <option value="">All stages</option>
           {["lead", "presentation", "engineering", "quotation", "negotiation",
             "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
@@ -56,9 +72,7 @@ export default function CustomersPage() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <button className="btn-ghost">
-          <Filter size={15} /> More filters
-        </button>
+        <button className="btn-ghost"><Filter size={15} /> More filters</button>
       </div>
 
       <div className="table-shell">
@@ -101,6 +115,16 @@ export default function CustomersPage() {
           </table>
         </div>
       </div>
+
+      <Modal
+        open={openNew}
+        onClose={() => setOpenNew(false)}
+        title="New customer"
+        subtitle="Add a company to your CRM. You'll be assigned as Sales PIC."
+        size="lg"
+      >
+        <NewCustomerForm onClose={() => setOpenNew(false)} />
+      </Modal>
     </div>
   );
 }
