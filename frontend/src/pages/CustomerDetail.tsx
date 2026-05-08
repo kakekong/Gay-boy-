@@ -1,19 +1,34 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
+  FileText, Plus,
 } from "lucide-react";
+import clsx from "clsx";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
 import { Modal } from "@/components/Modal";
 import { LogActivityForm } from "@/components/forms/LogActivityForm";
+import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
+
+const QSTATUS: Record<string, string> = {
+  draft:             "bg-ink-100 text-ink-700",
+  pending_approval:  "bg-amber-50 text-amber-700",
+  approved:          "bg-emerald-50 text-emerald-700",
+  rejected:          "bg-red-50 text-red-700",
+  sent:              "bg-blue-50 text-blue-700",
+  won:               "bg-emerald-100 text-emerald-800",
+  lost:              "bg-red-100 text-red-800",
+};
+const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const [openLog, setOpenLog] = useState(false);
   const [openAI, setOpenAI] = useState(false);
+  const [openQuote, setOpenQuote] = useState(false);
 
   const customer = useQuery({
     queryKey: ["customer", id],
@@ -28,6 +43,12 @@ export default function CustomerDetailPage() {
   const activities = useQuery({
     queryKey: ["activities", id],
     queryFn: () => api.get(`/customers/${id}/activities`).then((r) => r.data),
+    enabled: !!id,
+  });
+  const quotations = useQuery({
+    queryKey: ["customer-quotations", id],
+    queryFn: () =>
+      api.get(`/quotations`, { params: { customer_id: id } }).then((r) => r.data),
     enabled: !!id,
   });
 
@@ -138,6 +159,69 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      {/* Quotations */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-ink-900 flex items-center gap-2">
+              <FileText size={15} /> Quotations
+            </div>
+            <div className="text-xs muted">
+              {(quotations.data ?? []).length} document{(quotations.data ?? []).length === 1 ? "" : "s"} for this customer
+            </div>
+          </div>
+          <button className="btn-primary" onClick={() => setOpenQuote(true)}>
+            <Plus size={14} /> New quotation
+          </button>
+        </div>
+        {(quotations.data ?? []).length === 0 ? (
+          <div className="p-8 text-center text-sm muted">
+            No quotations yet. Click "New quotation" to create one.
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Number</th>
+                <th className="th">Variant</th>
+                <th className="th">Status</th>
+                <th className="th text-right">Discount</th>
+                <th className="th text-right">Total</th>
+                <th className="th">Valid until</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(quotations.data ?? []).map((qt: any) => (
+                <tr
+                  key={qt.id}
+                  className="tr-hover border-t border-ink-100 cursor-pointer"
+                  onClick={() => (window.location.href = `/quotations/${qt.id}`)}
+                >
+                  <td className="td">
+                    <Link
+                      to={`/quotations/${qt.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-mono text-xs text-brand-700 hover:underline"
+                    >
+                      {qt.number}
+                    </Link>
+                  </td>
+                  <td className="td capitalize muted">{qt.variant}</td>
+                  <td className="td">
+                    <span className={clsx("chip", QSTATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
+                      {qt.status.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td className="td text-right tabular-nums">{Number(qt.discount_pct)}%</td>
+                  <td className="td text-right font-medium tabular-nums">{idr(Number(qt.total))}</td>
+                  <td className="td muted">{qt.valid_until ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {/* Activity timeline */}
       <div className="card p-5">
         <div className="flex items-center justify-between mb-3">
@@ -180,6 +264,19 @@ export default function CustomerDetailPage() {
         subtitle="Record a call, meeting, or note for this customer."
       >
         <LogActivityForm customerId={id!} onClose={() => setOpenLog(false)} />
+      </Modal>
+
+      <Modal
+        open={openQuote}
+        onClose={() => { setOpenQuote(false); quotations.refetch(); }}
+        title="New quotation"
+        subtitle={`For ${c.company_name}.`}
+        size="xl"
+      >
+        <NewQuotationForm
+          preselectCustomerId={id}
+          onClose={() => { setOpenQuote(false); quotations.refetch(); }}
+        />
       </Modal>
 
       <Modal

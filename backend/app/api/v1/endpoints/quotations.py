@@ -178,13 +178,21 @@ async def list_quotations(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     status_eq: str | None = None,
+    customer_id: UUID | None = None,
     limit: int = 50,
 ):
-    stmt = select(Quotation).order_by(Quotation.created_at.desc()).limit(limit)
+    stmt = (
+        select(Quotation)
+        .options(selectinload(Quotation.items))
+        .order_by(Quotation.created_at.desc())
+        .limit(limit)
+    )
     if Role(user.role) == Role.SALES:
         stmt = stmt.where(Quotation.sales_pic_id == user.id)
     if status_eq:
         stmt = stmt.where(Quotation.status == status_eq)
+    if customer_id:
+        stmt = stmt.where(Quotation.customer_id == customer_id)
     rows = (await db.scalars(stmt)).all()
     return [QuotationOut.model_validate(r) for r in rows]
 
@@ -194,3 +202,17 @@ async def stats(db: AsyncSession = Depends(get_db),
                 user: User = Depends(get_current_user)):
     total = await db.scalar(select(func.count(Quotation.id)))
     return {"total": total or 0}
+
+
+@router.get("/{q_id}", response_model=QuotationOut)
+async def get_quotation(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _load(q_id, db)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    return q

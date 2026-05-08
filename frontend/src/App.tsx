@@ -5,6 +5,7 @@ import DashboardPage from "@/pages/Dashboard";
 import CustomersPage from "@/pages/Customers";
 import CustomerDetailPage from "@/pages/CustomerDetail";
 import QuotationsPage from "@/pages/Quotations";
+import QuotationDetailPage from "@/pages/QuotationDetail";
 import ApprovalsPage from "@/pages/Approvals";
 import ProjectsPage from "@/pages/Projects";
 import PurchasingPage from "@/pages/Purchasing";
@@ -34,6 +35,7 @@ export default function App() {
                 <Route path="/customers" element={<CustomersPage />} />
                 <Route path="/customers/:id" element={<CustomerDetailPage />} />
                 <Route path="/quotations" element={<QuotationsPage />} />
+                <Route path="/quotations/:id" element={<QuotationDetailPage />} />
                 <Route path="/approvals" element={<ApprovalsPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/purchasing" element={<PurchasingPage />} />

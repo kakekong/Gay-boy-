@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, FileText, Send } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -19,6 +20,7 @@ const STATUS: Record<string, string> = {
 
 export default function QuotationsPage() {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const [openNew, setOpenNew] = useState(false);
 
   const q = useQuery({
@@ -58,11 +60,21 @@ export default function QuotationsPage() {
           </thead>
           <tbody>
             {(q.data ?? []).map((qt) => (
-              <tr key={qt.id} className="tr-hover border-t border-ink-100">
+              <tr
+                key={qt.id}
+                className="tr-hover border-t border-ink-100 cursor-pointer"
+                onClick={() => nav(`/quotations/${qt.id}`)}
+              >
                 <td className="td">
                   <div className="flex items-center gap-2">
                     <FileText size={14} className="text-ink-400" />
-                    <span className="font-mono text-xs text-ink-700">{qt.number}</span>
+                    <Link
+                      to={`/quotations/${qt.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-mono text-xs text-brand-700 hover:underline"
+                    >
+                      {qt.number}
+                    </Link>
                   </div>
                 </td>
                 <td className="td capitalize muted">{qt.variant}</td>
@@ -76,7 +88,7 @@ export default function QuotationsPage() {
                 <td className="td text-right">
                   {qt.status === "draft" && (
                     <button
-                      onClick={() => submit.mutate(qt.id)}
+                      onClick={(e) => { e.stopPropagation(); submit.mutate(qt.id); }}
                       className="btn-ghost text-brand-700"
                       disabled={submit.isPending}
                     >
