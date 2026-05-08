@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class CustomerBase(BaseModel):
@@ -10,7 +10,7 @@ class CustomerBase(BaseModel):
     pic_position: str | None = None
     phone: str | None = None
     whatsapp: str | None = None
-    email: EmailStr | None = None
+    email: str | None = None
     company_address: str | None = None
     delivery_address: str | None = None
     payment_terms: dict = Field(default_factory=dict)
@@ -28,7 +28,7 @@ class CustomerUpdate(BaseModel):
     pic_position: str | None = None
     phone: str | None = None
     whatsapp: str | None = None
-    email: EmailStr | None = None
+    email: str | None = None
     company_address: str | None = None
     delivery_address: str | None = None
     payment_terms: dict | None = None

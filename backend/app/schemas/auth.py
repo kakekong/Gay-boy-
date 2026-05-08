@@ -1,10 +1,10 @@
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -16,7 +16,7 @@ class TokenPair(BaseModel):
 
 class UserOut(BaseModel):
     id: UUID
-    email: EmailStr
+    email: str
     full_name: str
     role: str
     phone: str | None = None
