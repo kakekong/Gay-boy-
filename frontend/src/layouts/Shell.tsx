@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
-  Bell, Menu, X, Factory,
+  Bell, Menu, X, Factory, CalendarDays,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -16,6 +16,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/", label: "Dashboard", icon: LayoutDashboard },
       { to: "/customers", label: "CRM", icon: Users },
       { to: "/quotations", label: "Quotations", icon: FileText },
+      { to: "/calendar", label: "Calendar", icon: CalendarDays },
       { to: "/approvals", label: "Approvals", icon: CheckSquare, roles: ["manager", "director"] },
     ],
   },

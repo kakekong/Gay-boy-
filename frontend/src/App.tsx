@@ -7,6 +7,7 @@ import CustomerDetailPage from "@/pages/CustomerDetail";
 import QuotationsPage from "@/pages/Quotations";
 import QuotationDetailPage from "@/pages/QuotationDetail";
 import ApprovalsPage from "@/pages/Approvals";
+import CalendarPage from "@/pages/Calendar";
 import ProjectsPage from "@/pages/Projects";
 import PurchasingPage from "@/pages/Purchasing";
 import OperationPage from "@/pages/Operation";
@@ -37,6 +38,7 @@ export default function App() {
                 <Route path="/quotations" element={<QuotationsPage />} />
                 <Route path="/quotations/:id" element={<QuotationDetailPage />} />
                 <Route path="/approvals" element={<ApprovalsPage />} />
+                <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/purchasing" element={<PurchasingPage />} />
                 <Route path="/operation" element={<OperationPage />} />

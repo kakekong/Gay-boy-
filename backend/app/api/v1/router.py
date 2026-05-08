@@ -4,6 +4,7 @@ from app.api.v1.endpoints import (
     ai,
     approvals,
     auth,
+    calendar,
     customers,
     dashboards,
     finance,
@@ -24,5 +25,6 @@ api_router.include_router(operation.router, prefix="/operation", tags=["operatio
 api_router.include_router(finance.router, prefix="/finance", tags=["finance"])
 api_router.include_router(kpi.router, prefix="/kpi", tags=["kpi"])
 api_router.include_router(dashboards.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
