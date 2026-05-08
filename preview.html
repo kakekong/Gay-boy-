@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IndustriaCRM — UI Preview</title>
+<link rel="preconnect" href="https://rsms.me/" />
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { sans: ['Inter var','Inter','system-ui','sans-serif'] },
+      colors: {
+        brand: { 50:'#eef4ff', 100:'#dbe6ff', 200:'#b7ccff', 300:'#8aa9ff', 400:'#5c80ff',
+                 500:'#3a5cf5', 600:'#2a45d9', 700:'#2236ad', 800:'#1d2d8a', 900:'#1a276f' },
+        ink:   { 50:'#f7f8fa', 100:'#eef0f4', 200:'#dde1e9', 300:'#bcc3d1', 400:'#8b94a7',
+                 500:'#5d6679', 600:'#414b5e', 700:'#2c3447', 800:'#1c2233', 900:'#0f1422' },
+      },
+      boxShadow: {
+        soft: '0 1px 2px rgba(15,20,34,0.04), 0 1px 3px rgba(15,20,34,0.06)',
+        card: '0 1px 3px rgba(15,20,34,0.06), 0 8px 24px -8px rgba(15,20,34,0.10)',
+        hero: '0 30px 80px -30px rgba(58,92,245,0.45)',
+      },
+    },
+  },
+};
+</script>
+<style>
+  body { font-family: 'Inter var','Inter',ui-sans-serif,system-ui,sans-serif; }
+  .card { background:#fff; border:1px solid rgba(221,225,233,.7); border-radius: 0.875rem;
+          box-shadow: 0 1px 2px rgba(15,20,34,0.04), 0 1px 3px rgba(15,20,34,0.06); }
+  .chip { display:inline-flex; align-items:center; gap:0.25rem; border-radius:9999px;
+          padding:0.125rem 0.5rem; font-size:11px; font-weight:500; }
+  .kbd { border:1px solid #dde1e9; background:#f7f8fa; border-radius:4px; padding:1px 5px;
+         font-size:10px; font-family: ui-monospace, SFMono-Regular, monospace; color:#414b5e; }
+  .pulse { animation: pulse-soft 2s ease-in-out infinite; }
+  @keyframes pulse-soft { 0%,100%{opacity:1} 50%{opacity:.5} }
+  /* Make icons inherit currentColor */
+  svg.lucide { stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d3d8e2; border-radius: 8px; }
+</style>
+</head>
+<body class="bg-ink-50 text-ink-800 antialiased">
+
+<!-- ============================== TAB SWITCHER (top of page) -->
+<div class="bg-white border-b border-ink-200">
+  <div class="max-w-7xl mx-auto px-4 lg:px-8 h-12 flex items-center gap-1 text-sm">
+    <span class="text-ink-500 mr-3 text-xs uppercase tracking-widest">Preview</span>
+    <button data-tab="login"     class="tab px-3 py-1.5 rounded font-medium text-ink-600 hover:bg-ink-100">Login</button>
+    <button data-tab="dashboard" class="tab px-3 py-1.5 rounded font-medium text-ink-600 hover:bg-ink-100">Dashboard</button>
+    <button data-tab="ai"        class="tab px-3 py-1.5 rounded font-medium text-ink-600 hover:bg-ink-100">AI Command Center</button>
+    <button data-tab="customers" class="tab px-3 py-1.5 rounded font-medium text-ink-600 hover:bg-ink-100">Customers</button>
+    <button data-tab="customer"  class="tab px-3 py-1.5 rounded font-medium text-ink-600 hover:bg-ink-100">Customer detail</button>
+    <button data-tab="approvals" class="tab px-3 py-1.5 rounded font-medium text-ink-600 hover:bg-ink-100">Approvals</button>
+    <span class="ml-auto text-xs text-ink-400">Static preview · no backend running</span>
+  </div>
+</div>
+
+<!-- ====================================================== LOGIN -->
+<section data-page="login" class="min-h-[calc(100vh-3rem)] grid lg:grid-cols-2">
+  <div class="relative hidden lg:flex flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-700 via-brand-600 to-brand-500 text-white p-12">
+    <div class="absolute -top-32 -right-32 h-96 w-96 rounded-full bg-white/10 blur-3xl"></div>
+    <div class="absolute bottom-0 -left-20 h-72 w-72 rounded-full bg-brand-300/30 blur-3xl"></div>
+    <div class="relative flex items-center gap-3">
+      <div class="h-11 w-11 rounded-xl bg-white/15 backdrop-blur grid place-items-center">🏭</div>
+      <div>
+        <div class="text-xl font-semibold">IndustriaCRM</div>
+        <div class="text-xs uppercase tracking-widest text-white/70">Project ERP · AI · WhatsApp</div>
+      </div>
+    </div>
+    <div class="relative space-y-6">
+      <h1 class="text-4xl font-bold leading-tight">Run your factory's whole sales journey from one screen.</h1>
+      <p class="text-white/80 max-w-md">
+        CRM · Quotations · Purchasing · Operations · Finance — wired together and watched over by an AI Command Center
+        that flags risk, ranks your day, and writes WhatsApp follow-ups for you.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <span class="rounded-full bg-white/10 backdrop-blur px-3 py-1 text-xs">Mining</span>
+        <span class="rounded-full bg-white/10 backdrop-blur px-3 py-1 text-xs">PLTU</span>
+        <span class="rounded-full bg-white/10 backdrop-blur px-3 py-1 text-xs">Cement</span>
+        <span class="rounded-full bg-white/10 backdrop-blur px-3 py-1 text-xs">Sugar</span>
+        <span class="rounded-full bg-white/10 backdrop-blur px-3 py-1 text-xs">Pulp & Paper</span>
+        <span class="rounded-full bg-white/10 backdrop-blur px-3 py-1 text-xs">Food</span>
+      </div>
+    </div>
+    <div class="relative text-xs text-white/60">© 2026 IndustriaCRM</div>
+  </div>
+  <div class="flex items-center justify-center p-6 sm:p-10 bg-ink-50">
+    <div class="w-full max-w-sm card p-8 space-y-5">
+      <div>
+        <h2 class="text-lg font-semibold">Welcome back</h2>
+        <p class="text-sm text-ink-500">Sign in to continue.</p>
+      </div>
+      <label class="block">
+        <span class="text-xs font-medium text-ink-600">Email</span>
+        <input value="director@demo.local" class="mt-1 w-full rounded-lg border border-ink-200 px-3 py-2 text-sm shadow-soft" />
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-ink-600">Password</span>
+        <input type="password" value="demo1234" class="mt-1 w-full rounded-lg border border-ink-200 px-3 py-2 text-sm shadow-soft" />
+      </label>
+      <button class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 text-sm font-medium shadow-soft">
+        Sign in →
+      </button>
+      <div class="text-[11px] text-ink-500 text-center pt-2 border-t border-ink-100">
+        Demo · <code>director / manager / sales1 / admin</code>@demo.local · password <code>demo1234</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== APP SHELL (shared by other tabs) -->
+<div data-page="dashboard ai customers customer approvals" class="hidden flex h-[calc(100vh-3rem)]" id="appShell">
+  <!-- Sidebar -->
+  <aside class="w-64 shrink-0 bg-white border-r border-ink-200 flex flex-col">
+    <div class="px-5 h-16 flex items-center gap-2 border-b border-ink-100">
+      <div class="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 grid place-items-center text-white text-sm">🏭</div>
+      <div>
+        <div class="font-semibold text-ink-900 leading-tight">IndustriaCRM</div>
+        <div class="text-[10px] uppercase tracking-wider text-ink-400">Project ERP · v0.1</div>
+      </div>
+    </div>
+    <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-6 text-sm">
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">Workspace</div>
+        <div class="space-y-0.5">
+          <a class="nav flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100" data-target="dashboard">▦ Dashboard</a>
+          <a class="nav flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100" data-target="customers">👥 CRM</a>
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">📄 Quotations</a>
+          <a class="nav flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100" data-target="approvals">✅ Approvals</a>
+        </div>
+      </div>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">Operations</div>
+        <div class="space-y-0.5">
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">💼 Projects</a>
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">🛒 Purchasing</a>
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">🔧 Operation</a>
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">💰 Finance</a>
+        </div>
+      </div>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">Insights</div>
+        <div class="space-y-0.5">
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">📊 KPI</a>
+          <a class="flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium text-ink-600 hover:bg-ink-100">👑 Executive</a>
+          <a class="nav flex items-center gap-2.5 rounded-lg px-3 py-2 font-medium bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-soft" data-target="ai">
+            🧠 AI Command <span class="ml-auto text-[9px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded bg-white/15">AI</span>
+          </a>
+        </div>
+      </div>
+    </nav>
+    <div class="p-3 border-t border-ink-100">
+      <div class="flex items-center gap-3 px-2 py-2">
+        <div class="h-9 w-9 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold text-sm">D</div>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-medium text-ink-900">Director Demo</div>
+          <div class="text-[11px] uppercase tracking-wide text-ink-400">director</div>
+        </div>
+        <button title="Logout" class="text-ink-400 hover:text-ink-700 p-1.5 rounded hover:bg-ink-100">⏻</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main column -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <header class="h-16 bg-white/80 backdrop-blur border-b border-ink-200 flex items-center px-4 lg:px-6 gap-3 sticky top-0 z-20">
+      <div class="relative flex-1 max-w-xl">
+        <input placeholder="Search customers, quotations, projects…"
+               class="w-full pl-9 pr-16 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm shadow-soft" />
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">🔍</span>
+        <span class="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 gap-1">
+          <span class="kbd">⌘</span><span class="kbd">K</span>
+        </span>
+      </div>
+      <button class="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800">
+        🔔
+        <span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 pulse"></span>
+      </button>
+      <div class="hidden md:flex items-center gap-2 pl-2 border-l border-ink-200 ml-1">
+        <div class="text-right leading-tight">
+          <div class="text-sm font-medium text-ink-900">Director Demo</div>
+          <div class="text-[11px] uppercase tracking-wide text-ink-400">director</div>
+        </div>
+        <div class="h-9 w-9 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold text-sm">D</div>
+      </div>
+    </header>
+
+    <main class="flex-1 overflow-auto">
+      <div class="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
+
+        <!-- DASHBOARD -->
+        <div data-content="dashboard" class="space-y-6">
+          <div class="flex items-end justify-between gap-4 flex-wrap">
+            <div>
+              <p class="text-sm text-ink-500">Welcome back, Director</p>
+              <h1 class="text-2xl font-semibold tracking-tight">Today's overview</h1>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-700 hover:bg-ink-100">✨ AI Command Center</button>
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 text-sm font-medium shadow-soft">+ New quotation</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <!-- KPI cards -->
+            <div class="card p-5">
+              <div class="flex items-start justify-between">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">New leads (30d)</div>
+                <div class="h-8 w-8 rounded-lg bg-brand-50 text-brand-700 grid place-items-center">👥</div>
+              </div>
+              <div class="mt-2 text-3xl font-semibold text-ink-900 tracking-tight">24</div>
+              <div class="mt-1.5 flex items-center gap-2 text-xs">
+                <span class="inline-flex items-center gap-1 font-medium text-emerald-600">↑ +12%</span>
+              </div>
+            </div>
+            <div class="card p-5">
+              <div class="flex items-start justify-between">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">Quote → Win</div>
+                <div class="h-8 w-8 rounded-lg bg-violet-50 text-violet-700 grid place-items-center">📄</div>
+              </div>
+              <div class="mt-2 text-3xl font-semibold text-ink-900 tracking-tight">31%</div>
+              <div class="mt-1.5 text-xs text-ink-500">last 30 days</div>
+            </div>
+            <div class="card p-5">
+              <div class="flex items-start justify-between">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">Outstanding AR</div>
+                <div class="h-8 w-8 rounded-lg bg-amber-50 text-amber-700 grid place-items-center">💼</div>
+              </div>
+              <div class="mt-2 text-3xl font-semibold text-ink-900 tracking-tight">Rp 2.4 M</div>
+              <div class="mt-1.5 text-xs text-ink-500">open invoices</div>
+            </div>
+            <div class="card p-5">
+              <div class="flex items-start justify-between">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-ink-500">Collected</div>
+                <div class="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-700 grid place-items-center">💰</div>
+              </div>
+              <div class="mt-2 text-3xl font-semibold text-ink-900 tracking-tight">Rp 9.2 B</div>
+              <div class="mt-1.5 flex items-center gap-2 text-xs">
+                <span class="inline-flex items-center gap-1 font-medium text-emerald-600">↑ +4%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="card p-5 lg:col-span-2">
+              <div class="flex items-center justify-between mb-4">
+                <div>
+                  <div class="text-lg font-semibold tracking-tight text-ink-900">Active customers</div>
+                  <p class="text-sm text-ink-500">Latest by stage.</p>
+                </div>
+                <a class="text-sm text-brand-700 hover:underline">View all →</a>
+              </div>
+              <div class="-mx-5">
+                <table class="w-full">
+                  <thead><tr class="border-y border-ink-100">
+                    <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Company</th>
+                    <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Industry</th>
+                    <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">PIC</th>
+                    <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Stage</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr class="hover:bg-ink-50 border-b border-ink-100">
+                      <td class="px-4 py-3 text-sm font-medium">PT Bara Kalsel</td>
+                      <td class="px-4 py-3 text-sm capitalize text-ink-500">mining</td>
+                      <td class="px-4 py-3 text-sm text-ink-500">Andi</td>
+                      <td class="px-4 py-3"><span class="chip bg-amber-50 text-amber-700"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Negotiation</span></td>
+                    </tr>
+                    <tr class="hover:bg-ink-50 border-b border-ink-100">
+                      <td class="px-4 py-3 text-sm font-medium">PT Semen Sukses</td>
+                      <td class="px-4 py-3 text-sm capitalize text-ink-500">cement</td>
+                      <td class="px-4 py-3 text-sm text-ink-500">Ratna</td>
+                      <td class="px-4 py-3"><span class="chip bg-violet-50 text-violet-700"><span class="h-1.5 w-1.5 rounded-full bg-violet-500"></span>Quotation</span></td>
+                    </tr>
+                    <tr class="hover:bg-ink-50 border-b border-ink-100">
+                      <td class="px-4 py-3 text-sm font-medium">PLTU Cilacap</td>
+                      <td class="px-4 py-3 text-sm capitalize text-ink-500">pltu</td>
+                      <td class="px-4 py-3 text-sm text-ink-500">Bambang</td>
+                      <td class="px-4 py-3"><span class="chip bg-blue-50 text-blue-700"><span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>Presentation</span></td>
+                    </tr>
+                    <tr class="hover:bg-ink-50 border-b border-ink-100">
+                      <td class="px-4 py-3 text-sm font-medium">Pabrik Gula Madukismo</td>
+                      <td class="px-4 py-3 text-sm capitalize text-ink-500">sugar</td>
+                      <td class="px-4 py-3 text-sm text-ink-500">Sutopo</td>
+                      <td class="px-4 py-3"><span class="chip bg-emerald-50 text-emerald-700"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>PO</span></td>
+                    </tr>
+                    <tr class="hover:bg-ink-50 border-b border-ink-100">
+                      <td class="px-4 py-3 text-sm font-medium">PT Pupuk Sriwidjaja</td>
+                      <td class="px-4 py-3 text-sm capitalize text-ink-500">fertilizer</td>
+                      <td class="px-4 py-3 text-sm text-ink-500">Nuraini</td>
+                      <td class="px-4 py-3"><span class="chip bg-cyan-50 text-cyan-700"><span class="h-1.5 w-1.5 rounded-full bg-cyan-500"></span>Drawing</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card p-5">
+              <div class="flex items-start gap-3 mb-3">
+                <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 grid place-items-center text-white">✨</div>
+                <div>
+                  <div class="text-lg font-semibold tracking-tight text-ink-900">AI tip of the day</div>
+                  <p class="text-sm text-ink-500">From your Command Center.</p>
+                </div>
+              </div>
+              <div class="rounded-xl bg-gradient-to-br from-brand-50 to-violet-50 p-4 text-sm text-ink-700">
+                Three deals haven't been touched in the last 7 days. Open the AI Command Center to see who needs a follow-up — and a suggested WhatsApp message.
+              </div>
+              <button class="w-full mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 text-sm font-medium shadow-soft">
+                Open AI Command Center →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI COMMAND CENTER -->
+        <div data-content="ai" class="space-y-6 hidden">
+          <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-ink-900 via-brand-800 to-brand-600 text-white p-6 lg:p-8 shadow-hero">
+            <div class="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-brand-300/20 blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-32 -left-10 h-72 w-72 rounded-full bg-white/5 blur-3xl pointer-events-none"></div>
+            <div class="relative flex items-start gap-3">
+              <div class="h-11 w-11 rounded-xl bg-white/15 backdrop-blur grid place-items-center">🧠</div>
+              <div>
+                <div class="text-xs uppercase tracking-widest text-white/70">Strategic war-room · live</div>
+                <h1 class="text-2xl lg:text-3xl font-semibold tracking-tight mt-0.5">AI Command Center</h1>
+                <p class="text-white/80 text-sm mt-1 max-w-2xl">Risk, profit, and your top moves of the day — re-ranked every minute.</p>
+              </div>
+            </div>
+            <div class="relative grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8">
+              <div class="rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/15 p-4">
+                <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-white/70">🎯 Forecast vs Reality</div>
+                <div class="mt-1 text-2xl font-semibold">Rp 9.2 B</div>
+                <div class="text-xs text-white/70">of Rp 12.4 B forecast</div>
+                <div class="mt-2 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-emerald-400 to-emerald-200" style="width:74%"></div>
+                </div>
+              </div>
+              <div class="rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/15 p-4">
+                <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-white/70">⚠️ At-risk deals</div>
+                <div class="mt-1 text-2xl font-semibold">3</div>
+                <div class="text-xs text-white/70">needs attention this week</div>
+              </div>
+              <div class="rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/15 p-4">
+                <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-white/70">📈 Profit alerts</div>
+                <div class="mt-1 text-2xl font-semibold">2</div>
+                <div class="text-xs text-white/70">projects breaching margin</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <!-- At Risk -->
+            <div class="card p-5">
+              <div class="flex items-start gap-3 mb-4">
+                <div class="h-9 w-9 rounded-lg bg-red-50 grid place-items-center">⚠️</div>
+                <div class="flex-1">
+                  <div class="font-semibold text-ink-900">At Risk Deals</div>
+                  <div class="text-xs text-ink-500">Deals slipping — act in the next 24h</div>
+                </div>
+              </div>
+              <ul class="space-y-2">
+                <li class="rounded-xl border border-ink-100 hover:border-ink-200 hover:shadow-soft p-3 transition-all">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-medium truncate">PT Bara Kalsel</div>
+                      <div class="text-xs text-ink-500 mt-0.5">
+                        <span class="font-mono">QT-2026-0042</span> · discount 17%
+                      </div>
+                    </div>
+                    <span class="chip uppercase ring-1 bg-red-50 text-red-700 ring-red-200">
+                      <span class="h-1.5 w-1.5 rounded-full bg-red-500 pulse"></span>high
+                    </span>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <span class="chip bg-ink-100 text-ink-600">days idle</span>
+                    <span class="chip bg-ink-100 text-ink-600">discount drift</span>
+                  </div>
+                  <div class="mt-2 flex items-center gap-2 text-sm text-brand-700">⚡ Follow up within 24h; escalate to manager.</div>
+                </li>
+                <li class="rounded-xl border border-ink-100 p-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-medium truncate">PT Semen Sukses</div>
+                      <div class="text-xs text-ink-500 mt-0.5"><span class="font-mono">QT-2026-0038</span> · discount 9%</div>
+                    </div>
+                    <span class="chip uppercase ring-1 bg-amber-50 text-amber-700 ring-amber-200">
+                      <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>medium
+                    </span>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <span class="chip bg-ink-100 text-ink-600">quote revisions</span>
+                    <span class="chip bg-ink-100 text-ink-600">activity below threshold</span>
+                  </div>
+                  <div class="mt-2 flex items-center gap-2 text-sm text-brand-700">⚡ Add a follow-up activity in the next 48 hours.</div>
+                </li>
+                <li class="rounded-xl border border-ink-100 p-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-medium truncate">CV Mitra Padi</div>
+                      <div class="text-xs text-ink-500 mt-0.5"><span class="font-mono">QT-2026-0035</span> · discount 5%</div>
+                    </div>
+                    <span class="chip uppercase ring-1 bg-amber-50 text-amber-700 ring-amber-200">
+                      <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>medium
+                    </span>
+                  </div>
+                  <div class="mt-2 flex items-center gap-2 text-sm text-brand-700">⚡ Schedule technical meeting this week.</div>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Top Actions -->
+            <div class="card p-5">
+              <div class="flex items-start gap-3 mb-4">
+                <div class="h-9 w-9 rounded-lg bg-amber-50 grid place-items-center">⚡</div>
+                <div class="flex-1">
+                  <div class="font-semibold text-ink-900">Top Priority Actions</div>
+                  <div class="text-xs text-ink-500">Your day, ranked by AI</div>
+                </div>
+              </div>
+              <ol class="space-y-1.5">
+                <li class="flex items-start gap-3 rounded-xl hover:bg-ink-50 p-2.5">
+                  <div class="h-7 w-7 shrink-0 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-xs font-semibold">1</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm text-ink-800">Call PIC PT Bara Kalsel before 11:00 — discuss revised price.</div>
+                    <div class="text-[11px] text-ink-500 mt-0.5">due today 10:30 · whatsapp</div>
+                  </div>
+                  <span class="chip bg-ink-100 text-ink-600">3.4</span>
+                </li>
+                <li class="flex items-start gap-3 rounded-xl hover:bg-ink-50 p-2.5">
+                  <div class="h-7 w-7 shrink-0 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-xs font-semibold">2</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm text-ink-800">Send revised quote to PT Sukses (drop 7→5%).</div>
+                    <div class="text-[11px] text-ink-500 mt-0.5">due today 14:00 · email</div>
+                  </div>
+                  <span class="chip bg-ink-100 text-ink-600">2.8</span>
+                </li>
+                <li class="flex items-start gap-3 rounded-xl hover:bg-ink-50 p-2.5">
+                  <div class="h-7 w-7 shrink-0 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-xs font-semibold">3</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm text-ink-800">Schedule site visit Pabrik Gula Madukismo.</div>
+                    <div class="text-[11px] text-ink-500 mt-0.5">due tomorrow 09:00 · dashboard</div>
+                  </div>
+                  <span class="chip bg-ink-100 text-ink-600">2.1</span>
+                </li>
+                <li class="flex items-start gap-3 rounded-xl hover:bg-ink-50 p-2.5">
+                  <div class="h-7 w-7 shrink-0 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-xs font-semibold">4</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm text-ink-800">Payment reminder — PLTU Cilacap, INV-2026-0017.</div>
+                    <div class="text-[11px] text-ink-500 mt-0.5">due tomorrow 13:00 · whatsapp</div>
+                  </div>
+                  <span class="chip bg-ink-100 text-ink-600">1.8</span>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Profit Alerts -->
+            <div class="card p-5">
+              <div class="flex items-start gap-3 mb-4">
+                <div class="h-9 w-9 rounded-lg bg-emerald-50 grid place-items-center">📈</div>
+                <div class="flex-1">
+                  <div class="font-semibold text-ink-900">Profit Alerts</div>
+                  <div class="text-xs text-ink-500">Projects breaching margin estimate</div>
+                </div>
+              </div>
+              <ul class="space-y-2">
+                <li class="rounded-xl border border-ink-100 p-3">
+                  <div class="flex items-center justify-between">
+                    <div class="font-mono text-xs text-ink-500">PRJ-2026-0042</div>
+                    <span class="chip bg-red-50 text-red-700">-9.2 pp</span>
+                  </div>
+                  <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div class="flex justify-between text-[10px] text-ink-500"><span>Estimate</span><span>18.0%</span></div>
+                      <div class="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-ink-300" style="width:18%"></div></div>
+                    </div>
+                    <div>
+                      <div class="flex justify-between text-[10px] text-ink-500"><span>Actual</span><span>8.8%</span></div>
+                      <div class="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-red-400" style="width:9%"></div></div>
+                    </div>
+                  </div>
+                </li>
+                <li class="rounded-xl border border-ink-100 p-3">
+                  <div class="flex items-center justify-between">
+                    <div class="font-mono text-xs text-ink-500">PRJ-2026-0029</div>
+                    <span class="chip bg-amber-50 text-amber-700">-5.1 pp</span>
+                  </div>
+                  <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div class="flex justify-between text-[10px] text-ink-500"><span>Estimate</span><span>22.0%</span></div>
+                      <div class="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-ink-300" style="width:22%"></div></div>
+                    </div>
+                    <div>
+                      <div class="flex justify-between text-[10px] text-ink-500"><span>Actual</span><span>16.9%</span></div>
+                      <div class="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-amber-400" style="width:17%"></div></div>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="card p-5">
+              <div class="flex items-start gap-3 mb-4">
+                <div class="h-9 w-9 rounded-lg bg-violet-50 grid place-items-center">💡</div>
+                <div class="flex-1">
+                  <div class="font-semibold text-ink-900">AI Recommendations</div>
+                  <div class="text-xs text-ink-500">Spotted by the company memory</div>
+                </div>
+              </div>
+              <ul class="space-y-2">
+                <li class="rounded-xl border border-ink-100 p-3 flex items-start gap-3">
+                  <span class="text-violet-600 mt-0.5">✨</span>
+                  <div class="flex-1">
+                    <div class="text-[10px] uppercase tracking-wider text-ink-500">upsell</div>
+                    <div class="text-sm text-ink-800">PT Cement A — likely needs chain replacement in 3 months.</div>
+                  </div>
+                </li>
+                <li class="rounded-xl border border-ink-100 p-3 flex items-start gap-3">
+                  <span class="text-violet-600 mt-0.5">✨</span>
+                  <div class="flex-1">
+                    <div class="text-[10px] uppercase tracking-wider text-ink-500">supplier</div>
+                    <div class="text-sm text-ink-800">Switch supplier for bearing X — QC fail rate 18% last 90 days.</div>
+                  </div>
+                </li>
+                <li class="rounded-xl border border-ink-100 p-3 flex items-start gap-3">
+                  <span class="text-violet-600 mt-0.5">✨</span>
+                  <div class="flex-1">
+                    <div class="text-[10px] uppercase tracking-wider text-ink-500">strategy</div>
+                    <div class="text-sm text-ink-800">You lose 70% of mining deals when first response &gt; 2 days. Set SLA reminder.</div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- CUSTOMERS -->
+        <div data-content="customers" class="space-y-5 hidden">
+          <div class="flex items-end justify-between gap-3 flex-wrap">
+            <div>
+              <h1 class="text-2xl font-semibold tracking-tight">Customers</h1>
+              <p class="text-sm text-ink-500">8 records</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-700 hover:bg-ink-100">⬇ Export</button>
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 text-sm font-medium shadow-soft">+ New customer</button>
+            </div>
+          </div>
+          <div class="card p-3 flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[220px]">
+              <input placeholder="Search by company name…" class="w-full pl-9 rounded-lg border border-ink-200 px-3 py-2 text-sm" />
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">🔍</span>
+            </div>
+            <select class="max-w-[200px] rounded-lg border border-ink-200 px-3 py-2 text-sm">
+              <option>All stages</option>
+            </select>
+            <button class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-700 hover:bg-ink-100">⚲ More filters</button>
+          </div>
+          <div class="card overflow-hidden">
+            <table class="w-full">
+              <thead class="bg-ink-50/60"><tr>
+                <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Company</th>
+                <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Industry</th>
+                <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">PIC</th>
+                <th class="px-4 py-2.5 text-left text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Stage</th>
+                <th class="px-4 py-2.5 text-right text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Lifetime value</th>
+              </tr></thead>
+              <tbody>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">PT Bara Kalsel</td><td class="px-4 py-3 text-sm capitalize text-ink-500">mining</td><td class="px-4 py-3 text-sm">Andi</td><td class="px-4 py-3"><span class="chip bg-amber-50 text-amber-700"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Negotiation</span></td><td class="px-4 py-3 text-right">Rp 4,200,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">PT Semen Sukses</td><td class="px-4 py-3 text-sm capitalize text-ink-500">cement</td><td class="px-4 py-3 text-sm">Ratna</td><td class="px-4 py-3"><span class="chip bg-violet-50 text-violet-700"><span class="h-1.5 w-1.5 rounded-full bg-violet-500"></span>Quotation</span></td><td class="px-4 py-3 text-right">Rp 2,800,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">PLTU Cilacap</td><td class="px-4 py-3 text-sm capitalize text-ink-500">pltu</td><td class="px-4 py-3 text-sm">Bambang</td><td class="px-4 py-3"><span class="chip bg-blue-50 text-blue-700"><span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>Presentation</span></td><td class="px-4 py-3 text-right">Rp 6,500,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">Pabrik Gula Madukismo</td><td class="px-4 py-3 text-sm capitalize text-ink-500">sugar</td><td class="px-4 py-3 text-sm">Sutopo</td><td class="px-4 py-3"><span class="chip bg-emerald-50 text-emerald-700"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>PO</span></td><td class="px-4 py-3 text-right">Rp 1,750,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">PT Pupuk Sriwidjaja</td><td class="px-4 py-3 text-sm capitalize text-ink-500">fertilizer</td><td class="px-4 py-3 text-sm">Nuraini</td><td class="px-4 py-3"><span class="chip bg-cyan-50 text-cyan-700"><span class="h-1.5 w-1.5 rounded-full bg-cyan-500"></span>Drawing</span></td><td class="px-4 py-3 text-right">Rp 3,100,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">PT Pulp & Paper Riau</td><td class="px-4 py-3 text-sm capitalize text-ink-500">pulp_paper</td><td class="px-4 py-3 text-sm">Yanti</td><td class="px-4 py-3"><span class="chip bg-teal-50 text-teal-700"><span class="h-1.5 w-1.5 rounded-full bg-teal-500"></span>Purchasing</span></td><td class="px-4 py-3 text-right">Rp 5,400,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">CV Mitra Padi</td><td class="px-4 py-3 text-sm capitalize text-ink-500">food</td><td class="px-4 py-3 text-sm">Hari</td><td class="px-4 py-3"><span class="chip bg-ink-100 text-ink-700"><span class="h-1.5 w-1.5 rounded-full bg-ink-400"></span>Lead</span></td><td class="px-4 py-3 text-right">Rp 320,000,000</td></tr>
+                <tr class="hover:bg-ink-50 border-t border-ink-100"><td class="px-4 py-3 text-sm font-medium text-brand-700">PT Indocement Bogor</td><td class="px-4 py-3 text-sm capitalize text-ink-500">cement</td><td class="px-4 py-3 text-sm">Wati</td><td class="px-4 py-3"><span class="chip bg-emerald-100 text-emerald-800"><span class="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>Won</span></td><td class="px-4 py-3 text-right">Rp 8,900,000,000</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CUSTOMER DETAIL -->
+        <div data-content="customer" class="space-y-6 hidden">
+          <div class="card p-5 lg:p-6">
+            <div class="flex items-start justify-between gap-4 flex-wrap">
+              <div class="flex items-start gap-4">
+                <div class="h-14 w-14 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white grid place-items-center text-xl font-semibold">P</div>
+                <div>
+                  <h1 class="text-2xl font-semibold tracking-tight">PT Bara Kalsel</h1>
+                  <div class="text-sm text-ink-500 flex items-center gap-2 mt-1 capitalize">
+                    🏢 mining · <span class="chip bg-amber-50 text-amber-700"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Negotiation</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-700 hover:bg-ink-100">💬 WhatsApp</button>
+                <button class="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white px-3 py-2 text-sm font-medium shadow-soft">✨ AI suggest</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 text-sm">
+              <div><div class="flex items-center gap-1 text-[11px] uppercase tracking-wider text-ink-500">📞 Phone</div><div class="mt-1 text-ink-900">+62 812 3456 789</div></div>
+              <div><div class="flex items-center gap-1 text-[11px] uppercase tracking-wider text-ink-500">💬 WhatsApp</div><div class="mt-1 text-ink-900">+62 812 3456 789</div></div>
+              <div><div class="flex items-center gap-1 text-[11px] uppercase tracking-wider text-ink-500">✉ Email</div><div class="mt-1 text-ink-900">andi@bara.example</div></div>
+              <div><div class="flex items-center gap-1 text-[11px] uppercase tracking-wider text-ink-500">📍 Address</div><div class="mt-1 text-ink-900">Banjarmasin, Kalsel</div></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="card p-5">
+              <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-ink-500">✨ AI Lead score</div>
+              <div class="mt-3 flex items-center gap-4">
+                <div class="h-20 w-20 rounded-full grid place-items-center"
+                     style="background: conic-gradient(#3a5cf5 263deg, #eef0f4 0deg);">
+                  <div class="h-15 w-15 rounded-full bg-white px-3 py-2 text-center">
+                    <div class="text-2xl font-semibold leading-none">73</div>
+                    <div class="text-[9px] uppercase text-ink-500 tracking-widest">/ 100</div>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <div class="text-sm font-medium">Push to close: schedule final negotiation within 5 days.</div>
+                  <div class="text-xs text-ink-500 mt-1">Model heuristic-v1</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card p-5 lg:col-span-2">
+              <div class="flex items-center gap-2 text-xs uppercase tracking-wider text-ink-500">📈 Top score drivers</div>
+              <ul class="mt-3 space-y-2">
+                <li class="flex items-center gap-3 text-sm"><span class="w-44 truncate">historical conversion</span><div class="flex-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500" style="width:78%"></div></div><span class="text-ink-500 w-14 text-right">+15.6</span></li>
+                <li class="flex items-center gap-3 text-sm"><span class="w-44 truncate">project value</span><div class="flex-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500" style="width:62%"></div></div><span class="text-ink-500 w-14 text-right">+12.4</span></li>
+                <li class="flex items-center gap-3 text-sm"><span class="w-44 truncate">industry baseline</span><div class="flex-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500" style="width:48%"></div></div><span class="text-ink-500 w-14 text-right">+9.6</span></li>
+                <li class="flex items-center gap-3 text-sm"><span class="w-44 truncate">response speed</span><div class="flex-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500" style="width:38%"></div></div><span class="text-ink-500 w-14 text-right">+7.6</span></li>
+                <li class="flex items-center gap-3 text-sm"><span class="w-44 truncate">follow-up consistency</span><div class="flex-1 h-1.5 bg-ink-100 rounded-full overflow-hidden"><div class="h-full bg-brand-500" style="width:30%"></div></div><span class="text-ink-500 w-14 text-right">+6.0</span></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card p-5">
+            <div class="flex items-center justify-between mb-3">
+              <div class="font-semibold text-ink-900">Activity timeline</div>
+              <button class="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-700 hover:bg-ink-100">＋ Log activity</button>
+            </div>
+            <ul class="space-y-3">
+              <li class="flex gap-3"><div class="h-8 w-8 rounded-full bg-emerald-50 text-emerald-700 grid place-items-center text-sm shrink-0">💬</div><div class="flex-1"><div class="text-sm"><b>Andi (PT Bara Kalsel)</b> via WhatsApp</div><div class="text-xs text-ink-500">"Pak boleh kami minta revisi quotation discount 12%"</div><div class="text-[11px] text-ink-400 mt-0.5">2 hours ago</div></div></li>
+              <li class="flex gap-3"><div class="h-8 w-8 rounded-full bg-blue-50 text-blue-700 grid place-items-center text-sm shrink-0">📞</div><div class="flex-1"><div class="text-sm"><b>Sales One</b> called PIC for 12 min</div><div class="text-xs text-ink-500">Discussed delivery split + drawing approval timing.</div><div class="text-[11px] text-ink-400 mt-0.5">yesterday 14:30</div></div></li>
+              <li class="flex gap-3"><div class="h-8 w-8 rounded-full bg-violet-50 text-violet-700 grid place-items-center text-sm shrink-0">📄</div><div class="flex-1"><div class="text-sm">Quotation <span class="font-mono text-xs">QT-2026-0042</span> sent (variant: detailed)</div><div class="text-xs text-ink-500">Total Rp 4,200,000,000 · 17% discount pending approval</div><div class="text-[11px] text-ink-400 mt-0.5">3 days ago</div></div></li>
+              <li class="flex gap-3"><div class="h-8 w-8 rounded-full bg-indigo-50 text-indigo-700 grid place-items-center text-sm shrink-0">✏️</div><div class="flex-1"><div class="text-sm">Engineering meeting completed</div><div class="text-xs text-ink-500">Site visit + technical Q&A. Deliverables clarified.</div><div class="text-[11px] text-ink-400 mt-0.5">a week ago</div></div></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- APPROVALS -->
+        <div data-content="approvals" class="space-y-5 hidden">
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight flex items-center gap-2">🛡️ Approval inbox</h1>
+            <p class="text-sm text-ink-500">Discount and data-change requests routed to you.</p>
+          </div>
+
+          <div class="card p-5 flex flex-wrap items-start gap-4 justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="chip bg-brand-50 text-brand-700 capitalize">quotation</span>
+                <span class="chip bg-amber-50 text-amber-700 uppercase">manager approval</span>
+              </div>
+              <div class="mt-2 text-sm font-medium">manager approval (>5%)</div>
+              <pre class="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-[11px] font-mono text-ink-600 overflow-x-auto">{
+  "discount_pct": 12.0,
+  "total": 2800000000,
+  "quotation": "QT-2026-0038"
+}</pre>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm font-medium">✕ Reject</button>
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm font-medium">✓ Approve</button>
+            </div>
+          </div>
+
+          <div class="card p-5 flex flex-wrap items-start gap-4 justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="chip bg-brand-50 text-brand-700 capitalize">quotation</span>
+                <span class="chip bg-red-50 text-red-700 uppercase">director approval</span>
+              </div>
+              <div class="mt-2 text-sm font-medium">director approval (>15%)</div>
+              <pre class="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-[11px] font-mono text-ink-600 overflow-x-auto">{
+  "discount_pct": 17.0,
+  "total": 4200000000,
+  "quotation": "QT-2026-0042"
+}</pre>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm font-medium">✕ Reject</button>
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm font-medium">✓ Approve</button>
+            </div>
+          </div>
+
+          <div class="card p-5 flex flex-wrap items-start gap-4 justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="chip bg-brand-50 text-brand-700 capitalize">customer</span>
+                <span class="chip bg-amber-50 text-amber-700 uppercase">manager approval</span>
+              </div>
+              <div class="mt-2 text-sm font-medium">admin edit requires manager approval</div>
+              <pre class="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-[11px] font-mono text-ink-600 overflow-x-auto">{
+  "changes": { "delivery_address": "Jl. Industri 12, Cilegon" }
+}</pre>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm font-medium">✕ Reject</button>
+              <button class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm font-medium">✓ Approve</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Tab switching
+  function show(tab) {
+    document.querySelectorAll('[data-page]').forEach(el => {
+      const owners = el.getAttribute('data-page').split(' ');
+      el.classList.toggle('hidden', !owners.includes(tab));
+    });
+    document.querySelectorAll('[data-content]').forEach(el => {
+      el.classList.toggle('hidden', el.getAttribute('data-content') !== tab);
+    });
+    document.querySelectorAll('.tab').forEach(b => {
+      const isActive = b.getAttribute('data-tab') === tab;
+      b.classList.toggle('bg-brand-50', isActive);
+      b.classList.toggle('text-brand-700', isActive);
+    });
+  }
+  document.querySelectorAll('.tab').forEach(b =>
+    b.addEventListener('click', () => show(b.getAttribute('data-tab')))
+  );
+  document.querySelectorAll('.nav[data-target]').forEach(a =>
+    a.addEventListener('click', () => show(a.getAttribute('data-target')))
+  );
+  show('ai'); // start on AI Command Center to show the headline screen
+</script>
+</body>
+</html>
