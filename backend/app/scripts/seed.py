@@ -1,10 +1,15 @@
-"""Seed initial users + demo data."""
+"""Seed initial users + demo data.
+
+Also creates the database schema if it doesn't exist yet (idempotent),
+so first-run installs work without a separate migration step.
+"""
 
 import asyncio
 
 from sqlalchemy import select
 
-from app.core.db import SessionLocal
+from app.core.db import Base, SessionLocal, engine
+import app.models  # noqa: F401  ensure all models are registered with metadata
 from app.core.security import hash_password
 from app.models.crm import Customer
 from app.models.user import User
@@ -19,7 +24,15 @@ _USERS = [
 ]
 
 
+async def ensure_schema() -> None:
+    """Create any tables that don't exist yet. Safe to run repeatedly."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print("Schema ready.")
+
+
 async def main() -> None:
+    await ensure_schema()
     async with SessionLocal() as db:
         for email, name, role in _USERS:
             existing = await db.scalar(select(User).where(User.email == email))

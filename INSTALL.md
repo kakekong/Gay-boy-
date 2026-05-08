@@ -155,19 +155,23 @@ If any service says **`Exited`** or **`Restarting`**, jump to **Troubleshooting*
 The database is empty. Run this **once** to create the tables and add demo data:
 
 ```bash
-docker compose -f infra/docker-compose.yml exec api alembic revision --autogenerate -m "init"
-docker compose -f infra/docker-compose.yml exec api alembic upgrade head
 docker compose -f infra/docker-compose.yml exec api python -m app.scripts.seed
 ```
 
-The last line should print:
+The script creates the schema if it's missing and inserts demo users + demo
+customers. It's safe to re-run — tables are only created if they don't exist
+and users are only inserted if they aren't there yet.
+
+You should see:
 ```
+Schema ready.
 Seed complete. Login with director@demo.local / demo1234 etc.
 ```
 
-> If `alembic revision --autogenerate` complains, you can skip it the first
-> time and just run `alembic upgrade head` directly — the metadata creates
-> tables anyway in dev.
+> 💡 **Note for ongoing changes:** as the schema evolves you'll switch to
+> Alembic migrations (`alembic revision --autogenerate -m "..."` then
+> `alembic upgrade head`). The seed script is just for the first-run
+> bootstrap.
 
 ---
 
