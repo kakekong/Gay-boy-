@@ -1,5 +1,6 @@
 """SQLAlchemy ORM models. Importing the package registers all models with metadata."""
 
+from app.models.account import Account  # noqa: F401
 from app.models.approval import ApprovalRequest  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.crm import Activity, Customer, Reminder  # noqa: F401

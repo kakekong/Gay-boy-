@@ -33,6 +33,12 @@ async def ensure_schema() -> None:
 
 async def main() -> None:
     await ensure_schema()
+    # Chart of Accounts seed
+    from app.scripts.coa_seed import seed_coa
+    async with SessionLocal() as db:
+        coa_created = await seed_coa(db)
+        await db.commit()
+        print(f"CoA: {coa_created} account(s) inserted.")
     async with SessionLocal() as db:
         for email, name, role in _USERS:
             existing = await db.scalar(select(User).where(User.email == email))
