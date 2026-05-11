@@ -27,7 +27,15 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/purchasing", label: "Purchasing", icon: ShoppingCart },
       { to: "/operation", label: "Operation", icon: Wrench },
       { to: "/finance", label: "Finance", icon: Banknote },
-      { to: "/accounts", label: "Chart of Accounts", icon: BookOpen },
+      { to: "/accounts", label: "Chart of Accounts", icon: BookOpen,
+        roles: ["admin", "director"] },
+    ],
+  },
+  {
+    label: "People",
+    items: [
+      { to: "/employees", label: "Employees", icon: Users,
+        roles: ["hr", "director"] },
     ],
   },
   {

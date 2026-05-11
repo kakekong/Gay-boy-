@@ -19,6 +19,7 @@ _USERS = [
     ("director@demo.local", "Director Demo", "director"),
     ("manager@demo.local",  "Manager Demo",  "manager"),
     ("admin@demo.local",    "Admin Demo",    "admin"),
+    ("hr@demo.local",       "HR Demo",       "hr"),
     ("sales1@demo.local",   "Sales One",     "sales"),
     ("sales2@demo.local",   "Sales Two",     "sales"),
 ]

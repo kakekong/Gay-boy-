@@ -13,11 +13,13 @@ from app.api.v1.endpoints import (
     operation,
     purchasing,
     quotations,
+    users,
     webhooks,
 )
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(customers.router, prefix="/customers", tags=["crm"])
 api_router.include_router(quotations.router, prefix="/quotations", tags=["quotation"])
 api_router.include_router(approvals.router, prefix="/approvals", tags=["approval"])

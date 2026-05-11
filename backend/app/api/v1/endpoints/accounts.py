@@ -9,11 +9,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user  # noqa: F401  (kept for symmetry)
+from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.user import User
 
 router = APIRouter()
+
+_admin_or_director = require(Role.ADMIN, Role.DIRECTOR)
 
 
 ACCOUNT_TYPES = [
@@ -78,14 +81,14 @@ def _validate_type(value: str) -> None:
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/types")
-async def types(_user: User = Depends(get_current_user)):
+async def types(_user: User = Depends(_admin_or_director)):
     return ACCOUNT_TYPES
 
 
 @router.get("", response_model=list[AccountOut])
 async def list_accounts(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(_admin_or_director),
     account_type: str | None = None,
     suspended: str | None = Query(None, description="all | active | suspended"),
     q: str | None = None,
@@ -108,7 +111,7 @@ async def list_accounts(
 @router.get("/{account_id}", response_model=AccountOut)
 async def get_account(account_id: UUID,
                       db: AsyncSession = Depends(get_db),
-                      _user: User = Depends(get_current_user)):
+                      _user: User = Depends(_admin_or_director)):
     obj = await db.get(Account, account_id)
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -118,7 +121,7 @@ async def get_account(account_id: UUID,
 @router.post("", response_model=AccountOut, status_code=201)
 async def create_account(payload: AccountIn,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
+                         _user: User = Depends(_admin_or_director)):
     _validate_no(payload.account_no)
     _validate_type(payload.account_type)
 
@@ -146,7 +149,7 @@ async def create_account(payload: AccountIn,
 async def update_account(account_id: UUID,
                          payload: AccountPatch,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
+                         _user: User = Depends(_admin_or_director)):
     obj = await db.get(Account, account_id)
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -167,7 +170,7 @@ async def update_account(account_id: UUID,
 @router.delete("/{account_id}", status_code=204)
 async def delete_account(account_id: UUID,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
+                         _user: User = Depends(_admin_or_director)):
     obj = await db.get(Account, account_id)
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -186,7 +189,7 @@ async def delete_account(account_id: UUID,
 
 @router.post("/seed")
 async def seed(db: AsyncSession = Depends(get_db),
-               _user: User = Depends(get_current_user)):
+               _user: User = Depends(_admin_or_director)):
     """Idempotent seed: inserts the default Indonesian Chart of Accounts."""
     from app.scripts.coa_seed import seed_coa
     created = await seed_coa(db)
