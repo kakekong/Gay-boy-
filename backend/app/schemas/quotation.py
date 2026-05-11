@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -50,8 +50,23 @@ class QuotationOut(BaseModel):
     valid_until: date | None
     notes: str | None
     items: list[QuotationItemOut] = []
+    # CoA linkage
+    account_revenue_no:    str | None = None
+    account_receivable_no: str | None = None
+    account_discount_no:   str | None = None
+    account_tax_no:        str | None = None
+    is_posted: bool = False
+    posted_at: datetime | None = None
+    posted_snapshot: dict = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
+
+
+class QuotationAccountLinks(BaseModel):
+    account_revenue_no:    str | None = None
+    account_receivable_no: str | None = None
+    account_discount_no:   str | None = None
+    account_tax_no:        str | None = None
 
 
 class QuotationDecide(BaseModel):

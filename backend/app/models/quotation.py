@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -50,6 +50,17 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     valid_until: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     pdf_url: Mapped[str | None] = mapped_column(String(500))
+
+    # ── Chart-of-Accounts linkage ─────────────────────────────────────────
+    account_revenue_no:    Mapped[str | None] = mapped_column(String(40))   # default "400001"
+    account_receivable_no: Mapped[str | None] = mapped_column(String(40))   # default "110301"
+    account_discount_no:   Mapped[str | None] = mapped_column(String(40))   # default "400004"
+    account_tax_no:        Mapped[str | None] = mapped_column(String(40))   # default "2102-01"
+
+    # Whether the journal has been posted to the ledger
+    is_posted:       Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    posted_at:       Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    posted_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     items: Mapped[list["QuotationItem"]] = relationship(
         back_populates="quotation",

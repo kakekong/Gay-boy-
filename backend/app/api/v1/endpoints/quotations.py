@@ -15,11 +15,18 @@ from app.core.approval import (
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_approve_quotation
+from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.crm import Activity, Reminder
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
-from app.schemas.quotation import QuotationCreate, QuotationDecide, QuotationOut
+from app.schemas.quotation import (
+    QuotationAccountLinks,
+    QuotationCreate,
+    QuotationDecide,
+    QuotationOut,
+)
+from app.services import ledger
 from app.services.numbering import next_quotation_number
 
 router = APIRouter()
@@ -152,6 +159,12 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     # Auto-create project (deferred to service)
     from app.services.project_factory import create_project_from_quotation
     await create_project_from_quotation(db, q, user)
+    # Auto-post to the ledger (idempotent)
+    try:
+        await ledger.post_quotation(db, q)
+    except Exception:
+        # Don't block the won flow if posting fails (e.g. missing accounts)
+        pass
     return await _load(q.id, db)
 
 
@@ -347,3 +360,78 @@ async def followup_reminder_done(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
     rem.status = "done"
     return {"ok": True}
+
+
+# ─── Account links + ledger posting ──────────────────────────────────────────
+
+
+@router.get("/{q_id}/account-links")
+async def get_account_links(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _scoped_quote(q_id, db, user)
+    amounts = ledger.compute_amounts(q)
+
+    out_links = []
+    for role, default in ledger.DEFAULTS.items():
+        no = getattr(q, f"account_{role}_no") or default
+        acc = await db.scalar(select(Account).where(Account.account_no == no))
+        out_links.append({
+            "role": role,
+            "account_no": no,
+            "account_name": acc.name if acc else None,
+            "account_type": acc.account_type if acc else None,
+            "current_balance": float(acc.balance or 0) if acc else None,
+            "amount_to_post": amounts.get(role, 0),
+        })
+    return {
+        "links": out_links,
+        "is_posted": q.is_posted,
+        "posted_at": q.posted_at,
+        "posted_snapshot": q.posted_snapshot,
+        "amounts": amounts,
+    }
+
+
+@router.patch("/{q_id}/account-links", response_model=QuotationOut)
+async def update_account_links(
+    q_id: UUID,
+    payload: QuotationAccountLinks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _scoped_quote(q_id, db, user)
+    if q.is_posted:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Cannot change account links after posting. Reverse first.",
+        )
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(q, k, v)
+    await db.flush()
+    return await _load(q.id, db)
+
+
+@router.post("/{q_id}/post-ledger", response_model=QuotationOut)
+async def post_to_ledger(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _scoped_quote(q_id, db, user)
+    await ledger.post_quotation(db, q)
+    return await _load(q.id, db)
+
+
+@router.post("/{q_id}/reverse-ledger", response_model=QuotationOut)
+async def reverse_from_ledger(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _scoped_quote(q_id, db, user)
+    await ledger.reverse_quotation(db, q)
+    return await _load(q.id, db)
