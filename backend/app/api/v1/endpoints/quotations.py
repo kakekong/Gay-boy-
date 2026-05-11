@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,6 +16,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_approve_quotation
 from app.models.approval import ApprovalRequest, ApprovalStatus
+from app.models.crm import Activity, Reminder
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
 from app.schemas.quotation import QuotationCreate, QuotationDecide, QuotationOut
@@ -216,3 +218,132 @@ async def get_quotation(
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     return q
+
+
+# ─── Follow-ups ──────────────────────────────────────────────────────────────
+
+class FollowUpIn(BaseModel):
+    notes: str
+    next_at: datetime | None = None
+    next_channel: str = "dashboard"
+
+
+async def _scoped_quote(q_id: UUID, db: AsyncSession, user: User) -> Quotation:
+    q = await db.get(Quotation, q_id)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    return q
+
+
+@router.post("/{q_id}/followup", status_code=201)
+async def log_followup(
+    q_id: UUID,
+    payload: FollowUpIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _scoped_quote(q_id, db, user)
+    if not payload.notes or not payload.notes.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Notes required.")
+
+    activity = Activity(
+        customer_id=q.customer_id,
+        user_id=user.id,
+        type="follow_up",
+        direction="outbound",
+        occurred_at=datetime.now(UTC),
+        notes=payload.notes,
+        meta={"quotation_id": str(q_id), "quotation_number": q.number},
+    )
+    db.add(activity)
+    await db.flush()
+
+    reminder_id: str | None = None
+    if payload.next_at:
+        rem = Reminder(
+            customer_id=q.customer_id,
+            user_id=user.id,
+            kind="follow_up",
+            due_at=payload.next_at,
+            channel=payload.next_channel,
+            message=f"Follow up on quotation {q.number}",
+            status="pending",
+        )
+        db.add(rem)
+        await db.flush()
+        reminder_id = str(rem.id)
+
+    return {
+        "activity_id": str(activity.id),
+        "reminder_id": reminder_id,
+        "occurred_at": activity.occurred_at,
+    }
+
+
+@router.get("/{q_id}/followups")
+async def list_followups(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = await _scoped_quote(q_id, db, user)
+
+    # Activities: anything tagged with this quotation_id, plus generic
+    # follow_up / quotation_sent / negotiation on the same customer after
+    # the quotation was created.
+    act_stmt = (
+        select(Activity)
+        .where(Activity.customer_id == q.customer_id)
+        .order_by(Activity.occurred_at.desc())
+        .limit(200)
+    )
+    activities = []
+    for a in (await db.scalars(act_stmt)).all():
+        tagged = bool(a.meta) and a.meta.get("quotation_id") == str(q_id)
+        is_related_type = a.type in ("follow_up", "quotation_sent", "negotiation")
+        after_quote = a.occurred_at >= q.created_at
+        if tagged or (is_related_type and after_quote):
+            activities.append({
+                "id": str(a.id),
+                "type": a.type,
+                "direction": a.direction,
+                "occurred_at": a.occurred_at,
+                "notes": a.notes,
+                "user_id": str(a.user_id) if a.user_id else None,
+                "tagged": tagged,
+            })
+
+    # Pending reminders for the same customer
+    rem_stmt = (
+        select(Reminder)
+        .where(Reminder.customer_id == q.customer_id, Reminder.status == "pending")
+        .order_by(Reminder.due_at.asc())
+    )
+    reminders = [
+        {
+            "id": str(r.id),
+            "kind": r.kind,
+            "channel": r.channel,
+            "due_at": r.due_at,
+            "message": r.message,
+        }
+        for r in (await db.scalars(rem_stmt)).all()
+    ]
+    return {"activities": activities, "reminders": reminders}
+
+
+@router.patch("/{q_id}/reminders/{reminder_id}/done")
+async def followup_reminder_done(
+    q_id: UUID,
+    reminder_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _scoped_quote(q_id, db, user)
+    rem = await db.get(Reminder, reminder_id)
+    if not rem:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
+    rem.status = "done"
+    return {"ok": True}

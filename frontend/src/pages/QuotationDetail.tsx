@@ -4,9 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileText, Send, CheckCircle2, XCircle, Trophy, Frown,
   ArrowLeft, Building2, Calendar, Receipt, ShieldCheck, ShieldAlert, Crown, Loader2,
+  MessageCircle, Plus, Bell, CheckCircle,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { Modal } from "@/components/Modal";
+import { FollowupForm } from "@/components/forms/FollowupForm";
 import { useAuthStore } from "@/store/auth";
 
 const STATUS_CHIP: Record<string, string> = {
@@ -27,6 +30,8 @@ export default function QuotationDetailPage() {
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
 
+  const [openFollowup, setOpenFollowup] = useState(false);
+
   const q = useQuery({
     queryKey: ["quotation", id],
     queryFn: () => api.get(`/quotations/${id}`).then((r) => r.data),
@@ -37,6 +42,18 @@ export default function QuotationDetailPage() {
     queryKey: ["customer", q.data?.customer_id],
     queryFn: () => api.get(`/customers/${q.data!.customer_id}`).then((r) => r.data),
     enabled: !!q.data?.customer_id,
+  });
+
+  const followups = useQuery({
+    queryKey: ["followups", id],
+    queryFn: () => api.get(`/quotations/${id}/followups`).then((r) => r.data),
+    enabled: !!id,
+  });
+
+  const completeReminder = useMutation({
+    mutationFn: (reminderId: string) =>
+      api.patch(`/quotations/${id}/reminders/${reminderId}/done`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["followups", id] }),
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["quotation", id] });
@@ -210,6 +227,119 @@ export default function QuotationDetailPage() {
         </div>
       </div>
 
+      {/* Follow-ups */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-semibold flex items-center gap-2">
+              <MessageCircle size={15} className="text-brand-600" /> Follow-ups
+            </div>
+            <div className="text-xs muted">
+              Conversations and reminders linked to this quotation.
+            </div>
+          </div>
+          <button
+            className="btn-primary"
+            onClick={() => setOpenFollowup(true)}
+          >
+            <Plus size={14} /> Log follow-up
+          </button>
+        </div>
+
+        {/* Upcoming reminders */}
+        {(followups.data?.reminders ?? []).length > 0 && (
+          <div className="mb-4">
+            <div className="text-[11px] uppercase tracking-wider muted mb-2 flex items-center gap-1">
+              <Bell size={11} /> Upcoming reminders
+            </div>
+            <ul className="space-y-2">
+              {(followups.data?.reminders ?? []).map((r: any) => {
+                const due = new Date(r.due_at);
+                const overdue = due < new Date();
+                return (
+                  <li
+                    key={r.id}
+                    className={clsx(
+                      "rounded-xl border p-3 flex items-center gap-3",
+                      overdue
+                        ? "border-red-200 bg-red-50/60"
+                        : "border-brand-100 bg-brand-50/40"
+                    )}
+                  >
+                    <div className={clsx(
+                      "h-8 w-8 rounded-lg grid place-items-center shrink-0",
+                      overdue ? "bg-red-100 text-red-700" : "bg-brand-100 text-brand-700"
+                    )}>
+                      <Bell size={14} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {r.message ?? r.kind.replace(/_/g, " ")}
+                      </div>
+                      <div className="text-[11px] muted">
+                        {due.toLocaleString()} · {r.channel}
+                        {overdue && <span className="ml-2 text-red-700 font-medium">OVERDUE</span>}
+                      </div>
+                    </div>
+                    <button
+                      className="btn-ghost text-emerald-700"
+                      onClick={() => completeReminder.mutate(r.id)}
+                      disabled={completeReminder.isPending}
+                    >
+                      <CheckCircle size={14} /> Done
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* History */}
+        <div className="text-[11px] uppercase tracking-wider muted mb-2 flex items-center gap-1">
+          <MessageCircle size={11} /> History
+        </div>
+        {(followups.data?.activities ?? []).length === 0 ? (
+          <div className="rounded-xl border border-dashed border-ink-200 p-6 text-center text-sm muted">
+            No follow-ups yet. Click "Log follow-up" to record what was discussed
+            and schedule the next touchpoint.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {(followups.data?.activities ?? []).map((a: any) => (
+              <li
+                key={a.id}
+                className={clsx(
+                  "rounded-xl border p-3 flex gap-3",
+                  a.tagged
+                    ? "border-brand-100 bg-brand-50/30"
+                    : "border-ink-100"
+                )}
+              >
+                <div className="h-8 w-8 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-[10px] font-semibold shrink-0 uppercase">
+                  {a.type.slice(0, 2)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm capitalize">
+                    <b>{a.type.replace(/_/g, " ")}</b>{" "}
+                    <span className="muted">· {a.direction}</span>
+                    {a.tagged && (
+                      <span className="ml-2 chip bg-brand-50 text-brand-700">linked to this quote</span>
+                    )}
+                  </div>
+                  {a.notes && (
+                    <div className="text-sm text-ink-700 mt-1 whitespace-pre-wrap">{a.notes}</div>
+                  )}
+                  <div className="text-[11px] text-ink-400 mt-1">
+                    {new Date(a.occurred_at).toLocaleString()}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {/* Notes */}
       {Q.notes && (
         <div className="card p-5">
@@ -217,6 +347,20 @@ export default function QuotationDetailPage() {
           <pre className="whitespace-pre-wrap text-sm text-ink-700 font-sans">{Q.notes}</pre>
         </div>
       )}
+
+      <Modal
+        open={openFollowup}
+        onClose={() => setOpenFollowup(false)}
+        title="Log follow-up"
+        subtitle={`Record what happened and (optionally) schedule the next touchpoint for ${Q.number}.`}
+        size="lg"
+      >
+        <FollowupForm
+          quotationId={Q.id}
+          customerId={Q.customer_id}
+          onClose={() => setOpenFollowup(false)}
+        />
+      </Modal>
     </div>
   );
 }
