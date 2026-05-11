@@ -1,8 +1,8 @@
 # IndustriaCRM — A Smart Office Assistant for Industrial Engineering Companies
 
-> Imagine if your sales, purchasing, warehouse, and finance teams all worked from
-> the **same notebook**, and an AI assistant quietly read that notebook all day,
-> looking for problems before they happen.
+> Imagine if your sales, purchasing, warehouse, finance, accounting, and HR
+> teams all worked from the **same notebook**, and an AI assistant quietly
+> read that notebook all day, looking for problems before they happen.
 >
 > That's what this software does.
 
@@ -48,50 +48,60 @@ We deliver
 We send the invoice
         ↓
 We receive payment
+        ↓
+The accounting books update automatically
 ```
 
 That's a **lot** to track. Most companies do this in spreadsheets, WhatsApp
 chats, and emails. Things slip through the cracks. Customers go cold. Margins
-get eaten. This software is the fix.
+get eaten. Bookkeeping falls behind. This software is the fix.
 
 ---
 
 ## What does it actually do?
 
-Think of it as **three tools in one**:
+Think of it as **four tools in one**:
 
 ### 1. 🧲 CRM — "Customer Notebook"
 Keeps a tidy record of every customer, every phone call, every WhatsApp
-message, and where each deal is in the pipeline. So nobody forgets to follow
-up, and nobody has to ask "who's handling this customer?"
+message, every quotation, and where each deal is in the pipeline. Click a
+company and you see all their quotations. Click a quotation and you see the
+full document, follow-ups, and which accounts it touches.
 
 ### 2. 🏭 ERP — "The Factory Brain"
 Once a customer says yes, the system tracks the entire job: buying materials,
 managing the workshop, doing quality checks, packing, delivering, invoicing,
 and getting paid. All in one place.
 
-### 3. 🤖 AI Assistant — "The Quiet Co-Worker"
+### 3. 💰 Accounting (CoA) — "The Books"
+A full Indonesian Chart of Accounts (109 pre-seeded accounts: Bank, Kas,
+Piutang Usaha, Persediaan, Aset Tetap, Hutang Pajak, etc.). When a deal is
+**won**, the matching accounts (Receivable, Revenue, Discount, Tax Payable)
+**update automatically** — no double bookkeeping.
+
+### 4. 🤖 AI Assistant — "The Quiet Co-Worker"
 This is the special part. An AI quietly watches everything and:
 
 - Warns you when a deal is going cold ("you haven't called PT Bara in 8 days")
-- Suggests the **best message** to send the customer next, in Bahasa Indonesia
+- Suggests the **best follow-up message** to send the customer, in Bahasa Indonesia
 - Reads incoming Purchase Order PDFs and automatically creates the project
 - Tells you which deals are losing money before it's too late
-- Reminds customers about overdue payments via WhatsApp
+- Reminds customers about overdue payments via WhatsApp at the best time of day
 - Suggests upsell opportunities ("PT Cement A probably needs new chains soon")
 
 ---
 
-## The 4 types of users
+## The 5 types of users
 
 Different people in the company see different things:
 
 | Person | What they can do |
 |---|---|
-| 👤 **Sales** | See only their own customers. Make quotations. Talk to customers. |
-| 📝 **Admin** | Help enter data, but every change must be approved by a Manager. |
-| 👔 **Manager** | Approve quotations and small discounts. See everything. |
-| 👑 **Director** | Full access. Approve big discounts. See the whole company. |
+| 👤 **Sales** | See only their own customers and quotations. Make new quotations and log follow-ups. |
+| 📝 **Admin** | Help enter data; every change must be approved by a Manager. Manages the **Chart of Accounts**. |
+| 👥 **HR** | Sees the **employee directory** — every salesperson's pipeline, win rate, customers and activity. |
+| 👔 **Manager** | Approves quotations and discounts. Sees the whole org pipeline. |
+| 👑 **Director** | Full access to everything. Approves big discounts. |
 
 ### How discounts work (a real example)
 
@@ -101,28 +111,40 @@ Say a salesperson wants to give a customer a discount:
 - 🟡 **Between 5% and 15%** → the Manager has to say yes
 - 🔴 **More than 15%** → the Director has to say yes
 
-The system checks this **automatically**. No more "boss, can I give 10% to
-this client?" over WhatsApp.
+The system checks this **automatically**. The discount slider on the new
+quotation form even shows you, live, who has to approve it before you hit
+Submit.
 
 ---
 
 ## What you'll see on the screen
 
-The software is a website. After logging in, there's a menu on the left:
+The software is a website. After logging in, there's a menu on the left,
+grouped into sections:
 
-- **Dashboard** — your daily summary
-- **CRM** — your list of customers
-- **Quotations** — the price offers you've sent
-- **Approvals** — things waiting for the boss to say yes
-- **Projects** — jobs in progress
-- **Purchasing** — materials being bought
-- **Operation** — what's happening in the workshop
-- **Finance** — invoices and payments
-- **KPI** — performance numbers
-- **Executive Dashboard** — the big-picture view (for managers/directors)
-- **🧠 AI Command Center** — the smart room
+### 🗂️ Workspace
+- **Dashboard** — your daily summary with the top customers and an AI tip
+- **CRM** — your filterable list of customers (click any company → see all their quotations + activity timeline)
+- **Quotations** — every price offer; click any row → full quotation detail page
+- **Calendar** — month view that aggregates reminders, quote expiries, payment due dates, target deliveries, and activities
+- **Approvals** *(manager / director)* — discount and data-change inbox with one-click Approve / Reject
 
-### The 🧠 AI Command Center (the cool part)
+### 🏭 Operations
+- **Projects** — won deals turned into deliverables, with margin tracking
+- **Purchasing** — PR → RFQ → Supplier PO → GR → QC pipeline
+- **Operation** — work-order board grouped by stage
+- **Finance** — AR aging, invoices, payments
+- **Chart of Accounts** *(admin / director)* — full Indonesian CoA, 109 accounts pre-seeded
+
+### 👥 People
+- **Employees** *(HR / director)* — directory grouped by role; click any salesperson to see their KPIs, quotations, customers, and activity
+
+### 📊 Insights
+- **KPI** — per-department performance numbers
+- **Executive Dashboard** *(manager / director)* — pipeline, forecast, top customers, lost-deal analysis
+- **🧠 AI Command Center** — the headline screen
+
+### 🧠 AI Command Center (the cool part)
 
 This page is the **war room**. Open it in the morning and you instantly see:
 
@@ -137,16 +159,38 @@ overnight and prepared a briefing.
 
 ---
 
+## Working a deal — a typical day
+
+1. **CRM** → click your customer → see their **last WhatsApp message, full
+   activity timeline, and a panel listing every quotation you've sent**.
+2. Click **+ New quotation** → modal with line-item editor and a discount
+   slider that shows live the approval tier (Auto / Manager / Director).
+3. Submit → if discount > 5%, an Approval card shows up in the manager's
+   inbox; manager hits Approve.
+4. Open the quotation detail page → **Log follow-up** modal records what was
+   discussed, optionally schedules the next reminder (which immediately shows
+   on the Calendar and the AI Top Priority Actions).
+5. Click **Mark won** → status flips, a **Project** is auto-created, and the
+   **accounting books update themselves**: Piutang Usaha goes up by the total,
+   Penjualan goes up by the net amount, PPN Keluaran goes up by the tax,
+   Diskon Penjualan goes up by the discount.
+6. **HR or Director** can open the **Employees** page, click your name, and see
+   exactly which quotations you've worked on, your win rate, and your
+   pipeline value — without bugging you for a report.
+
+---
+
 ## How does the WhatsApp part work?
 
 This is built for Indonesia, so WhatsApp is the main channel.
 
 - 📥 **Incoming**: when a customer messages your business WhatsApp, the message
-  is automatically saved in their customer record. No more "where did I see
-  that message?"
+  is automatically saved in their customer record.
 - 📤 **Outgoing**: the system sends payment reminders, quotation follow-ups,
   and after-sales messages on its own — but only at the **smart times** when
-  that customer usually replies.
+  that customer usually replies (learned from their past response patterns).
+- ✨ **AI suggest** button on every customer & quotation → drafts a polite,
+  professional WhatsApp message in Bahasa Indonesia you can copy and send.
 
 ---
 
@@ -157,16 +201,18 @@ If you opened this folder on your computer, here's what you'd see:
 ```
 .
 ├── README.md          ← this file
+├── INSTALL.md         ← beginner-friendly install (30 min, copy-paste)
+├── preview.html       ← open in a browser to preview the UI without installing
 ├── docs/              ← detailed design (for the technical team)
-├── backend/           ← the engine that runs behind the scenes
-├── frontend/          ← the website you click around in
+├── backend/           ← the engine that runs behind the scenes (FastAPI + PostgreSQL)
+├── frontend/          ← the website you click around in (React + Vite + Tailwind)
 ├── n8n/               ← the automation rules (WhatsApp, reminders, etc.)
-├── infra/             ← instructions for putting it all on a server
-└── .github/           ← rules for testing the code automatically
+├── infra/             ← instructions for putting it all on a server (Docker)
+└── .github/           ← rules for testing the code automatically (CI)
 ```
 
 You don't need to open any of these unless you're working with a developer.
-The README in each folder explains what's there.
+Each module has its own README explaining what's there.
 
 ---
 
@@ -183,11 +229,17 @@ The whole thing in plain words:
 3. Copy the example settings file
 4. Run **one start command** — Docker fetches the database, the website, the
    automation engine, and starts them all
-5. Run the database setup command (one-time)
+5. Run the seed command (one-time) — creates the database tables, adds demo
+   users + customers, and pre-populates the 109-account Indonesian Chart of
+   Accounts
 6. Open the website in your browser
 
 👉 **Beginner-friendly step-by-step (with copy-paste commands, screenshots-style
 guidance, troubleshooting):** see **[`INSTALL.md`](INSTALL.md)**.
+
+👉 **Want to see what it looks like first, without installing?** Open
+[`preview.html`](preview.html) in your browser — it's a static preview of the
+main screens with demo data.
 
 👉 **Production deployment, security hardening, scaling, backups:** see
 [`docs/07-deployment.md`](docs/07-deployment.md).
@@ -198,12 +250,14 @@ guidance, troubleshooting):** see **[`INSTALL.md`](INSTALL.md)**.
 
 After your developer runs the setup, you can log in with these demo accounts:
 
-| Role | Email | Password |
-|---|---|---|
-| Director | `director@demo.local` | `demo1234` |
-| Manager | `manager@demo.local` | `demo1234` |
-| Sales | `sales1@demo.local` | `demo1234` |
-| Admin | `admin@demo.local` | `demo1234` |
+| Role | Email | Password | Sees |
+|---|---|---|---|
+| Director | `director@demo.local` | `demo1234` | Everything |
+| Manager | `manager@demo.local` | `demo1234` | Org-wide CRM, KPIs, approvals |
+| HR | `hr@demo.local` | `demo1234` | The Employees directory |
+| Admin | `admin@demo.local` | `demo1234` | Data entry + Chart of Accounts |
+| Sales | `sales1@demo.local` | `demo1234` | Their own customers + quotations |
+| Sales | `sales2@demo.local` | `demo1234` | Their own customers + quotations |
 
 Each one shows a slightly different view, so you can see how permissions work.
 
@@ -221,6 +275,9 @@ products** to **many customers**. This one is the opposite:
 - 🚛 Handles **split delivery** (one PO can be delivered in pieces)
 - 💳 Knows **DP / Tempo / Termin** payment terms (not just credit cards)
 - 🤝 Built around the **approval culture** of Indonesian B2B (manager OKs everything)
+- 📚 Has a **real Chart of Accounts inside** (Penjualan, Piutang Usaha, PPN
+  Keluaran, etc.) that **auto-updates when a deal is won** — no double entry
+  between your CRM and your accounting app
 - 🤖 The AI is trained to think like a **B2B industrial salesperson**, not a
   marketing chatbot
 
@@ -233,8 +290,9 @@ To be honest:
 - ❌ It's **not a finished product** you download and click "install" on. It's
   a **scaffold** — a strong starting structure that a developer customizes for
   your company.
-- ❌ It does **not replace** your accounting software for tax filing. It hands
-  off cleanly to one.
+- ❌ It does **not replace** a full general ledger (e.g. for e-Faktur tax
+  reporting). It tracks balances cleanly and can hand off to a proper
+  accounting app at month-end.
 - ❌ The AI is **a helper, not a decision-maker.** It suggests; humans approve.
 
 ---
@@ -243,6 +301,7 @@ To be honest:
 
 | If you are… | Read this |
 |---|---|
+| **Just want to see the UI** | Open **[`preview.html`](preview.html)** in any browser — no install |
 | **Just trying to install it** | **[`INSTALL.md`](INSTALL.md)** — 30-min beginner guide |
 | The business owner | This README is enough. Hand the rest to your dev team. |
 | A non-technical manager | Skim [`docs/04-uiux-design.md`](docs/04-uiux-design.md) to see the screens. |
@@ -254,6 +313,7 @@ To be honest:
 
 ## In one sentence
 
-> **A modern, AI-powered, WhatsApp-native digital office for companies that
-> sell custom-engineered industrial products to factories — built so nothing
-> falls through the cracks, and your best deals don't go cold.**
+> **A modern, AI-powered, WhatsApp-native digital office for Indonesian
+> companies that sell custom-engineered industrial products to factories —
+> CRM, ERP, accounting, HR, and AI follow-ups in one place, so nothing falls
+> through the cracks and your best deals don't go cold.**
