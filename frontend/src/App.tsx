@@ -11,6 +11,8 @@ import CalendarPage from "@/pages/Calendar";
 import ChartOfAccountsPage from "@/pages/ChartOfAccounts";
 import EmployeesPage from "@/pages/Employees";
 import EmployeeDetailPage from "@/pages/EmployeeDetail";
+import SalaryPage from "@/pages/Salary";
+import InventoryPage from "@/pages/Inventory";
 import ProjectsPage from "@/pages/Projects";
 import PurchasingPage from "@/pages/Purchasing";
 import OperationPage from "@/pages/Operation";
@@ -45,6 +47,8 @@ export default function App() {
                 <Route path="/accounts" element={<ChartOfAccountsPage />} />
                 <Route path="/employees" element={<EmployeesPage />} />
                 <Route path="/employees/:id" element={<EmployeeDetailPage />} />
+                <Route path="/salary" element={<SalaryPage />} />
+                <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/purchasing" element={<PurchasingPage />} />
                 <Route path="/operation" element={<OperationPage />} />
