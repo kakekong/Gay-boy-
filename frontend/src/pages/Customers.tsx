@@ -1,23 +1,43 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Plus, Search, Filter, Download } from "lucide-react";
+import {
+  Plus, Search, Filter, Download, Table2, Columns3,
+} from "lucide-react";
+import clsx from "clsx";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
+import { PipelineView } from "@/components/PipelineView";
 import { Modal } from "@/components/Modal";
 import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
 import type { Customer } from "@/types";
 
+type ViewMode = "table" | "pipeline";
+
 export default function CustomersPage() {
+  const [view, setView] = useState<ViewMode>(() => {
+    return (localStorage.getItem("customers-view") as ViewMode) || "table";
+  });
+  useEffect(() => {
+    localStorage.setItem("customers-view", view);
+  }, [view]);
+
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
   const [openNew, setOpenNew] = useState(false);
 
   const q = useQuery({
-    queryKey: ["customers", search, stage],
+    queryKey: ["customers", view === "pipeline" ? "" : search, view === "pipeline" ? "" : stage],
     queryFn: () =>
       api
-        .get("/customers", { params: { q: search || undefined, stage: stage || undefined } })
+        .get("/customers", {
+          params: {
+            // In pipeline mode we fetch all stages, search is applied client-side
+            q: view === "table" ? (search || undefined) : (search || undefined),
+            stage: view === "table" ? (stage || undefined) : undefined,
+            page_size: view === "pipeline" ? 500 : 50,
+          },
+        })
         .then((r) => r.data),
   });
   const rows: Customer[] = q.data?.data ?? [];
@@ -37,6 +57,11 @@ export default function CustomersPage() {
     URL.revokeObjectURL(a.href);
   }
 
+  // Client-side filter for pipeline search
+  const pipelineRows = view === "pipeline" && search
+    ? rows.filter((r) => r.company_name.toLowerCase().includes(search.toLowerCase()))
+    : rows;
+
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -47,6 +72,31 @@ export default function CustomersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
+            <button
+              onClick={() => setView("table")}
+              className={clsx(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+                view === "table"
+                  ? "bg-brand-50 text-brand-700"
+                  : "text-ink-600 hover:bg-ink-50"
+              )}
+            >
+              <Table2 size={14} /> Table
+            </button>
+            <button
+              onClick={() => setView("pipeline")}
+              className={clsx(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+                view === "pipeline"
+                  ? "bg-brand-50 text-brand-700"
+                  : "text-ink-600 hover:bg-ink-50"
+              )}
+            >
+              <Columns3 size={14} /> Pipeline
+            </button>
+          </div>
           <button className="btn-ghost" onClick={exportCsv}><Download size={15} /> Export</button>
           <button className="btn-primary" onClick={() => setOpenNew(true)}>
             <Plus size={15} /> New customer
@@ -60,61 +110,71 @@ export default function CustomersPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by company name…"
+            placeholder={view === "table"
+              ? "Search by company name…"
+              : "Search the board (client-side)…"}
             className="input pl-9"
           />
         </div>
-        <select value={stage} onChange={(e) => setStage(e.target.value)} className="input max-w-[200px]">
-          <option value="">All stages</option>
-          {["lead", "presentation", "engineering", "quotation", "negotiation",
-            "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
-            "closed_won", "closed_lost"].map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        <button className="btn-ghost"><Filter size={15} /> More filters</button>
+        {view === "table" && (
+          <select value={stage} onChange={(e) => setStage(e.target.value)} className="input max-w-[200px]">
+            <option value="">All stages</option>
+            {["lead", "presentation", "engineering", "quotation", "negotiation",
+              "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
+              "closed_won", "closed_lost"].map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        )}
+        {view === "table" && (
+          <button className="btn-ghost"><Filter size={15} /> More filters</button>
+        )}
       </div>
 
-      <div className="table-shell">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-ink-50/60">
-              <tr>
-                <th className="th">Company</th>
-                <th className="th">Industry</th>
-                <th className="th">PIC</th>
-                <th className="th">Stage</th>
-                <th className="th text-right">Lifetime value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => (
-                <tr key={c.id} className="tr-hover border-t border-ink-100">
-                  <td className="td">
-                    <Link
-                      to={`/customers/${c.id}`}
-                      className="font-medium text-ink-900 hover:text-brand-700"
-                    >
-                      {c.company_name}
-                    </Link>
-                  </td>
-                  <td className="td capitalize muted">{c.industry}</td>
-                  <td className="td">{c.pic_name ?? "—"}</td>
-                  <td className="td"><StageBadge stage={c.stage} /></td>
-                  <td className="td text-right tabular-nums">{idr(c.lifetime_value ?? 0)}</td>
-                </tr>
-              ))}
-              {!rows.length && (
+      {view === "table" ? (
+        <div className="table-shell">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-ink-50/60">
                 <tr>
-                  <td colSpan={5} className="td text-center muted py-12">
-                    No customers match your filter.
-                  </td>
+                  <th className="th">Company</th>
+                  <th className="th">Industry</th>
+                  <th className="th">PIC</th>
+                  <th className="th">Stage</th>
+                  <th className="th text-right">Lifetime value</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((c) => (
+                  <tr key={c.id} className="tr-hover border-t border-ink-100">
+                    <td className="td">
+                      <Link
+                        to={`/customers/${c.id}`}
+                        className="font-medium text-ink-900 hover:text-brand-700"
+                      >
+                        {c.company_name}
+                      </Link>
+                    </td>
+                    <td className="td capitalize muted">{c.industry}</td>
+                    <td className="td">{c.pic_name ?? "—"}</td>
+                    <td className="td"><StageBadge stage={c.stage} /></td>
+                    <td className="td text-right tabular-nums">{idr(c.lifetime_value ?? 0)}</td>
+                  </tr>
+                ))}
+                {!rows.length && (
+                  <tr>
+                    <td colSpan={5} className="td text-center muted py-12">
+                      No customers match your filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        <PipelineView customers={pipelineRows} />
+      )}
 
       <Modal
         open={openNew}
