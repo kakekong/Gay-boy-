@@ -1,13 +1,16 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Mail, Phone, Briefcase, FileText, Users, Trophy, Frown,
-  Wallet, TrendingUp, Activity as ActivityIcon,
+  Wallet, TrendingUp, Activity as ActivityIcon, Tags,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
 import { StageBadge } from "@/components/StageBadge";
+import { TagChip } from "@/components/TagChip";
+import { TagPicker } from "@/components/TagPicker";
+import { useAuthStore } from "@/store/auth";
 
 const ROLE_CHIP: Record<string, string> = {
   sales:    "bg-brand-50 text-brand-700",
@@ -32,11 +35,28 @@ const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.ro
 export default function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
+  const canTag = me && (me.role === "hr" || me.role === "director");
 
   const employee = useQuery({
     queryKey: ["employee", id],
     queryFn: () => api.get(`/users/${id}`).then((r) => r.data),
     enabled: !!id,
+  });
+
+  const userTags = useQuery({
+    queryKey: ["user-tags", id],
+    queryFn: () => api.get(`/tags/users/${id}`).then((r) => r.data as any[]),
+    enabled: !!id && !!canTag,
+  });
+
+  const detach = useMutation({
+    mutationFn: (tagId: string) => api.delete(`/tags/users/${id}/${tagId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["user-tags", id] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
   });
   const stats = useQuery({
     queryKey: ["employee-stats", id],
@@ -97,6 +117,33 @@ export default function EmployeeDetailPage() {
             {e.is_active ? "Active" : "Inactive"}
           </Field>
         </div>
+
+        {canTag && (
+          <div className="mt-6 pt-4 border-t border-ink-100">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider muted mb-2">
+              <Tags size={12} /> Tags
+            </div>
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {(userTags.data ?? []).map((t: any) => (
+                <TagChip
+                  key={t.id}
+                  name={t.name}
+                  color={t.color}
+                  onRemove={() => detach.mutate(t.id)}
+                />
+              ))}
+              <TagPicker
+                userId={e.id}
+                attachedTagIds={(userTags.data ?? []).map((t: any) => t.id)}
+              />
+              {(userTags.data ?? []).length === 0 && (
+                <span className="text-xs muted">
+                  No tags yet — click "+ Add tag" to label this employee.
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* KPIs */}

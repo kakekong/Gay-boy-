@@ -12,6 +12,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.models.crm import Activity, Customer
 from app.models.quotation import Quotation
+from app.models.tag import Tag, UserTagLink
 from app.models.user import User
 from app.schemas.auth import UserOut
 
@@ -20,7 +21,7 @@ router = APIRouter()
 _hr_or_director = require(Role.HR, Role.DIRECTOR)
 
 
-@router.get("", response_model=list[UserOut])
+@router.get("")
 async def list_employees(
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(_hr_or_director),
@@ -37,7 +38,34 @@ async def list_employees(
         like = f"%{q}%"
         stmt = stmt.where((User.full_name.ilike(like)) | (User.email.ilike(like)))
     rows = (await db.scalars(stmt)).all()
-    return [UserOut.model_validate(r) for r in rows]
+
+    # Bulk load tags for all users in one query
+    tag_map: dict[str, list[dict]] = {}
+    if rows:
+        user_ids = [r.id for r in rows]
+        result = await db.execute(
+            select(UserTagLink.user_id, Tag)
+            .join(Tag, Tag.id == UserTagLink.tag_id)
+            .where(UserTagLink.user_id.in_(user_ids))
+        )
+        for uid, tag in result.all():
+            tag_map.setdefault(str(uid), []).append({
+                "id": str(tag.id), "name": tag.name,
+                "color": tag.color, "description": tag.description,
+            })
+
+    return [
+        {
+            "id": str(r.id),
+            "email": r.email,
+            "full_name": r.full_name,
+            "role": r.role,
+            "phone": r.phone,
+            "is_active": r.is_active,
+            "tags": tag_map.get(str(r.id), []),
+        }
+        for r in rows
+    ]
 
 
 @router.get("/{user_id}", response_model=UserOut)
