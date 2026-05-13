@@ -12,10 +12,13 @@ from app.api.v1.endpoints import (
     finance,
     inventory,
     kpi,
+    notifications,
     operation,
     purchasing,
     quotations,
+    reports,
     salaries,
+    search,
     tags,
     users,
     webhooks,
@@ -34,6 +37,9 @@ api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"]
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(salaries.router, prefix="/salaries", tags=["salaries"])
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
+api_router.include_router(search.router, prefix="/search", tags=["search"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(kpi.router, prefix="/kpi", tags=["kpi"])
 api_router.include_router(dashboards.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"])

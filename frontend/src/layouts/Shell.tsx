@@ -11,6 +11,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { NotificationsBell } from "@/components/NotificationsBell";
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
@@ -49,6 +50,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Insights",
     items: [
       { to: "/kpi", label: "KPI", icon: BarChart3 },
+      { to: "/reports", label: "Reports", icon: BookOpen },
       { to: "/executive", label: "Executive", icon: Crown, roles: ["manager", "director"] },
       { to: "/ai", label: "AI Command", icon: BrainCircuit, accent: true },
       { to: "/help", label: "Help", icon: HelpCircle },
@@ -202,20 +204,27 @@ export function Shell({ children }: { children: React.ReactNode }) {
           >
             <Menu size={20} />
           </button>
-          <div className="relative flex-1 max-w-xl">
-            <Search
-              size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none"
-            />
-            <input
-              placeholder="Search customers, quotations, projects…"
-              className="input pl-9 pr-16"
-            />
-            <span className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              const isMac = navigator.platform.toLowerCase().includes("mac");
+              const ev = new KeyboardEvent("keydown", {
+                key: "k",
+                metaKey: isMac,
+                ctrlKey: !isMac,
+                bubbles: true,
+              });
+              document.dispatchEvent(ev);
+            }}
+            className="relative flex-1 max-w-xl text-left rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm shadow-soft hover:border-brand-300 transition-colors flex items-center gap-2 text-ink-500"
+          >
+            <Search size={15} className="text-ink-400" />
+            <span className="flex-1 truncate">Search customers, quotations, projects…</span>
+            <span className="hidden sm:flex items-center gap-1">
               <span className="kbd">⌘</span>
               <span className="kbd">K</span>
             </span>
-          </div>
+          </button>
           <button
             className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
             aria-label="Chat"
@@ -229,13 +238,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </span>
             )}
           </button>
-          <button
-            className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
-            aria-label="Notifications"
-            title="Notifications (coming soon)"
-          >
-            <Bell size={18} />
-          </button>
+          <NotificationsBell />
           <div className="hidden md:flex items-center gap-2 pl-2 border-l border-ink-200 ml-1">
             <div className="text-right leading-tight">
               <div className="text-sm font-medium text-ink-900">{user?.full_name}</div>
