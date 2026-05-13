@@ -11,6 +11,7 @@ import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
 import { LinkedAccountsPanel } from "@/components/quotation/LinkedAccountsPanel";
+import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { useAuthStore } from "@/store/auth";
 
 const STATUS_CHIP: Record<string, string> = {
@@ -230,6 +231,9 @@ export default function QuotationDetailPage() {
 
       {/* Linked Accounts (CoA) */}
       <LinkedAccountsPanel quotationId={Q.id} />
+
+      {/* Attachments */}
+      <AttachmentsSection ownerType="quotation" ownerId={Q.id} />
 
       {/* Follow-ups */}
       <div className="card p-5">

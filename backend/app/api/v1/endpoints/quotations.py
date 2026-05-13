@@ -12,6 +12,7 @@ from app.core.approval import (
     evaluate_discount,
     request_approval,
 )
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_approve_quotation
@@ -101,6 +102,9 @@ async def submit_quotation(
             reason=rule.reason,
             payload={"discount_pct": float(q.discount_pct), "total": float(q.total)},
         )
+    await audit_record(db, actor=user, action="submit", entity="quotation",
+                       entity_id=q.id, before={"status": "draft"},
+                       after={"status": q.status})
     await db.flush()
     return await _load(q.id, db)
 
@@ -124,6 +128,8 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
                  decider_role=Role(user.role), approve=True, notes=payload.notes)
     q = await db.get(Quotation, q_id)
     q.status = "approved"
+    await audit_record(db, actor=user, action="approve", entity="quotation",
+                       entity_id=q.id, after={"status": "approved"})
     return await _load(q.id, db)
 
 
@@ -146,6 +152,8 @@ async def reject_quotation(q_id: UUID, payload: QuotationDecide,
                  decider_role=Role(user.role), approve=False, notes=payload.notes)
     q = await db.get(Quotation, q_id)
     q.status = "rejected"
+    await audit_record(db, actor=user, action="reject", entity="quotation",
+                       entity_id=q.id, after={"status": "rejected", "notes": payload.notes})
     return await _load(q.id, db)
 
 
@@ -165,6 +173,8 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     except Exception:
         # Don't block the won flow if posting fails (e.g. missing accounts)
         pass
+    await audit_record(db, actor=user, action="won", entity="quotation",
+                       entity_id=q.id, after={"status": "won", "total": float(q.total or 0)})
     return await _load(q.id, db)
 
 
@@ -177,6 +187,8 @@ async def mark_lost(q_id: UUID, reason: str,
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     q.status = "lost"
     q.notes = (q.notes or "") + f"\n[lost @ {datetime.now(UTC).isoformat()}] {reason}"
+    await audit_record(db, actor=user, action="lost", entity="quotation",
+                       entity_id=q.id, after={"status": "lost", "reason": reason})
     return await _load(q.id, db)
 
 

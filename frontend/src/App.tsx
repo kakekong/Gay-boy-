@@ -16,6 +16,8 @@ import InventoryPage from "@/pages/Inventory";
 import ChatPage from "@/pages/Chat";
 import HelpPage from "@/pages/Help";
 import ReportsPage from "@/pages/Reports";
+import SalesTargetsPage from "@/pages/SalesTargets";
+import AuditLogPage from "@/pages/AuditLog";
 import { CommandPalette } from "@/components/CommandPalette";
 import ProjectsPage from "@/pages/Projects";
 import PurchasingPage from "@/pages/Purchasing";
@@ -57,6 +59,8 @@ export default function App() {
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/help" element={<HelpPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/sales-targets" element={<SalesTargetsPage />} />
+                <Route path="/audit" element={<AuditLogPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/purchasing" element={<PurchasingPage />} />
                 <Route path="/operation" element={<OperationPage />} />

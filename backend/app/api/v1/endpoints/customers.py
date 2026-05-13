@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import evaluate_data_change, request_approval
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_view_customer, filter_to_role_scope
@@ -97,9 +98,12 @@ async def update_customer(
     changes = payload.model_dump(exclude_unset=True)
 
     if rule.required_role is None:
+        before = {k: getattr(obj, k) for k in changes.keys()}
         for k, v in changes.items():
             setattr(obj, k, v)
         obj.updated_by = user.id
+        await audit_record(db, actor=user, action="update", entity="customer",
+                           entity_id=obj.id, before=before, after=changes)
         return obj
 
     # admin role -> needs manager approval; record request, do not mutate

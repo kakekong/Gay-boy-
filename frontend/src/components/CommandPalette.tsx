@@ -36,10 +36,12 @@ const PAGES: { label: string; sublabel: string; link: string; icon: any }[] = [
   { label: "Chart of Accounts",     sublabel: "Operations",   link: "/accounts",  icon: Receipt },
   { label: "Employees",             sublabel: "People",       link: "/employees", icon: Users },
   { label: "Salary",                sublabel: "People",       link: "/salary",    icon: Wallet },
+  { label: "Sales Targets",         sublabel: "People",       link: "/sales-targets", icon: BookOpen },
   { label: "KPI",                   sublabel: "Insights",     link: "/kpi",       icon: BarChart3 },
   { label: "Executive Dashboard",   sublabel: "Insights",     link: "/executive", icon: Crown },
   { label: "AI Command Center",     sublabel: "Insights",     link: "/ai",        icon: BrainCircuit },
   { label: "Reports",               sublabel: "Insights",     link: "/reports",   icon: BookOpen },
+  { label: "Audit log",             sublabel: "Insights",     link: "/audit",     icon: BookOpen },
   { label: "Help",                  sublabel: "Insights",     link: "/help",      icon: HelpCircle },
 ];
 

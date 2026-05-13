@@ -11,6 +11,7 @@ import { StageBadge } from "@/components/StageBadge";
 import { Modal } from "@/components/Modal";
 import { LogActivityForm } from "@/components/forms/LogActivityForm";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
+import { AttachmentsSection } from "@/components/AttachmentsSection";
 
 const QSTATUS: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -221,6 +222,9 @@ export default function CustomerDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Attachments */}
+      <AttachmentsSection ownerType="customer" ownerId={id!} />
 
       {/* Activity timeline */}
       <div className="card p-5">

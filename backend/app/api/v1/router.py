@@ -4,6 +4,8 @@ from app.api.v1.endpoints import (
     accounts,
     ai,
     approvals,
+    attachments,
+    audit,
     auth,
     calendar,
     chat,
@@ -18,6 +20,7 @@ from app.api.v1.endpoints import (
     quotations,
     reports,
     salaries,
+    sales_targets,
     search,
     tags,
     users,
@@ -40,6 +43,9 @@ api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
+api_router.include_router(attachments.router, prefix="/attachments", tags=["attachments"])
+api_router.include_router(sales_targets.router, prefix="/sales-targets", tags=["sales-targets"])
+api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(kpi.router, prefix="/kpi", tags=["kpi"])
 api_router.include_router(dashboards.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"])

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.permissions import Role, require
 from app.models.account import Account
@@ -255,6 +256,10 @@ async def post_to_ledger(salary_id: UUID,
     s.status = "posted"
     s.posted_at = datetime.now(UTC)
     s.posted_snapshot = {"movements": movements, "posted_at": s.posted_at.isoformat()}
+    await audit_record(db, actor=_, action="post_ledger", entity="salary",
+                       entity_id=s.id, after={"gross": float(s.gross_salary),
+                                              "net": float(s.net_pay),
+                                              "pph21": float(s.pph21)})
     await db.flush()
     return await _serialize(db, s)
 

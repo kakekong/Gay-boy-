@@ -2,6 +2,7 @@
 
 from app.models.account import Account  # noqa: F401
 from app.models.approval import ApprovalRequest  # noqa: F401
+from app.models.attachment import Attachment  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage  # noqa: F401
 from app.models.crm import Activity, Customer, Reminder  # noqa: F401
@@ -18,5 +19,6 @@ from app.models.purchasing import (  # noqa: F401
 )
 from app.models.quotation import Product, Quotation, QuotationItem  # noqa: F401
 from app.models.salary import Salary  # noqa: F401
+from app.models.sales_target import SalesTarget  # noqa: F401
 from app.models.tag import Tag, UserTagLink  # noqa: F401
 from app.models.user import User  # noqa: F401

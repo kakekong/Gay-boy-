@@ -1,7 +1,8 @@
+import clsx from "clsx";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Users, FileText, Banknote, Wallet, ArrowUpRight, Sparkles, Plus,
+  Users, FileText, Banknote, Wallet, ArrowUpRight, Sparkles, Plus, Target,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
@@ -21,6 +22,11 @@ export default function DashboardPage() {
   const customers = useQuery({
     queryKey: ["customers"],
     queryFn: () => api.get("/customers").then((r) => r.data),
+  });
+  const myTarget = useQuery({
+    queryKey: ["my-target"],
+    queryFn: () => api.get("/sales-targets/me/current").then((r) => r.data),
+    enabled: user?.role === "sales",
   });
 
   const idr = (n: number) =>
@@ -121,6 +127,48 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <div className="space-y-4">
+        {user?.role === "sales" && myTarget.data && (
+          <div className="card p-5">
+            <div className="flex items-start gap-3 mb-2">
+              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center text-white">
+                <Target size={18} />
+              </div>
+              <div>
+                <div className="section-title">Your monthly target</div>
+                <p className="text-sm muted">{myTarget.data.period}</p>
+              </div>
+            </div>
+            {myTarget.data.no_target ? (
+              <div className="text-sm muted">
+                No target set this month yet. Achieved so far:{" "}
+                <b className="tabular-nums">{idr(myTarget.data.achieved_amount)}</b>
+              </div>
+            ) : (
+              <>
+                <div className="text-2xl font-semibold tabular-nums">
+                  {idr(myTarget.data.achieved_amount)} <span className="text-base muted">/ {idr(myTarget.data.target_amount)}</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-ink-100 overflow-hidden">
+                  <div
+                    className={clsx(
+                      "h-full transition-all",
+                      myTarget.data.progress_pct >= 100 ? "bg-gradient-to-r from-emerald-500 to-emerald-300"
+                      : myTarget.data.progress_pct >= 70 ? "bg-emerald-500"
+                      : myTarget.data.progress_pct >= 40 ? "bg-amber-500"
+                      : "bg-red-500"
+                    )}
+                    style={{ width: `${Math.min(100, myTarget.data.progress_pct)}%` }}
+                  />
+                </div>
+                <div className="mt-2 text-xs muted">
+                  <b>{Math.round(myTarget.data.progress_pct)}%</b> · {idr(myTarget.data.remaining)} to go
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="card p-5">
           <div className="flex items-start gap-3 mb-3">
             <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white">
@@ -142,6 +190,7 @@ export default function DashboardPage() {
           >
             Open AI Command Center <ArrowUpRight size={14} />
           </Link>
+        </div>
         </div>
       </div>
     </div>

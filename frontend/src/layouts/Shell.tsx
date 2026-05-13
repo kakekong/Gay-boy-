@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
-  MessageCircle, HelpCircle,
+  MessageCircle, HelpCircle, Target, Shield,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -44,6 +44,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         roles: ["hr", "director"] },
       { to: "/salary", label: "Salary", icon: Wallet,
         roles: ["director"] },
+      { to: "/sales-targets", label: "Sales Targets", icon: Target },
     ],
   },
   {
@@ -53,6 +54,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/reports", label: "Reports", icon: BookOpen },
       { to: "/executive", label: "Executive", icon: Crown, roles: ["manager", "director"] },
       { to: "/ai", label: "AI Command", icon: BrainCircuit, accent: true },
+      { to: "/audit", label: "Audit log", icon: Shield,
+        roles: ["admin", "director"] },
       { to: "/help", label: "Help", icon: HelpCircle },
     ],
   },

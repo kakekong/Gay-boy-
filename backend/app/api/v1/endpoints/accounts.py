@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user  # noqa: F401  (kept for symmetry)
 from app.core.permissions import Role, require
@@ -142,6 +143,8 @@ async def create_account(payload: AccountIn,
     obj = Account(**payload.model_dump())
     db.add(obj)
     await db.flush()
+    await audit_record(db, actor=_user, action="create", entity="account",
+                       entity_id=obj.id, after=payload.model_dump())
     return obj
 
 
@@ -162,8 +165,11 @@ async def update_account(account_id: UUID,
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Parent account does not exist.")
         if parent.account_no == obj.account_no:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Account cannot be its own parent.")
+    before = {k: getattr(obj, k) for k in data.keys()}
     for k, v in data.items():
         setattr(obj, k, v)
+    await audit_record(db, actor=_user, action="update", entity="account",
+                       entity_id=obj.id, before=before, after=data)
     return obj
 
 
