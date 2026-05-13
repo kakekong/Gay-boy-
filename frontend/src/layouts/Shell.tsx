@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
+import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
@@ -17,6 +20,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/customers", label: "CRM", icon: Users },
       { to: "/quotations", label: "Quotations", icon: FileText },
       { to: "/calendar", label: "Calendar", icon: CalendarDays },
+      { to: "/chat", label: "Chat", icon: MessageCircle, badgeQuery: "chat-unread" },
       { to: "/approvals", label: "Approvals", icon: CheckSquare, roles: ["manager", "director"] },
     ],
   },
@@ -57,12 +61,24 @@ interface NavItem {
   icon: LucideIcon;
   roles?: string[];
   accent?: boolean;
+  badgeQuery?: string;
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const nav = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const unread = useQuery({
+    queryKey: ["chat-unread"],
+    queryFn: () => api.get("/chat/unread").then((r) => r.data.unread as number),
+    refetchInterval: 15_000,
+    enabled: !!user,
+  });
+  const badges: Record<string, number> = {
+    "chat-unread": unread.data ?? 0,
+  };
 
   return (
     <div className="flex h-full bg-ink-50">
@@ -138,6 +154,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
                           AI
                         </span>
                       )}
+                      {n.badgeQuery && badges[n.badgeQuery] > 0 && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500 text-white min-w-[18px] text-center">
+                          {badges[n.badgeQuery]}
+                        </span>
+                      )}
                     </NavLink>
                   ))}
                 </div>
@@ -196,10 +217,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
           <button
             className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
+            aria-label="Chat"
+            title="Open chat"
+            onClick={() => nav("/chat")}
+          >
+            <MessageCircle size={18} />
+            {(unread.data ?? 0) > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 grid place-items-center text-[10px] font-semibold rounded-full bg-red-500 text-white">
+                {(unread.data ?? 0) > 99 ? "99+" : unread.data}
+              </span>
+            )}
+          </button>
+          <button
+            className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
             aria-label="Notifications"
+            title="Notifications (coming soon)"
           >
             <Bell size={18} />
-            <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 animate-pulse-soft" />
           </button>
           <div className="hidden md:flex items-center gap-2 pl-2 border-l border-ink-200 ml-1">
             <div className="text-right leading-tight">
