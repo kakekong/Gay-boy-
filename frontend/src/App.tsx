@@ -14,6 +14,7 @@ import EmployeeDetailPage from "@/pages/EmployeeDetail";
 import SalaryPage from "@/pages/Salary";
 import InventoryPage from "@/pages/Inventory";
 import ChatPage from "@/pages/Chat";
+import HelpPage from "@/pages/Help";
 import ProjectsPage from "@/pages/Projects";
 import PurchasingPage from "@/pages/Purchasing";
 import OperationPage from "@/pages/Operation";
@@ -51,6 +52,7 @@ export default function App() {
                 <Route path="/salary" element={<SalaryPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/chat" element={<ChatPage />} />
+                <Route path="/help" element={<HelpPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/purchasing" element={<PurchasingPage />} />
                 <Route path="/operation" element={<OperationPage />} />

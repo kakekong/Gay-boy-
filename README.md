@@ -159,6 +159,14 @@ overnight and prepared a briefing.
 
 ---
 
+## 📖 New here?
+
+If you've just been given an account, jump straight to **[`USER_GUIDE.md`](USER_GUIDE.md)**
+(or click **Help** in the app's sidebar once you log in). It explains every page,
+every button, and the most common day-to-day workflows in plain language.
+
+---
+
 ## Working a deal — a typical day
 
 1. **CRM** → click your customer → see their **last WhatsApp message, full
@@ -201,6 +209,7 @@ If you opened this folder on your computer, here's what you'd see:
 ```
 .
 ├── README.md          ← this file
+├── USER_GUIDE.md      ← new employee walkthrough (every page, every workflow)
 ├── INSTALL.md         ← beginner-friendly install (30 min, copy-paste)
 ├── preview.html       ← open in a browser to preview the UI without installing
 ├── docs/              ← detailed design (for the technical team)
@@ -301,6 +310,7 @@ To be honest:
 
 | If you are… | Read this |
 |---|---|
+| **A new employee opening the app for the first time** | **[`USER_GUIDE.md`](USER_GUIDE.md)** — every page explained, common workflows, troubleshooting. Also available **inside the app** at **Help** in the sidebar. |
 | **Just want to see the UI** | Open **[`preview.html`](preview.html)** in any browser — no install |
 | **Just trying to install it** | **[`INSTALL.md`](INSTALL.md)** — 30-min beginner guide |
 | The business owner | This README is enough. Hand the rest to your dev team. |
