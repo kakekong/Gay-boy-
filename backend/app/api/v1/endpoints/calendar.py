@@ -168,6 +168,20 @@ class ReminderCreate(BaseModel):
     due_at: datetime
     channel: str = "dashboard"
     message: str | None = None
+    recurs: str = "none"           # none | daily | weekly | biweekly | monthly
+    recurs_until: date | None = None
+
+
+def _next_due(current: datetime, recurs: str) -> datetime | None:
+    """Compute the next due_at for a recurring reminder, or None if it ended."""
+    if recurs == "daily":      return current + timedelta(days=1)
+    if recurs == "weekly":     return current + timedelta(days=7)
+    if recurs == "biweekly":   return current + timedelta(days=14)
+    if recurs == "monthly":
+        # Add ~30 days (good enough for follow-up cadence; calendar-month edge
+        # cases not worth the complexity here)
+        return current + timedelta(days=30)
+    return None
 
 
 @router.post("/reminders", status_code=201)
@@ -184,10 +198,12 @@ async def create_reminder(
         channel=payload.channel,
         message=payload.message,
         status="pending",
+        recurs=payload.recurs or "none",
+        recurs_until=payload.recurs_until,
     )
     db.add(r)
     await db.flush()
-    return {"id": str(r.id), "ok": True}
+    return {"id": str(r.id), "ok": True, "recurs": r.recurs}
 
 
 @router.patch("/reminders/{reminder_id}/done")
@@ -202,7 +218,31 @@ async def mark_done(
     if r.user_id != user.id and Role(user.role) == Role.SALES:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
     r.status = "done"
-    return {"ok": True}
+
+    # Chain the next instance if recurring and not past the end date
+    next_id: str | None = None
+    if r.recurs and r.recurs != "none":
+        nxt = _next_due(r.due_at, r.recurs)
+        if nxt is not None:
+            end = r.recurs_until
+            nxt_d = nxt.date() if hasattr(nxt, "date") else nxt
+            if end is None or nxt_d <= end:
+                child = Reminder(
+                    customer_id=r.customer_id,
+                    user_id=r.user_id,
+                    kind=r.kind,
+                    due_at=nxt,
+                    channel=r.channel,
+                    message=r.message,
+                    status="pending",
+                    recurs=r.recurs,
+                    recurs_until=r.recurs_until,
+                    parent_reminder_id=r.parent_reminder_id or r.id,
+                )
+                db.add(child)
+                await db.flush()
+                next_id = str(child.id)
+    return {"ok": True, "next_reminder_id": next_id}
 
 
 # Convenience: tomorrow as a default for forms

@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -67,3 +67,7 @@ class Reminder(Base, UUIDPK, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     channel: Mapped[str] = mapped_column(String(20), nullable=False, default="whatsapp")
     message: Mapped[str | None] = mapped_column(Text)
+    # Recurrence: none | daily | weekly | biweekly | monthly
+    recurs: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    recurs_until: Mapped[date | None] = mapped_column(Date)
+    parent_reminder_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))

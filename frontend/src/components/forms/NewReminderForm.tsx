@@ -37,6 +37,8 @@ export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: P
   const [message, setMessage] = useState("");
   const [date, setDate] = useState(defaultDate ?? new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState("09:00");
+  const [recurs, setRecurs] = useState("none");
+  const [recursUntil, setRecursUntil] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   const create = useMutation({
@@ -48,6 +50,8 @@ export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: P
         due_at: dueAt,
         channel,
         message: message || null,
+        recurs,
+        recurs_until: recurs === "none" ? null : (recursUntil || null),
       });
     },
     onSuccess: () => {
@@ -84,6 +88,24 @@ export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: P
           </select>
         </Field>
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Repeat">
+          <select className="input" value={recurs} onChange={(e) => setRecurs(e.target.value)}>
+            <option value="none">Never</option>
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week</option>
+            <option value="biweekly">Every 2 weeks</option>
+            <option value="monthly">Every month</option>
+          </select>
+        </Field>
+        {recurs !== "none" && (
+          <Field label="Repeat until (optional)">
+            <input type="date" className="input" value={recursUntil}
+              onChange={(e) => setRecursUntil(e.target.value)} />
+          </Field>
+        )}
+      </div>
+
       <Field label="Customer (optional)">
         <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
           <option value="">— none —</option>

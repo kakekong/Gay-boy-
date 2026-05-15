@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { Briefcase } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -18,6 +19,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function ProjectsPage() {
+  const nav = useNavigate();
   const q = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data),
@@ -48,8 +50,20 @@ export default function ProjectsPage() {
           </thead>
           <tbody>
             {(q.data ?? []).map((p: any) => (
-              <tr key={p.id} className="tr-hover border-t border-ink-100">
-                <td className="td font-mono text-xs">{p.code}</td>
+              <tr
+                key={p.id}
+                className="tr-hover border-t border-ink-100 cursor-pointer"
+                onClick={() => nav(`/projects/${p.id}`)}
+              >
+                <td className="td font-mono text-xs">
+                  <Link
+                    to={`/projects/${p.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-brand-700 hover:underline"
+                  >
+                    {p.code}
+                  </Link>
+                </td>
                 <td className="td">
                   <span className={clsx("chip capitalize",
                     STATUS_COLOR[p.status] ?? "bg-ink-100 text-ink-600")}>
