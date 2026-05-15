@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.approval import decide
+from app.core.approval import apply_to_target, decide
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.permissions import Role, require
 from app.models.approval import ApprovalRequest, ApprovalStatus
@@ -48,11 +49,22 @@ async def approve(
     user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
 ):
     try:
-        req = await decide(db, request_id=req_id, decider_id=user.id,
-                           decider_role=Role(user.role), approve=True, notes=notes)
+        req = await decide(
+            db, request_id=req_id, decider_id=user.id,
+            decider_role=Role(user.role), approve=True, notes=notes,
+        )
     except PermissionError as e:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
-    return {"id": str(req.id), "status": req.status}
+    except ValueError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+    applied = await apply_to_target(db, req, approve=True)
+    await audit_record(
+        db, actor=user, action="approve_request", entity=req.target_type,
+        entity_id=req.target_id,
+        after={"approval_request_id": str(req.id), "applied": applied},
+    )
+    return {"id": str(req.id), "status": req.status, "applied": applied}
 
 
 @router.post("/{req_id}/reject")
@@ -63,8 +75,19 @@ async def reject(
     user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
 ):
     try:
-        req = await decide(db, request_id=req_id, decider_id=user.id,
-                           decider_role=Role(user.role), approve=False, notes=notes)
+        req = await decide(
+            db, request_id=req_id, decider_id=user.id,
+            decider_role=Role(user.role), approve=False, notes=notes,
+        )
     except PermissionError as e:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
-    return {"id": str(req.id), "status": req.status}
+    except ValueError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+    applied = await apply_to_target(db, req, approve=False)
+    await audit_record(
+        db, actor=user, action="reject_request", entity=req.target_type,
+        entity_id=req.target_id,
+        after={"approval_request_id": str(req.id), "notes": notes, "applied": applied},
+    )
+    return {"id": str(req.id), "status": req.status, "applied": applied}

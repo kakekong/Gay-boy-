@@ -7,6 +7,7 @@ Used by:
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -86,5 +87,38 @@ async def decide(
         raise PermissionError("manager or director approval required")
     req.status = (ApprovalStatus.APPROVED if approve else ApprovalStatus.REJECTED).value
     req.decided_by = decider_id
+    req.decided_at = datetime.now(UTC)
     req.decision_notes = notes
     return req
+
+
+async def apply_to_target(
+    db: AsyncSession, req: ApprovalRequest, approve: bool
+) -> dict:
+    """When an approval is decided, propagate the outcome to its target entity.
+
+    - quotation:    on approve → status becomes 'approved'; on reject → 'rejected'
+    - customer:     on approve → apply the saved 'changes' from payload
+    - discount/etc: legacy alias — discount approvals were sometimes filed under
+                    target_type='quotation' but older code used 'discount';
+                    we handle both.
+    Returns a small dict describing what was applied (for the API response).
+    """
+    applied: dict = {"target_type": req.target_type, "target_id": str(req.target_id)}
+    if req.target_type in ("quotation", "discount"):
+        from app.models.quotation import Quotation
+        q = await db.get(Quotation, req.target_id)
+        if q:
+            q.status = "approved" if approve else "rejected"
+            applied["new_status"] = q.status
+    elif req.target_type == "customer":
+        from app.models.crm import Customer
+        c = await db.get(Customer, req.target_id)
+        if c and approve and req.payload and "changes" in req.payload:
+            changes = req.payload["changes"]
+            for k, v in changes.items():
+                if hasattr(c, k):
+                    setattr(c, k, v)
+            applied["applied_changes"] = list(changes.keys())
+    # other target_types: no automatic propagation (yet)
+    return applied
