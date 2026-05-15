@@ -114,7 +114,18 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
                             db: AsyncSession = Depends(get_db),
                             user: User = Depends(get_current_user)):
     if not can_approve_quotation(user):
-        raise HTTPException(status.HTTP_403_FORBIDDEN)
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only manager or director can approve quotations")
+    q = await db.get(Quotation, q_id)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if q.status not in ("pending_approval", "draft", "rejected"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot approve a quotation in status '{q.status}'",
+        )
+    # Decide any pending approval request that's still open; missing or
+    # already-decided requests are fine — we still set the quotation status.
     req = await db.scalar(
         select(ApprovalRequest).where(
             ApprovalRequest.target_type == "quotation",
@@ -122,11 +133,13 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
             ApprovalRequest.status == ApprovalStatus.PENDING.value,
         )
     )
-    if not req:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No pending approval")
-    await decide(db, request_id=req.id, decider_id=user.id,
-                 decider_role=Role(user.role), approve=True, notes=payload.notes)
-    q = await db.get(Quotation, q_id)
+    if req:
+        try:
+            await decide(db, request_id=req.id, decider_id=user.id,
+                         decider_role=Role(user.role), approve=True,
+                         notes=payload.notes)
+        except PermissionError as e:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
     q.status = "approved"
     await audit_record(db, actor=user, action="approve", entity="quotation",
                        entity_id=q.id, after={"status": "approved"})
@@ -138,7 +151,16 @@ async def reject_quotation(q_id: UUID, payload: QuotationDecide,
                            db: AsyncSession = Depends(get_db),
                            user: User = Depends(get_current_user)):
     if not can_approve_quotation(user):
-        raise HTTPException(status.HTTP_403_FORBIDDEN)
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only manager or director can reject quotations")
+    q = await db.get(Quotation, q_id)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if q.status not in ("pending_approval", "draft", "approved"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot reject a quotation in status '{q.status}'",
+        )
     req = await db.scalar(
         select(ApprovalRequest).where(
             ApprovalRequest.target_type == "quotation",
@@ -146,14 +168,17 @@ async def reject_quotation(q_id: UUID, payload: QuotationDecide,
             ApprovalRequest.status == ApprovalStatus.PENDING.value,
         )
     )
-    if not req:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No pending approval")
-    await decide(db, request_id=req.id, decider_id=user.id,
-                 decider_role=Role(user.role), approve=False, notes=payload.notes)
-    q = await db.get(Quotation, q_id)
+    if req:
+        try:
+            await decide(db, request_id=req.id, decider_id=user.id,
+                         decider_role=Role(user.role), approve=False,
+                         notes=payload.notes)
+        except PermissionError as e:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
     q.status = "rejected"
     await audit_record(db, actor=user, action="reject", entity="quotation",
-                       entity_id=q.id, after={"status": "rejected", "notes": payload.notes})
+                       entity_id=q.id, after={"status": "rejected",
+                                              "notes": payload.notes})
     return await _load(q.id, db)
 
 

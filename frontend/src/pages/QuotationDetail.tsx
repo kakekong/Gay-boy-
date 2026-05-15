@@ -58,19 +58,52 @@ export default function QuotationDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["followups", id] }),
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["quotation", id] });
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  const submit  = useMutation({ mutationFn: () => api.post(`/quotations/${id}/submit`),  onSuccess: refresh });
-  const approve = useMutation({ mutationFn: () => api.post(`/quotations/${id}/approve`, { notes: "" }), onSuccess: refresh });
-  const reject  = useMutation({ mutationFn: () => api.post(`/quotations/${id}/reject`,  { notes: "" }), onSuccess: refresh });
-  const won     = useMutation({ mutationFn: () => api.post(`/quotations/${id}/won`),     onSuccess: refresh });
-  const lost    = useMutation({
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["quotation", id] });
+    qc.invalidateQueries({ queryKey: ["quotations"] });
+    qc.invalidateQueries({ queryKey: ["approvals"] });
+    qc.invalidateQueries({ queryKey: ["notifications"] });
+  };
+
+  function onActionSuccess(label: string) {
+    return () => {
+      refresh();
+      setFlash({ kind: "ok", text: `${label} succeeded.` });
+    };
+  }
+  function onActionError(e: any) {
+    if (e?.message === "cancelled") return;
+    const httpStatus = e?.response?.status;
+    const msg = e?.response?.data?.errors?.[0]?.message ?? e?.message ?? "Action failed";
+    setFlash({ kind: "err", text: `${msg}${httpStatus ? ` (HTTP ${httpStatus})` : ""}` });
+    refresh();
+  }
+
+  const submit = useMutation({
+    mutationFn: () => api.post(`/quotations/${id}/submit`),
+    onSuccess: onActionSuccess("Submit"), onError: onActionError,
+  });
+  const approve = useMutation({
+    mutationFn: () => api.post(`/quotations/${id}/approve`, { notes: "" }),
+    onSuccess: onActionSuccess("Approve"), onError: onActionError,
+  });
+  const reject = useMutation({
+    mutationFn: () => api.post(`/quotations/${id}/reject`, { notes: "" }),
+    onSuccess: onActionSuccess("Reject"), onError: onActionError,
+  });
+  const won = useMutation({
+    mutationFn: () => api.post(`/quotations/${id}/won`),
+    onSuccess: onActionSuccess("Mark won"), onError: onActionError,
+  });
+  const lost = useMutation({
     mutationFn: () => {
       const reason = window.prompt("Lost reason?") ?? "";
-      if (!reason.trim()) throw new Error("cancelled");
+      if (!reason.trim()) return Promise.reject(new Error("cancelled"));
       return api.post(`/quotations/${id}/lost`, null, { params: { reason } });
     },
-    onSuccess: refresh,
+    onSuccess: onActionSuccess("Mark lost"), onError: onActionError,
   });
 
   if (q.isLoading) return <div className="muted">Loading…</div>;
@@ -97,6 +130,22 @@ export default function QuotationDetailPage() {
       <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
         <ArrowLeft size={15} /> Back
       </button>
+
+      {flash && (
+        <div
+          className={clsx(
+            "rounded-xl border px-4 py-2 text-sm flex items-start gap-2",
+            flash.kind === "ok"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800",
+          )}
+        >
+          <span className="flex-1">{flash.text}</span>
+          <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">
+            <XCircle size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Header card */}
       <div className="card p-5 lg:p-6">
