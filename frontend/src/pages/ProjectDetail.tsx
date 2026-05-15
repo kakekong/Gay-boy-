@@ -66,6 +66,29 @@ export default function ProjectDetailPage() {
   });
 
   if (data.isLoading) return <div className="muted text-sm">Loading…</div>;
+  if (data.isError) {
+    const e: any = data.error;
+    const httpStatus = e?.response?.status;
+    const msg = e?.response?.data?.errors?.[0]?.message ?? e?.message ?? "Failed to load project";
+    return (
+      <div className="space-y-4">
+        <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
+          <ArrowLeft size={15} /> Back
+        </button>
+        <div className="card p-6 text-sm">
+          <div className="font-semibold text-red-700">Could not load project</div>
+          <div className="muted mt-1">{msg}</div>
+          {httpStatus && (
+            <div className="text-xs muted mt-2">HTTP {httpStatus} · GET /operation/projects/{id}/full</div>
+          )}
+          <div className="text-xs muted mt-3">
+            If you just upgraded, the api container may still be running the old code.
+            Try a hard refresh, or restart the api container.
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!data.data)     return <div className="muted text-sm">Project not found.</div>;
 
   const p   = data.data.project;
