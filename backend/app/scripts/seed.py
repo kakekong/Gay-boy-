@@ -2,11 +2,15 @@
 
 Also creates the database schema if it doesn't exist yet (idempotent),
 so first-run installs work without a separate migration step.
+
+When the model gains columns on an existing table, `create_all` won't
+add them automatically — we run a tiny ALTER-TABLE migrator below that
+keeps demo installs upgradeable without alembic discipline.
 """
 
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.db import Base, SessionLocal, engine
 import app.models  # noqa: F401  ensure all models are registered with metadata
@@ -25,11 +29,41 @@ _USERS = [
 ]
 
 
+# ─── Lightweight forward-only migrations ─────────────────────────────────────
+# Every statement here is idempotent (`ADD COLUMN IF NOT EXISTS`). Add new
+# entries below as the model evolves. Postgres-only.
+COLUMN_MIGRATIONS: list[str] = [
+    # Quotation gained CoA linkage + ledger-posting state
+    'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_revenue_no    VARCHAR(40)',
+    'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_receivable_no VARCHAR(40)',
+    'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_discount_no   VARCHAR(40)',
+    'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_tax_no        VARCHAR(40)',
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS is_posted BOOLEAN NOT NULL DEFAULT false",
+    'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS posted_at TIMESTAMPTZ',
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS posted_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb",
+
+    # Reminder gained recurrence
+    "ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurs VARCHAR(20) NOT NULL DEFAULT 'none'",
+    'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurs_until DATE',
+    'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS parent_reminder_id UUID',
+]
+
+
 async def ensure_schema() -> None:
     """Create any tables that don't exist yet. Safe to run repeatedly."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     print("Schema ready.")
+
+    # Forward-only column migrations
+    async with engine.begin() as conn:
+        for stmt in COLUMN_MIGRATIONS:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                # Don't block seed on a single bad migration; report so we can fix it.
+                print(f"  ! migration skipped: {stmt[:80]}…  ({exc.__class__.__name__})")
+    print(f"Ran {len(COLUMN_MIGRATIONS)} column migration(s) (no-op when up-to-date).")
 
 
 async def main() -> None:
