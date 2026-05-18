@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Plus, Loader2, Trash2, Pencil, Save, X, KeyRound, UserCheck, UserX,
+  AlertCircle, ExternalLink,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -48,11 +50,21 @@ export default function AdminUsersPage() {
       .then((r) => r.data as User[]),
   });
 
+  // Always load when either modal is open — the role might switch to
+  // customer/supplier mid-form and we want the picker ready immediately.
+  const formOpen = openNew || !!editing;
   const customers = useQuery({
     queryKey: ["customers-min"],
     queryFn: () => api.get("/customers", { params: { page_size: 500 } })
       .then((r) => r.data.data as Customer[]),
-    enabled: form.role === "customer" || (editing?.role === "customer"),
+    enabled: formOpen,
+  });
+  const suppliers = useQuery({
+    queryKey: ["suppliers-min"],
+    queryFn: () => api.get("/purchasing/suppliers")
+      .then((r) => r.data as Supplier[])
+      .catch(() => [] as Supplier[]),
+    enabled: formOpen,
   });
 
   const create = useMutation({
@@ -188,6 +200,9 @@ export default function AdminUsersPage() {
           <UserForm
             form={form} setForm={setForm}
             customers={customers.data ?? []}
+            customersLoading={customers.isLoading}
+            suppliers={suppliers.data ?? []}
+            suppliersLoading={suppliers.isLoading}
             isPending={create.isPending}
             submitLabel="Create user"
             onSubmit={() => create.mutate()}
@@ -228,7 +243,11 @@ function Modal({ title, subtitle, onClose, children }: {
   );
 }
 
-function UserForm({ form, setForm, customers, isPending, submitLabel, onSubmit, onCancel }: any) {
+function UserForm({
+  form, setForm, customers, customersLoading,
+  suppliers, suppliersLoading,
+  isPending, submitLabel, onSubmit, onCancel,
+}: any) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -256,22 +275,57 @@ function UserForm({ form, setForm, customers, isPending, submitLabel, onSubmit, 
             onChange={(e: any) => setForm({ ...form, phone: e.target.value })} />
         </Field>
         {form.role === "customer" && (
-          <Field label="Link to customer *">
-            <select className="input" required value={form.linked_customer_id}
-              onChange={(e: any) => setForm({ ...form, linked_customer_id: e.target.value })}>
-              <option value="">— pick customer —</option>
-              {customers.map((c: any) => (
-                <option key={c.id} value={c.id}>{c.company_name}</option>
-              ))}
-            </select>
-          </Field>
+          <div className="md:col-span-2">
+            <SearchablePicker
+              label="Link to customer *"
+              placeholder="Search customers by name…"
+              items={customers}
+              loading={customersLoading}
+              value={form.linked_customer_id}
+              onChange={(v) => setForm({ ...form, linked_customer_id: v })}
+              getId={(c: Customer) => c.id}
+              getLabel={(c: Customer) => c.company_name}
+              emptyCta={
+                <Link
+                  to="/customers"
+                  className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+                >
+                  Open CRM and create a customer first <ExternalLink size={12} />
+                </Link>
+              }
+            />
+          </div>
         )}
         {form.role === "supplier" && (
-          <Field label="Link to supplier ID *">
-            <input className="input" required value={form.linked_supplier_id}
-              onChange={(e: any) => setForm({ ...form, linked_supplier_id: e.target.value })}
-              placeholder="supplier UUID" />
-          </Field>
+          <div className="md:col-span-2">
+            <SearchablePicker
+              label="Link to supplier *"
+              placeholder="Search suppliers by name…"
+              items={suppliers}
+              loading={suppliersLoading}
+              value={form.linked_supplier_id}
+              onChange={(v) => setForm({ ...form, linked_supplier_id: v })}
+              getId={(s: Supplier) => s.id}
+              getLabel={(s: Supplier) => s.name}
+              emptyCta={
+                <span>
+                  No suppliers yet. Add one via{" "}
+                  <Link to="/purchasing" className="text-brand-700 hover:underline">
+                    Operations → Purchasing
+                  </Link>
+                  , or paste the supplier UUID below:
+                </span>
+              }
+              extraInput={
+                <input
+                  className="input mt-2 font-mono text-xs"
+                  placeholder="…or paste supplier UUID"
+                  value={form.linked_supplier_id}
+                  onChange={(e: any) => setForm({ ...form, linked_supplier_id: e.target.value })}
+                />
+              }
+            />
+          </div>
         )}
       </div>
       <div className="flex justify-end gap-2 pt-2">
@@ -282,6 +336,95 @@ function UserForm({ form, setForm, customers, isPending, submitLabel, onSubmit, 
         </button>
       </div>
     </form>
+  );
+}
+
+interface SearchablePickerProps<T> {
+  label: string;
+  placeholder: string;
+  items: T[];
+  loading: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  getId: (item: T) => string;
+  getLabel: (item: T) => string;
+  emptyCta: React.ReactNode;
+  extraInput?: React.ReactNode;
+}
+
+function SearchablePicker<T>({
+  label, placeholder, items, loading, value, onChange,
+  getId, getLabel, emptyCta, extraInput,
+}: SearchablePickerProps<T>) {
+  const [query, setQuery] = useState("");
+  const filtered = items.filter((it) =>
+    getLabel(it).toLowerCase().includes(query.toLowerCase())
+  );
+  const selected = items.find((it) => getId(it) === value);
+
+  return (
+    <div>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+
+      {loading ? (
+        <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : items.length === 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div className="flex-1">{emptyCta}{extraInput}</div>
+        </div>
+      ) : (
+        <>
+          {selected && (
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-brand-50 text-brand-700 px-3 py-1 text-sm">
+              <span className="font-medium">{getLabel(selected)}</span>
+              <button
+                type="button"
+                onClick={() => onChange("")}
+                className="opacity-70 hover:opacity-100"
+                aria-label="Clear selection"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+          <input
+            className="input"
+            placeholder={placeholder}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <ul className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-ink-200 bg-white">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2 text-xs muted">No matches.</li>
+            ) : (
+              filtered.map((it) => {
+                const id = getId(it);
+                const active = id === value;
+                return (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      onClick={() => onChange(id)}
+                      className={clsx(
+                        "w-full text-left px-3 py-1.5 text-sm",
+                        active ? "bg-brand-50 text-brand-700"
+                               : "hover:bg-ink-50",
+                      )}
+                    >
+                      {getLabel(it)}
+                    </button>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+          {extraInput}
+        </>
+      )}
+    </div>
   );
 }
 
