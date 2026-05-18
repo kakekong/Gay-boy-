@@ -326,3 +326,106 @@ async def unread_total(
             stmt = stmt.where(ChatMessage.created_at > mem.last_read_at)
         total += await db.scalar(stmt) or 0
     return {"unread": total}
+
+
+# ─── Group channels ──────────────────────────────────────────────────────────
+
+class ChannelCreate(BaseModel):
+    name: str
+    member_ids: list[UUID] = []
+
+
+@router.post("/channels", status_code=201)
+async def create_channel(
+    payload: ChannelCreate,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Channel name required")
+    ch = ChatChannel(name=name, kind="channel", created_by=me.id)
+    db.add(ch)
+    await db.flush()
+    # Always add the creator
+    member_set = set(payload.member_ids) | {me.id}
+    for uid in member_set:
+        u = await db.get(User, uid)
+        if u and u.is_active:
+            db.add(ChatChannelMember(channel_id=ch.id, user_id=uid))
+    await db.flush()
+    return {"id": str(ch.id), "name": ch.name, "kind": "channel"}
+
+
+@router.get("/channels/{channel_id}/members")
+async def list_members(
+    channel_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    await _ensure_member(db, channel_id, me.id)
+    rows = (await db.execute(
+        select(User)
+        .join(ChatChannelMember, ChatChannelMember.user_id == User.id)
+        .where(ChatChannelMember.channel_id == channel_id)
+        .order_by(User.full_name.asc())
+    )).scalars().all()
+    return [
+        {"id": str(u.id), "full_name": u.full_name, "role": u.role}
+        for u in rows
+    ]
+
+
+class MemberAdd(BaseModel):
+    user_id: UUID
+
+
+@router.post("/channels/{channel_id}/members", status_code=201)
+async def add_member(
+    channel_id: UUID,
+    payload: MemberAdd,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    await _ensure_member(db, channel_id, me.id)
+    ch = await db.get(ChatChannel, channel_id)
+    if not ch or ch.kind != "channel":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Can only add members to group channels")
+    existing = await db.scalar(
+        select(ChatChannelMember).where(
+            ChatChannelMember.channel_id == channel_id,
+            ChatChannelMember.user_id == payload.user_id,
+        )
+    )
+    if existing:
+        return {"ok": True, "already_member": True}
+    db.add(ChatChannelMember(channel_id=channel_id, user_id=payload.user_id))
+    await db.flush()
+    return {"ok": True}
+
+
+@router.delete("/channels/{channel_id}/members/{user_id}", status_code=204)
+async def remove_member(
+    channel_id: UUID,
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    await _ensure_member(db, channel_id, me.id)
+    ch = await db.get(ChatChannel, channel_id)
+    if not ch or ch.kind != "channel":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Can only manage members of group channels")
+    # Only the creator can remove others; anyone can remove themselves
+    if user_id != me.id and ch.created_by != me.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the channel creator can remove other members")
+    from sqlalchemy import delete as sqldelete
+    await db.execute(
+        sqldelete(ChatChannelMember).where(
+            ChatChannelMember.channel_id == channel_id,
+            ChatChannelMember.user_id == user_id,
+        )
+    )
+    return None

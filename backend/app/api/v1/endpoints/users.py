@@ -7,14 +7,44 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
+
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
+from app.core.security import hash_password
 from app.models.crm import Activity, Customer
 from app.models.quotation import Quotation
 from app.models.tag import Tag, UserTagLink
 from app.models.user import User
 from app.schemas.auth import UserOut
+
+_director = require(Role.DIRECTOR)
+
+
+class UserCreate(BaseModel):
+    email: str
+    full_name: str
+    role: str   # sales | admin | hr | manager | director | customer | supplier
+    password: str
+    phone: str | None = None
+    whatsapp_id: str | None = None
+    linked_customer_id: UUID | None = None
+    linked_supplier_id: UUID | None = None
+
+
+class UserPatch(BaseModel):
+    full_name: str | None = None
+    role: str | None = None
+    phone: str | None = None
+    whatsapp_id: str | None = None
+    is_active: bool | None = None
+    password: str | None = None
+    linked_customer_id: UUID | None = None
+    linked_supplier_id: UUID | None = None
+
+
+VALID_ROLES = {"sales", "admin", "hr", "manager", "director", "customer", "supplier"}
 
 router = APIRouter()
 
@@ -228,3 +258,80 @@ async def employee_activities(
             "customer_name": c.company_name,
         })
     return out
+
+
+# ─── Director-only user management ───────────────────────────────────────────
+
+@router.post("", status_code=201)
+async def create_user(
+    payload: UserCreate,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_director),
+):
+    if payload.role not in VALID_ROLES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    if len(payload.password) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "password must be at least 6 chars")
+    existing = await db.scalar(select(User).where(User.email == payload.email.lower()))
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email already in use")
+    if payload.role == "customer" and not payload.linked_customer_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "customer accounts need linked_customer_id")
+    if payload.role == "supplier" and not payload.linked_supplier_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "supplier accounts need linked_supplier_id")
+    u = User(
+        email=payload.email.lower(),
+        password_hash=hash_password(payload.password),
+        full_name=payload.full_name,
+        role=payload.role,
+        phone=payload.phone,
+        whatsapp_id=payload.whatsapp_id,
+        linked_customer_id=payload.linked_customer_id,
+        linked_supplier_id=payload.linked_supplier_id,
+        is_active=True,
+    )
+    db.add(u)
+    await db.flush()
+    return {"id": str(u.id), "email": u.email, "role": u.role}
+
+
+@router.patch("/{user_id}")
+async def update_user(
+    user_id: UUID,
+    payload: UserPatch,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_director),
+):
+    u = await db.get(User, user_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    data = payload.model_dump(exclude_unset=True)
+    if "role" in data and data["role"] not in VALID_ROLES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role")
+    if "password" in data:
+        if len(data["password"]) < 6:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "password too short")
+        u.password_hash = hash_password(data.pop("password"))
+    for k, v in data.items():
+        setattr(u, k, v)
+    return {"id": str(u.id), "ok": True}
+
+
+@router.delete("/{user_id}", status_code=204)
+async def delete_user(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(_director),
+):
+    if user_id == me.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot delete yourself")
+    u = await db.get(User, user_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    # Soft-disable rather than DELETE — keeps audit references intact
+    u.is_active = False
+    return None

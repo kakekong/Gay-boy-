@@ -1,0 +1,278 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Clock, LogIn, LogOut, Loader2, Calendar as CalIcon, AlertCircle, CheckCircle2,
+} from "lucide-react";
+import clsx from "clsx";
+import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
+
+interface AttendanceRow {
+  id: string;
+  user_id: string;
+  user_name: string | null;
+  date: string;
+  clock_in: string | null;
+  clock_out: string | null;
+  hours: number;
+  status: string;
+  notes: string | null;
+}
+
+const STATUS_CHIP: Record<string, string> = {
+  present:  "bg-emerald-50 text-emerald-700",
+  absent:   "bg-red-50 text-red-700",
+  half_day: "bg-amber-50 text-amber-700",
+  leave:    "bg-violet-50 text-violet-700",
+  wfh:      "bg-blue-50 text-blue-700",
+  sick:     "bg-pink-50 text-pink-700",
+  holiday:  "bg-ink-100 text-ink-700",
+  not_started: "bg-ink-100 text-ink-700",
+};
+
+function fmtTime(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export default function AttendancePage() {
+  const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
+  const canManage = me && (me.role === "hr" || me.role === "director");
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const today = useQuery({
+    queryKey: ["attendance-today"],
+    queryFn: () => api.get("/attendance/me/today").then((r) => r.data),
+    refetchInterval: 30_000,
+  });
+
+  const myHistory = useQuery({
+    queryKey: ["attendance-me"],
+    queryFn: () => api.get("/attendance/me").then((r) => r.data as AttendanceRow[]),
+  });
+
+  const all = useQuery({
+    queryKey: ["attendance-all"],
+    queryFn: () => api.get("/attendance").then((r) => r.data as AttendanceRow[]),
+    enabled: !!canManage,
+  });
+
+  const clockIn = useMutation({
+    mutationFn: () => api.post("/attendance/clock-in"),
+    onSuccess: () => {
+      setFlash({ kind: "ok", text: "Clocked in. Have a great day!" });
+      qc.invalidateQueries({ queryKey: ["attendance-today"] });
+      qc.invalidateQueries({ queryKey: ["attendance-me"] });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message ?? "Failed to clock in",
+    }),
+  });
+  const clockOut = useMutation({
+    mutationFn: () => api.post("/attendance/clock-out"),
+    onSuccess: () => {
+      setFlash({ kind: "ok", text: "Clocked out. See you tomorrow!" });
+      qc.invalidateQueries({ queryKey: ["attendance-today"] });
+      qc.invalidateQueries({ queryKey: ["attendance-me"] });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message ?? "Failed to clock out",
+    }),
+  });
+
+  const t = today.data;
+  const hasIn = !!t?.clock_in;
+  const hasOut = !!t?.clock_out;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+          <Clock size={22} className="text-brand-600" /> Attendance
+        </h1>
+        <p className="text-sm muted">
+          Clock in when you start the day, out when you leave. Hours feed into your payroll.
+        </p>
+      </div>
+
+      {flash && (
+        <div className={clsx(
+          "rounded-xl border px-4 py-2 text-sm flex items-start gap-2",
+          flash.kind === "ok"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-red-200 bg-red-50 text-red-800",
+        )}>
+          {flash.kind === "ok"
+            ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+            : <AlertCircle  size={16} className="mt-0.5 shrink-0" />}
+          <div className="flex-1">{flash.text}</div>
+          <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
+
+      {/* Today card */}
+      <div className="card p-5 lg:p-8">
+        <div className="text-xs uppercase tracking-wider muted">Today</div>
+        <div className="mt-1 flex items-end gap-3 flex-wrap">
+          <div className="text-3xl lg:text-4xl font-semibold tracking-tight">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+          </div>
+          {t?.status && (
+            <span className={clsx("chip uppercase",
+              STATUS_CHIP[t.status] ?? "bg-ink-100 text-ink-700")}>
+              {t.status.replace(/_/g, " ")}
+            </span>
+          )}
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Card label="Clock in"  value={fmtTime(t?.clock_in)} />
+          <Card label="Clock out" value={fmtTime(t?.clock_out)} />
+          <Card label="Hours"     value={t?.hours ? `${Number(t.hours).toFixed(2)}h` : "—"} />
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={() => clockIn.mutate()}
+            disabled={hasIn || clockIn.isPending}
+            className={clsx(
+              "rounded-2xl p-5 text-left transition-all border-2",
+              hasIn
+                ? "bg-ink-50 border-ink-100 cursor-not-allowed opacity-60"
+                : "bg-emerald-50 border-emerald-200 hover:bg-emerald-100 active:scale-[0.98]"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              {clockIn.isPending
+                ? <Loader2 size={22} className="animate-spin text-emerald-700" />
+                : <LogIn size={22} className="text-emerald-700" />}
+              <div>
+                <div className="text-lg font-semibold">Clock IN</div>
+                <div className="text-xs muted">
+                  {hasIn ? `Done at ${fmtTime(t?.clock_in)}` : "Start your work day"}
+                </div>
+              </div>
+            </div>
+          </button>
+          <button
+            onClick={() => clockOut.mutate()}
+            disabled={!hasIn || hasOut || clockOut.isPending}
+            className={clsx(
+              "rounded-2xl p-5 text-left transition-all border-2",
+              !hasIn || hasOut
+                ? "bg-ink-50 border-ink-100 cursor-not-allowed opacity-60"
+                : "bg-brand-50 border-brand-200 hover:bg-brand-100 active:scale-[0.98]"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              {clockOut.isPending
+                ? <Loader2 size={22} className="animate-spin text-brand-700" />
+                : <LogOut size={22} className="text-brand-700" />}
+              <div>
+                <div className="text-lg font-semibold">Clock OUT</div>
+                <div className="text-xs muted">
+                  {hasOut ? `Done at ${fmtTime(t?.clock_out)}`
+                          : hasIn ? "End your work day" : "Clock in first"}
+                </div>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* My history */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
+          <div className="font-semibold flex items-center gap-2">
+            <CalIcon size={15} /> My recent attendance
+          </div>
+          <div className="text-xs muted">last 30 days</div>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-ink-50/60">
+            <tr>
+              <th className="th">Date</th>
+              <th className="th">Status</th>
+              <th className="th">Clock in</th>
+              <th className="th">Clock out</th>
+              <th className="th text-right">Hours</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(myHistory.data ?? []).map((r) => (
+              <tr key={r.id} className="border-t border-ink-100">
+                <td className="td">{r.date}</td>
+                <td className="td">
+                  <span className={clsx("chip uppercase",
+                    STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
+                    {r.status.replace(/_/g, " ")}
+                  </span>
+                </td>
+                <td className="td muted">{fmtTime(r.clock_in)}</td>
+                <td className="td muted">{fmtTime(r.clock_out)}</td>
+                <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
+              </tr>
+            ))}
+            {!myHistory.data?.length && (
+              <tr><td colSpan={5} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* HR / Director: everyone */}
+      {canManage && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold">All employees · today + recent</div>
+            <div className="text-xs muted">HR / Director view</div>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Date</th>
+                <th className="th">Employee</th>
+                <th className="th">Status</th>
+                <th className="th">Clock in</th>
+                <th className="th">Clock out</th>
+                <th className="th text-right">Hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(all.data ?? []).map((r) => (
+                <tr key={r.id} className="border-t border-ink-100">
+                  <td className="td">{r.date}</td>
+                  <td className="td font-medium">{r.user_name ?? "—"}</td>
+                  <td className="td">
+                    <span className={clsx("chip uppercase",
+                      STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
+                      {r.status.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td className="td muted">{fmtTime(r.clock_in)}</td>
+                  <td className="td muted">{fmtTime(r.clock_out)}</td>
+                  <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
+                </tr>
+              ))}
+              {!all.data?.length && (
+                <tr><td colSpan={6} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Card({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-ink-50 border border-ink-100 p-4">
+      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}

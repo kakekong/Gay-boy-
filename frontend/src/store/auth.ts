@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type Role = "sales" | "admin" | "hr" | "manager" | "director";
+export type Role = "sales" | "admin" | "hr" | "manager" | "director" | "customer" | "supplier";
 
 interface AuthState {
   accessToken: string | null;

@@ -46,6 +46,12 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurs VARCHAR(20) NOT NULL DEFAULT 'none'",
     'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurs_until DATE',
     'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS parent_reminder_id UUID',
+
+    # User gained portal-scope links (for customer / supplier accounts)
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_customer_id UUID',
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_supplier_id UUID',
+    'CREATE INDEX IF NOT EXISTS ix_users_linked_customer_id ON users (linked_customer_id)',
+    'CREATE INDEX IF NOT EXISTS ix_users_linked_supplier_id ON users (linked_supplier_id)',
 ]
 
 

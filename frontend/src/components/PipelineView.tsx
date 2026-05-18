@@ -49,6 +49,9 @@ export function PipelineView({ customers }: Props) {
   const [showClosed, setShowClosed] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [hoverStage, setHoverStage] = useState<string | null>(null);
+  // On small screens we don't show all 13 columns at once — a stage picker
+  // lets the user focus on one column at a time.
+  const [mobileStage, setMobileStage] = useState<string>("lead");
 
   const stages = useMemo(
     () => showClosed
@@ -129,7 +132,22 @@ export function PipelineView({ customers }: Props) {
         </button>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* Mobile stage picker */}
+      <div className="md:hidden mb-3">
+        <select
+          className="input"
+          value={mobileStage}
+          onChange={(e) => setMobileStage(e.target.value)}
+        >
+          {stages.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label} ({(byStage.get(s.key) ?? []).length})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="overflow-x-auto hidden md:block">
         <div className="flex gap-3 pb-4 min-w-max">
           {stages.map((s) => {
             const items = byStage.get(s.key) ?? [];
@@ -226,6 +244,61 @@ export function PipelineView({ customers }: Props) {
             );
           })}
         </div>
+      </div>
+
+      {/* Mobile: single column for the picked stage */}
+      <div className="md:hidden">
+        {(() => {
+          const s = stages.find((x) => x.key === mobileStage) ?? stages[0];
+          const items = byStage.get(s.key) ?? [];
+          return (
+            <div className="rounded-xl border border-ink-200 bg-ink-50/40">
+              <div className="px-3 py-2.5 border-b border-ink-100 bg-white rounded-t-xl">
+                <div className="flex items-center gap-2">
+                  <span className={clsx("h-2 w-2 rounded-full", s.dot)} />
+                  <span className="font-semibold text-sm">{s.label}</span>
+                  <span className={clsx("chip", s.tone)}>{items.length}</span>
+                </div>
+                <div className="text-[11px] muted mt-0.5 tabular-nums">
+                  {idr(sumValue(items))}
+                </div>
+              </div>
+              <div className="p-2 space-y-2 min-h-[200px]">
+                {items.length === 0 ? (
+                  <div className="text-xs muted text-center py-6 italic">
+                    No customers in this stage
+                  </div>
+                ) : (
+                  items.map((c) => {
+                    const tint = INDUSTRY_TINT[c.industry] ?? INDUSTRY_TINT.other;
+                    const icon = INDUSTRY_ICON[c.industry] ?? "🏢";
+                    return (
+                      <Link
+                        key={c.id}
+                        to={`/customers/${c.id}`}
+                        className={clsx(
+                          "block rounded-lg bg-gradient-to-br p-3 border border-ink-100 active:bg-ink-100",
+                          tint,
+                        )}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="text-lg leading-none mt-0.5">{icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-semibold truncate">{c.company_name}</div>
+                            <div className="text-[11px] muted truncate capitalize">
+                              {c.industry.replace(/_/g, " ")}
+                              {c.pic_name && <> · {c.pic_name}</>}
+                            </div>
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

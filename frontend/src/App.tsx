@@ -5,14 +5,12 @@ import { Shell } from "@/layouts/Shell";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useAuthStore } from "@/store/auth";
 
-// Eager: most-used pages stay in the main bundle for instant load
 import LoginPage from "@/pages/Login";
 import DashboardPage from "@/pages/Dashboard";
 import CustomersPage from "@/pages/Customers";
 import QuotationsPage from "@/pages/Quotations";
 import ApprovalsPage from "@/pages/Approvals";
 
-// Lazy: heavier or less-frequently-visited pages download on demand
 const CustomerDetailPage   = lazy(() => import("@/pages/CustomerDetail"));
 const QuotationDetailPage  = lazy(() => import("@/pages/QuotationDetail"));
 const CalendarPage         = lazy(() => import("@/pages/Calendar"));
@@ -23,11 +21,15 @@ const SalaryPage           = lazy(() => import("@/pages/Salary"));
 const InventoryPage        = lazy(() => import("@/pages/Inventory"));
 const ChatPage             = lazy(() => import("@/pages/Chat"));
 const HelpPage             = lazy(() => import("@/pages/Help"));
-const ReportsPage          = lazy(() => import("@/pages/Reports"));        // recharts
+const ReportsPage          = lazy(() => import("@/pages/Reports"));
 const SalesTargetsPage     = lazy(() => import("@/pages/SalesTargets"));
 const AuditLogPage         = lazy(() => import("@/pages/AuditLog"));
 const ProjectsPage         = lazy(() => import("@/pages/Projects"));
 const ProjectDetailPage    = lazy(() => import("@/pages/ProjectDetail"));
+const AttendancePage       = lazy(() => import("@/pages/Attendance"));
+const AdminUsersPage       = lazy(() => import("@/pages/AdminUsers"));
+const CustomerPortalPage   = lazy(() => import("@/pages/CustomerPortal"));
+const SupplierPortalPage   = lazy(() => import("@/pages/SupplierPortal"));
 const PurchasingPage       = lazy(() => import("@/pages/Purchasing"));
 const OperationPage        = lazy(() => import("@/pages/Operation"));
 const FinancePage          = lazy(() => import("@/pages/Finance"));
@@ -51,48 +53,101 @@ function PageFallback() {
   );
 }
 
+function PortalShell({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  return (
+    <div className="min-h-full bg-ink-50">
+      <header className="h-14 bg-white border-b border-ink-200 px-4 lg:px-6 flex items-center sticky top-0 z-20">
+        <div className="font-semibold text-sm">
+          {user?.role === "customer" ? "🏢 Customer portal" : "🏭 Supplier portal"}
+        </div>
+        <div className="ml-auto flex items-center gap-3 text-sm">
+          <span className="text-ink-600 hidden sm:inline">{user?.full_name}</span>
+          <button
+            onClick={logout}
+            className="px-3 py-1.5 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 text-xs"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="max-w-5xl mx-auto px-4 lg:px-8 py-6 lg:py-8">{children}</main>
+    </div>
+  );
+}
+
+function MainApp() {
+  const user = useAuthStore((s) => s.user);
+  if (user?.role === "customer") {
+    return (
+      <PortalShell>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/portal" element={<CustomerPortalPage />} />
+            <Route path="/*" element={<Navigate to="/portal" replace />} />
+          </Routes>
+        </Suspense>
+      </PortalShell>
+    );
+  }
+  if (user?.role === "supplier") {
+    return (
+      <PortalShell>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/supplier-portal" element={<SupplierPortalPage />} />
+            <Route path="/*" element={<Navigate to="/supplier-portal" replace />} />
+          </Routes>
+        </Suspense>
+      </PortalShell>
+    );
+  }
+  return (
+    <Shell>
+      <CommandPalette />
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/customers" element={<CustomersPage />} />
+          <Route path="/customers/:id" element={<CustomerDetailPage />} />
+          <Route path="/quotations" element={<QuotationsPage />} />
+          <Route path="/quotations/:id" element={<QuotationDetailPage />} />
+          <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/accounts" element={<ChartOfAccountsPage />} />
+          <Route path="/employees" element={<EmployeesPage />} />
+          <Route path="/employees/:id" element={<EmployeeDetailPage />} />
+          <Route path="/salary" element={<SalaryPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/sales-targets" element={<SalesTargetsPage />} />
+          <Route path="/audit" element={<AuditLogPage />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          <Route path="/attendance" element={<AttendancePage />} />
+          <Route path="/admin/users" element={<AdminUsersPage />} />
+          <Route path="/purchasing" element={<PurchasingPage />} />
+          <Route path="/operation" element={<OperationPage />} />
+          <Route path="/finance" element={<FinancePage />} />
+          <Route path="/kpi" element={<KpiPage />} />
+          <Route path="/executive" element={<ExecutivePage />} />
+          <Route path="/ai" element={<AICommandCenter />} />
+        </Routes>
+      </Suspense>
+    </Shell>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/*"
-        element={
-          <Protected>
-            <Shell>
-              <CommandPalette />
-              <Suspense fallback={<PageFallback />}>
-                <Routes>
-                  <Route path="/" element={<DashboardPage />} />
-                  <Route path="/customers" element={<CustomersPage />} />
-                  <Route path="/customers/:id" element={<CustomerDetailPage />} />
-                  <Route path="/quotations" element={<QuotationsPage />} />
-                  <Route path="/quotations/:id" element={<QuotationDetailPage />} />
-                  <Route path="/approvals" element={<ApprovalsPage />} />
-                  <Route path="/calendar" element={<CalendarPage />} />
-                  <Route path="/accounts" element={<ChartOfAccountsPage />} />
-                  <Route path="/employees" element={<EmployeesPage />} />
-                  <Route path="/employees/:id" element={<EmployeeDetailPage />} />
-                  <Route path="/salary" element={<SalaryPage />} />
-                  <Route path="/inventory" element={<InventoryPage />} />
-                  <Route path="/chat" element={<ChatPage />} />
-                  <Route path="/help" element={<HelpPage />} />
-                  <Route path="/reports" element={<ReportsPage />} />
-                  <Route path="/sales-targets" element={<SalesTargetsPage />} />
-                  <Route path="/audit" element={<AuditLogPage />} />
-                  <Route path="/projects" element={<ProjectsPage />} />
-                  <Route path="/projects/:id" element={<ProjectDetailPage />} />
-                  <Route path="/purchasing" element={<PurchasingPage />} />
-                  <Route path="/operation" element={<OperationPage />} />
-                  <Route path="/finance" element={<FinancePage />} />
-                  <Route path="/kpi" element={<KpiPage />} />
-                  <Route path="/executive" element={<ExecutivePage />} />
-                  <Route path="/ai" element={<AICommandCenter />} />
-                </Routes>
-              </Suspense>
-            </Shell>
-          </Protected>
-        }
+        element={<Protected><MainApp /></Protected>}
       />
     </Routes>
   );

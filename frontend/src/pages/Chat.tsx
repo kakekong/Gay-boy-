@@ -124,6 +124,25 @@ export default function ChatPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-messages", active] }),
   });
 
+  const [pickerMode, setPickerMode] = useState<"dm" | "group">("dm");
+  const [groupName, setGroupName] = useState("");
+  const [groupMembers, setGroupMembers] = useState<Set<string>>(new Set());
+
+  const createGroup = useMutation({
+    mutationFn: () => api.post(`/chat/channels`, {
+      name: groupName,
+      member_ids: Array.from(groupMembers),
+    }).then((r) => r.data as { id: string }),
+    onSuccess: (data) => {
+      setShowPicker(false);
+      setGroupName("");
+      setGroupMembers(new Set());
+      setPickerMode("dm");
+      setActive(data.id);
+      qc.invalidateQueries({ queryKey: ["chat-channels"] });
+    },
+  });
+
   const newDm = useMutation({
     mutationFn: (userId: string) =>
       api.post(`/chat/dm/${userId}`).then((r) => r.data as { id: string }),
@@ -381,38 +400,96 @@ export default function ChatPage() {
           <div className="relative w-full max-w-md bg-white rounded-2xl shadow-card max-h-[80vh] flex flex-col">
             <header className="p-4 border-b border-ink-100">
               <div className="text-lg font-semibold">Start a new chat</div>
-              <p className="text-sm muted">Pick a colleague to direct-message.</p>
+              <div className="mt-2 inline-flex rounded-lg border border-ink-200 p-0.5 text-sm">
+                <button
+                  onClick={() => setPickerMode("dm")}
+                  className={clsx("px-3 py-1 rounded-md",
+                    pickerMode === "dm" ? "bg-brand-50 text-brand-700" : "text-ink-600")}
+                >Direct message</button>
+                <button
+                  onClick={() => setPickerMode("group")}
+                  className={clsx("px-3 py-1 rounded-md",
+                    pickerMode === "group" ? "bg-brand-50 text-brand-700" : "text-ink-600")}
+                >Group chat</button>
+              </div>
             </header>
+
+            {pickerMode === "group" && (
+              <div className="p-3 border-b border-ink-100">
+                <input
+                  autoFocus
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  placeholder="Group name (e.g. #sales, Project PRJ-2026-0042)"
+                  className="input"
+                />
+                <div className="text-[11px] muted mt-1">
+                  {groupMembers.size} member(s) selected — you'll be added automatically
+                </div>
+              </div>
+            )}
+
             <div className="p-3 border-b border-ink-100">
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
                 <input
-                  autoFocus
+                  autoFocus={pickerMode === "dm"}
                   value={contactSearch}
                   onChange={(e) => setContactSearch(e.target.value)}
-                  placeholder="Search by name or email…"
+                  placeholder={pickerMode === "dm" ? "Search by name or email…" : "Search to add members…"}
                   className="input pl-9"
                 />
               </div>
             </div>
+
             <div className="flex-1 overflow-y-auto">
-              {filteredContacts.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => newDm.mutate(u.id)}
-                  disabled={newDm.isPending}
-                  className="w-full text-left p-3 flex items-center gap-3 hover:bg-ink-50 border-b border-ink-100 last:border-b-0"
-                >
-                  <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold text-sm">
-                    {u.full_name.slice(0, 1).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{u.full_name}</div>
-                    <div className="text-xs muted truncate">{u.email}</div>
-                  </div>
-                  <span className="chip bg-ink-100 text-ink-700 uppercase">{u.role}</span>
-                </button>
-              ))}
+              {filteredContacts.map((u) => {
+                const selected = groupMembers.has(u.id);
+                return pickerMode === "dm" ? (
+                  <button
+                    key={u.id}
+                    onClick={() => newDm.mutate(u.id)}
+                    disabled={newDm.isPending}
+                    className="w-full text-left p-3 flex items-center gap-3 hover:bg-ink-50 border-b border-ink-100 last:border-b-0"
+                  >
+                    <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold text-sm">
+                      {u.full_name.slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">{u.full_name}</div>
+                      <div className="text-xs muted truncate">{u.email}</div>
+                    </div>
+                    <span className="chip bg-ink-100 text-ink-700 uppercase">{u.role}</span>
+                  </button>
+                ) : (
+                  <label
+                    key={u.id}
+                    className={clsx(
+                      "w-full text-left p-3 flex items-center gap-3 border-b border-ink-100 last:border-b-0 cursor-pointer",
+                      selected ? "bg-brand-50/60" : "hover:bg-ink-50"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => {
+                        const next = new Set(groupMembers);
+                        if (selected) next.delete(u.id); else next.add(u.id);
+                        setGroupMembers(next);
+                      }}
+                      className="h-4 w-4 rounded border-ink-300 text-brand-600"
+                    />
+                    <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold text-sm">
+                      {u.full_name.slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">{u.full_name}</div>
+                      <div className="text-xs muted truncate">{u.email}</div>
+                    </div>
+                    <span className="chip bg-ink-100 text-ink-700 uppercase">{u.role}</span>
+                  </label>
+                );
+              })}
               {contacts.isLoading && (
                 <div className="p-6 text-center text-sm muted">Loading…</div>
               )}
@@ -420,8 +497,19 @@ export default function ChatPage() {
                 <div className="p-6 text-center text-sm muted">No one matches that search.</div>
               )}
             </div>
-            <footer className="p-3 border-t border-ink-100 flex justify-end">
+
+            <footer className="p-3 border-t border-ink-100 flex justify-end gap-2">
               <button className="btn-ghost" onClick={() => setShowPicker(false)}>Cancel</button>
+              {pickerMode === "group" && (
+                <button
+                  className="btn-primary"
+                  disabled={!groupName.trim() || groupMembers.size === 0 || createGroup.isPending}
+                  onClick={() => createGroup.mutate()}
+                >
+                  {createGroup.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Create group ({groupMembers.size + 1})
+                </button>
+              )}
             </footer>
           </div>
         </div>

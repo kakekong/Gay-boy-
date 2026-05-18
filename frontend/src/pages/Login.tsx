@@ -22,7 +22,10 @@ export default function LoginPage() {
       setTokens(t.data.access_token, t.data.refresh_token);
       const me = await api.get("/auth/me");
       setUser(me.data);
-      nav("/");
+      const role = me.data?.role;
+      if (role === "customer")      nav("/portal");
+      else if (role === "supplier") nav("/supplier-portal");
+      else                          nav("/");
     } catch (e: any) {
       setErr(e.response?.data?.errors?.[0]?.message ?? "Login failed");
     } finally {

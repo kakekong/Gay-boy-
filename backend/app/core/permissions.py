@@ -15,9 +15,17 @@ class Role(StrEnum):
     HR = "hr"
     MANAGER = "manager"
     DIRECTOR = "director"
+    CUSTOMER = "customer"
+    SUPPLIER = "supplier"
 
 
-_HIERARCHY = {Role.SALES: 1, Role.ADMIN: 2, Role.HR: 2, Role.MANAGER: 3, Role.DIRECTOR: 4}
+_HIERARCHY = {
+    Role.CUSTOMER: 0, Role.SUPPLIER: 0,
+    Role.SALES: 1,
+    Role.ADMIN: 2, Role.HR: 2,
+    Role.MANAGER: 3,
+    Role.DIRECTOR: 4,
+}
 
 
 def at_least(required: Role, actual: Role) -> bool:
