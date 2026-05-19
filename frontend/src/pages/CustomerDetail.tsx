@@ -3,10 +3,12 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
-  FileText, Plus,
+  FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
+  Clock,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 import { StageBadge } from "@/components/StageBadge";
 import { Modal } from "@/components/Modal";
 import { LogActivityForm } from "@/components/forms/LogActivityForm";
@@ -22,11 +24,40 @@ const QSTATUS: Record<string, string> = {
   won:               "bg-emerald-100 text-emerald-800",
   lost:              "bg-red-100 text-red-800",
 };
+const PSTATUS: Record<string, string> = {
+  new:              "bg-ink-100 text-ink-700",
+  drawing:          "bg-cyan-50 text-cyan-700",
+  drawing_approved: "bg-cyan-100 text-cyan-800",
+  purchasing:       "bg-teal-50 text-teal-700",
+  production:       "bg-violet-50 text-violet-700",
+  qc:               "bg-amber-50 text-amber-700",
+  packaging:        "bg-yellow-50 text-yellow-700",
+  delivered:        "bg-lime-50 text-lime-700",
+  invoiced:         "bg-orange-50 text-orange-700",
+  paid:             "bg-emerald-50 text-emerald-700",
+  closed:           "bg-emerald-100 text-emerald-800",
+};
+const ISTATUS: Record<string, string> = {
+  draft:    "bg-ink-100 text-ink-700",
+  issued:   "bg-blue-50 text-blue-700",
+  partial:  "bg-amber-50 text-amber-700",
+  paid:     "bg-emerald-50 text-emerald-700",
+  overdue:  "bg-red-50 text-red-700",
+  void:     "bg-ink-100 text-ink-600",
+};
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+const idrCompact = (n: number) => {
+  const v = Math.abs(n);
+  if (v >= 1e9) return `Rp ${(n / 1e9).toFixed(1)} B`;
+  if (v >= 1e6) return `Rp ${(n / 1e6).toFixed(1)} M`;
+  if (v >= 1e3) return `Rp ${(n / 1e3).toFixed(0)} K`;
+  return idr(n);
+};
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
   const [openLog, setOpenLog] = useState(false);
   const [openAI, setOpenAI] = useState(false);
   const [openQuote, setOpenQuote] = useState(false);
@@ -52,6 +83,24 @@ export default function CustomerDetailPage() {
       api.get(`/quotations`, { params: { customer_id: id } }).then((r) => r.data),
     enabled: !!id,
   });
+  const summary = useQuery({
+    queryKey: ["customer-summary", id],
+    queryFn: () => api.get(`/customers/${id}/summary`).then((r) => r.data),
+    enabled: !!id,
+  });
+
+  function exportCsv() {
+    api.get(`/customers/${id}/export.csv`, { responseType: "blob" }).then((r) => {
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      const cd = (r.headers as any)["content-disposition"] ?? "";
+      const m = /filename="?([^"]+)"?/.exec(cd);
+      a.download = m?.[1] ?? `customer-${id}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   const aiSuggest = useMutation({
     mutationFn: () =>
@@ -93,7 +142,10 @@ export default function CustomerDetailPage() {
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" onClick={exportCsv} title="Download a complete customer report as CSV">
+              <Download size={15} /> Export spreadsheet
+            </button>
             <button className="btn-ghost" onClick={openWhatsApp}>
               <MessageCircle size={15} /> WhatsApp
             </button>
@@ -160,6 +212,89 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      {/* Financial summary strip */}
+      {summary.data && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Kpi label="Lifetime value" value={idrCompact(c.lifetime_value)} Icon={Wallet} tone="brand" />
+            <Kpi label="Won revenue"    value={idrCompact(summary.data.stats.won_revenue)} Icon={TrendingUp} tone="emerald" />
+            <Kpi label="Pipeline"       value={idrCompact(summary.data.stats.pipeline_value)} Icon={FileText} tone="violet" />
+            <Kpi label="Outstanding AR" value={idrCompact(summary.data.stats.outstanding_ar)}
+                 Icon={AlertCircle} tone={summary.data.stats.outstanding_ar > 0 ? "amber" : "ink"} />
+            <Kpi label="Active projects" value={String(summary.data.stats.active_projects)}
+                 Icon={Briefcase} tone="brand" />
+            <Kpi label="Win rate" value={`${Math.round((summary.data.stats.win_rate ?? 0) * 100)}%`}
+                 Icon={TrendingUp} tone="emerald" />
+          </div>
+          {summary.data.stats.last_activity_at && (
+            <div className="text-xs muted flex items-center gap-1.5">
+              <Clock size={12} /> Last contact:{" "}
+              <b className="text-ink-700">
+                {new Date(summary.data.stats.last_activity_at).toLocaleString()}
+              </b>
+              {" · "}known {summary.data.stats.days_known} day(s) ·{" "}
+              {summary.data.stats.total_quotations} quotation(s) ever ·{" "}
+              {summary.data.stats.completed_projects} completed project(s)
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Projects */}
+      {summary.data?.projects?.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <Briefcase size={15} className="text-brand-600" /> Projects
+            </div>
+            <div className="text-xs muted">{summary.data.projects.length} record(s)</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">Code</th>
+                  <th className="th">Status</th>
+                  <th className="th">PO Number</th>
+                  <th className="th text-right">PO Value</th>
+                  <th className="th">Target delivery</th>
+                  <th className="th text-right">Margin (est / act)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.data.projects.map((p: any) => (
+                  <tr
+                    key={p.id}
+                    className="tr-hover border-t border-ink-100 cursor-pointer"
+                    onClick={() => (window.location.href = `/projects/${p.id}`)}
+                  >
+                    <td className="td">
+                      <Link to={`/projects/${p.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-mono text-xs text-brand-700 hover:underline">
+                        {p.code}
+                      </Link>
+                    </td>
+                    <td className="td">
+                      <span className={clsx("chip capitalize",
+                        PSTATUS[p.status] ?? "bg-ink-100 text-ink-700")}>
+                        {p.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="td muted">{p.po_number ?? "—"}</td>
+                    <td className="td text-right tabular-nums font-medium">{idr(p.po_value)}</td>
+                    <td className="td muted">{p.target_delivery ?? "—"}</td>
+                    <td className="td text-right tabular-nums text-xs">
+                      {(p.margin_estimate * 100).toFixed(1)}% / {(p.margin_actual * 100).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Quotations */}
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
@@ -222,6 +357,93 @@ export default function CustomerDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Invoices */}
+      {summary.data?.invoices?.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <Receipt size={15} className="text-brand-600" /> Invoices
+            </div>
+            <div className="text-xs muted">
+              {summary.data.invoices.length} invoice(s) · {summary.data.stats.overdue_invoices} overdue
+            </div>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Number</th>
+                <th className="th">Type</th>
+                <th className="th">Issued</th>
+                <th className="th">Due</th>
+                <th className="th text-right">Total</th>
+                <th className="th">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.data.invoices.map((i: any) => (
+                <tr key={i.id} className="border-t border-ink-100">
+                  <td className="td font-mono text-xs">{i.number}</td>
+                  <td className="td capitalize muted">
+                    {i.type}{i.termin_index ? ` #${i.termin_index}` : ""}
+                  </td>
+                  <td className="td muted">{i.issue_date ?? "—"}</td>
+                  <td className="td muted">{i.due_date ?? "—"}</td>
+                  <td className="td text-right tabular-nums font-medium">{idr(i.total)}</td>
+                  <td className="td">
+                    <span className={clsx("chip capitalize",
+                      ISTATUS[i.status] ?? "bg-ink-100 text-ink-700")}>
+                      {i.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Payments */}
+      {summary.data?.payments?.length > 0 && (() => {
+        const invMap: Record<string, string> = {};
+        for (const i of summary.data.invoices ?? []) invMap[i.id] = i.number;
+        return (
+          <div className="card overflow-hidden">
+            <div className="px-5 py-3 border-b border-ink-100">
+              <div className="font-semibold flex items-center gap-2">
+                <Wallet size={15} className="text-brand-600" /> Payments received
+              </div>
+              <div className="text-xs muted">
+                {summary.data.payments.length} payment(s) · total {idr(summary.data.stats.total_paid)}
+              </div>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">Invoice</th>
+                  <th className="th">Paid at</th>
+                  <th className="th">Method</th>
+                  <th className="th">Reference</th>
+                  <th className="th text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.data.payments.map((p: any) => (
+                  <tr key={p.id} className="border-t border-ink-100">
+                    <td className="td font-mono text-xs">{invMap[p.invoice_id] ?? p.invoice_id.slice(0, 8)}</td>
+                    <td className="td muted">{p.paid_at ? new Date(p.paid_at).toLocaleDateString() : "—"}</td>
+                    <td className="td muted">{p.method ?? "—"}</td>
+                    <td className="td font-mono text-xs">{p.reference ?? "—"}</td>
+                    <td className="td text-right tabular-nums font-medium text-emerald-700">
+                      {idr(p.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       {/* Attachments */}
       <AttachmentsSection ownerType="customer" ownerId={id!} />
@@ -346,6 +568,30 @@ function Field({ icon, label, value }: {
         {icon} {label}
       </div>
       <div className="mt-1 text-ink-900 truncate">{value ?? "—"}</div>
+    </div>
+  );
+}
+
+function Kpi({ label, value, Icon, tone }: {
+  label: string; value: string; Icon: any;
+  tone: "brand" | "amber" | "emerald" | "violet" | "ink";
+}) {
+  const cls = {
+    brand:   "bg-brand-50 text-brand-700",
+    amber:   "bg-amber-50 text-amber-700",
+    emerald: "bg-emerald-50 text-emerald-700",
+    violet:  "bg-violet-50 text-violet-700",
+    ink:     "bg-ink-100 text-ink-700",
+  }[tone];
+  return (
+    <div className="card p-3">
+      <div className="flex items-start justify-between">
+        <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+        <div className={`h-6 w-6 rounded ${cls} grid place-items-center`}>
+          <Icon size={12} />
+        </div>
+      </div>
+      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
