@@ -30,6 +30,7 @@ const AttendancePage       = lazy(() => import("@/pages/Attendance"));
 const AdminUsersPage       = lazy(() => import("@/pages/AdminUsers"));
 const CustomerPortalPage   = lazy(() => import("@/pages/CustomerPortal"));
 const SupplierPortalPage   = lazy(() => import("@/pages/SupplierPortal"));
+const PaymentVerificationPage = lazy(() => import("@/pages/PaymentVerification"));
 const PurchasingPage       = lazy(() => import("@/pages/Purchasing"));
 const OperationPage        = lazy(() => import("@/pages/Operation"));
 const FinancePage          = lazy(() => import("@/pages/Finance"));
@@ -132,6 +133,7 @@ function MainApp() {
           <Route path="/purchasing" element={<PurchasingPage />} />
           <Route path="/operation" element={<OperationPage />} />
           <Route path="/finance" element={<FinancePage />} />
+          <Route path="/finance/payment-verification" element={<PaymentVerificationPage />} />
           <Route path="/kpi" element={<KpiPage />} />
           <Route path="/executive" element={<ExecutivePage />} />
           <Route path="/ai" element={<AICommandCenter />} />

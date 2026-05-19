@@ -52,6 +52,16 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_supplier_id UUID',
     'CREATE INDEX IF NOT EXISTS ix_users_linked_customer_id ON users (linked_customer_id)',
     'CREATE INDEX IF NOT EXISTS ix_users_linked_supplier_id ON users (linked_supplier_id)',
+
+    # Project gained a shipping timeline + import flag
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_ship_from_origin DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_ship_from_origin DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_arrive_our_warehouse DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_arrive_our_warehouse DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_arrive_customer DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_arrive_customer DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS origin_location VARCHAR(120)',
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_import BOOLEAN NOT NULL DEFAULT false",
 ]
 
 

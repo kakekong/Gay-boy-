@@ -8,6 +8,8 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { ShippingTimeline } from "@/components/ShippingTimeline";
+import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
 
 const STATUS_CHIP: Record<string, string> = {
   new:              "bg-ink-100 text-ink-700",
@@ -183,6 +185,10 @@ export default function ProjectDetailPage() {
           tone={marginDelta < -0.05 ? "red" : marginDelta < 0 ? "amber" : "emerald"}
         />
       </div>
+
+      {/* Shipping timeline */}
+      <ShippingTimeline projectId={p.id} />
+      <ShippingTimelineEditor projectId={p.id} />
 
       {/* Work orders */}
       <div className="card overflow-hidden">

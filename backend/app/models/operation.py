@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,6 +30,15 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     status: Mapped[str] = mapped_column(String(30), default="new", nullable=False, index=True)
     margin_estimate: Mapped[float] = mapped_column(Numeric(8, 4), default=0, nullable=False)
     margin_actual: Mapped[float] = mapped_column(Numeric(8, 4), default=0, nullable=False)
+    # Shipping timeline — especially useful for imports
+    est_ship_from_origin:     Mapped[date | None] = mapped_column(Date)
+    act_ship_from_origin:     Mapped[date | None] = mapped_column(Date)
+    est_arrive_our_warehouse: Mapped[date | None] = mapped_column(Date)
+    act_arrive_our_warehouse: Mapped[date | None] = mapped_column(Date)
+    est_arrive_customer:      Mapped[date | None] = mapped_column(Date)
+    act_arrive_customer:      Mapped[date | None] = mapped_column(Date)
+    origin_location:          Mapped[str | None]  = mapped_column(String(120))
+    is_import:                Mapped[bool]        = mapped_column(Boolean, default=False, nullable=False)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
 

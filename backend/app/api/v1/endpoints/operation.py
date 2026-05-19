@@ -169,6 +169,15 @@ class ProjectPatch(BaseModel):
     actual_delivery: str | None = None
     margin_estimate: float | None = None
     margin_actual: float | None = None
+    # Shipping timeline
+    est_ship_from_origin: str | None = None
+    act_ship_from_origin: str | None = None
+    est_arrive_our_warehouse: str | None = None
+    act_arrive_our_warehouse: str | None = None
+    est_arrive_customer: str | None = None
+    act_arrive_customer: str | None = None
+    origin_location: str | None = None
+    is_import: bool | None = None
 
 
 @router.patch("/projects/{project_id}")
@@ -255,3 +264,50 @@ async def mark_delivered(do_id: UUID,
     d.status = "delivered"
     d.delivered_at = datetime.now(UTC)
     return {"ok": True, "delivered_at": d.delivered_at}
+
+
+@router.get("/projects/{project_id}/timeline")
+async def project_timeline(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    # Stages in chronological order; "completed" if act date is set.
+    stages = [
+        {
+            "key": "ship_from_origin",
+            "label": "Shipped from origin" + (f" ({p.origin_location})" if p.origin_location else ""),
+            "est": p.est_ship_from_origin,
+            "actual": p.act_ship_from_origin,
+        },
+        {
+            "key": "arrive_our_warehouse",
+            "label": "Arrived at our warehouse",
+            "est": p.est_arrive_our_warehouse,
+            "actual": p.act_arrive_our_warehouse,
+        },
+        {
+            "key": "arrive_customer",
+            "label": "Arrived at customer's warehouse",
+            "est": p.est_arrive_customer,
+            "actual": p.act_arrive_customer,
+        },
+    ]
+    # Mark the current stage as the first one without an actual date
+    current_idx = next((i for i, s in enumerate(stages) if not s["actual"]), len(stages))
+    for i, s in enumerate(stages):
+        s["status"] = (
+            "completed" if s["actual"]
+            else "current" if i == current_idx
+            else "future"
+        )
+    return {
+        "project_id": str(p.id),
+        "code": p.code,
+        "is_import": bool(p.is_import),
+        "origin_location": p.origin_location,
+        "stages": stages,
+    }

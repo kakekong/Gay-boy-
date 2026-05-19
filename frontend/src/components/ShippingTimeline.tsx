@@ -1,0 +1,110 @@
+import { useQuery } from "@tanstack/react-query";
+import { Truck, Warehouse, Building2, CheckCircle2, Loader2 } from "lucide-react";
+import clsx from "clsx";
+import { api } from "@/api/client";
+
+interface Stage {
+  key: string;
+  label: string;
+  est: string | null;
+  actual: string | null;
+  status: "completed" | "current" | "future";
+}
+
+function fmt(d: string | null) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString();
+}
+
+const ICON: Record<string, any> = {
+  ship_from_origin:     Truck,
+  arrive_our_warehouse: Warehouse,
+  arrive_customer:      Building2,
+};
+
+export function ShippingTimeline({ projectId }: { projectId: string }) {
+  const q = useQuery({
+    queryKey: ["project-timeline", projectId],
+    queryFn: () => api.get(`/operation/projects/${projectId}/timeline`).then((r) => r.data),
+    enabled: !!projectId,
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className="card p-5 flex items-center gap-2 text-sm muted">
+        <Loader2 size={14} className="animate-spin" /> Loading timeline…
+      </div>
+    );
+  }
+  if (!q.data) return null;
+  const stages: Stage[] = q.data.stages ?? [];
+  const allEmpty = stages.every((s) => !s.est && !s.actual);
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Truck size={15} className="text-brand-600" /> Shipping timeline
+          </div>
+          <div className="text-xs muted">
+            {q.data.is_import ? "International import" : "Local shipment"}
+            {q.data.origin_location && ` · from ${q.data.origin_location}`}
+          </div>
+        </div>
+      </div>
+
+      {allEmpty ? (
+        <div className="rounded-xl border border-dashed border-ink-200 p-6 text-sm muted text-center">
+          No shipping milestones set yet.
+        </div>
+      ) : (
+        <ol className="relative pl-6">
+          {/* vertical line */}
+          <div className="absolute left-[10px] top-2 bottom-2 w-px bg-ink-200" />
+          {stages.map((s, i) => {
+            const Icon = ICON[s.key] ?? Truck;
+            const dotCls =
+              s.status === "completed" ? "bg-emerald-500 text-white"
+              : s.status === "current" ? "bg-brand-500 text-white animate-pulse"
+                                       : "bg-white border-2 border-ink-200 text-ink-400";
+            return (
+              <li key={s.key} className="relative pb-5 last:pb-0">
+                <div className={clsx(
+                  "absolute -left-6 top-0 h-5 w-5 rounded-full grid place-items-center",
+                  dotCls,
+                )}>
+                  {s.status === "completed"
+                    ? <CheckCircle2 size={12} />
+                    : <Icon size={11} />}
+                </div>
+                <div className={clsx(
+                  "rounded-xl border p-3",
+                  s.status === "completed" ? "border-emerald-100 bg-emerald-50/40"
+                  : s.status === "current" ? "border-brand-200 bg-brand-50/40"
+                                            : "border-ink-100 bg-ink-50/30",
+                )}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="font-medium text-sm">{s.label}</div>
+                    <span className={clsx(
+                      "chip uppercase text-[10px]",
+                      s.status === "completed" ? "bg-emerald-100 text-emerald-800"
+                      : s.status === "current" ? "bg-brand-100 text-brand-800"
+                                                : "bg-ink-100 text-ink-600",
+                    )}>{s.status}</span>
+                  </div>
+                  <div className="mt-1 text-xs muted flex gap-4 flex-wrap">
+                    <span>Estimated: <b className="text-ink-800">{fmt(s.est)}</b></span>
+                    <span>Actual: <b className={clsx(
+                      s.actual ? "text-emerald-700" : "text-ink-800"
+                    )}>{fmt(s.actual)}</b></span>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}

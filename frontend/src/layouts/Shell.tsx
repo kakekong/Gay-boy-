@@ -29,9 +29,12 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Operations",
     items: [
       { to: "/projects", label: "Projects", icon: Briefcase },
-      { to: "/purchasing", label: "Purchasing", icon: ShoppingCart },
+      { to: "/purchasing", label: "Purchasing", icon: ShoppingCart,
+        roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/operation", label: "Operation", icon: Wrench },
       { to: "/finance", label: "Finance", icon: Banknote },
+      { to: "/finance/payment-verification", label: "Payment verification", icon: Banknote,
+        roles: ["admin", "manager", "director"] },
       { to: "/inventory", label: "Inventory", icon: Package },
       { to: "/accounts", label: "Chart of Accounts", icon: BookOpen,
         roles: ["admin", "director"] },
