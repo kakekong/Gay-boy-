@@ -8,12 +8,13 @@ and can upload invoice / drawing / bill / delivery (landing) documents
 that flow back to internal staff.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,6 +108,14 @@ async def customer_projects(
             "po_number": p.po_number, "po_value": float(p.po_value or 0),
             "target_delivery": p.target_delivery,
             "actual_delivery": p.actual_delivery,
+            "is_import": p.is_import,
+            "origin_location": p.origin_location,
+            "est_ship_from_origin": p.est_ship_from_origin,
+            "act_ship_from_origin": p.act_ship_from_origin,
+            "est_arrive_our_warehouse": p.est_arrive_our_warehouse,
+            "act_arrive_our_warehouse": p.act_arrive_our_warehouse,
+            "est_arrive_customer": p.est_arrive_customer,
+            "act_arrive_customer": p.act_arrive_customer,
             "deliveries": [
                 {"id": str(d.id), "number": d.number, "status": d.status,
                  "tracking_no": d.tracking_no, "courier": d.courier,
@@ -197,6 +206,47 @@ async def supplier_orders(
         select(SupplierPO).where(SupplierPO.supplier_id == sid)
         .order_by(SupplierPO.created_at.desc())
     )).all()
+
+    # Pre-load each PO's project so we can show the warehouse ETA + drawing
+    # status without N+1 round trips.
+    proj_ids = {p.project_id for p in pos if p.project_id}
+    projects: dict[UUID, Project] = {}
+    if proj_ids:
+        rows = (await db.scalars(
+            select(Project).where(Project.id.in_(proj_ids))
+        )).all()
+        projects = {p.id: p for p in rows}
+
+    # Has the supplier already uploaded a drawing for this PO?
+    drawing_po_ids: set[UUID] = set()
+    if pos:
+        att_rows = (await db.execute(
+            select(Attachment.owner_id, Attachment.description)
+            .where(
+                Attachment.owner_type == "supplier_po",
+                Attachment.owner_id.in_([p.id for p in pos]),
+            )
+        )).all()
+        for owner_id, desc in att_rows:
+            if desc and desc.startswith("[drawing]"):
+                drawing_po_ids.add(owner_id)
+
+    po_out = []
+    for p in pos:
+        proj = projects.get(p.project_id) if p.project_id else None
+        po_out.append({
+            "id": str(p.id), "number": p.number, "status": p.status,
+            "po_date": p.po_date, "quoted_lead_days": p.quoted_lead_days,
+            "total": float(p.total or 0), "items": p.items,
+            "created_at": p.created_at,
+            "project_id": str(p.project_id) if p.project_id else None,
+            "project_code": proj.code if proj else None,
+            # Warehouse ETA = when the supplier expects goods at our warehouse
+            "est_arrive_our_warehouse": proj.est_arrive_our_warehouse if proj else None,
+            "act_arrive_our_warehouse": proj.act_arrive_our_warehouse if proj else None,
+            "act_ship_from_origin": proj.act_ship_from_origin if proj else None,
+            "has_drawing": p.id in drawing_po_ids,
+        })
     return {
         "rfqs": [
             {"id": str(r.id), "status": r.status,
@@ -205,13 +255,53 @@ async def supplier_orders(
              "created_at": r.created_at}
             for r in rfqs
         ],
-        "purchase_orders": [
-            {"id": str(p.id), "number": p.number, "status": p.status,
-             "po_date": p.po_date, "quoted_lead_days": p.quoted_lead_days,
-             "total": float(p.total or 0), "items": p.items,
-             "created_at": p.created_at}
-            for p in pos
-        ],
+        "purchase_orders": po_out,
+    }
+
+
+class SupplierEtaIn(BaseModel):
+    est_arrive_our_warehouse: date | None = None
+    act_ship_from_origin: date | None = None
+    act_arrive_our_warehouse: date | None = None
+
+
+@router.post("/supplier/po/{po_id}/eta")
+async def supplier_set_eta(
+    po_id: UUID,
+    payload: SupplierEtaIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Supplier updates shipping dates for the project linked to a PO.
+
+    These dates flow straight to the customer's portal via the project's
+    shipping timeline — no internal step required.
+    """
+    sid = _require_supplier(me)
+    po = await db.get(SupplierPO, po_id)
+    if not po or po.supplier_id != sid:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your PO")
+    if not po.project_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This PO is not linked to a project yet — ask the buyer to attach one.",
+        )
+    proj = await db.get(Project, po.project_id)
+    if not proj:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project missing")
+    if payload.est_arrive_our_warehouse is not None:
+        proj.est_arrive_our_warehouse = payload.est_arrive_our_warehouse
+    if payload.act_ship_from_origin is not None:
+        proj.act_ship_from_origin = payload.act_ship_from_origin
+    if payload.act_arrive_our_warehouse is not None:
+        proj.act_arrive_our_warehouse = payload.act_arrive_our_warehouse
+    await db.flush()
+    return {
+        "ok": True,
+        "project_id": str(proj.id),
+        "est_arrive_our_warehouse": proj.est_arrive_our_warehouse,
+        "act_ship_from_origin": proj.act_ship_from_origin,
+        "act_arrive_our_warehouse": proj.act_arrive_our_warehouse,
     }
 
 
@@ -257,6 +347,23 @@ async def supplier_upload(
     )
     db.add(a)
     await db.flush()
+
+    # When the supplier uploads a drawing on a project-linked PO, mirror it
+    # into the project's Drawing list so the customer can see (and approve)
+    # it from their portal without an internal-team round-trip.
+    if kind == "drawing" and po.project_id:
+        prior = (await db.scalars(
+            select(Drawing).where(Drawing.project_id == po.project_id)
+        )).all()
+        next_rev = (max((d.revision for d in prior), default=0) or 0) + 1
+        drw = Drawing(
+            project_id=po.project_id,
+            revision=next_rev,
+            file_url=f"/api/v1/attachments/{a.id}/download",
+            status="submitted",
+        )
+        db.add(drw)
+        await db.flush()
     return {
         "id": str(a.id), "po_id": str(po.id), "kind": kind,
         "filename": a.filename, "size": a.size,

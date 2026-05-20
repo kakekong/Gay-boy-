@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Factory, FileText, Upload, Download, Loader2, FileSpreadsheet, Hammer, Receipt, Truck,
+  Factory, FileText, Download, Loader2, FileSpreadsheet, Hammer, Receipt,
+  Truck, Warehouse, AlertCircle, CheckCircle2, Save,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -9,8 +10,8 @@ import { api } from "@/api/client";
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
 const UPLOAD_KINDS = [
-  { value: "invoice",  label: "Invoice",          Icon: Receipt },
   { value: "drawing",  label: "Drawing",          Icon: Hammer },
+  { value: "invoice",  label: "Invoice",          Icon: Receipt },
   { value: "bill",     label: "Bill / Statement", Icon: FileSpreadsheet },
   { value: "delivery", label: "Delivery (landing)", Icon: Truck },
 ];
@@ -19,6 +20,12 @@ interface PO {
   id: string; number: string; status: string;
   po_date: string | null; quoted_lead_days: number | null;
   total: number; items: any[];
+  project_id: string | null;
+  project_code: string | null;
+  est_arrive_our_warehouse: string | null;
+  act_arrive_our_warehouse: string | null;
+  act_ship_from_origin: string | null;
+  has_drawing: boolean;
 }
 
 export default function SupplierPortalPage() {
@@ -95,8 +102,13 @@ export default function SupplierPortalPage() {
 function POCard({ po }: { po: PO }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [kind, setKind] = useState<string>("invoice");
+  const [kind, setKind] = useState<string>("drawing");
   const [err, setErr] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const [estWh, setEstWh] = useState(po.est_arrive_our_warehouse ?? "");
+  const [actShip, setActShip] = useState(po.act_ship_from_origin ?? "");
+  const [actWh, setActWh] = useState(po.act_arrive_our_warehouse ?? "");
 
   const files = useQuery({
     queryKey: ["portal-supplier-attachments", po.id],
@@ -116,9 +128,31 @@ function POCard({ po }: { po: PO }) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["portal-supplier-attachments", po.id] });
+      qc.invalidateQueries({ queryKey: ["portal-supplier-orders"] });
       if (inputRef.current) inputRef.current.value = "";
+      setErr(null);
     },
-    onError: (e: any) => setErr(e?.response?.data?.errors?.[0]?.message ?? "Upload failed"),
+    onError: (e: any) =>
+      setErr(e?.response?.data?.errors?.[0]?.message
+             ?? e?.response?.data?.detail
+             ?? "Upload failed"),
+  });
+
+  const saveEta = useMutation({
+    mutationFn: () => api.post(`/portal/supplier/po/${po.id}/eta`, {
+      est_arrive_our_warehouse: estWh || null,
+      act_ship_from_origin: actShip || null,
+      act_arrive_our_warehouse: actWh || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["portal-supplier-orders"] });
+      setFlash("Saved. The customer can see the new dates immediately.");
+      setErr(null);
+    },
+    onError: (e: any) =>
+      setErr(e?.response?.data?.errors?.[0]?.message
+             ?? e?.response?.data?.detail
+             ?? "Couldn't save dates"),
   });
 
   function download(id: string, filename: string) {
@@ -130,14 +164,23 @@ function POCard({ po }: { po: PO }) {
     });
   }
 
+  const needsDrawing = !po.has_drawing;
+  const needsEta = !po.est_arrive_our_warehouse;
+  const needsProject = !po.project_id;
+
   return (
     <div className="card p-5 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
+        <div className="min-w-0">
           <div className="font-mono text-sm">{po.number}</div>
           <div className="text-xs muted">
             PO date: {po.po_date ?? "—"} · Lead: {po.quoted_lead_days ?? "—"} days · {(po.items ?? []).length} line(s)
           </div>
+          {po.project_code && (
+            <div className="text-xs mt-0.5">
+              Project: <span className="font-mono text-brand-700">{po.project_code}</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right">
@@ -145,6 +188,92 @@ function POCard({ po }: { po: PO }) {
             <div className="font-semibold tabular-nums">{idr(po.total)}</div>
           </div>
           <span className="chip bg-ink-100 text-ink-700 uppercase">{po.status}</span>
+        </div>
+      </div>
+
+      {/* Required-action banner */}
+      {(needsProject || needsDrawing || needsEta) && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 flex flex-wrap gap-3">
+          {needsProject && (
+            <span className="inline-flex items-center gap-1">
+              <AlertCircle size={12} /> Not linked to a project — ask the buyer to attach one
+            </span>
+          )}
+          {needsDrawing && !needsProject && (
+            <span className="inline-flex items-center gap-1">
+              <AlertCircle size={12} /> Drawing PDF required
+            </span>
+          )}
+          {needsEta && !needsProject && (
+            <span className="inline-flex items-center gap-1">
+              <AlertCircle size={12} /> Set the estimated arrival at our warehouse
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Status checklist */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <StatusTile
+          done={po.has_drawing}
+          label="Drawing uploaded"
+          hint={po.has_drawing ? "Visible to the customer for approval" : "Upload below"}
+        />
+        <StatusTile
+          done={!!po.est_arrive_our_warehouse}
+          label="Warehouse ETA"
+          hint={po.est_arrive_our_warehouse
+            ? `Customer sees: ${po.est_arrive_our_warehouse}`
+            : "Tell us when you'll deliver"}
+        />
+      </div>
+
+      {/* Shipping date inputs */}
+      <div className="rounded-xl border border-ink-200 bg-white p-3">
+        <div className="text-xs font-semibold uppercase muted mb-2 flex items-center gap-1">
+          <Warehouse size={12} /> Shipping dates (visible to the customer)
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Field label="Est. arrive at our warehouse *">
+            <input
+              type="date"
+              className="input"
+              value={estWh ? estWh.slice(0, 10) : ""}
+              onChange={(e) => setEstWh(e.target.value)}
+              disabled={needsProject}
+            />
+          </Field>
+          <Field label="Actual ship from origin">
+            <input
+              type="date"
+              className="input"
+              value={actShip ? actShip.slice(0, 10) : ""}
+              onChange={(e) => setActShip(e.target.value)}
+              disabled={needsProject}
+            />
+          </Field>
+          <Field label="Actual arrive our warehouse">
+            <input
+              type="date"
+              className="input"
+              value={actWh ? actWh.slice(0, 10) : ""}
+              onChange={(e) => setActWh(e.target.value)}
+              disabled={needsProject}
+            />
+          </Field>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            className="btn-primary"
+            disabled={saveEta.isPending || needsProject}
+            onClick={() => saveEta.mutate()}
+          >
+            {saveEta.isPending
+              ? <Loader2 size={14} className="animate-spin" />
+              : <Save size={14} />}
+            Save dates
+          </button>
+          {flash && <span className="text-xs text-emerald-700">{flash}</span>}
         </div>
       </div>
 
@@ -206,5 +335,36 @@ function POCard({ po }: { po: PO }) {
         </div>
       )}
     </div>
+  );
+}
+
+function StatusTile({ done, label, hint }: {
+  done: boolean; label: string; hint: string;
+}) {
+  return (
+    <div className={clsx(
+      "rounded-xl border p-3 flex items-start gap-3",
+      done ? "border-emerald-200 bg-emerald-50/40" : "border-ink-200 bg-white",
+    )}>
+      <div className={clsx(
+        "h-8 w-8 rounded-md grid place-items-center shrink-0",
+        done ? "bg-emerald-100 text-emerald-700" : "bg-ink-100 text-ink-400",
+      )}>
+        {done ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+      </div>
+      <div>
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-xs muted">{hint}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="block text-[10px] uppercase tracking-wider muted mb-0.5">{label}</span>
+      {children}
+    </label>
   );
 }

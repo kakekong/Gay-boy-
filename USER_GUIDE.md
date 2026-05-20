@@ -264,6 +264,24 @@ The strategic war-room. Open this in the morning.
 - **Profit Alerts** — projects breaching margin estimate
 - **AI Recommendations** — upsell opportunities, supplier switches, strategy notes
 
+### 🏢 Customer portal *(customer-role logins only)*
+The stripped-down view a customer sees when they log in. No sidebar, no
+internal data.
+- Their open quotations and project status
+- **Shipping timeline** per project: Ship-from-origin → Arrive at our warehouse → Arrive at customer (with estimated + actual dates side by side). Suppliers update the first two; internal team owns the last. **Updates from the supplier appear here automatically — no internal step needed.**
+- Drawings awaiting their approval — they can Approve / Reject directly
+- Invoices, with an "I paid this" button that opens the payment-claim modal
+
+### 🏭 Supplier portal *(supplier-role logins only)*
+What a vendor sees when they log into your system.
+- Their open RFQs and Supplier POs (only their own)
+- For each PO:
+  - **Status tiles** show whether they've uploaded a drawing and set the warehouse ETA
+  - **Shipping dates** card — they fill in *Estimated arrival at our warehouse*, *Actual ship-from-origin*, *Actual arrived at warehouse*. The moment they hit **Save dates**, those values appear on the customer's shipping timeline.
+  - **Upload** Drawing (PDF) / Invoice / Bill / Delivery proof. Uploading a Drawing on a project-linked PO auto-creates a revision in that project's drawing list — the customer can then approve from their portal.
+  - An amber banner warns if drawing or ETA is missing.
+- Every PO must be linked to a Supplier **and** a Project before the supplier can set dates. If the PO isn't linked yet, the supplier sees a warning to contact the buyer.
+
 ### 📖 Help
 This guide, rendered inline so you never have to leave the app.
 
