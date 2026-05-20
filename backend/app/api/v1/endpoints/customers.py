@@ -28,7 +28,7 @@ async def list_customers(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
+    page_size: int = Query(20, ge=1, le=500),
     q: str | None = None,
     stage: str | None = None,
     industry: str | None = None,

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Plus, Search, Filter, Download, Table2, Columns3,
+  Plus, Search, Filter, Download, Table2, Columns3, AlertCircle,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -130,6 +130,27 @@ export default function CustomersPage() {
           <button className="btn-ghost"><Filter size={15} /> More filters</button>
         )}
       </div>
+
+      {q.error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-start gap-2">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">
+              Couldn't load customers
+              {(q.error as any)?.response?.status ? ` (HTTP ${(q.error as any).response.status})` : ""}.
+            </div>
+            <div className="text-xs mt-0.5 break-all">
+              {(q.error as any)?.response?.data?.errors?.[0]?.message
+                ?? (q.error as any)?.response?.data?.detail
+                ?? (q.error as any)?.message
+                ?? "Request failed"}
+            </div>
+            <button onClick={() => q.refetch()} className="mt-2 text-xs underline hover:no-underline">
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       {view === "table" ? (
         <div className="table-shell">
