@@ -130,10 +130,15 @@ Your customer book. The page has **two views you can toggle** between:
 ### 👤 Customer detail page
 What you see when you click a company:
 - **Header** — company name, industry, current stage chip, contact info (phone, WhatsApp, email, address)
+- **Export spreadsheet** — downloads a full CSV (profile, financials, all quotations, projects, invoices, payments, activities) for offline review or sharing with management
 - **WhatsApp button** — opens the customer's number on `wa.me` so you can chat
 - **AI suggest** — generates a polite follow-up message in Bahasa Indonesia you can copy & send
 - **AI Lead score** — a 0–100 score with a circular ring + the top reasons
+- **Deal pipeline (stepper)** — every stage shown as a clickable chip. Click any stage to move the deal forward (or back, for fixes), or use the **Advance to …** button on the right. Green = stages already passed, blue = current, plain = upcoming. There are also **Mark won / Mark lost** shortcuts.
+- **What to do in this stage** — stage-aware shortcuts to the right module: e.g. in *Purchasing* it links straight to the Purchasing screen; in *Delivery* to the project shipping timeline; in *Invoicing* to Finance; in *Payment* to Payment verification.
+- **Stage checklist** — the required actions for the current stage, each with a due date. Click the circle to mark done (line-through + green), the pencil icon to add a note or change the due date, and **On calendar** to find it on the calendar. A green progress bar fills as you complete items.
 - **Quotations** — every quote ever sent to this customer (click any to open)
+- **Projects / Invoices / Payments** — every running project, billed invoice, and received payment
 - **Activity timeline** — every call, meeting, WhatsApp message, log entry
 - **Log activity** button — record a call, meeting, or note
 
@@ -219,11 +224,13 @@ The full Indonesian books (Bagan Akun).
 ### 👥 Employees *(HR / director only)*
 Directory of all colleagues, grouped by role.
 - Search by name or email; filter by role or **tag**
-- Each card shows avatar, role chip, and any tags
+- Each card shows avatar, role chip, any tags, and — if they have any — a **missed-days chip** for the current month (yellow ≤ 2, red ≥ 3). Calculated as `absent + half-day × 0.5`, the same number used for salary deductions.
 - Click a card → **Employee detail page**:
   - Header with contact info + Tags section (HR can add/remove tags from a picker)
   - 6 KPI cards: Customers · Quotations · Won · Lost · Win rate · Won revenue
+  - **Missed days this month** KPI strip whenever it's greater than 0
   - Pipeline value strip for sales
+  - **Attendance** card with month picker, six summary tiles (workdays · present · half-day · absent · leave · deductible days), total hours, and a daily table of every clock-in/out
   - **Quotations table** — every quote that employee authored
   - **Assigned customers** table
   - **Recent activity** timeline
@@ -351,20 +358,33 @@ This guide, rendered inline so you never have to leave the app.
 ## 6. Quick reference
 
 ### Pipeline stages explained
-| Stage | What it means |
-|---|---|
-| Lead | Just heard of them; nothing real yet |
-| Presentation | We've shown them what we make |
-| Engineering | Our engineers are designing for them |
-| Quotation | We sent a price offer |
-| Negotiation | They're haggling |
-| PO | They sent a Purchase Order — it's real |
-| Drawing | Customer is approving the technical drawings |
-| Purchasing | We're buying materials |
-| Delivery | Shipping the goods |
-| Invoicing | We sent the invoice |
-| Payment | Waiting for the money |
-| Won | Closed and paid 🎉 |
+Every stage has a **checklist** auto-created when you move the deal there. Stage moves happen on the customer page using the **Deal pipeline** stepper — click the next stage, or use the **Advance to …** button.
+
+| Stage | What it means | Auto-checklist |
+|---|---|---|
+| Lead | Just heard of them; nothing real yet | First contact within 24 h · Qualify need + budget |
+| Presentation | We've shown them what we make | Schedule demo · Send company deck |
+| Engineering | Our engineers are designing for them | Spec review · Site survey if needed |
+| Quotation | We sent a price offer | Draft quotation · Send quotation |
+| Negotiation | They're haggling | Follow up · Second follow-up if silent |
+| PO | They sent a Purchase Order — it's real | Collect signed PO · Confirm payment terms |
+| Drawing | Customer is approving the technical drawings | Send drawing · Collect customer sign-off |
+| Purchasing | We're buying materials | Raise PR · Select supplier & issue PO |
+| Delivery | Shipping the goods | Schedule delivery · Upload BAST / delivery proof |
+| Invoicing | We sent the invoice | Issue invoice · Send invoice to customer |
+| Payment | Waiting for the money | Follow up on payment |
+| Won | Closed and paid 🎉 | — |
+
+Overdue checklist items appear in the **Notifications bell** (top-right) as red alerts, and on the **Calendar** as red "Stage task" events that link directly back to the customer.
+
+### How the stage stepper works
+1. Open a customer.
+2. The **Deal pipeline** card shows every stage as a chip; current is blue, completed are green, upcoming are gray.
+3. Click any chip to move the deal there — or use **Advance to …** for the next-in-sequence move.
+4. The **Stage checklist** below auto-reloads with the new stage's required tasks. Existing tasks for old stages stay (they don't get deleted), so nothing is lost.
+5. The **What to do in this stage** card gives stage-aware shortcuts (e.g. "Open Purchasing" when you're at the purchasing stage).
+6. Tick checklist circles as you finish each task. Add a note or change the due date with **+ Note / change due**.
+7. To skip past stages (e.g. straight from PO to Delivery for a fast-track project), just click the destination stage — no validation blocks you.
 | Lost | Didn't win this one |
 
 ### Discount tier rules

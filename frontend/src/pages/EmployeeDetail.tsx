@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Mail, Phone, Briefcase, FileText, Users, Trophy, Frown,
   Wallet, TrendingUp, Activity as ActivityIcon, Tags, CalendarCheck, Clock,
+  CalendarX,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -194,6 +195,15 @@ export default function EmployeeDetailPage() {
           icon={Wallet} accent="emerald"
         />
       </div>
+
+      {canSeeAttendance && (attendanceSummary.data?.deductible_days ?? 0) > 0 && (
+        <KpiCard
+          label="Missed days this month"
+          value={attendanceSummary.data?.deductible_days ?? 0}
+          icon={CalendarX}
+          accent={(attendanceSummary.data?.deductible_days ?? 0) >= 3 ? "red" : "amber"}
+        />
+      )}
 
       {isSales && (
         <KpiCard

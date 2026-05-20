@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
-  Clock, ListChecks, CheckCircle2, Circle, RotateCcw,
+  Clock, ListChecks, CheckCircle2, Circle, RotateCcw, ChevronRight, Truck,
+  ShoppingCart, Banknote, Building, CalendarDays,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -106,6 +107,23 @@ export default function CustomerDetailPage() {
       api.post(`/customers/${id}/stage-tasks/${key}/reopen`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+  const patchTask = useMutation({
+    mutationFn: ({ key, body }: { key: string; body: Record<string, any> }) =>
+      api.patch(`/customers/${id}/stage-tasks/${key}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
+    },
+  });
+  const moveStage = useMutation({
+    mutationFn: (stage: string) => api.patch(`/customers/${id}`, { stage }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer", id] });
+      qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["notifications"] });
     },
   });
@@ -316,6 +334,16 @@ export default function CustomerDetailPage() {
         </div>
       )}
 
+      {/* Stage stepper — click any stage to move the customer there */}
+      <StageStepper
+        current={c.stage}
+        onMove={(s) => moveStage.mutate(s)}
+        busy={moveStage.isPending}
+      />
+
+      {/* Stage-specific quick actions */}
+      <StageActions stage={c.stage} customerId={id!} />
+
       {/* Stage checklist */}
       <StageChecklist
         loading={stageTasks.isLoading}
@@ -323,7 +351,8 @@ export default function CustomerDetailPage() {
         items={stageTasks.data?.items ?? []}
         onComplete={(k) => completeTask.mutate(k)}
         onReopen={(k) => reopenTask.mutate(k)}
-        busy={completeTask.isPending || reopenTask.isPending}
+        onPatch={(key, body) => patchTask.mutate({ key, body })}
+        busy={completeTask.isPending || reopenTask.isPending || patchTask.isPending}
       />
 
       {/* Quotations */}
@@ -634,17 +663,19 @@ interface StageTaskItem {
   due_after_days: number;
   status: "pending" | "done" | "missing";
   due_at: string | null;
+  note: string | null;
   completed_at: string | null;
 }
 
 function StageChecklist({
-  loading, stage, items, onComplete, onReopen, busy,
+  loading, stage, items, onComplete, onReopen, onPatch, busy,
 }: {
   loading: boolean;
   stage: string;
   items: StageTaskItem[];
   onComplete: (key: string) => void;
   onReopen: (key: string) => void;
+  onPatch: (key: string, body: Record<string, any>) => void;
   busy: boolean;
 }) {
   const now = Date.now();
@@ -697,86 +728,365 @@ function StageChecklist({
           </div>
         ) : (
           <ul className="space-y-2">
-            {items.map((it) => {
-              const dueMs = it.due_at ? new Date(it.due_at).getTime() : null;
-              const isOverdue =
-                it.status === "pending" && dueMs !== null && dueMs <= now;
-              const dueLabel = dueMs
-                ? new Date(dueMs).toLocaleDateString(undefined,
-                    { month: "short", day: "numeric" })
-                : "—";
-              return (
-                <li
-                  key={it.key}
-                  className={clsx(
-                    "rounded-lg border p-3 flex items-start gap-3",
-                    it.status === "done"
-                      ? "border-emerald-200 bg-emerald-50/40"
-                      : isOverdue
-                      ? "border-red-200 bg-red-50/60"
-                      : "border-ink-200 bg-white",
-                  )}
-                >
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      it.status === "done" ? onReopen(it.key) : onComplete(it.key)
-                    }
-                    className="shrink-0 mt-0.5"
-                    aria-label={it.status === "done" ? "Reopen" : "Mark done"}
-                    title={it.status === "done" ? "Reopen" : "Mark done"}
-                  >
-                    {it.status === "done" ? (
-                      <CheckCircle2 size={20} className="text-emerald-600" />
-                    ) : (
-                      <Circle
-                        size={20}
-                        className={isOverdue ? "text-red-500" : "text-ink-400"}
-                      />
-                    )}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div
-                      className={clsx(
-                        "text-sm font-medium",
-                        it.status === "done" && "line-through text-ink-500",
-                      )}
-                    >
-                      {it.title}
-                    </div>
-                    <div className="text-xs muted mt-0.5">{it.hint}</div>
-                    <div className="mt-1 text-[11px] flex items-center gap-2 flex-wrap">
-                      <span
-                        className={clsx(
-                          "inline-flex items-center gap-1",
-                          isOverdue ? "text-red-700 font-medium" : "muted",
-                        )}
-                      >
-                        <Clock size={11} /> Due {dueLabel}
-                      </span>
-                      {it.status === "done" && (
-                        <span className="text-emerald-700">Completed</span>
-                      )}
-                    </div>
-                  </div>
-                  {it.status === "done" && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onReopen(it.key)}
-                      className="btn-ghost text-xs"
-                      title="Reopen task"
-                    >
-                      <RotateCcw size={12} /> Reopen
-                    </button>
-                  )}
-                </li>
-              );
-            })}
+            {items.map((it) => (
+              <StageChecklistRow
+                key={it.key}
+                item={it}
+                busy={busy}
+                onComplete={onComplete}
+                onReopen={onReopen}
+                onPatch={onPatch}
+              />
+            ))}
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+const STAGE_ORDER = [
+  "lead", "presentation", "engineering", "quotation", "negotiation",
+  "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
+  "closed_won",
+] as const;
+
+function StageChecklistRow({
+  item, busy, onComplete, onReopen, onPatch,
+}: {
+  item: StageTaskItem;
+  busy: boolean;
+  onComplete: (key: string) => void;
+  onReopen: (key: string) => void;
+  onPatch: (key: string, body: Record<string, any>) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [note, setNote] = useState(item.note ?? "");
+  const [due, setDue] = useState(
+    item.due_at ? item.due_at.slice(0, 10) : "",
+  );
+
+  const now = Date.now();
+  const dueMs = item.due_at ? new Date(item.due_at).getTime() : null;
+  const isOverdue = item.status === "pending" && dueMs !== null && dueMs <= now;
+  const dueLabel = dueMs
+    ? new Date(dueMs).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : "—";
+
+  function save() {
+    const body: Record<string, any> = { note: note ?? "" };
+    if (due) body.due_at = new Date(due + "T09:00:00").toISOString();
+    onPatch(item.key, body);
+    setEditing(false);
+  }
+
+  return (
+    <li
+      className={clsx(
+        "rounded-lg border p-3 flex items-start gap-3",
+        item.status === "done"
+          ? "border-emerald-200 bg-emerald-50/40"
+          : isOverdue
+          ? "border-red-200 bg-red-50/60"
+          : "border-ink-200 bg-white",
+      )}
+    >
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() =>
+          item.status === "done" ? onReopen(item.key) : onComplete(item.key)
+        }
+        className="shrink-0 mt-0.5"
+        aria-label={item.status === "done" ? "Reopen" : "Mark done"}
+        title={item.status === "done" ? "Reopen" : "Mark done"}
+      >
+        {item.status === "done" ? (
+          <CheckCircle2 size={20} className="text-emerald-600" />
+        ) : (
+          <Circle size={20} className={isOverdue ? "text-red-500" : "text-ink-400"} />
+        )}
+      </button>
+      <div className="flex-1 min-w-0">
+        <div
+          className={clsx(
+            "text-sm font-medium",
+            item.status === "done" && "line-through text-ink-500",
+          )}
+        >
+          {item.title}
+        </div>
+        <div className="text-xs muted mt-0.5">{item.hint}</div>
+        {item.note && !editing && (
+          <div className="text-xs mt-1 rounded-md bg-white border border-ink-200 px-2 py-1">
+            <span className="muted">Note: </span>{item.note}
+          </div>
+        )}
+        {editing && (
+          <div className="mt-2 space-y-2">
+            <textarea
+              className="input"
+              rows={2}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Add a note (e.g. waiting on customer drawings)…"
+            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-[11px] muted">Due:</label>
+              <input
+                type="date"
+                className="input max-w-[160px]"
+                value={due}
+                onChange={(e) => setDue(e.target.value)}
+              />
+              <button className="btn-primary text-xs" onClick={save} disabled={busy}>
+                Save
+              </button>
+              <button
+                className="btn-ghost text-xs"
+                onClick={() => { setEditing(false); setNote(item.note ?? ""); }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="mt-1 text-[11px] flex items-center gap-2 flex-wrap">
+          <span
+            className={clsx(
+              "inline-flex items-center gap-1",
+              isOverdue ? "text-red-700 font-medium" : "muted",
+            )}
+          >
+            <Clock size={11} /> Due {dueLabel}
+          </span>
+          {item.status === "done" && (
+            <span className="text-emerald-700">Completed</span>
+          )}
+          {!editing && (
+            <button
+              type="button"
+              className="text-brand-700 hover:underline"
+              onClick={() => setEditing(true)}
+            >
+              {item.note ? "Edit note" : "+ Note / change due"}
+            </button>
+          )}
+          <Link
+            to={`/calendar`}
+            className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+            title="See this reminder on the calendar"
+          >
+            <CalendarDays size={11} /> On calendar
+          </Link>
+        </div>
+      </div>
+      {item.status === "done" && !editing && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onReopen(item.key)}
+          className="btn-ghost text-xs"
+          title="Reopen task"
+        >
+          <RotateCcw size={12} /> Reopen
+        </button>
+      )}
+    </li>
+  );
+}
+
+function StageStepper({
+  current, onMove, busy,
+}: {
+  current: string;
+  onMove: (stage: string) => void;
+  busy: boolean;
+}) {
+  const stages = STAGE_ORDER;
+  const idx = stages.indexOf(current as any);
+  return (
+    <div className="card p-4 lg:p-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <ListChecks size={15} /> Deal pipeline
+          </div>
+          <div className="text-xs muted">
+            Click any stage to move the deal there. Each move auto-creates the
+            required checklist for that stage.
+          </div>
+        </div>
+        {idx >= 0 && idx < stages.length - 1 && (
+          <button
+            className="btn-primary"
+            disabled={busy}
+            onClick={() => onMove(stages[idx + 1])}
+          >
+            Advance to {stages[idx + 1].replace(/_/g, " ")} <ChevronRight size={14} />
+          </button>
+        )}
+      </div>
+      <ol className="flex items-stretch gap-1 overflow-x-auto pb-1">
+        {stages.map((s, i) => {
+          const isCurrent = s === current;
+          const isPast = idx >= 0 && i < idx;
+          return (
+            <li key={s} className="flex items-stretch gap-1 flex-1 min-w-[88px]">
+              <button
+                type="button"
+                disabled={busy || isCurrent}
+                onClick={() => onMove(s)}
+                className={clsx(
+                  "flex-1 rounded-lg px-2 py-1.5 text-[11px] font-medium text-center transition border",
+                  isCurrent
+                    ? "bg-brand-600 text-white border-brand-600"
+                    : isPast
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                    : "bg-white text-ink-600 border-ink-200 hover:border-brand-300 hover:text-brand-700",
+                )}
+                title={`Move to ${s.replace(/_/g, " ")}`}
+              >
+                <div className="capitalize leading-tight">{s.replace(/_/g, " ")}</div>
+              </button>
+              {i < stages.length - 1 && (
+                <ChevronRight
+                  size={14}
+                  className="self-center text-ink-300 shrink-0"
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="mt-2 flex gap-2 flex-wrap text-xs">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onMove("closed_won")}
+          className="chip bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+        >
+          Mark won
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onMove("closed_lost")}
+          className="chip bg-red-50 text-red-700 hover:bg-red-100"
+        >
+          Mark lost
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StageActions({ stage, customerId }: { stage: string; customerId: string }) {
+  // Stage-specific shortcuts to other modules
+  const actions: { label: string; hint: string; to: string; icon: any }[] = [];
+  switch (stage) {
+    case "quotation":
+    case "negotiation":
+      actions.push({
+        label: "View all quotations",
+        hint: "Scroll down to draft, send, or follow up",
+        to: "#quotations",
+        icon: FileText,
+      });
+      break;
+    case "po":
+      actions.push({
+        label: "Upload signed PO",
+        hint: "Drop the PDF on Attachments below",
+        to: "#attachments",
+        icon: Receipt,
+      });
+      actions.push({
+        label: "Create project",
+        hint: "Open Operations to spawn the project",
+        to: "/operation",
+        icon: Briefcase,
+      });
+      break;
+    case "drawing":
+      actions.push({
+        label: "Open project drawings",
+        hint: "Submit drawings for customer approval",
+        to: "/projects",
+        icon: FileText,
+      });
+      break;
+    case "purchasing":
+      actions.push({
+        label: "Open Purchasing",
+        hint: "Raise a PR, issue RFQs, place a PO",
+        to: "/purchasing",
+        icon: ShoppingCart,
+      });
+      break;
+    case "delivery":
+      actions.push({
+        label: "Update shipping timeline",
+        hint: "Origin → our warehouse → customer arrival",
+        to: "/projects",
+        icon: Truck,
+      });
+      break;
+    case "invoicing":
+      actions.push({
+        label: "Open Finance",
+        hint: "Issue invoice from this customer's wins",
+        to: "/finance",
+        icon: Banknote,
+      });
+      break;
+    case "payment":
+      actions.push({
+        label: "Open Payment verification",
+        hint: "Match customer payments to invoices",
+        to: "/finance/payment-verification",
+        icon: Banknote,
+      });
+      break;
+    default:
+      return null;
+  }
+  if (!actions.length) return null;
+  return (
+    <div className="card p-4 lg:p-5">
+      <div className="font-semibold flex items-center gap-2 mb-2">
+        <Building size={15} /> What to do in this stage
+        <span className="chip bg-ink-100 text-ink-700 capitalize">
+          {stage.replace(/_/g, " ")}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {actions.map((a) => {
+          const Icon = a.icon;
+          const isHash = a.to.startsWith("#");
+          const inner = (
+            <div className="rounded-lg border border-ink-200 hover:border-brand-300 hover:bg-ink-50/60 p-3 flex items-start gap-3 transition">
+              <div className="h-8 w-8 rounded-md bg-brand-50 text-brand-700 grid place-items-center shrink-0">
+                <Icon size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">{a.label}</div>
+                <div className="text-xs muted">{a.hint}</div>
+              </div>
+              <ChevronRight size={14} className="text-ink-300 self-center" />
+            </div>
+          );
+          return isHash ? (
+            <a key={a.label} href={a.to}>{inner}</a>
+          ) : (
+            <Link key={a.label} to={a.to}>{inner}</Link>
+          );
+        })}
+      </div>
+      <p className="text-[11px] muted mt-2">
+        Reference for customer {customerId.slice(0, 8)} — open the module above
+        to take stage-specific actions.
+      </p>
     </div>
   );
 }

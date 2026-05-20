@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, Bell, FileText,
-  Truck, AlertCircle, CheckCircle2,
+  Truck, AlertCircle, CheckCircle2, ListChecks,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -12,7 +12,7 @@ import { NewReminderForm } from "@/components/forms/NewReminderForm";
 
 interface CalEvent {
   id: string;
-  kind: "reminder" | "activity" | "quotation_expiry" | "payment_due" | "delivery";
+  kind: "reminder" | "activity" | "quotation_expiry" | "payment_due" | "delivery" | "stage_task";
   title: string;
   subtype?: string;
   at: string;
@@ -36,6 +36,7 @@ const KIND_META: Record<CalEvent["kind"], { label: string; Icon: any; tone: stri
   quotation_expiry: { label: "Quote expires",   Icon: FileText,       tone: "text-violet-700 bg-violet-50" },
   payment_due:      { label: "Payment due",     Icon: AlertCircle,    tone: "text-amber-700 bg-amber-50" },
   delivery:         { label: "Delivery",        Icon: Truck,          tone: "text-emerald-700 bg-emerald-50" },
+  stage_task:       { label: "Stage task",      Icon: ListChecks,     tone: "text-red-700 bg-red-50" },
 };
 
 function startOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1); }
@@ -50,7 +51,7 @@ export default function CalendarPage() {
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState<Date>(new Date());
   const [filters, setFilters] = useState<Record<CalEvent["kind"], boolean>>({
-    reminder: true, activity: true, quotation_expiry: true, payment_due: true, delivery: true,
+    reminder: true, activity: true, quotation_expiry: true, payment_due: true, delivery: true, stage_task: true,
   });
   const [openNew, setOpenNew] = useState<{ open: boolean; date?: string }>({ open: false });
 

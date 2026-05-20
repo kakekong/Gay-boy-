@@ -1,6 +1,6 @@
 """Employee directory endpoints (HR + Director only)."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date as date_t, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +13,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.core.security import hash_password
+from app.models.attendance import Attendance
 from app.models.crm import Activity, Customer
 from app.models.quotation import Quotation
 from app.models.tag import Tag, UserTagLink
@@ -84,6 +85,32 @@ async def list_employees(
                 "color": tag.color, "description": tag.description,
             })
 
+    # Bulk-compute this month's missed days for everyone (absent + half_day*0.5)
+    today = date_t.today()
+    month_start = today.replace(day=1)
+    # First of next month
+    if today.month == 12:
+        next_month = date_t(today.year + 1, 1, 1)
+    else:
+        next_month = date_t(today.year, today.month + 1, 1)
+
+    missed_map: dict[str, float] = {}
+    if rows:
+        att_q = await db.execute(
+            select(Attendance.user_id, Attendance.status, func.count(Attendance.id))
+            .where(
+                Attendance.user_id.in_([r.id for r in rows]),
+                Attendance.date >= month_start,
+                Attendance.date < next_month,
+                Attendance.status.in_(["absent", "half_day"]),
+            )
+            .group_by(Attendance.user_id, Attendance.status)
+        )
+        for uid, st, n in att_q.all():
+            missed_map[str(uid)] = (
+                missed_map.get(str(uid), 0.0) + (n * (0.5 if st == "half_day" else 1.0))
+            )
+
     return [
         {
             "id": str(r.id),
@@ -93,6 +120,7 @@ async def list_employees(
             "phone": r.phone,
             "is_active": r.is_active,
             "tags": tag_map.get(str(r.id), []),
+            "missed_days_this_month": round(missed_map.get(str(r.id), 0.0), 1),
         }
         for r in rows
     ]

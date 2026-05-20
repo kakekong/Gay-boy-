@@ -102,6 +102,11 @@ async def stage_tasks_for(
     for t in tasks:
         k = stage_task_kind(stage, t["key"])
         r = by_kind.get(k)
+        # Stored note for a stage task is kept in Reminder.message; if it equals
+        # the seeded title it counts as "no custom note yet".
+        note = None
+        if r and r.message and r.message != t["title"]:
+            note = r.message
         out.append({
             "stage": stage,
             "key": t["key"],
@@ -111,6 +116,7 @@ async def stage_tasks_for(
             "reminder_id": str(r.id) if r else None,
             "status": r.status if r else "missing",  # pending / done / missing
             "due_at": r.due_at if r else None,
+            "note": note,
             "completed_at": (
                 r.updated_at if r and r.status == "done" else None
             ),

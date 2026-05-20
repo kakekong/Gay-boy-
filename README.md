@@ -68,6 +68,13 @@ message, every quotation, and where each deal is in the pipeline. Click a
 company and you see all their quotations. Click a quotation and you see the
 full document, follow-ups, and which accounts it touches.
 
+Every customer page has a **Deal pipeline stepper** — click any stage to move
+the deal forward (or back) and the system auto-creates the checklist for that
+stage with sensible due dates assigned to the sales PIC. Overdue items light
+up in the notification bell and on the calendar. Each stage also shows
+**"What to do in this stage"** shortcuts that link to the right module
+(Purchasing, Finance, Payment verification, etc.).
+
 ### 2. 🏭 ERP — "The Factory Brain"
 Once a customer says yes, the system tracks the entire job: buying materials,
 managing the workshop, doing quality checks, packing, delivering, invoicing,
@@ -137,7 +144,8 @@ grouped into sections:
 - **Chart of Accounts** *(admin / director)* — full Indonesian CoA, 109 accounts pre-seeded
 
 ### 👥 People
-- **Employees** *(HR / director)* — directory grouped by role; click any salesperson to see their KPIs, quotations, customers, and activity
+- **Employees** *(HR / director)* — directory grouped by role; cards show how many **missed days** each person has this month at a glance. Click any salesperson to see their KPIs, full **attendance** history, quotations, customers, and activity
+- **Attendance** — daily clock-in/out, monthly summary, auto-feeds the salary deduction calculation
 
 ### 📊 Insights
 - **KPI** — per-department performance numbers

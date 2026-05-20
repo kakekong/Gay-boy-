@@ -398,6 +398,52 @@ async def complete_stage_task(
     return {"id": str(r.id), "status": r.status, "kind": k}
 
 
+class StageTaskPatch(BaseModel):
+    note: str | None = None
+    due_at: datetime | None = None
+
+
+@router.patch("/{customer_id}/stage-tasks/{task_key}")
+async def patch_stage_task(
+    customer_id: UUID,
+    task_key: str,
+    payload: StageTaskPatch,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Edit a stage task — set a custom due date or add a note."""
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    k = stage_task_kind(c.stage, task_key)
+    r = await db.scalar(
+        select(Reminder).where(
+            Reminder.customer_id == c.id,
+            Reminder.kind == k,
+        )
+    )
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
+    if payload.note is not None:
+        # Keep the title visible on the calendar when the user clears the note
+        from app.core.stage_playbook import playbook_for
+        item = next((t for t in playbook_for(c.stage) if t["key"] == task_key), None)
+        if payload.note.strip():
+            r.message = payload.note.strip()
+        elif item:
+            r.message = item["title"]
+    if payload.due_at is not None:
+        r.due_at = payload.due_at
+    return {
+        "id": str(r.id),
+        "status": r.status,
+        "due_at": r.due_at,
+        "note": r.message,
+    }
+
+
 @router.post("/{customer_id}/stage-tasks/{task_key}/reopen")
 async def reopen_stage_task(
     customer_id: UUID,

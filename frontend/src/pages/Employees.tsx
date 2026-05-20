@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Users, Search, Tags } from "lucide-react";
+import { Users, Search, Tags, CalendarX } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
@@ -16,6 +16,7 @@ interface Employee {
   phone?: string | null;
   is_active: boolean;
   tags: { id: string; name: string; color: string; description?: string | null }[];
+  missed_days_this_month?: number;
 }
 
 const ROLE_CHIP: Record<Employee["role"], string> = {
@@ -142,6 +143,22 @@ export default function EmployeesPage() {
                       {e.tags.map((t) => (
                         <TagChip key={t.id} name={t.name} color={t.color} small />
                       ))}
+                    </div>
+                  )}
+                  {(e.missed_days_this_month ?? 0) > 0 && (
+                    <div className="pl-13 flex items-center gap-1.5">
+                      <span
+                        className={clsx(
+                          "chip inline-flex items-center gap-1",
+                          (e.missed_days_this_month ?? 0) >= 3
+                            ? "bg-red-50 text-red-700"
+                            : "bg-amber-50 text-amber-700",
+                        )}
+                        title="Missed days this month (absent + half-day×0.5)"
+                      >
+                        <CalendarX size={11} />
+                        {e.missed_days_this_month} missed this month
+                      </span>
                     </div>
                   )}
                 </Link>

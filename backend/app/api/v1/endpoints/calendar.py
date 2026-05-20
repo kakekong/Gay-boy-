@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role
+from app.core.stage_playbook import playbook_for
+from app.core.stage_tasks import parse_stage_task_kind
 from app.models.crm import Activity, Customer, Reminder
 from app.models.finance import Invoice
 from app.models.operation import Project
@@ -41,22 +43,40 @@ async def list_events(
 
     events: list[dict] = []
 
-    # Reminders
-    rem_stmt = select(Reminder).where(
-        Reminder.due_at >= start_dt, Reminder.due_at <= end_dt
+    # Reminders (incl. auto-generated per-stage checklist items)
+    rem_stmt = (
+        select(Reminder, Customer)
+        .outerjoin(Customer, Reminder.customer_id == Customer.id)
+        .where(Reminder.due_at >= start_dt, Reminder.due_at <= end_dt)
     )
     if sales_only:
         rem_stmt = rem_stmt.where(Reminder.user_id == user.id)
-    for r in (await db.scalars(rem_stmt)).all():
+    for r, c in (await db.execute(rem_stmt)).all():
+        # Pretty-print stage tasks like "Lead · Make first contact · PT Bara Kalsel"
+        stage_info = parse_stage_task_kind(r.kind)
+        if stage_info:
+            stg, task_key = stage_info
+            item = next((t for t in playbook_for(stg) if t["key"] == task_key), None)
+            task_title = item["title"] if item else (r.message or task_key)
+            cust_label = c.company_name if c else "—"
+            title = f"{stg.replace('_', ' ').title()} · {task_title} · {cust_label}"
+            subtype = f"stage:{stg}"
+            color = "red" if r.status == "pending" and r.due_at <= datetime.now(r.due_at.tzinfo) else "brand"
+        else:
+            title = r.message or r.kind.replace("_", " ").title()
+            if c:
+                title = f"{title} · {c.company_name}"
+            subtype = r.kind
+            color = _color_for_reminder(r.kind)
         events.append({
             "id": f"reminder:{r.id}",
-            "kind": "reminder",
-            "title": r.message or r.kind.replace("_", " ").title(),
-            "subtype": r.kind,
+            "kind": "stage_task" if stage_info else "reminder",
+            "title": title,
+            "subtype": subtype,
             "at": r.due_at,
             "status": r.status,
-            "link": None,
-            "color": _color_for_reminder(r.kind),
+            "link": f"/customers/{c.id}" if c else None,
+            "color": color,
         })
 
     # Activities (logged interactions)
