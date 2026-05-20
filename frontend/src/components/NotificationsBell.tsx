@@ -3,14 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bell, CheckSquare, AlertTriangle, AlertCircle, Truck, MessageCircle,
-  ChevronRight, Loader2,
+  ChevronRight, Loader2, ListChecks,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 
 interface NotificationItem {
   id: string;
-  kind: "approval" | "at_risk_deal" | "payment_due" | "drawing_pending" | "chat";
+  kind: "approval" | "at_risk_deal" | "payment_due" | "drawing_pending" | "chat" | "stage_task";
   severity: "low" | "medium" | "high";
   title: string;
   body: string;
@@ -24,6 +24,7 @@ const ICON: Record<string, any> = {
   payment_due:      AlertCircle,
   drawing_pending:  Truck,
   chat:             MessageCircle,
+  stage_task:       ListChecks,
 };
 
 const SEVERITY_RING: Record<string, string> = {

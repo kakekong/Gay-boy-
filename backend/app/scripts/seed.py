@@ -118,6 +118,17 @@ async def main() -> None:
                          stage="presentation"),
             ])
         await db.commit()
+
+    # Backfill stage-task reminders for every existing customer
+    async with SessionLocal() as db:
+        from app.core.stage_tasks import ensure_stage_tasks
+        customers = (await db.scalars(select(Customer))).all()
+        spawned = 0
+        for c in customers:
+            spawned += len(await ensure_stage_tasks(db, c, c.stage))
+        await db.commit()
+        if spawned:
+            print(f"Stage tasks: spawned {spawned} reminder(s).")
     print("Seed complete. Login with director@demo.local / demo1234 etc.")
 
 

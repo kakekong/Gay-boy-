@@ -12,7 +12,12 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_view_customer, filter_to_role_scope
-from app.models.crm import Activity, Customer
+from app.core.stage_tasks import (
+    ensure_stage_tasks,
+    stage_tasks_for,
+    stage_task_kind,
+)
+from app.models.crm import Activity, Customer, Reminder
 from app.models.finance import Invoice, Payment
 from app.models.operation import Project
 from app.models.quotation import Quotation
@@ -70,6 +75,7 @@ async def create_customer(
     )
     db.add(obj)
     await db.flush()
+    await ensure_stage_tasks(db, obj, obj.stage)
     return obj
 
 
@@ -103,11 +109,14 @@ async def update_customer(
 
     if rule.required_role is None:
         before = {k: getattr(obj, k) for k in changes.keys()}
+        prev_stage = obj.stage
         for k, v in changes.items():
             setattr(obj, k, v)
         obj.updated_by = user.id
         await audit_record(db, actor=user, action="update", entity="customer",
                            entity_id=obj.id, before=before, after=changes)
+        if "stage" in changes and changes["stage"] != prev_stage:
+            await ensure_stage_tasks(db, obj, changes["stage"])
         return obj
 
     # admin role -> needs manager approval; record request, do not mutate
@@ -332,6 +341,86 @@ async def _build_summary(db: AsyncSession, c: Customer) -> dict:
             for a in activities
         ],
     }
+
+
+# ─── Stage checklist ─────────────────────────────────────────────────────────
+
+
+@router.get("/{customer_id}/stage-tasks")
+async def list_stage_tasks(
+    customer_id: UUID,
+    stage: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return the stage checklist for a customer.
+
+    Defaults to the customer's current stage. Sales sees only their own
+    customers; HR/manager/director see all.
+    """
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    # Make sure tasks for the current stage exist before returning them
+    if (stage or c.stage) == c.stage:
+        await ensure_stage_tasks(db, c, c.stage)
+    rows = await stage_tasks_for(db, c, stage)
+    return {"stage": stage or c.stage, "items": rows}
+
+
+@router.post("/{customer_id}/stage-tasks/{task_key}/complete")
+async def complete_stage_task(
+    customer_id: UUID,
+    task_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    k = stage_task_kind(c.stage, task_key)
+    r = await db.scalar(
+        select(Reminder).where(
+            Reminder.customer_id == c.id,
+            Reminder.kind == k,
+        )
+    )
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
+    r.status = "done"
+    await audit_record(db, actor=user, action="complete", entity="stage_task",
+                       entity_id=r.id, before={"status": "pending"},
+                       after={"status": "done", "kind": k})
+    return {"id": str(r.id), "status": r.status, "kind": k}
+
+
+@router.post("/{customer_id}/stage-tasks/{task_key}/reopen")
+async def reopen_stage_task(
+    customer_id: UUID,
+    task_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    k = stage_task_kind(c.stage, task_key)
+    r = await db.scalar(
+        select(Reminder).where(
+            Reminder.customer_id == c.id,
+            Reminder.kind == k,
+        )
+    )
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
+    r.status = "pending"
+    return {"id": str(r.id), "status": r.status, "kind": k}
 
 
 @router.get("/{customer_id}/summary")

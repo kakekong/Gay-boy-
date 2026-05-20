@@ -19,9 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role
+from app.core.stage_playbook import playbook_for
+from app.core.stage_tasks import parse_stage_task_kind
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.chat import ChatChannelMember, ChatMessage
-from app.models.crm import Activity, Customer
+from app.models.crm import Activity, Customer, Reminder
 from app.models.finance import Invoice
 from app.models.operation import Drawing
 from app.models.quotation import Quotation
@@ -113,6 +115,42 @@ async def list_notifications(
             "body": f"{c.company_name} · Rp " + f"{float(inv.total or 0):,.0f}".replace(",", "."),
             "link": "/finance",
             "at": datetime.combine(inv.due_date, datetime.min.time()).replace(tzinfo=UTC),
+        })
+
+    # 3b. Overdue / due-soon stage checklist tasks owned by the caller
+    soon_dt = now + timedelta(days=2)
+    stage_stmt = (
+        select(Reminder, Customer)
+        .join(Customer, Reminder.customer_id == Customer.id)
+        .where(
+            Reminder.status == "pending",
+            Reminder.kind.like("stage:%"),
+            Reminder.due_at <= soon_dt,
+        )
+        .order_by(Reminder.due_at.asc())
+        .limit(50)
+    )
+    if role == Role.SALES:
+        stage_stmt = stage_stmt.where(Reminder.user_id == me.id)
+    for rem, cust in (await db.execute(stage_stmt)).all():
+        parsed = parse_stage_task_kind(rem.kind)
+        if not parsed:
+            continue
+        stg, task_key = parsed
+        playbook_item = next(
+            (t for t in playbook_for(stg) if t["key"] == task_key), None
+        )
+        title = playbook_item["title"] if playbook_item else rem.message or task_key
+        overdue = rem.due_at <= now
+        items.append({
+            "id": f"stage-task:{rem.id}",
+            "kind": "stage_task",
+            "severity": "high" if overdue else "medium",
+            "title": ("Overdue" if overdue else "Due soon")
+                     + f": {title} ({stg.replace('_', ' ')})",
+            "body": f"{cust.company_name}",
+            "link": f"/customers/{cust.id}",
+            "at": rem.due_at,
         })
 
     # 4. Drawings awaiting customer approval

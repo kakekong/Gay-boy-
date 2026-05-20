@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
-  Clock,
+  Clock, ListChecks, CheckCircle2, Circle, RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -87,6 +87,27 @@ export default function CustomerDetailPage() {
     queryKey: ["customer-summary", id],
     queryFn: () => api.get(`/customers/${id}/summary`).then((r) => r.data),
     enabled: !!id,
+  });
+  const stageTasks = useQuery({
+    queryKey: ["customer-stage-tasks", id],
+    queryFn: () => api.get(`/customers/${id}/stage-tasks`).then((r) => r.data),
+    enabled: !!id,
+  });
+  const completeTask = useMutation({
+    mutationFn: (key: string) =>
+      api.post(`/customers/${id}/stage-tasks/${key}/complete`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+  const reopenTask = useMutation({
+    mutationFn: (key: string) =>
+      api.post(`/customers/${id}/stage-tasks/${key}/reopen`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
   });
 
   function exportCsv() {
@@ -294,6 +315,16 @@ export default function CustomerDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Stage checklist */}
+      <StageChecklist
+        loading={stageTasks.isLoading}
+        stage={stageTasks.data?.stage ?? c.stage}
+        items={stageTasks.data?.items ?? []}
+        onComplete={(k) => completeTask.mutate(k)}
+        onReopen={(k) => reopenTask.mutate(k)}
+        busy={completeTask.isPending || reopenTask.isPending}
+      />
 
       {/* Quotations */}
       <div className="card overflow-hidden">
@@ -592,6 +623,160 @@ function Kpi({ label, value, Icon, tone }: {
         </div>
       </div>
       <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+interface StageTaskItem {
+  key: string;
+  title: string;
+  hint: string;
+  due_after_days: number;
+  status: "pending" | "done" | "missing";
+  due_at: string | null;
+  completed_at: string | null;
+}
+
+function StageChecklist({
+  loading, stage, items, onComplete, onReopen, busy,
+}: {
+  loading: boolean;
+  stage: string;
+  items: StageTaskItem[];
+  onComplete: (key: string) => void;
+  onReopen: (key: string) => void;
+  busy: boolean;
+}) {
+  const now = Date.now();
+  const done = items.filter((i) => i.status === "done").length;
+  const overdue = items.filter(
+    (i) => i.status === "pending" && i.due_at && new Date(i.due_at).getTime() <= now
+  ).length;
+  const pct = items.length ? Math.round((done / items.length) * 100) : 0;
+
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <ListChecks size={15} /> Stage checklist
+            <span className="chip bg-brand-50 text-brand-700 capitalize">
+              {stage.replace(/_/g, " ")}
+            </span>
+          </div>
+          <div className="text-xs muted">
+            Required actions for this stage — keep these green to keep the
+            deal on track.
+          </div>
+        </div>
+        <div className="text-xs muted flex items-center gap-3">
+          <span><b className="text-ink-900">{done}</b>/{items.length} done</span>
+          {overdue > 0 && (
+            <span className="text-red-700 font-medium">{overdue} overdue</span>
+          )}
+        </div>
+      </header>
+
+      {items.length > 0 && (
+        <div className="h-1 bg-ink-100">
+          <div
+            className="h-full bg-emerald-500 transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+
+      <div className="p-5">
+        {loading ? (
+          <div className="text-sm muted flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : items.length === 0 ? (
+          <div className="text-sm muted">
+            No required actions for this stage. 🎉
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {items.map((it) => {
+              const dueMs = it.due_at ? new Date(it.due_at).getTime() : null;
+              const isOverdue =
+                it.status === "pending" && dueMs !== null && dueMs <= now;
+              const dueLabel = dueMs
+                ? new Date(dueMs).toLocaleDateString(undefined,
+                    { month: "short", day: "numeric" })
+                : "—";
+              return (
+                <li
+                  key={it.key}
+                  className={clsx(
+                    "rounded-lg border p-3 flex items-start gap-3",
+                    it.status === "done"
+                      ? "border-emerald-200 bg-emerald-50/40"
+                      : isOverdue
+                      ? "border-red-200 bg-red-50/60"
+                      : "border-ink-200 bg-white",
+                  )}
+                >
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      it.status === "done" ? onReopen(it.key) : onComplete(it.key)
+                    }
+                    className="shrink-0 mt-0.5"
+                    aria-label={it.status === "done" ? "Reopen" : "Mark done"}
+                    title={it.status === "done" ? "Reopen" : "Mark done"}
+                  >
+                    {it.status === "done" ? (
+                      <CheckCircle2 size={20} className="text-emerald-600" />
+                    ) : (
+                      <Circle
+                        size={20}
+                        className={isOverdue ? "text-red-500" : "text-ink-400"}
+                      />
+                    )}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className={clsx(
+                        "text-sm font-medium",
+                        it.status === "done" && "line-through text-ink-500",
+                      )}
+                    >
+                      {it.title}
+                    </div>
+                    <div className="text-xs muted mt-0.5">{it.hint}</div>
+                    <div className="mt-1 text-[11px] flex items-center gap-2 flex-wrap">
+                      <span
+                        className={clsx(
+                          "inline-flex items-center gap-1",
+                          isOverdue ? "text-red-700 font-medium" : "muted",
+                        )}
+                      >
+                        <Clock size={11} /> Due {dueLabel}
+                      </span>
+                      {it.status === "done" && (
+                        <span className="text-emerald-700">Completed</span>
+                      )}
+                    </div>
+                  </div>
+                  {it.status === "done" && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onReopen(it.key)}
+                      className="btn-ghost text-xs"
+                      title="Reopen task"
+                    >
+                      <RotateCcw size={12} /> Reopen
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
