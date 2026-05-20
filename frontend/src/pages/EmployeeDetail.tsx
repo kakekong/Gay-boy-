@@ -2,8 +2,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Mail, Phone, Briefcase, FileText, Users, Trophy, Frown,
-  Wallet, TrendingUp, Activity as ActivityIcon, Tags,
+  Wallet, TrendingUp, Activity as ActivityIcon, Tags, CalendarCheck, Clock,
 } from "lucide-react";
+import { useState } from "react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
@@ -18,6 +19,16 @@ const ROLE_CHIP: Record<string, string> = {
   hr:       "bg-amber-50 text-amber-700",
   manager:  "bg-emerald-50 text-emerald-700",
   director: "bg-red-50 text-red-700",
+};
+
+const ATT_CHIP: Record<string, string> = {
+  present:  "bg-emerald-50 text-emerald-700",
+  wfh:      "bg-emerald-50 text-emerald-700",
+  half_day: "bg-amber-50 text-amber-700",
+  leave:    "bg-blue-50 text-blue-700",
+  sick:     "bg-blue-50 text-blue-700",
+  absent:   "bg-red-50 text-red-700",
+  holiday:  "bg-ink-100 text-ink-700",
 };
 
 const QSTATUS: Record<string, string> = {
@@ -38,6 +49,11 @@ export default function EmployeeDetailPage() {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const canTag = me && (me.role === "hr" || me.role === "director");
+  const canSeeAttendance = me && (me.role === "hr" || me.role === "director");
+
+  const today = new Date();
+  const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const [period, setPeriod] = useState(defaultPeriod);
 
   const employee = useQuery({
     queryKey: ["employee", id],
@@ -77,6 +93,21 @@ export default function EmployeeDetailPage() {
     queryKey: ["employee-activities", id],
     queryFn: () => api.get(`/users/${id}/activities`).then((r) => r.data),
     enabled: !!id,
+  });
+
+  const attendanceSummary = useQuery({
+    queryKey: ["employee-attendance-summary", id, period],
+    queryFn: () => api.get("/attendance/summary", { params: { user_id: id, period } })
+      .then((r) => r.data),
+    enabled: !!id && !!canSeeAttendance,
+    retry: false,
+  });
+  const attendanceRows = useQuery({
+    queryKey: ["employee-attendance-rows", id, period],
+    queryFn: () => api.get("/attendance", { params: { user_id: id, period } })
+      .then((r) => r.data as any[]),
+    enabled: !!id && !!canSeeAttendance,
+    retry: false,
   });
 
   const e = employee.data;
@@ -291,6 +322,105 @@ export default function EmployeeDetailPage() {
         )}
       </div>
 
+      {/* Attendance — HR/Director only */}
+      {canSeeAttendance && (
+        <div className="card overflow-hidden">
+          <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-semibold flex items-center gap-2">
+                <CalendarCheck size={15} /> Attendance
+              </div>
+              <div className="text-xs muted">
+                Daily presence + monthly summary used for salary deductions.
+              </div>
+            </div>
+            <input
+              type="month"
+              className="input max-w-[180px]"
+              value={period}
+              onChange={(ev) => setPeriod(ev.target.value)}
+            />
+          </header>
+
+          {/* Summary tiles */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-5 border-b border-ink-100">
+            <SumTile label="Workdays" value={attendanceSummary.data?.workdays_in_month ?? "—"} />
+            <SumTile label="Present"
+              value={
+                (attendanceSummary.data?.counts?.present ?? 0)
+                + (attendanceSummary.data?.counts?.wfh ?? 0)
+              }
+              tone="emerald" />
+            <SumTile label="Half day" value={attendanceSummary.data?.counts?.half_day ?? 0} tone="amber" />
+            <SumTile label="Absent" value={attendanceSummary.data?.counts?.absent ?? 0} tone="red" />
+            <SumTile label="Leave"
+              value={
+                (attendanceSummary.data?.counts?.leave ?? 0)
+                + (attendanceSummary.data?.counts?.sick ?? 0)
+              } />
+            <SumTile label="Deductible days"
+              value={attendanceSummary.data?.deductible_days ?? 0}
+              tone="red" />
+          </div>
+
+          <div className="px-5 py-2 text-xs muted flex items-center gap-3 flex-wrap">
+            <span className="inline-flex items-center gap-1">
+              <Clock size={12} /> Total hours:&nbsp;
+              <b className="text-ink-900 tabular-nums">
+                {attendanceSummary.data?.total_hours ?? 0}
+              </b>
+            </span>
+            {attendanceSummary.error && (
+              <span className="text-red-600">
+                Couldn't load summary (HTTP {(attendanceSummary.error as any)?.response?.status ?? "?"})
+              </span>
+            )}
+          </div>
+
+          {(attendanceRows.data ?? []).length === 0 ? (
+            <div className="p-8 text-center text-sm muted">
+              No attendance records for {period}.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="th">Date</th>
+                    <th className="th">Status</th>
+                    <th className="th text-right">Hours</th>
+                    <th className="th">Clock in</th>
+                    <th className="th">Clock out</th>
+                    <th className="th">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(attendanceRows.data ?? []).map((a: any) => (
+                    <tr key={a.id} className="tr-hover border-t border-ink-100">
+                      <td className="td tabular-nums">{a.date}</td>
+                      <td className="td">
+                        <span className={clsx("chip capitalize",
+                          ATT_CHIP[a.status] ?? "bg-ink-100 text-ink-700")}>
+                          {a.status?.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td className="td text-right tabular-nums">{a.hours ?? "—"}</td>
+                      <td className="td muted tabular-nums">
+                        {a.clock_in ? new Date(a.clock_in).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                      </td>
+                      <td className="td muted tabular-nums">
+                        {a.clock_out ? new Date(a.clock_out).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                      </td>
+                      <td className="td muted">{a.notes ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Activity */}
       <div className="card p-5">
         <div className="flex items-center gap-2 font-semibold">
@@ -328,6 +458,25 @@ export default function EmployeeDetailPage() {
             ))}
           </ul>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SumTile({ label, value, tone }: {
+  label: string;
+  value: number | string;
+  tone?: "emerald" | "amber" | "red";
+}) {
+  const toneClass = tone === "emerald" ? "text-emerald-700"
+    : tone === "amber" ? "text-amber-700"
+    : tone === "red" ? "text-red-700"
+    : "text-ink-900";
+  return (
+    <div className="rounded-xl border border-ink-100 p-3">
+      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className={clsx("mt-1 text-xl font-semibold tabular-nums", toneClass)}>
+        {value}
       </div>
     </div>
   );
