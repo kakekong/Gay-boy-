@@ -56,16 +56,28 @@ export default function AdminUsersPage() {
   const formOpen = openNew || !!editing;
   const customers = useQuery({
     queryKey: ["customers-min"],
-    queryFn: () => api.get("/customers", { params: { page_size: 500 } })
-      .then((r) => r.data.data as Customer[]),
+    queryFn: () => api.get("/customers", { params: { page_size: 200 } })
+      .then((r) => {
+        // Defensive: support both {data:[...]} and [...] shapes
+        const body = r.data;
+        if (Array.isArray(body)) return body as Customer[];
+        if (body && Array.isArray(body.data)) return body.data as Customer[];
+        return [] as Customer[];
+      }),
     enabled: formOpen,
+    retry: false,
   });
   const suppliers = useQuery({
     queryKey: ["suppliers-min"],
     queryFn: () => api.get("/purchasing/suppliers")
-      .then((r) => r.data as Supplier[])
-      .catch(() => [] as Supplier[]),
+      .then((r) => {
+        const body = r.data;
+        if (Array.isArray(body)) return body as Supplier[];
+        if (body && Array.isArray(body.data)) return body.data as Supplier[];
+        return [] as Supplier[];
+      }),
     enabled: formOpen,
+    retry: false,
   });
 
   const create = useMutation({
@@ -202,8 +214,12 @@ export default function AdminUsersPage() {
             form={form} setForm={setForm}
             customers={customers.data ?? []}
             customersLoading={customers.isLoading}
+            customersError={customers.error as any}
+            customersRefetch={() => customers.refetch()}
             suppliers={suppliers.data ?? []}
             suppliersLoading={suppliers.isLoading}
+            suppliersError={suppliers.error as any}
+            suppliersRefetch={() => suppliers.refetch()}
             isPending={create.isPending}
             submitLabel="Create user"
             onSubmit={() => create.mutate()}
@@ -245,8 +261,8 @@ function Modal({ title, subtitle, onClose, children }: {
 }
 
 function UserForm({
-  form, setForm, customers, customersLoading,
-  suppliers, suppliersLoading,
+  form, setForm, customers, customersLoading, customersError, customersRefetch,
+  suppliers, suppliersLoading, suppliersError, suppliersRefetch,
   isPending, submitLabel, onSubmit, onCancel,
 }: any) {
   return (
@@ -282,6 +298,8 @@ function UserForm({
               placeholder="Search customers by name…"
               items={customers}
               loading={customersLoading}
+              error={customersError}
+              onRetry={customersRefetch}
               value={form.linked_customer_id}
               onChange={(v) => setForm({ ...form, linked_customer_id: v })}
               getId={(c: Customer) => c.id}
@@ -304,6 +322,8 @@ function UserForm({
               placeholder="Search suppliers by name…"
               items={suppliers}
               loading={suppliersLoading}
+              error={suppliersError}
+              onRetry={suppliersRefetch}
               value={form.linked_supplier_id}
               onChange={(v) => setForm({ ...form, linked_supplier_id: v })}
               getId={(s: Supplier) => s.id}
@@ -345,6 +365,8 @@ interface SearchablePickerProps<T> {
   placeholder: string;
   items: T[];
   loading: boolean;
+  error?: any;
+  onRetry?: () => void;
   value: string;
   onChange: (v: string) => void;
   getId: (item: T) => string;
@@ -354,7 +376,7 @@ interface SearchablePickerProps<T> {
 }
 
 function SearchablePicker<T>({
-  label, placeholder, items, loading, value, onChange,
+  label, placeholder, items, loading, error, onRetry, value, onChange,
   getId, getLabel, emptyCta, extraInput,
 }: SearchablePickerProps<T>) {
   const [query, setQuery] = useState("");
@@ -363,18 +385,62 @@ function SearchablePicker<T>({
   );
   const selected = items.find((it) => getId(it) === value);
 
+  const errText = error
+    ? (error?.response?.data?.errors?.[0]?.message
+        ?? error?.response?.data?.detail
+        ?? error?.message
+        ?? "Request failed")
+    : null;
+  const errStatus = error?.response?.status;
+
   return (
     <div>
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <div className="flex items-center justify-between mb-1">
+        <span className="block text-xs font-medium text-ink-600">{label}</span>
+        {!loading && !error && (
+          <span className="text-[10px] muted">{items.length} available</span>
+        )}
+      </div>
 
       {loading ? (
         <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
           <Loader2 size={14} className="animate-spin" /> Loading…
         </div>
+      ) : error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">
+              Couldn't load list{errStatus ? ` (HTTP ${errStatus})` : ""}.
+            </div>
+            <div className="text-xs mt-0.5 break-all">{String(errText)}</div>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-2 text-xs underline hover:no-underline"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        </div>
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
-          <div className="flex-1">{emptyCta}{extraInput}</div>
+          <div className="flex-1">
+            {emptyCta}
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="ml-2 text-xs underline hover:no-underline"
+              >
+                Refresh
+              </button>
+            )}
+            {extraInput}
+          </div>
         </div>
       ) : (
         <>
