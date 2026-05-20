@@ -27,11 +27,25 @@ interface Supplier {
 export default function PurchasingPage() {
   const qc = useQueryClient();
   const [openNew, setOpenNew] = useState(false);
+  const [openPO, setOpenPO] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],
     queryFn: () => api.get("/purchasing/suppliers").then((r) => r.data as Supplier[]),
+    retry: false,
+  });
+
+  const pos = useQuery({
+    queryKey: ["supplier-pos"],
+    queryFn: () => api.get("/purchasing/po").then((r) => r.data as any[]),
+    retry: false,
+  });
+
+  const projects = useQuery({
+    queryKey: ["projects-min"],
+    queryFn: () => api.get("/operation/projects").then((r) => r.data as any[]),
+    enabled: openPO,
     retry: false,
   });
 
@@ -44,9 +58,14 @@ export default function PurchasingPage() {
           </h1>
           <p className="text-sm muted">Track every document along the procurement chain.</p>
         </div>
-        <button className="btn-primary" onClick={() => setOpenNew(true)}>
-          <Plus size={15} /> New supplier
-        </button>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={() => setOpenNew(true)}>
+            <Plus size={15} /> New supplier
+          </button>
+          <button className="btn-primary" onClick={() => setOpenPO(true)}>
+            <Plus size={15} /> New PO
+          </button>
+        </div>
       </div>
 
       {flash && (
@@ -166,6 +185,67 @@ export default function PurchasingPage() {
         )}
       </div>
 
+      {/* Supplier POs */}
+      <div className="card overflow-hidden">
+        <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
+          <div>
+            <div className="font-semibold text-ink-900">Supplier purchase orders</div>
+            <div className="text-xs muted">
+              Every PO must reference a supplier and a project. Suppliers see
+              them in their portal and update dates that flow to the customer.
+            </div>
+          </div>
+          <div className="text-[10px] uppercase tracking-wider muted">
+            {pos.data?.length ?? 0} total
+          </div>
+        </header>
+
+        {pos.isLoading ? (
+          <div className="px-5 py-10 text-center text-sm muted flex items-center justify-center gap-2">
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : !pos.data?.length ? (
+          <div className="px-5 py-12 text-center">
+            <div className="text-sm muted mb-3">No purchase orders yet.</div>
+            <button className="btn-primary" onClick={() => setOpenPO(true)}>
+              <Plus size={14} /> Issue your first PO
+            </button>
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Number</th>
+                <th className="th">Supplier</th>
+                <th className="th">Project</th>
+                <th className="th">PO date</th>
+                <th className="th">Status</th>
+                <th className="th text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pos.data.map((p: any) => {
+                const supplier = (suppliers.data ?? []).find((s) => s.id === p.supplier_id);
+                return (
+                  <tr key={p.id} className="tr-hover border-t border-ink-100">
+                    <td className="td font-mono text-xs">{p.number}</td>
+                    <td className="td">{supplier?.name ?? p.supplier_id.slice(0, 8)}</td>
+                    <td className="td font-mono text-xs">
+                      {p.project_id ? p.project_id.slice(0, 8) : "—"}
+                    </td>
+                    <td className="td muted">{p.po_date ?? "—"}</td>
+                    <td className="td">
+                      <span className="chip bg-ink-100 text-ink-700 uppercase">{p.status}</span>
+                    </td>
+                    <td className="td text-right tabular-nums">{idr(p.total ?? 0)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {openNew && (
         <NewSupplierModal
           onClose={() => setOpenNew(false)}
@@ -178,9 +258,25 @@ export default function PurchasingPage() {
           onError={(msg) => setFlash({ kind: "err", text: msg })}
         />
       )}
+      {openPO && (
+        <NewPOModal
+          suppliers={suppliers.data ?? []}
+          projects={projects.data ?? []}
+          projectsLoading={projects.isLoading}
+          onClose={() => setOpenPO(false)}
+          onCreated={(number) => {
+            qc.invalidateQueries({ queryKey: ["supplier-pos"] });
+            setOpenPO(false);
+            setFlash({ kind: "ok", text: `PO ${number} issued.` });
+          }}
+          onError={(msg) => setFlash({ kind: "err", text: msg })}
+        />
+      )}
     </div>
   );
 }
+
+function idr(n: number) { return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0)); }
 
 function NewSupplierModal({ onClose, onCreated, onError }: {
   onClose: () => void;
@@ -291,5 +387,166 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
       {children}
     </label>
+  );
+}
+
+function NewPOModal({
+  suppliers, projects, projectsLoading, onClose, onCreated, onError,
+}: {
+  suppliers: Supplier[];
+  projects: any[];
+  projectsLoading: boolean;
+  onClose: () => void;
+  onCreated: (number: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const [supplierId, setSupplierId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [poDate, setPoDate] = useState(new Date().toISOString().slice(0, 10));
+  const [leadDays, setLeadDays] = useState("");
+  const [total, setTotal] = useState("");
+  const [description, setDescription] = useState("");
+
+  const create = useMutation({
+    mutationFn: () => api.post("/purchasing/po", {
+      supplier_id: supplierId,
+      project_id: projectId,
+      po_date: poDate || null,
+      quoted_lead_days: leadDays ? Number(leadDays) : null,
+      total: total ? Number(total) : 0,
+      items: description ? [{ description, qty: 1 }] : [],
+    }).then((r) => r.data),
+    onSuccess: (r) => onCreated(r.number),
+    onError: (e: any) => onError(
+      e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Failed to create PO"
+    ),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+        <header className="px-5 py-4 border-b border-ink-100">
+          <h2 className="text-lg font-semibold">Issue purchase order</h2>
+          <p className="text-sm muted mt-0.5">
+            The PO must reference a supplier and a project so the supplier can
+            update shipping dates that flow to the customer.
+          </p>
+        </header>
+        <form
+          onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
+          className="flex-1 overflow-auto p-5 space-y-3"
+        >
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">Supplier *</span>
+            {suppliers.length === 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <span>No suppliers yet. Click "+ New supplier" first.</span>
+              </div>
+            ) : (
+              <select
+                required
+                className="input"
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+              >
+                <option value="">Choose a supplier…</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            )}
+          </label>
+
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">Project *</span>
+            {projectsLoading ? (
+              <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" /> Loading projects…
+              </div>
+            ) : projects.length === 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <span>No projects yet. Open Operations and create one.</span>
+              </div>
+            ) : (
+              <select
+                required
+                className="input"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+              >
+                <option value="">Choose a project…</option>
+                {projects.map((p: any) => (
+                  <option key={p.id} value={p.id}>
+                    {p.code} {p.status ? `· ${p.status}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">PO date</span>
+              <input
+                type="date"
+                className="input"
+                value={poDate}
+                onChange={(e) => setPoDate(e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">Lead time (days)</span>
+              <input
+                type="number"
+                min={0}
+                className="input"
+                value={leadDays}
+                onChange={(e) => setLeadDays(e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">Total (Rp)</span>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                className="input"
+                value={total}
+                onChange={(e) => setTotal(e.target.value)}
+              />
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">Description (optional)</span>
+            <textarea
+              rows={2}
+              className="input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What's being purchased…"
+            />
+          </label>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={create.isPending || !supplierId || !projectId}
+            >
+              {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Issue PO
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
