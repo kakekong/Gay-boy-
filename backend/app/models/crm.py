@@ -61,7 +61,7 @@ class Reminder(Base, UUIDPK, TimestampMixin):
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    kind: Mapped[str] = mapped_column(String(80), nullable=False)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ai_optimal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")

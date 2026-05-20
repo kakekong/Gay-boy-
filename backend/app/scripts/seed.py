@@ -46,6 +46,8 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurs VARCHAR(20) NOT NULL DEFAULT 'none'",
     'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurs_until DATE',
     'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS parent_reminder_id UUID',
+    # Stage-task kinds like "stage:negotiation:second_follow_up" can exceed 30
+    'ALTER TABLE reminders ALTER COLUMN kind TYPE VARCHAR(80)',
 
     # User gained portal-scope links (for customer / supplier accounts)
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_customer_id UUID',
