@@ -291,6 +291,15 @@ async def supplier_set_eta(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project missing")
     if payload.est_arrive_our_warehouse is not None:
         proj.est_arrive_our_warehouse = payload.est_arrive_our_warehouse
+        # Auto-derive the customer's expected arrival from the warehouse ETA
+        # so the customer sees a forecast immediately, without waiting for
+        # an internal-team step. Uses a default 7-day internal-handling
+        # buffer; ops can override on the project later.
+        if not proj.est_arrive_customer:
+            from datetime import timedelta as _td
+            proj.est_arrive_customer = (
+                payload.est_arrive_our_warehouse + _td(days=7)
+            )
     if payload.act_ship_from_origin is not None:
         proj.act_ship_from_origin = payload.act_ship_from_origin
     if payload.act_arrive_our_warehouse is not None:
@@ -300,6 +309,7 @@ async def supplier_set_eta(
         "ok": True,
         "project_id": str(proj.id),
         "est_arrive_our_warehouse": proj.est_arrive_our_warehouse,
+        "est_arrive_customer": proj.est_arrive_customer,
         "act_ship_from_origin": proj.act_ship_from_origin,
         "act_arrive_our_warehouse": proj.act_arrive_our_warehouse,
     }

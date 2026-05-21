@@ -64,10 +64,17 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
           <div className="absolute left-[10px] top-2 bottom-2 w-px bg-ink-200" />
           {stages.map((s, i) => {
             const Icon = ICON[s.key] ?? Truck;
+            const hasEstOnly = !s.actual && !!s.est;
             const dotCls =
               s.status === "completed" ? "bg-emerald-500 text-white"
               : s.status === "current" ? "bg-brand-500 text-white animate-pulse"
+              : hasEstOnly             ? "bg-amber-100 text-amber-700 border-2 border-amber-300"
                                        : "bg-white border-2 border-ink-200 text-ink-400";
+            const statusLabel =
+              s.status === "completed" ? "completed"
+              : s.status === "current" ? "in progress"
+              : hasEstOnly             ? "forecast"
+                                       : "future";
             return (
               <li key={s.key} className="relative pb-5 last:pb-0">
                 <div className={clsx(
@@ -82,6 +89,7 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
                   "rounded-xl border p-3",
                   s.status === "completed" ? "border-emerald-100 bg-emerald-50/40"
                   : s.status === "current" ? "border-brand-200 bg-brand-50/40"
+                  : hasEstOnly             ? "border-amber-200 bg-amber-50/40"
                                             : "border-ink-100 bg-ink-50/30",
                 )}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -90,11 +98,18 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
                       "chip uppercase text-[10px]",
                       s.status === "completed" ? "bg-emerald-100 text-emerald-800"
                       : s.status === "current" ? "bg-brand-100 text-brand-800"
+                      : hasEstOnly             ? "bg-amber-100 text-amber-800"
                                                 : "bg-ink-100 text-ink-600",
-                    )}>{s.status}</span>
+                    )}>{statusLabel}</span>
                   </div>
                   <div className="mt-1 text-xs muted flex gap-4 flex-wrap">
-                    <span>Estimated: <b className="text-ink-800">{fmt(s.est)}</b></span>
+                    {hasEstOnly ? (
+                      <span className="text-amber-800">
+                        Expected: <b>{fmt(s.est)}</b>
+                      </span>
+                    ) : (
+                      <span>Estimated: <b className="text-ink-800">{fmt(s.est)}</b></span>
+                    )}
                     <span>Actual: <b className={clsx(
                       s.actual ? "text-emerald-700" : "text-ink-800"
                     )}>{fmt(s.actual)}</b></span>

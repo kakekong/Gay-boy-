@@ -224,17 +224,22 @@ function POCard({ po }: { po: PO }) {
           label="Warehouse ETA"
           hint={po.est_arrive_our_warehouse
             ? `Customer sees: ${po.est_arrive_our_warehouse}`
-            : "Tell us when you'll deliver"}
+            : "Just an estimate is enough — customer sees it instantly"}
         />
       </div>
 
       {/* Shipping date inputs */}
       <div className="rounded-xl border border-ink-200 bg-white p-3">
-        <div className="text-xs font-semibold uppercase muted mb-2 flex items-center gap-1">
+        <div className="text-xs font-semibold uppercase muted mb-1 flex items-center gap-1">
           <Warehouse size={12} /> Shipping dates (visible to the customer)
         </div>
+        <div className="text-[11px] muted mb-3">
+          Fill in any of these as soon as you know them — the customer sees
+          updates straight away. <b>Just the estimate alone is enough</b>;
+          you don't have to wait for the goods to actually arrive.
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Est. arrive at our warehouse *">
+          <Field label="Est. arrival at our warehouse">
             <input
               type="date"
               className="input"
@@ -252,7 +257,7 @@ function POCard({ po }: { po: PO }) {
               disabled={needsProject}
             />
           </Field>
-          <Field label="Actual arrive our warehouse">
+          <Field label="Actual arrival at warehouse">
             <input
               type="date"
               className="input"
