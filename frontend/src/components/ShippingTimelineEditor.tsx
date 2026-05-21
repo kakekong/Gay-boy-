@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save, Loader2 } from "lucide-react";
+import { Save, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { api } from "@/api/client";
 
 const FIELDS: { key: string; label: string }[] = [
@@ -22,6 +22,7 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [isImport, setIsImport] = useState(false);
   const [origin, setOrigin] = useState("");
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     if (!q.data) return;
@@ -33,22 +34,34 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
   }, [q.data]);
 
   const save = useMutation({
-    mutationFn: () => api.patch(`/operation/projects/${projectId}`, {
-      ...form,
-      is_import: isImport,
-      origin_location: origin || null,
-      // Convert empty strings to null
-      est_ship_from_origin: form.est_ship_from_origin || null,
-      act_ship_from_origin: form.act_ship_from_origin || null,
-      est_arrive_our_warehouse: form.est_arrive_our_warehouse || null,
-      act_arrive_our_warehouse: form.act_arrive_our_warehouse || null,
-      est_arrive_customer: form.est_arrive_customer || null,
-      act_arrive_customer: form.act_arrive_customer || null,
-    }),
+    mutationFn: () => {
+      // Only send fields the user actually filled in — empty strings would
+      // null out existing dates. Plain JS truthy check is enough here.
+      const body: Record<string, any> = {
+        is_import: isImport,
+        origin_location: origin || null,
+      };
+      for (const f of FIELDS) {
+        if (form[f.key]) body[f.key] = form[f.key];
+      }
+      return api.patch(`/operation/projects/${projectId}`, body);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["project-timeline", projectId] });
       qc.invalidateQueries({ queryKey: ["project", projectId] });
+      setFlash({
+        kind: "ok",
+        text: "Saved. The customer can see the new dates immediately.",
+      });
     },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text:
+        e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Couldn't save timeline",
+    }),
   });
 
   return (
@@ -57,7 +70,9 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
         <div>
           <div className="font-semibold">Edit shipping timeline</div>
           <div className="text-xs muted">
-            Visible to internal staff. The customer sees the same dates on their portal.
+            Visible to internal staff. The customer sees the same dates on
+            their portal — <b>you can save just the estimate</b>, no need to
+            wait for the actual arrival.
           </div>
         </div>
         <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
@@ -65,6 +80,18 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
           Save
         </button>
       </div>
+
+      {flash && (
+        <div className={
+          flash.kind === "ok"
+            ? "mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 flex items-start gap-2"
+            : "mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2"
+        }>
+          {flash.kind === "ok" ? <CheckCircle2 size={14} className="mt-0.5" /> : <AlertCircle size={14} className="mt-0.5" />}
+          <span className="flex-1">{flash.text}</span>
+          <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
         <label className="flex items-center gap-2 text-sm">
@@ -88,6 +115,10 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
               onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
           </label>
         ))}
+      </div>
+      <div className="mt-3 text-[11px] muted">
+        Tip: blank fields are ignored on save (they don't erase existing dates).
+        Clearing a date you previously set: contact ops or use the API directly.
       </div>
     </div>
   );

@@ -188,8 +188,21 @@ async def update_project(project_id: UUID,
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    # exclude_unset alone isn't enough: the frontend often sends an explicit
+    # null for the date fields it isn't editing. Drop those nulls for date
+    # columns so we never wipe an existing date by accident. Setting
+    # is_import=False or origin_location=null is still respected (they're
+    # not in the protected set).
+    DATE_FIELDS_PROTECTED = {
+        "start_date", "target_delivery", "actual_delivery",
+        "est_ship_from_origin", "act_ship_from_origin",
+        "est_arrive_our_warehouse", "act_arrive_our_warehouse",
+        "est_arrive_customer", "act_arrive_customer",
+    }
     data = payload.model_dump(exclude_unset=True)
     for k, v in data.items():
+        if v is None and k in DATE_FIELDS_PROTECTED:
+            continue
         setattr(p, k, v)
     return {"ok": True, "id": str(p.id)}
 

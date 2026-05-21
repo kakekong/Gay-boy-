@@ -139,14 +139,21 @@ function POCard({ po }: { po: PO }) {
   });
 
   const saveEta = useMutation({
-    mutationFn: () => api.post(`/portal/supplier/po/${po.id}/eta`, {
-      est_arrive_our_warehouse: estWh || null,
-      act_ship_from_origin: actShip || null,
-      act_arrive_our_warehouse: actWh || null,
-    }),
-    onSuccess: () => {
+    mutationFn: () => {
+      // Only send fields the supplier actually filled in. Empty strings
+      // shouldn't null out existing dates, and the estimate alone is fine.
+      const body: Record<string, string> = {};
+      if (estWh) body.est_arrive_our_warehouse = estWh;
+      if (actShip) body.act_ship_from_origin = actShip;
+      if (actWh) body.act_arrive_our_warehouse = actWh;
+      return api.post(`/portal/supplier/po/${po.id}/eta`, body).then((r) => r.data);
+    },
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["portal-supplier-orders"] });
-      setFlash("Saved. The customer can see the new dates immediately.");
+      const saved = data?.est_arrive_our_warehouse ?? estWh ?? "";
+      setFlash(saved
+        ? `Saved. Customer now sees expected arrival: ${saved}.`
+        : "Saved. The customer can see the new dates immediately.");
       setErr(null);
     },
     onError: (e: any) =>
