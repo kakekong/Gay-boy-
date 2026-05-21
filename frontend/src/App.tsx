@@ -37,6 +37,7 @@ const FinancePage          = lazy(() => import("@/pages/Finance"));
 const KpiPage              = lazy(() => import("@/pages/Kpi"));
 const ExecutivePage        = lazy(() => import("@/pages/Executive"));
 const AICommandCenter      = lazy(() => import("@/pages/AICommandCenter"));
+const RoleGuidePage        = lazy(() => import("@/pages/RoleGuide"));
 
 function Protected({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.accessToken);
@@ -123,6 +124,7 @@ function MainApp() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/help" element={<HelpPage />} />
+          <Route path="/role-guide" element={<RoleGuidePage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/sales-targets" element={<SalesTargetsPage />} />
           <Route path="/audit" element={<AuditLogPage />} />
