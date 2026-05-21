@@ -1,4 +1,4 @@
-# IndustriaCRM — A Smart Office Assistant for Industrial Engineering Companies
+# Transmisi Eng — A Smart Office Assistant for Industrial Engineering Companies
 
 > Imagine if your sales, purchasing, warehouse, finance, accounting, and HR
 > teams all worked from the **same notebook**, and an AI assistant quietly
@@ -169,9 +169,15 @@ overnight and prepared a briefing.
 
 ## 📖 New here?
 
-If you've just been given an account, jump straight to **[`USER_GUIDE.md`](USER_GUIDE.md)**
-(or click **Help** in the app's sidebar once you log in). It explains every page,
-every button, and the most common day-to-day workflows in plain language.
+Three docs, pick the right one:
+
+| Doc | For who | When to read |
+|---|---|---|
+| **[`USER_GUIDE.md`](USER_GUIDE.md)** | Anyone | Full page-by-page walkthrough |
+| **[`docs/ROLE_GUIDES.md`](docs/ROLE_GUIDES.md)** | Anyone | Short playbook for your specific role with workflow diagrams (sales, purchasing, HR, admin, manager, director, customer, supplier) |
+| **[`INSTALL.md`](INSTALL.md)** | The person setting up the server | Step-by-step deployment |
+
+(or click **Help** in the app's sidebar once you log in).
 
 ---
 

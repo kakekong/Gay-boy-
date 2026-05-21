@@ -533,7 +533,7 @@ async def export_customer_csv(
         lines.append(f"# {name}")
 
     # Header
-    lines.append(_csv_row(["IndustriaCRM — Customer report"]))
+    lines.append(_csv_row(["Transmisi Eng — Customer report"]))
     lines.append(_csv_row(["Generated", today, "by", user.full_name or user.email]))
 
     # Profile

@@ -37,7 +37,7 @@ def _enforce_prod_safety() -> None:
 _enforce_prod_safety()
 
 app = FastAPI(
-    title="IndustriaCRM API",
+    title="Transmisi Eng API",
     version="0.1.0",
     description="Enterprise CRM + ERP + AI for project-based industrial engineering.",
     docs_url="/docs",

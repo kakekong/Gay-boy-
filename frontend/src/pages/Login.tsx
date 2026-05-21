@@ -44,7 +44,7 @@ export default function LoginPage() {
             <Factory size={22} />
           </div>
           <div>
-            <div className="text-xl font-semibold">IndustriaCRM</div>
+            <div className="text-xl font-semibold">Transmisi Eng</div>
             <div className="text-xs uppercase tracking-widest text-white/70">
               Project ERP · AI · WhatsApp
             </div>
@@ -73,7 +73,7 @@ export default function LoginPage() {
         </div>
 
         <div className="relative text-xs text-white/60">
-          © {new Date().getFullYear()} IndustriaCRM
+          © {new Date().getFullYear()} Transmisi Eng
         </div>
       </div>
 
@@ -88,7 +88,7 @@ export default function LoginPage() {
               <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
                 <Factory size={18} className="text-white" />
               </div>
-              <span className="font-semibold">IndustriaCRM</span>
+              <span className="font-semibold">Transmisi Eng</span>
             </div>
             <h2 className="section-title">Welcome back</h2>
             <p className="text-sm muted">Sign in to continue.</p>

@@ -117,7 +117,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Factory size={18} className="text-white" />
           </div>
           <div>
-            <div className="font-semibold text-ink-900 leading-tight">IndustriaCRM</div>
+            <div className="font-semibold text-ink-900 leading-tight">Transmisi Eng</div>
             <div className="text-[10px] uppercase tracking-wider text-ink-400">
               Project ERP · v0.1
             </div>
