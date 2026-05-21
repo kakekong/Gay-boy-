@@ -193,6 +193,8 @@ Won deals that are now jobs. Each row shows:
 ### 🛒 Purchasing
 Pipeline for buying materials: **PR → RFQ → Supplier PO → Goods Receipt → QC**.
 - 5 stage cards across the top showing counts at each stage
+- **Suppliers** table — everyone with access to this page can see the vendor list, ratings, and lead times. New suppliers are created from the **+ New supplier** button.
+- **Supplier purchase orders** + **+ New PO** — **director only**. The director is the only role who can issue a PO and link it to a specific supplier + project. This keeps the supplier⇄customer mapping inside the director's office so vendors can only see the work assigned to them.
 
 ### 🔧 Operation
 Work order board. Columns for production stages: Receiving · Warehousing ·

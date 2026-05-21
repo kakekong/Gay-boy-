@@ -86,12 +86,13 @@ class PoCreate(BaseModel):
 
 
 _purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.ADMIN)
+_director_only = require(Role.DIRECTOR)
 
 
 @router.get("/po")
 async def list_pos(
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    _u: User = Depends(_director_only),
     supplier_id: UUID | None = None,
     project_id: UUID | None = None,
 ):
@@ -119,10 +120,12 @@ async def list_pos(
 async def create_po(
     payload: PoCreate,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_purchasing_or_director),
+    _u: User = Depends(_director_only),
 ):
-    """Issue a supplier PO. **Must** reference a supplier and a project so
-    the supplier portal can show it and updates flow to the customer.
+    """Issue a supplier PO — **director only** to limit exposure of the
+    supplier⇄customer mapping. The PO must reference a supplier and a
+    project so the supplier portal can show it and updates flow to the
+    customer.
     """
     from datetime import date as date_t
 

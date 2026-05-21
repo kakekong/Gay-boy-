@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 
 const STAGES = [
   { key: "PR",  label: "Purchase Request", icon: ClipboardList, hint: "Internal request" },
@@ -26,6 +27,9 @@ interface Supplier {
 
 export default function PurchasingPage() {
   const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
+  const isDirector = me?.role === "director";
+
   const [openNew, setOpenNew] = useState(false);
   const [openPO, setOpenPO] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -36,16 +40,19 @@ export default function PurchasingPage() {
     retry: false,
   });
 
+  // PO creation + the supplier→project mapping are director-only to avoid
+  // leaking which supplier serves which customer to internal staff.
   const pos = useQuery({
     queryKey: ["supplier-pos"],
     queryFn: () => api.get("/purchasing/po").then((r) => r.data as any[]),
+    enabled: isDirector,
     retry: false,
   });
 
   const projects = useQuery({
     queryKey: ["projects-min"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data as any[]),
-    enabled: openPO,
+    enabled: openPO && isDirector,
     retry: false,
   });
 
@@ -62,9 +69,11 @@ export default function PurchasingPage() {
           <button className="btn-ghost" onClick={() => setOpenNew(true)}>
             <Plus size={15} /> New supplier
           </button>
-          <button className="btn-primary" onClick={() => setOpenPO(true)}>
-            <Plus size={15} /> New PO
-          </button>
+          {isDirector && (
+            <button className="btn-primary" onClick={() => setOpenPO(true)}>
+              <Plus size={15} /> New PO
+            </button>
+          )}
         </div>
       </div>
 
@@ -185,14 +194,16 @@ export default function PurchasingPage() {
         )}
       </div>
 
-      {/* Supplier POs */}
+      {/* Supplier POs — director-only to limit who sees the supplier⇄customer mapping */}
+      {isDirector && (
       <div className="card overflow-hidden">
         <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
           <div>
             <div className="font-semibold text-ink-900">Supplier purchase orders</div>
             <div className="text-xs muted">
-              Every PO must reference a supplier and a project. Suppliers see
-              them in their portal and update dates that flow to the customer.
+              Director-only. Every PO must reference a supplier and a project.
+              Suppliers see them in their portal and update dates that flow to
+              the customer.
             </div>
           </div>
           <div className="text-[10px] uppercase tracking-wider muted">
@@ -245,6 +256,7 @@ export default function PurchasingPage() {
           </table>
         )}
       </div>
+      )}
 
       {openNew && (
         <NewSupplierModal
