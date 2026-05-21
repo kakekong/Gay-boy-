@@ -29,23 +29,45 @@ export default function SalaryPage() {
         .then((r) => r.data as any[]),
   });
 
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["salaries"] });
+  const errMsg = (e: any) =>
+    e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? e?.message
+      ?? "Request failed";
 
   const post = useMutation({
     mutationFn: (id: string) => api.post(`/salaries/${id}/post-ledger`),
-    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ["accounts"] }); },
+    onSuccess: () => {
+      refresh(); qc.invalidateQueries({ queryKey: ["accounts"] });
+      setFlash({ kind: "ok", text: "Posted to ledger." });
+    },
+    onError: (e: any) => setFlash({ kind: "err", text: errMsg(e) }),
   });
   const reverse = useMutation({
     mutationFn: (id: string) => api.post(`/salaries/${id}/reverse-ledger`),
-    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ["accounts"] }); },
+    onSuccess: () => {
+      refresh(); qc.invalidateQueries({ queryKey: ["accounts"] });
+      setFlash({ kind: "ok", text: "Reversed." });
+    },
+    onError: (e: any) => setFlash({ kind: "err", text: errMsg(e) }),
   });
   const pay = useMutation({
     mutationFn: (id: string) => api.post(`/salaries/${id}/mark-paid`),
-    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ["accounts"] }); },
+    onSuccess: () => {
+      refresh(); qc.invalidateQueries({ queryKey: ["accounts"] });
+      setFlash({ kind: "ok", text: "Marked paid." });
+    },
+    onError: (e: any) => setFlash({ kind: "err", text: errMsg(e) }),
   });
   const del = useMutation({
     mutationFn: (id: string) => api.delete(`/salaries/${id}`),
-    onSuccess: refresh,
+    onSuccess: () => {
+      refresh();
+      setFlash({ kind: "ok", text: "Salary entry deleted." });
+    },
+    onError: (e: any) => setFlash({ kind: "err", text: errMsg(e) }),
   });
 
   // Summary across the period
@@ -61,6 +83,17 @@ export default function SalaryPage() {
 
   return (
     <div className="space-y-5">
+      {flash && (
+        <div className={clsx(
+          "rounded-xl border px-4 py-2 text-sm flex items-start gap-2",
+          flash.kind === "ok"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-red-200 bg-red-50 text-red-800",
+        )}>
+          <span className="flex-1">{flash.text}</span>
+          <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">

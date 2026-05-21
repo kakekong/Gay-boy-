@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     JWT_ACCESS_TTL_MIN: int = 15
     JWT_REFRESH_TTL_DAYS: int = 7
 
+    # Environment ("dev" seeds demo users; "prod" refuses defaults)
+    APP_ENV: str = "dev"
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 

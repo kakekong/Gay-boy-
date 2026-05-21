@@ -51,20 +51,29 @@ export default function ProjectDetailPage() {
   const [newWoCode, setNewWoCode] = useState("");
   const [newWoStage, setNewWoStage] = useState("receiving");
 
+  const onErr = (e: any) => alert(
+    e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? e?.message
+      ?? "Operation failed"
+  );
   const addWO = useMutation({
     mutationFn: () => api.post(`/operation/projects/${id}/work-orders`, {
       code: newWoCode, stage: newWoStage,
     }),
     onSuccess: () => { refresh(); setNewWoCode(""); },
+    onError: onErr,
   });
   const completeWO = useMutation({
     mutationFn: (woId: string) =>
       api.patch(`/operation/work-orders/${woId}`, null, { params: { completed: true } }),
     onSuccess: refresh,
+    onError: onErr,
   });
   const markDelivered = useMutation({
     mutationFn: (doId: string) => api.patch(`/operation/deliveries/${doId}/delivered`),
     onSuccess: refresh,
+    onError: onErr,
   });
 
   if (data.isLoading) return <div className="muted text-sm">Loading…</div>;

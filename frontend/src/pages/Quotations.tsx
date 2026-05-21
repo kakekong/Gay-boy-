@@ -32,6 +32,11 @@ export default function QuotationsPage() {
   const submit = useMutation({
     mutationFn: (id: string) => api.post(`/quotations/${id}/submit`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["quotations"] }),
+    onError: (e: any) => alert(
+      e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? "Couldn't submit quotation"
+    ),
   });
 
   return (

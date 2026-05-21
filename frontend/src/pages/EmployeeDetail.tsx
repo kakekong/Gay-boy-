@@ -74,6 +74,11 @@ export default function EmployeeDetailPage() {
       qc.invalidateQueries({ queryKey: ["user-tags", id] });
       qc.invalidateQueries({ queryKey: ["employees"] });
     },
+    onError: (e: any) => alert(
+      e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? "Failed to remove tag"
+    ),
   });
   const stats = useQuery({
     queryKey: ["employee-stats", id],

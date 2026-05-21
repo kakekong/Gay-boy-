@@ -85,6 +85,9 @@ async def ensure_schema() -> None:
 
 
 async def main() -> None:
+    from app.core.config import settings
+    is_prod = settings.APP_ENV.lower() == "prod"
+
     await ensure_schema()
     # Chart of Accounts seed
     from app.scripts.coa_seed import seed_coa
@@ -92,33 +95,47 @@ async def main() -> None:
         coa_created = await seed_coa(db)
         await db.commit()
         print(f"CoA: {coa_created} account(s) inserted.")
+
+    # Demo users — only in dev. In prod, the director creates real accounts
+    # via Admin → Users, and any stray demo accounts get deactivated.
     async with SessionLocal() as db:
-        for email, name, role in _USERS:
-            existing = await db.scalar(select(User).where(User.email == email))
-            if existing:
-                continue
-            db.add(User(email=email, full_name=name, role=role,
-                        password_hash=hash_password("demo1234"), is_active=True))
-        await db.flush()
+        if is_prod:
+            seeded_emails = [u[0] for u in _USERS]
+            stale = (await db.scalars(
+                select(User).where(User.email.in_(seeded_emails), User.is_active.is_(True))
+            )).all()
+            for u in stale:
+                u.is_active = False
+            if stale:
+                print(f"PROD: deactivated {len(stale)} demo user(s) "
+                      f"(set APP_ENV=dev if you want them).")
+        else:
+            for email, name, role in _USERS:
+                existing = await db.scalar(select(User).where(User.email == email))
+                if existing:
+                    continue
+                db.add(User(email=email, full_name=name, role=role,
+                            password_hash=hash_password("demo1234"), is_active=True))
+            await db.flush()
 
-        sales1 = await db.scalar(select(User).where(User.email == "sales1@demo.local"))
-
-        if not await db.scalar(select(Customer).limit(1)):
-            db.add_all([
-                Customer(company_name="PT Bara Kalsel", industry="mining",
-                         pic_name="Andi", phone="+628123456789",
-                         whatsapp="+628123456789", email="andi@bara.example",
-                         sales_pic_id=sales1.id if sales1 else None,
-                         stage="negotiation", payment_terms={"type": "termin"}),
-                Customer(company_name="PT Semen Sukses", industry="cement",
-                         pic_name="Ratna", whatsapp="+628199990001",
-                         sales_pic_id=sales1.id if sales1 else None,
-                         stage="quotation", payment_terms={"type": "tempo", "days": 60}),
-                Customer(company_name="PLTU Cilacap", industry="pltu",
-                         pic_name="Bambang", whatsapp="+628155551111",
-                         sales_pic_id=sales1.id if sales1 else None,
-                         stage="presentation"),
-            ])
+        if not is_prod:
+            sales1 = await db.scalar(select(User).where(User.email == "sales1@demo.local"))
+            if not await db.scalar(select(Customer).limit(1)):
+                db.add_all([
+                    Customer(company_name="PT Bara Kalsel", industry="mining",
+                             pic_name="Andi", phone="+628123456789",
+                             whatsapp="+628123456789", email="andi@bara.example",
+                             sales_pic_id=sales1.id if sales1 else None,
+                             stage="negotiation", payment_terms={"type": "termin"}),
+                    Customer(company_name="PT Semen Sukses", industry="cement",
+                             pic_name="Ratna", whatsapp="+628199990001",
+                             sales_pic_id=sales1.id if sales1 else None,
+                             stage="quotation", payment_terms={"type": "tempo", "days": 60}),
+                    Customer(company_name="PLTU Cilacap", industry="pltu",
+                             pic_name="Bambang", whatsapp="+628155551111",
+                             sales_pic_id=sales1.id if sales1 else None,
+                             stage="presentation"),
+                ])
         await db.commit()
 
     # Backfill stage-task reminders for every existing customer

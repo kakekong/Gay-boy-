@@ -177,31 +177,42 @@ async def create_po(
 
 # ─── PR / RFQ / PO stubs (kept) ──────────────────────────────────────────────
 
+# PR/RFQ/GR/QC are intentionally not implemented in this build — the
+# director-owned PO flow (POST /purchasing/po) covers the procurement
+# loop. These stubs return 501 so a caller never thinks a TODO succeeded.
+
 @router.get("/pr")
 async def list_pr(_user: User = Depends(get_current_user)):
     return []
 
 
+def _not_implemented():
+    raise HTTPException(
+        status.HTTP_501_NOT_IMPLEMENTED,
+        "Not in this release — use the director PO flow at POST /purchasing/po",
+    )
+
+
 @router.post("/pr")
-async def create_pr(_user: User = Depends(get_current_user)):
-    return {"status": "todo"}
+async def create_pr(_user: User = Depends(_director_only)):
+    _not_implemented()
 
 
 @router.post("/pr/{pr_id}/rfq")
-async def spawn_rfq(pr_id: str, _user: User = Depends(get_current_user)):
-    return {"pr_id": pr_id, "rfqs": []}
+async def spawn_rfq(pr_id: str, _user: User = Depends(_director_only)):
+    _not_implemented()
 
 
 @router.post("/rfq/{rfq_id}/po")
-async def rfq_to_po(rfq_id: str, _user: User = Depends(get_current_user)):
-    return {"rfq_id": rfq_id, "po_id": "todo"}
+async def rfq_to_po(rfq_id: str, _user: User = Depends(_director_only)):
+    _not_implemented()
 
 
 @router.post("/po/{po_id}/gr")
-async def goods_receipt(po_id: str, _user: User = Depends(get_current_user)):
-    return {"po_id": po_id, "gr_id": "todo"}
+async def goods_receipt(po_id: str, _user: User = Depends(_director_only)):
+    _not_implemented()
 
 
 @router.post("/po/{po_id}/qc")
-async def qc(po_id: str, _user: User = Depends(get_current_user)):
-    return {"po_id": po_id, "qc_id": "todo"}
+async def qc(po_id: str, _user: User = Depends(_director_only)):
+    _not_implemented()

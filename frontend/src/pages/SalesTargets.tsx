@@ -71,6 +71,11 @@ export default function SalesTargetsPage() {
   const del = useMutation({
     mutationFn: (id: string) => api.delete(`/sales-targets/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sales-targets"] }),
+    onError: (e: any) => alert(
+      e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? "Failed to delete target"
+    ),
   });
 
   const summary = (targets.data ?? []).reduce(

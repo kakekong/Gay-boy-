@@ -100,6 +100,13 @@ export default function ChatPage() {
     el.scrollTop = el.scrollHeight;
   }, [messages.data?.length, active]);
 
+  const showErr = (e: any) => alert(
+    e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? e?.message
+      ?? "Chat action failed"
+  );
+
   const send = useMutation({
     mutationFn: (body: string) =>
       api.post(`/chat/channels/${active}/messages`, { body }).then((r) => r.data as Message),
@@ -108,6 +115,7 @@ export default function ChatPage() {
       qc.invalidateQueries({ queryKey: ["chat-messages", active] });
       qc.invalidateQueries({ queryKey: ["chat-channels"] });
     },
+    onError: showErr,
   });
 
   const edit = useMutation({
@@ -117,11 +125,13 @@ export default function ChatPage() {
       setEditingId(null);
       qc.invalidateQueries({ queryKey: ["chat-messages", active] });
     },
+    onError: showErr,
   });
 
   const del = useMutation({
     mutationFn: (id: string) => api.delete(`/chat/messages/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-messages", active] }),
+    onError: showErr,
   });
 
   const [pickerMode, setPickerMode] = useState<"dm" | "group">("dm");
