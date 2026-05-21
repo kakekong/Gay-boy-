@@ -66,6 +66,8 @@ export default function AdminUsersPage() {
       }),
     enabled: formOpen,
     retry: false,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
   const suppliers = useQuery({
     queryKey: ["suppliers-min"],
@@ -78,6 +80,8 @@ export default function AdminUsersPage() {
       }),
     enabled: formOpen,
     retry: false,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   const create = useMutation({
@@ -339,21 +343,12 @@ function UserForm({
               getId={(s: Supplier) => s.id}
               getLabel={(s: Supplier) => s.name}
               emptyCta={
-                <span>
-                  No suppliers yet. Add one via{" "}
-                  <Link to="/purchasing" className="text-brand-700 hover:underline">
-                    Operations → Purchasing
-                  </Link>
-                  , or paste the supplier UUID below:
-                </span>
-              }
-              extraInput={
-                <input
-                  className="input mt-2 font-mono text-xs"
-                  placeholder="…or paste supplier UUID"
-                  value={form.linked_supplier_id}
-                  onChange={(e: any) => setForm({ ...form, linked_supplier_id: e.target.value })}
-                />
+                <Link
+                  to="/purchasing"
+                  className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+                >
+                  Open Purchasing and add a supplier first <ExternalLink size={12} />
+                </Link>
               }
             />
           </div>
