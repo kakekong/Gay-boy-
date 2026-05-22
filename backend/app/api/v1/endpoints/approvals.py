@@ -70,6 +70,18 @@ async def inbox(
     for r in rows:
         cust = customers.get(r.target_id) if r.target_type == "customer" else None
         requester = requesters.get(r.requested_by)
+        payload = dict(r.payload or {})
+        # Back-fill from_stage on legacy approvals (created via the old
+        # PATCH /customers/:id path) so the director sees what's about to
+        # change. Use the customer's CURRENT stage as the "from" since the
+        # request didn't capture it.
+        if (
+            cust is not None
+            and payload.get("changes", {}).get("stage")
+            and not payload.get("from_stage")
+        ):
+            payload["from_stage"] = cust.stage
+            payload["to_stage"] = payload["changes"]["stage"]
         out.append({
             "id": str(r.id),
             "target_type": r.target_type,
@@ -77,7 +89,7 @@ async def inbox(
             "target_label": cust.company_name if cust else None,
             "required_role": r.required_role,
             "reason": r.reason,
-            "payload": r.payload,
+            "payload": payload,
             "requested_by": str(r.requested_by),
             "requester_name": requester.full_name if requester else None,
             "created_at": r.created_at,

@@ -126,10 +126,15 @@ export default function ApprovalsPage() {
 
 function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
   const [showRaw, setShowRaw] = useState(false);
-  const isStageMove =
-    r.target_type === "customer"
-    && r.payload?.from_stage
-    && r.payload?.to_stage;
+
+  // Detect a stage move under both payload shapes:
+  // - new flow (rich): payload.from_stage + payload.to_stage + payload.narrative
+  // - legacy PATCH /customers/:id flow: payload.changes.stage only
+  const toStage =
+    (r.payload?.to_stage as string | undefined)
+    ?? (r.payload?.changes?.stage as string | undefined);
+  const fromStage = r.payload?.from_stage as string | undefined;
+  const isStageMove = r.target_type === "customer" && !!toStage;
   const narrative = (r.payload?.narrative ?? "") as string;
 
   function download(id: string, filename: string) {
@@ -176,22 +181,32 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                 </Link>
               )}
               <div className="flex items-center gap-2 flex-wrap text-sm">
-                <span className="muted">Move from</span>
-                <span className="chip bg-ink-100 text-ink-700 capitalize">
-                  {String(r.payload.from_stage).replace(/_/g, " ")}
-                </span>
-                <ChevronRight size={14} className="text-ink-400" />
-                <span className="chip bg-brand-50 text-brand-700 capitalize">
-                  {String(r.payload.to_stage).replace(/_/g, " ")}
+                {fromStage ? (
+                  <>
+                    <span className="muted">Move from</span>
+                    <span className="chip bg-ink-100 text-ink-700 capitalize">
+                      {fromStage.replace(/_/g, " ")}
+                    </span>
+                    <ChevronRight size={14} className="text-ink-400" />
+                  </>
+                ) : (
+                  <span className="muted">Move to</span>
+                )}
+                <span className="chip bg-brand-50 text-brand-700 capitalize font-semibold">
+                  {String(toStage).replace(/_/g, " ")}
                 </span>
               </div>
-              {narrative && (
+              {narrative ? (
                 <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-sm whitespace-pre-wrap">
                   <div className="text-[10px] uppercase tracking-wider muted mb-1">
                     Reason from requester
                   </div>
                   {narrative}
                 </div>
+              ) : (
+                r.reason && (
+                  <div className="text-xs muted italic">{r.reason}</div>
+                )
               )}
             </div>
           ) : (
