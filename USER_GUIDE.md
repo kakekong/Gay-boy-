@@ -181,9 +181,12 @@ Internal team chat — direct messages with any colleague.
 Inbox of things waiting for your "yes":
 - Quotation discount approvals (5–15% needs Manager; > 15% needs Director)
 - Data changes made by Admin
+- **Every CRM stage transition** (lead → presentation → … → won) requested by sales, manager, or admin — director only
 
 Each card shows the request, who asked, and the proposed changes. Click
-**Approve** or **Reject**. The requester is notified automatically.
+**Approve** or **Reject**. The requester is notified automatically. When
+the director approves a stage move, the new stage's checklist auto-spawns
+on the customer page.
 
 ### 💼 Projects
 Won deals that are now jobs. Each row shows:
@@ -284,6 +287,21 @@ What a vendor sees when they log into your system.
   - An amber banner warns if drawing or ETA is missing.
 - Every PO must be linked to a Supplier **and** a Project before the supplier can set dates. If the PO isn't linked yet, the supplier sees a warning to contact the buyer.
 
+### 📁 All files *(director only)*
+Audit view of every file ever uploaded — drawings from suppliers,
+invoices from customers, signed POs, payment proofs, anything. Search by
+filename or description, filter by what record it belongs to (customer /
+quotation / project / supplier PO). Each row shows uploader name,
+timestamp, and a one-click download. Use this whenever you want to spot-
+check what's been shared, or to find a file when someone says "I
+uploaded it last week, where is it?"
+
+### 🗺️ Role guide
+A clickable, interactive version of the per-role playbook in
+[`docs/ROLE_GUIDES.md`](docs/ROLE_GUIDES.md). Defaults to your role.
+Each section has: daily rhythm, a step-by-step workflow, a button
+reference table, and the rules you need to know.
+
 ### 📖 Help
 This guide, rendered inline so you never have to leave the app.
 
@@ -296,7 +314,7 @@ This guide, rendered inline so you never have to leave the app.
 2. Fill company name, industry, PIC name, phone/WhatsApp, email, address
 3. Save → you become the **Sales PIC** automatically (if you're sales)
 4. Open the customer → log a **call / presentation / technical meeting** activity to remember what you discussed
-5. As you progress, **drag the card to the next stage** on the Pipeline view
+5. As you progress, **click the next stage** on the Deal pipeline stepper (or **Advance to …**). The director will get an approval request; once approved, the new stage's checklist appears automatically.
 
 ### B) Sending a quotation
 1. On the customer page (or Quotations page), click **+ New quotation**
@@ -372,6 +390,9 @@ This guide, rendered inline so you never have to leave the app.
 | KPI | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Executive Dashboard | — | — | — | ✅ | ✅ |
 | AI Command Center | ✅ | ✅ | ✅ | ✅ | ✅ |
+| All files (audit) | — | — | — | — | ✅ |
+| Issue Supplier PO | — | — | — | — | ✅ |
+| Approve stage move | — | — | — | — | ✅ |
 
 ---
 
@@ -400,11 +421,13 @@ Overdue checklist items appear in the **Notifications bell** (top-right) as red 
 ### How the stage stepper works
 1. Open a customer.
 2. The **Deal pipeline** card shows every stage as a chip; current is blue, completed are green, upcoming are gray.
-3. Click any chip to move the deal there — or use **Advance to …** for the next-in-sequence move.
-4. The **Stage checklist** below auto-reloads with the new stage's required tasks. Existing tasks for old stages stay (they don't get deleted), so nothing is lost.
-5. The **What to do in this stage** card gives stage-aware shortcuts (e.g. "Open Purchasing" when you're at the purchasing stage).
-6. Tick checklist circles as you finish each task. Add a note or change the due date with **+ Note / change due**.
-7. To skip past stages (e.g. straight from PO to Delivery for a fast-track project), just click the destination stage — no validation blocks you.
+3. Click any chip to **request** a move to that stage — or use **Advance to …** for the next-in-sequence move.
+4. **Every stage move needs the director's sign-off.** When you (sales, manager, admin) click a stage, an amber banner says *"Stage move to '<stage>' sent to the director for approval"* and the stage stays put until the director clicks Approve in **Approvals**.
+   - Director moves apply instantly with a green *"Moved to …"* banner.
+5. Once the director approves, the **Stage checklist** auto-spawns the new stage's required tasks. Existing tasks for old stages stay (they don't get deleted), so nothing is lost.
+6. The **What to do in this stage** card gives stage-aware shortcuts (e.g. "Open Purchasing" when you're at the purchasing stage).
+7. Tick checklist circles as you finish each task. Add a note or change the due date with **+ Note / change due**.
+8. Need to skip stages (e.g. straight from PO to Delivery for a fast-track project)? Just click the destination — same approval flow applies.
 | Lost | Didn't win this one |
 
 ### Discount tier rules

@@ -56,15 +56,18 @@ flowchart TD
     B --> C{Stage = Lead}
     C --> D[Tick: First contact done]
     C --> E[Tick: Qualify need]
-    E --> F[Advance to Presentation]
-    F --> G[Send company deck]
-    G --> H[Advance to Quotation]
-    H --> I[+ New quotation]
+    E --> F[Request Advance to Presentation]
+    F --> X{Director approves?}
+    X -->|yes| F2[Stage moves]
+    F2 --> G[Send company deck]
+    G --> H[Request Advance to Quotation]
+    H --> X2{Director approves?}
+    X2 -->|yes| I[+ New quotation]
     I -->|discount ≤5%| J[Auto-approved → Send]
     I -->|discount 5–15%| K[Manager approves]
     I -->|discount >15%| L[Director approves]
     J & K & L --> M[Customer accepts]
-    M --> N[Mark deal Won]
+    M --> N[Request Mark deal Won]
     N --> O[Director takes over for PO → supplier]
 ```
 
@@ -72,7 +75,7 @@ flowchart TD
 | Page | Button | What it does |
 |---|---|---|
 | Customers | **+ New customer** | Add a new company |
-| Customer page | **Advance to …** | Move the deal one stage forward |
+| Customer page | **Advance to …** | Request the deal move one stage forward (director approves) |
 | Customer page | **Log activity** | Record a call or WhatsApp |
 | Customer page | **AI suggest** | Get a Bahasa Indonesia follow-up |
 | Customer page | **Stage checklist circle** | Tick required actions off |
@@ -82,6 +85,7 @@ flowchart TD
 ### Rules
 - You can only edit customers assigned to you.
 - Discounts > 5% need approval before you can send.
+- **Every stage transition needs the director's approval.** When you click "Advance to …", an amber banner says *"sent to the director for approval"* — the move applies once they click Approve.
 - Overdue stage tasks light up the bell and the calendar in red.
 
 ---
@@ -213,6 +217,7 @@ flowchart TD
 ### Rules
 - You can approve discounts up to 15% and "data change" requests from
   admins. Anything bigger waits for the director.
+- **Stage transitions (lead → presentation → … → won) need the director, not you.** Your own stage moves on customers also go through the director — no exception for managers.
 
 ---
 
@@ -228,6 +233,7 @@ flowchart TD
     A[Monday morning] --> B[Executive Dashboard]
     B --> C[Read AI Recommendations]
     D[Approvals] --> E[Big discounts >15%]
+    D --> E2[Stage moves from sales/manager/admin]
     F[Won deal needs material] --> G[Purchasing page]
     G --> H[+ New PO]
     H --> I[Pick supplier + project]
@@ -237,22 +243,28 @@ flowchart TD
     M --> N[Post each row to ledger]
     N --> O[Mark paid when bank transfer done]
     P[Admin → Users] --> Q[Hire / fire / reset password]
+    R[Spot-check uploads] --> S[All files page]
 ```
 
 ### Buttons you'll touch
 | Page | Button | What it does |
 |---|---|---|
+| Approvals | **Approve / Reject** | Sign off on every stage move + discount + data change |
 | Purchasing | **+ New PO** *(director-only)* | Link a supplier to a project |
+| All files | (search / filter / download) | Audit every file in the system |
 | Salary | **Post to ledger**, **Mark paid** | Finalize payroll |
 | Admin → Users | **+ New user** | Create any account, any role |
 | Finance → Payment verification | **Verify / Reject** | Settle customer payments |
-| Approvals | **Approve / Reject** | Final word on big changes |
 | Executive Dashboard | **AI Recommendations** | Upsell ideas & supplier switches |
 
 ### Rules
 - You are the **only role** that can issue a PO and choose which
   supplier serves which project. This keeps the customer↔supplier
   mapping private.
+- You are the **only role** that can approve a CRM stage transition.
+  Every "Advance to …" by sales/manager/admin shows up in Approvals
+  as a stage-move request — the deal doesn't advance until you click
+  Approve.
 - Mark-paid + post-to-ledger are irreversible-feeling — reverse uses a
   matching reversal entry, never a hard delete.
 
