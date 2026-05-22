@@ -116,9 +116,15 @@ async def apply_to_target(
         c = await db.get(Customer, req.target_id)
         if c and approve and req.payload and "changes" in req.payload:
             changes = req.payload["changes"]
+            prev_stage = c.stage
             for k, v in changes.items():
                 if hasattr(c, k):
                     setattr(c, k, v)
             applied["applied_changes"] = list(changes.keys())
+            # If the approval included a stage move, kick off that stage's
+            # checklist now — same behaviour as a direct director edit.
+            if "stage" in changes and changes["stage"] != prev_stage:
+                from app.core.stage_tasks import ensure_stage_tasks
+                await ensure_stage_tasks(db, c, changes["stage"])
     # other target_types: no automatic propagation (yet)
     return applied

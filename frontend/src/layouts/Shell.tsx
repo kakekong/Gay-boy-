@@ -63,6 +63,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/ai", label: "AI Command", icon: BrainCircuit, accent: true },
       { to: "/audit", label: "Audit log", icon: Shield,
         roles: ["admin", "director"] },
+      { to: "/attachments", label: "All files", icon: FileText,
+        roles: ["director"] },
       { to: "/role-guide", label: "Role guide", icon: Map },
       { to: "/help", label: "Help", icon: HelpCircle },
     ],

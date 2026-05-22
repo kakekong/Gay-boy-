@@ -107,7 +107,13 @@ async def update_customer(
     rule = evaluate_data_change(Role(user.role))
     changes = payload.model_dump(exclude_unset=True)
 
-    if rule.required_role is None:
+    # Stage transitions are sensitive — every move along the pipeline needs
+    # the director to sign off, regardless of role. Director can still
+    # move freely.
+    stage_change = "stage" in changes and changes["stage"] != obj.stage
+    needs_director_for_stage = stage_change and Role(user.role) != Role.DIRECTOR
+
+    if rule.required_role is None and not needs_director_for_stage:
         before = {k: getattr(obj, k) for k in changes.keys()}
         prev_stage = obj.stage
         for k, v in changes.items():
@@ -119,14 +125,19 @@ async def update_customer(
             await ensure_stage_tasks(db, obj, changes["stage"])
         return obj
 
-    # admin role -> needs manager approval; record request, do not mutate
+    # Either a sensitive data change (admin role) or a stage transition.
+    required_role = Role.DIRECTOR if needs_director_for_stage else rule.required_role
+    reason = (
+        f"Stage move {obj.stage} → {changes['stage']} needs director approval"
+        if needs_director_for_stage else rule.reason
+    )
     await request_approval(
         db,
         target_type="customer",
         target_id=obj.id,
         requested_by=user.id,
-        required_role=rule.required_role,
-        reason=rule.reason,
+        required_role=required_role,
+        reason=reason,
         payload={"changes": changes},
     )
     raise HTTPException(status.HTTP_202_ACCEPTED, "Change requested; awaiting approval")

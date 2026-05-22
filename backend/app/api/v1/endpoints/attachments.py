@@ -75,6 +75,31 @@ async def list_attachments(
     return [await _to_out(db, a) for a in rows]
 
 
+@router.get("/all")
+async def list_all_attachments(
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+    owner_type: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """Director-only: every attachment in the system. Useful for auditing
+    drawings/invoices/proofs uploaded by sales, suppliers, customers."""
+    from app.core.permissions import Role
+    if Role(me.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Director only")
+    stmt = select(Attachment).order_by(Attachment.created_at.desc()).limit(limit)
+    if owner_type:
+        stmt = stmt.where(Attachment.owner_type == owner_type)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(
+            (Attachment.filename.ilike(like)) | (Attachment.description.ilike(like))
+        )
+    rows = (await db.scalars(stmt)).all()
+    return [await _to_out(db, a) for a in rows]
+
+
 @router.post("", status_code=201)
 async def upload_attachment(
     owner_type: str = Form(...),

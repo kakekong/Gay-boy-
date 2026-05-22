@@ -118,14 +118,30 @@ export default function CustomerDetailPage() {
       qc.invalidateQueries({ queryKey: ["calendar-events"] });
     },
   });
+  const [stageFlash, setStageFlash] = useState<{ kind: "ok" | "wait" | "err"; text: string } | null>(null);
   const moveStage = useMutation({
     mutationFn: (stage: string) => api.patch(`/customers/${id}`, { stage }),
-    onSuccess: () => {
+    onSuccess: (r: any, stage) => {
       qc.invalidateQueries({ queryKey: ["customer", id] });
       qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["notifications"] });
+      // 202 = approval requested. The error envelope is still in the body.
+      if (r?.status === 202) {
+        setStageFlash({
+          kind: "wait",
+          text: `Stage move to "${stage.replace(/_/g, " ")}" sent to the director for approval.`,
+        });
+      } else {
+        setStageFlash({ kind: "ok", text: `Moved to ${stage.replace(/_/g, " ")}.` });
+      }
     },
+    onError: (e: any) => setStageFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? "Failed to move stage",
+    }),
   });
 
   function exportCsv() {
@@ -331,6 +347,20 @@ export default function CustomerDetailPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {stageFlash && (
+        <div className={clsx(
+          "rounded-xl border px-4 py-2 text-sm flex items-start gap-2",
+          stageFlash.kind === "ok"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : stageFlash.kind === "wait"
+            ? "border-amber-200 bg-amber-50 text-amber-800"
+            : "border-red-200 bg-red-50 text-red-800",
+        )}>
+          <span className="flex-1">{stageFlash.text}</span>
+          <button onClick={() => setStageFlash(null)} className="opacity-60 hover:opacity-100">×</button>
         </div>
       )}
 
