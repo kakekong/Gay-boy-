@@ -9,6 +9,8 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.permissions import Role, require
 from app.models.approval import ApprovalRequest, ApprovalStatus
+from app.models.attachment import Attachment
+from app.models.crm import Customer
 from app.models.user import User
 
 router = APIRouter()
@@ -26,19 +28,62 @@ async def inbox(
         # manager sees manager-level approvals; director sees all
         stmt = stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
     rows = (await db.scalars(stmt.order_by(ApprovalRequest.created_at.asc()))).all()
-    return [
-        {
+    if not rows:
+        return []
+
+    # Bulk-load target customers (most approvals are customer stage moves)
+    cust_ids = {r.target_id for r in rows if r.target_type == "customer"}
+    customers: dict[UUID, Customer] = {}
+    if cust_ids:
+        crows = (await db.scalars(
+            select(Customer).where(Customer.id.in_(cust_ids))
+        )).all()
+        customers = {c.id: c for c in crows}
+
+    # Bulk-load requester names
+    requester_ids = {r.requested_by for r in rows}
+    requesters: dict[UUID, User] = {}
+    if requester_ids:
+        urows = (await db.scalars(
+            select(User).where(User.id.in_(requester_ids))
+        )).all()
+        requesters = {u.id: u for u in urows}
+
+    # Bulk-load supporting attachments tied to these requests
+    att_map: dict[UUID, list[dict]] = {}
+    arows = (await db.scalars(
+        select(Attachment).where(
+            Attachment.owner_type == "approval_request",
+            Attachment.owner_id.in_([r.id for r in rows]),
+        ).order_by(Attachment.created_at.asc())
+    )).all()
+    for a in arows:
+        att_map.setdefault(a.owner_id, []).append({
+            "id": str(a.id),
+            "filename": a.filename,
+            "size": a.size,
+            "content_type": a.content_type,
+            "uploaded_at": a.created_at,
+        })
+
+    out = []
+    for r in rows:
+        cust = customers.get(r.target_id) if r.target_type == "customer" else None
+        requester = requesters.get(r.requested_by)
+        out.append({
             "id": str(r.id),
             "target_type": r.target_type,
             "target_id": str(r.target_id),
+            "target_label": cust.company_name if cust else None,
             "required_role": r.required_role,
             "reason": r.reason,
             "payload": r.payload,
             "requested_by": str(r.requested_by),
+            "requester_name": requester.full_name if requester else None,
             "created_at": r.created_at,
-        }
-        for r in rows
-    ]
+            "attachments": att_map.get(r.id, []),
+        })
+    return out
 
 
 @router.post("/{req_id}/approve")

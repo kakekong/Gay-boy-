@@ -119,22 +119,17 @@ export default function CustomerDetailPage() {
     },
   });
   const [stageFlash, setStageFlash] = useState<{ kind: "ok" | "wait" | "err"; text: string } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  // Director moves apply instantly with the direct PATCH; everyone else
+  // opens the StageMoveRequestModal to provide reason + files.
   const moveStage = useMutation({
     mutationFn: (stage: string) => api.patch(`/customers/${id}`, { stage }),
-    onSuccess: (r: any, stage) => {
+    onSuccess: (_r: any, stage) => {
       qc.invalidateQueries({ queryKey: ["customer", id] });
       qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["notifications"] });
-      // 202 = approval requested. The error envelope is still in the body.
-      if (r?.status === 202) {
-        setStageFlash({
-          kind: "wait",
-          text: `Stage move to "${stage.replace(/_/g, " ")}" sent to the director for approval.`,
-        });
-      } else {
-        setStageFlash({ kind: "ok", text: `Moved to ${stage.replace(/_/g, " ")}.` });
-      }
+      setStageFlash({ kind: "ok", text: `Moved to ${stage.replace(/_/g, " ")}.` });
     },
     onError: (e: any) => setStageFlash({
       kind: "err",
@@ -143,6 +138,14 @@ export default function CustomerDetailPage() {
         ?? "Failed to move stage",
     }),
   });
+  const isDirector = me?.role === "director";
+  const onStagePicked = (stage: string) => {
+    if (isDirector) {
+      moveStage.mutate(stage);
+    } else {
+      setMoveTarget(stage);
+    }
+  };
 
   function exportCsv() {
     api.get(`/customers/${id}/export.csv`, { responseType: "blob" }).then((r) => {
@@ -367,7 +370,7 @@ export default function CustomerDetailPage() {
       {/* Stage stepper — click any stage to move the customer there */}
       <StageStepper
         current={c.stage}
-        onMove={(s) => moveStage.mutate(s)}
+        onMove={(s) => onStagePicked(s)}
         busy={moveStage.isPending}
       />
 
@@ -581,6 +584,26 @@ export default function CustomerDetailPage() {
       >
         <LogActivityForm customerId={id!} onClose={() => setOpenLog(false)} />
       </Modal>
+
+      {moveTarget && (
+        <StageMoveRequestModal
+          customerId={id!}
+          customerName={c.company_name}
+          fromStage={c.stage}
+          toStage={moveTarget}
+          onClose={() => setMoveTarget(null)}
+          onSubmitted={(filesAttached) => {
+            setMoveTarget(null);
+            qc.invalidateQueries({ queryKey: ["notifications"] });
+            setStageFlash({
+              kind: "wait",
+              text: filesAttached
+                ? `Request sent to the director with ${filesAttached} file(s).`
+                : "Request sent to the director.",
+            });
+          }}
+        />
+      )}
 
       <Modal
         open={openQuote}
@@ -1117,6 +1140,144 @@ function StageActions({ stage, customerId }: { stage: string; customerId: string
         Reference for customer {customerId.slice(0, 8)} — open the module above
         to take stage-specific actions.
       </p>
+    </div>
+  );
+}
+
+function StageMoveRequestModal({
+  customerId, customerName, fromStage, toStage, onClose, onSubmitted,
+}: {
+  customerId: string;
+  customerName: string;
+  fromStage: string;
+  toStage: string;
+  onClose: () => void;
+  onSubmitted: (filesAttached: number) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = useMutation({
+    mutationFn: () => {
+      const form = new FormData();
+      form.append("target_stage", toStage);
+      form.append("reason", reason.trim());
+      files.forEach((f) => form.append("files", f));
+      return api.post(
+        `/customers/${customerId}/request-stage-move`,
+        form,
+        { headers: { "Content-Type": "multipart/form-data" } },
+      ).then((r) => r.data);
+    },
+    onSuccess: (data: any) => {
+      onSubmitted(data?.files_attached ?? 0);
+    },
+    onError: (e: any) =>
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Couldn't submit request"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+        <header className="px-5 py-4 border-b border-ink-100">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <ListChecks size={17} />
+            Request stage move
+          </h2>
+          <p className="text-sm muted mt-1">
+            <span className="font-medium text-ink-900">{customerName}</span>
+            <span className="muted"> · </span>
+            <span className="chip bg-ink-100 text-ink-700 capitalize">{fromStage.replace(/_/g, " ")}</span>
+            <ChevronRight size={12} className="inline -mt-0.5 mx-0.5 text-ink-400" />
+            <span className="chip bg-brand-50 text-brand-700 capitalize">{toStage.replace(/_/g, " ")}</span>
+          </p>
+          <p className="text-xs muted mt-2">
+            The director will see this request in their Approvals inbox. They
+            need to click Approve before the stage actually moves.
+          </p>
+        </header>
+
+        <form
+          onSubmit={(e) => { e.preventDefault(); setErr(null); submit.mutate(); }}
+          className="flex-1 overflow-auto p-5 space-y-3"
+        >
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">
+              Why this move? *
+            </span>
+            <textarea
+              required
+              rows={4}
+              className="input"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={
+                toStage === "po"
+                  ? "Customer signed the PO. PO number, amount, terms attached."
+                  : toStage === "negotiation"
+                  ? "Customer wants 10% off. I think 7% is defensible — see comparison attached."
+                  : toStage === "quotation"
+                  ? "Tech spec finalized. Sending the quote at IDR 850M, 30-day terms."
+                  : `Tell the director what's pushing this deal into "${toStage.replace(/_/g, " ")}" — be specific.`
+              }
+            />
+          </label>
+
+          <div>
+            <span className="block text-xs font-medium text-ink-600 mb-1">
+              Supporting files (optional)
+            </span>
+            <input
+              type="file"
+              multiple
+              className="text-sm"
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+            />
+            {files.length > 0 && (
+              <ul className="mt-2 text-xs space-y-1">
+                {files.map((f, i) => (
+                  <li key={i} className="flex items-center justify-between rounded-md bg-ink-50 border border-ink-100 px-2 py-1">
+                    <span className="truncate flex-1">{f.name}</span>
+                    <span className="muted tabular-nums">{(f.size / 1024).toFixed(1)} KB</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="text-[11px] muted mt-1">
+              Attach signed POs, PDFs, drawings, anything that helps the
+              director decide. Max 20 MB per file.
+            </div>
+          </div>
+
+          {err && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <span>{err}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={submit.isPending || !reason.trim()}
+            >
+              {submit.isPending
+                ? <Loader2 size={14} className="animate-spin" />
+                : <ChevronRight size={14} />}
+              Send to director
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

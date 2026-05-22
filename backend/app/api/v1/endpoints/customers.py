@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
-from uuid import UUID
+from pathlib import Path
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -478,6 +479,118 @@ async def reopen_stage_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
     r.status = "pending"
     return {"id": str(r.id), "status": r.status, "kind": k}
+
+
+# ─── Stage-move request (with reason + supporting files) ─────────────────────
+
+
+@router.post("/{customer_id}/request-stage-move", status_code=201)
+async def request_stage_move(
+    customer_id: UUID,
+    target_stage: str = Form(...),
+    reason: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Sales/manager/admin requests a stage move with a written reason and
+    optional supporting files. Director sees all of this in /approvals.
+
+    Director themself short-circuits — direct stage moves still go through
+    PATCH /customers/:id.
+    """
+    from app.core.config import settings
+    from app.models.attachment import Attachment
+
+    obj = await db.get(Customer, customer_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and obj.sales_pic_id != user.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Sales can only request moves on own customers"
+        )
+    if not reason.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Reason is required")
+    if target_stage == obj.stage:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Customer is already in stage '{target_stage}'",
+        )
+    # If the requester is the director, apply directly — no approval queue.
+    if Role(user.role) == Role.DIRECTOR:
+        prev_stage = obj.stage
+        obj.stage = target_stage
+        obj.updated_by = user.id
+        if prev_stage != target_stage:
+            await ensure_stage_tasks(db, obj, target_stage)
+        await audit_record(
+            db, actor=user, action="update", entity="customer",
+            entity_id=obj.id,
+            before={"stage": prev_stage},
+            after={"stage": target_stage, "reason": reason},
+        )
+        return {"applied": True, "stage": target_stage}
+
+    # Otherwise create an approval request for the director.
+    req = await request_approval(
+        db,
+        target_type="customer",
+        target_id=obj.id,
+        requested_by=user.id,
+        required_role=Role.DIRECTOR,
+        reason=f"Move {obj.stage} → {target_stage}: {reason.strip()}",
+        payload={
+            "changes": {"stage": target_stage},
+            "from_stage": obj.stage,
+            "to_stage": target_stage,
+            "narrative": reason.strip(),
+        },
+    )
+
+    # Save supporting files (if any) tied to this request.
+    saved_count = 0
+    if files:
+        now = datetime.now(UTC)
+        root = (
+            Path(settings.STORAGE_LOCAL_DIR) / "attachments"
+            / str(now.year) / f"{now.month:02d}"
+        )
+        root.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            if not f.filename:
+                continue
+            data = await f.read()
+            if not data:
+                continue
+            if len(data) > 20 * 1024 * 1024:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    f"{f.filename}: max 20 MB per file",
+                )
+            safe = "".join(
+                ch if (ch.isalnum() or ch in "._- ") else "_"
+                for ch in f.filename
+            )[:200]
+            path = root / f"{uuid4().hex}_{safe}"
+            path.write_bytes(data)
+            db.add(Attachment(
+                owner_type="approval_request",
+                owner_id=req.id,
+                filename=safe,
+                content_type=f.content_type,
+                size=len(data),
+                storage_path=str(path),
+                description=f"[stage-move] {target_stage}",
+                uploaded_by=user.id,
+            ))
+            saved_count += 1
+        await db.flush()
+
+    return {
+        "request_id": str(req.id),
+        "target_stage": target_stage,
+        "files_attached": saved_count,
+    }
 
 
 @router.get("/{customer_id}/summary")
