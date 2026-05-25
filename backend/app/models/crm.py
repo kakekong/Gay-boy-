@@ -33,6 +33,24 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
 
+class CustomerContact(Base, UUIDPK, TimestampMixin):
+    """Additional PICs at a customer company. The Customer row itself still
+    carries the primary PIC; this table holds everyone else."""
+    __tablename__ = "customer_contacts"
+
+    customer_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("customers.id", ondelete="CASCADE"),
+        index=True, nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[str | None] = mapped_column(String(120))
+    phone: Mapped[str | None] = mapped_column(String(40))
+    whatsapp: Mapped[str | None] = mapped_column(String(40))
+    email: Mapped[str | None] = mapped_column(String(255))
+    is_primary: Mapped[bool] = mapped_column(default=False, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class Activity(Base, UUIDPK, TimestampMixin):
     __tablename__ = "activities"
 

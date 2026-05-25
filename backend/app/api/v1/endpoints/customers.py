@@ -18,7 +18,7 @@ from app.core.stage_tasks import (
     stage_tasks_for,
     stage_task_kind,
 )
-from app.models.crm import Activity, Customer, Reminder
+from app.models.crm import Activity, Customer, CustomerContact, Reminder
 from app.models.finance import Invoice, Payment
 from app.models.operation import Project
 from app.models.quotation import Quotation
@@ -152,6 +152,122 @@ class ActivityIn(BaseModel):
     notes: str | None = None
     occurred_at: datetime | None = None
     meta: dict = {}
+
+
+# ─── Additional contacts (multiple PICs per customer) ───────────────────────
+
+
+class ContactIn(BaseModel):
+    name: str
+    position: str | None = None
+    phone: str | None = None
+    whatsapp: str | None = None
+    email: str | None = None
+    is_primary: bool = False
+    notes: str | None = None
+
+
+def _contact_out(c: CustomerContact) -> dict:
+    return {
+        "id": str(c.id),
+        "customer_id": str(c.customer_id),
+        "name": c.name,
+        "position": c.position,
+        "phone": c.phone,
+        "whatsapp": c.whatsapp,
+        "email": c.email,
+        "is_primary": c.is_primary,
+        "notes": c.notes,
+        "created_at": c.created_at,
+    }
+
+
+@router.get("/{customer_id}/contacts")
+async def list_contacts(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    rows = (await db.scalars(
+        select(CustomerContact)
+        .where(CustomerContact.customer_id == customer_id)
+        .order_by(CustomerContact.is_primary.desc(), CustomerContact.created_at.asc())
+    )).all()
+    return [_contact_out(x) for x in rows]
+
+
+@router.post("/{customer_id}/contacts", status_code=201)
+async def create_contact(
+    customer_id: UUID,
+    payload: ContactIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    if not payload.name.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name required")
+    contact = CustomerContact(
+        customer_id=customer_id,
+        name=payload.name.strip(),
+        position=payload.position,
+        phone=payload.phone,
+        whatsapp=payload.whatsapp,
+        email=payload.email,
+        is_primary=payload.is_primary,
+        notes=payload.notes,
+    )
+    db.add(contact)
+    await db.flush()
+    return _contact_out(contact)
+
+
+@router.patch("/{customer_id}/contacts/{contact_id}")
+async def update_contact(
+    customer_id: UUID,
+    contact_id: UUID,
+    payload: ContactIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    contact = await db.get(CustomerContact, contact_id)
+    if not contact or contact.customer_id != customer_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(contact, k, v)
+    return _contact_out(contact)
+
+
+@router.delete("/{customer_id}/contacts/{contact_id}", status_code=204)
+async def delete_contact(
+    customer_id: UUID,
+    contact_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    contact = await db.get(CustomerContact, contact_id)
+    if not contact or contact.customer_id != customer_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+    await db.delete(contact)
+    return None
 
 
 @router.get("/{customer_id}/activities")

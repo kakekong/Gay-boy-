@@ -352,14 +352,37 @@ async def update_user(
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(
     user_id: UUID,
+    hard: bool = False,
     db: AsyncSession = Depends(get_db),
     me: User = Depends(_director),
 ):
+    """Soft-disable by default. Pass ?hard=true for a permanent delete
+    (keeps audit log entries via SET NULL FK; refuses if the user is
+    referenced anywhere we can't safely null out)."""
     if user_id == me.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot delete yourself")
     u = await db.get(User, user_id)
     if not u:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    # Soft-disable rather than DELETE — keeps audit references intact
-    u.is_active = False
+    if not hard:
+        u.is_active = False
+        return None
+    # Hard delete: explicitly NULL the cached author/owner columns first
+    # so we never hit a NOT NULL FK constraint. Tables that ON DELETE
+    # SET NULL or CASCADE handle themselves at DB level.
+    from app.models.crm import Customer
+    from app.models.quotation import Quotation
+    for col, model in [
+        (Customer.sales_pic_id, Customer),
+        (Customer.created_by,   Customer),
+        (Customer.updated_by,   Customer),
+        (Quotation.sales_pic_id, Quotation),
+        (Quotation.created_by,   Quotation),
+        (Quotation.updated_by,   Quotation),
+    ]:
+        rows = (await db.scalars(select(model).where(col == user_id))).all()
+        for r in rows:
+            setattr(r, col.key, None)
+    await db.flush()
+    await db.delete(u)
     return None

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import Role
 from app.models.crm import Customer
 from app.models.finance import Invoice
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
@@ -22,10 +23,18 @@ router = APIRouter()
 
 @router.get("/projects")
 async def list_projects(db: AsyncSession = Depends(get_db),
-                        _user: User = Depends(get_current_user)):
-    rows = (await db.scalars(
-        select(Project).where(Project.is_deleted.is_(False)).order_by(Project.created_at.desc())
-    )).all()
+                        user: User = Depends(get_current_user)):
+    stmt = (
+        select(Project)
+        .where(Project.is_deleted.is_(False))
+        .order_by(Project.created_at.desc())
+    )
+    # Sales only sees projects belonging to their own customers
+    if Role(user.role) == Role.SALES:
+        stmt = stmt.join(Customer, Project.customer_id == Customer.id).where(
+            Customer.sales_pic_id == user.id
+        )
+    rows = (await db.scalars(stmt)).all()
     return [
         {
             "id": str(p.id), "code": p.code, "customer_id": str(p.customer_id),
@@ -39,12 +48,16 @@ async def list_projects(db: AsyncSession = Depends(get_db),
 @router.get("/projects/{project_id}")
 async def get_project(project_id: UUID,
                       db: AsyncSession = Depends(get_db),
-                      _user: User = Depends(get_current_user)):
+                      user: User = Depends(get_current_user)):
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     customer = await db.get(Customer, p.customer_id) if p.customer_id else None
     quotation = await db.get(Quotation, p.quotation_id) if p.quotation_id else None
+    if Role(user.role) == Role.SALES and (
+        not customer or customer.sales_pic_id != user.id
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
     return {
         "id": str(p.id), "code": p.code, "status": p.status,
         "po_number": p.po_number, "po_date": p.po_date,

@@ -25,5 +25,7 @@ tenacity==9.0.0
 pdfminer.six==20240706
 pillow==10.4.0
 pytesseract==0.3.13
+reportlab==4.2.5
+openpyxl==3.1.5
 pytest==8.3.3
 pytest-asyncio==0.24.0

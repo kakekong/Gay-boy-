@@ -26,6 +26,25 @@ const STATUS_CHIP: Record<string, string> = {
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
+function downloadExport(quoteId: string, quoteNumber: string, kind: "pdf" | "xlsx") {
+  api.get(`/quotations/${quoteId}/export.${kind}`, { responseType: "blob" })
+    .then((r) => {
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `quotation-${quoteNumber}.${kind}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    })
+    .catch((e) => alert(
+      e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? "Download failed"
+    ));
+}
+
 export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -200,6 +219,20 @@ export default function QuotationDetailPage() {
                 </button>
               </>
             )}
+            <button
+              className="btn-ghost"
+              onClick={() => downloadExport(Q.id, Q.number, "pdf")}
+              title="Download as PDF"
+            >
+              <FileText size={15} /> PDF
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={() => downloadExport(Q.id, Q.number, "xlsx")}
+              title="Download as Excel"
+            >
+              <FileText size={15} /> Excel
+            </button>
           </div>
         </div>
 

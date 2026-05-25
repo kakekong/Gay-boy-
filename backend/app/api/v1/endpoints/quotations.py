@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, can_approve_quotation
 from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
-from app.models.crm import Activity, Reminder
+from app.models.crm import Activity, Customer, Reminder
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
 from app.schemas.quotation import (
@@ -254,6 +255,267 @@ async def stats(db: AsyncSession = Depends(get_db),
                 user: User = Depends(get_current_user)):
     total = await db.scalar(select(func.count(Quotation.id)))
     return {"total": total or 0}
+
+
+def _idr(n) -> str:
+    n = float(n or 0)
+    sign = "-" if n < 0 else ""
+    s = f"{abs(n):,.0f}".replace(",", ".")
+    return f"{sign}Rp {s}"
+
+
+async def _quotation_bundle(db: AsyncSession, q_id: UUID) -> tuple[Quotation, list, Customer | None]:
+    q = await db.get(Quotation, q_id)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    items = (await db.scalars(
+        select(QuotationItem).where(QuotationItem.quotation_id == q.id)
+        .order_by(QuotationItem.position.asc())
+    )).all()
+    cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+    return q, items, cust
+
+
+@router.get("/{q_id}/export.pdf")
+async def export_quotation_pdf(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    )
+
+    q, items, cust = await _quotation_bundle(db, q_id)
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=15*mm, rightMargin=15*mm,
+        topMargin=15*mm, bottomMargin=15*mm,
+        title=f"Quotation {q.number}",
+    )
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Title"], fontSize=18, alignment=0)
+    body = styles["BodyText"]
+    label = ParagraphStyle("label", parent=body, textColor=colors.grey, fontSize=8, leading=10)
+    flow: list = []
+
+    flow.append(Paragraph("<b>Transmisi Eng</b>", h1))
+    flow.append(Paragraph(f"Quotation <b>{q.number}</b>", body))
+    flow.append(Spacer(1, 6*mm))
+
+    meta = [
+        ["Customer", cust.company_name if cust else "—"],
+        ["Industry", (cust.industry if cust else "—").title()],
+        ["Variant", (q.variant or "—").title()],
+        ["Status", (q.status or "—").replace("_", " ").title()],
+        ["Issued", q.created_at.strftime("%Y-%m-%d") if q.created_at else "—"],
+        ["Valid until", q.valid_until.strftime("%Y-%m-%d") if q.valid_until else "—"],
+    ]
+    t = Table(meta, colWidths=[35*mm, 130*mm])
+    t.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    flow.append(t)
+    flow.append(Spacer(1, 6*mm))
+
+    flow.append(Paragraph("<b>Line items</b>", body))
+    flow.append(Spacer(1, 2*mm))
+    rows = [["#", "Description", "Qty", "Unit", "Unit price", "Line total"]]
+    for i, it in enumerate(items, start=1):
+        rows.append([
+            str(i),
+            it.description or "",
+            f"{float(it.qty or 0):g}",
+            it.unit or "",
+            _idr(it.unit_price),
+            _idr(float(it.qty or 0) * float(it.unit_price or 0)),
+        ])
+    items_table = Table(
+        rows,
+        colWidths=[10*mm, 80*mm, 15*mm, 15*mm, 30*mm, 30*mm],
+    )
+    items_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef0f4")),
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
+        ("FONT", (0, 1), (-1, -1), "Helvetica", 9),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEABOVE", (0, 1), (-1, 1), 0.5, colors.HexColor("#cbd1dc")),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.5, colors.HexColor("#cbd1dc")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    flow.append(items_table)
+    flow.append(Spacer(1, 4*mm))
+
+    subtotal = float(q.subtotal or 0)
+    disc_amt = subtotal * (float(q.discount_pct or 0) / 100.0)
+    tax = float(q.tax_amount or 0)
+    total = float(q.total or 0)
+    totals = [
+        ["Subtotal", _idr(subtotal)],
+        [f"Discount ({float(q.discount_pct or 0):.1f}%)", f"−{_idr(disc_amt)}"],
+        ["Tax", _idr(tax)],
+        ["TOTAL", _idr(total)],
+    ]
+    t2 = Table(totals, colWidths=[150*mm, 30*mm])
+    t2.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -2), "Helvetica", 9),
+        ("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 11),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("LINEABOVE", (0, -1), (-1, -1), 1, colors.black),
+        ("TOPPADDING", (0, -1), (-1, -1), 4),
+    ]))
+    flow.append(t2)
+    flow.append(Spacer(1, 8*mm))
+
+    if q.notes:
+        flow.append(Paragraph("<b>Notes</b>", body))
+        flow.append(Paragraph(q.notes.replace("\n", "<br/>"), body))
+
+    flow.append(Spacer(1, 12*mm))
+    flow.append(Paragraph(
+        "Generated by Transmisi Eng. Prices in IDR. "
+        "Quotation valid for the period above.",
+        label,
+    ))
+    doc.build(flow)
+    pdf = buf.getvalue()
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="quotation-{q.number}.pdf"',
+        },
+    )
+
+
+@router.get("/{q_id}/export.xlsx")
+async def export_quotation_excel(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+    q, items, cust = await _quotation_bundle(db, q_id)
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Quotation {q.number}"[:31]
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=16)
+    header_fill = PatternFill("solid", fgColor="EEF0F4")
+    thin = Side(border_style="thin", color="CBD1DC")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    right = Alignment(horizontal="right")
+
+    ws["A1"] = "Transmisi Eng"
+    ws["A1"].font = title_font
+    ws.merge_cells("A1:F1")
+    ws["A2"] = f"Quotation {q.number}"
+    ws["A2"].font = bold
+    ws.merge_cells("A2:F2")
+
+    row = 4
+    for label, value in [
+        ("Customer",      cust.company_name if cust else "—"),
+        ("Industry",      (cust.industry if cust else "—").title()),
+        ("Variant",       (q.variant or "—").title()),
+        ("Status",        (q.status or "—").replace("_", " ").title()),
+        ("Issued",        q.created_at.strftime("%Y-%m-%d") if q.created_at else "—"),
+        ("Valid until",   q.valid_until.strftime("%Y-%m-%d") if q.valid_until else "—"),
+    ]:
+        ws.cell(row=row, column=1, value=label).font = bold
+        ws.cell(row=row, column=2, value=value)
+        row += 1
+
+    row += 1
+    ws.cell(row=row, column=1, value="Line items").font = bold
+    row += 1
+    headers = ["#", "Description", "Qty", "Unit", "Unit price (IDR)", "Line total (IDR)"]
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=row, column=col_idx, value=h)
+        cell.font = bold
+        cell.fill = header_fill
+        cell.border = box
+    row += 1
+    for i, it in enumerate(items, start=1):
+        line_total = float(it.qty or 0) * float(it.unit_price or 0)
+        vals = [
+            i,
+            it.description or "",
+            float(it.qty or 0),
+            it.unit or "",
+            float(it.unit_price or 0),
+            line_total,
+        ]
+        for col_idx, v in enumerate(vals, start=1):
+            cell = ws.cell(row=row, column=col_idx, value=v)
+            cell.border = box
+            if col_idx >= 3:
+                cell.alignment = right
+            if col_idx in (5, 6):
+                cell.number_format = '"Rp" #,##0'
+        row += 1
+
+    # Totals block
+    subtotal = float(q.subtotal or 0)
+    disc_amt = subtotal * (float(q.discount_pct or 0) / 100.0)
+    tax = float(q.tax_amount or 0)
+    total = float(q.total or 0)
+    row += 1
+    for label, value, fmt in [
+        ("Subtotal",                                      subtotal, '"Rp" #,##0'),
+        (f"Discount ({float(q.discount_pct or 0):.1f}%)", -disc_amt, '"Rp" #,##0'),
+        ("Tax",                                           tax,      '"Rp" #,##0'),
+        ("TOTAL",                                         total,    '"Rp" #,##0'),
+    ]:
+        ws.cell(row=row, column=5, value=label).font = bold
+        cell = ws.cell(row=row, column=6, value=value)
+        cell.font = bold
+        cell.number_format = fmt
+        cell.alignment = right
+        row += 1
+
+    # Column widths
+    widths = [5, 50, 8, 8, 18, 18]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    if q.notes:
+        row += 1
+        ws.cell(row=row, column=1, value="Notes").font = bold
+        row += 1
+        ws.cell(row=row, column=1, value=q.notes)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+        ws.cell(row=row, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+
+    buf = BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="quotation-{q.number}.xlsx"',
+        },
+    )
 
 
 @router.get("/{q_id}", response_model=QuotationOut)

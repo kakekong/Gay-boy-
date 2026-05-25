@@ -132,6 +132,21 @@ export default function AdminUsersPage() {
     }),
   });
 
+  const hardDel = useMutation({
+    mutationFn: (id: string) => api.delete(`/users/${id}`, { params: { hard: true } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setFlash({ kind: "ok", text: "User permanently deleted." });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Failed to delete",
+    }),
+  });
+
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -198,16 +213,33 @@ export default function AdminUsersPage() {
                     {u.is_active ? (
                       <button
                         className="btn-ghost text-red-600 hover:bg-red-50"
+                        title="Deactivate (keeps history)"
                         onClick={() => {
-                          if (window.confirm(`Deactivate ${u.full_name}? They won't be able to log in.`))
+                          if (window.confirm(`Deactivate ${u.full_name}? They won't be able to log in. Records they created stay intact.`))
                             del.mutate(u.id);
                         }}
                       ><UserX size={13} /></button>
                     ) : (
-                      <button
-                        className="btn-ghost text-emerald-700"
-                        onClick={() => patch.mutate({ id: u.id, body: { is_active: true } })}
-                      ><UserCheck size={13} /></button>
+                      <>
+                        <button
+                          className="btn-ghost text-emerald-700"
+                          title="Reactivate"
+                          onClick={() => patch.mutate({ id: u.id, body: { is_active: true } })}
+                        ><UserCheck size={13} /></button>
+                        <button
+                          className="btn-ghost text-red-700 hover:bg-red-50"
+                          title="Permanently delete (removes the user row entirely)"
+                          onClick={() => {
+                            if (window.confirm(
+                              `PERMANENTLY delete ${u.full_name}?\n\n` +
+                              `This removes the user row from the database. Customers / quotations they created stay but the 'created by' field will become empty.\n\n` +
+                              `This cannot be undone.`
+                            )) {
+                              hardDel.mutate(u.id);
+                            }
+                          }}
+                        ><Trash2 size={13} /></button>
+                      </>
                     )}
                   </div>
                 </td>

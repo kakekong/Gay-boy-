@@ -15,6 +15,7 @@ import { Modal } from "@/components/Modal";
 import { LogActivityForm } from "@/components/forms/LogActivityForm";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { ContactsSection } from "@/components/ContactsSection";
 
 const QSTATUS: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -540,6 +541,9 @@ export default function CustomerDetailPage() {
 
       {/* Attachments */}
       <AttachmentsSection ownerType="customer" ownerId={id!} />
+
+      {/* Multiple PICs / contacts */}
+      <ContactsSection customerId={id!} />
 
       {/* Activity timeline */}
       <div className="card p-5">

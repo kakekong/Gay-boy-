@@ -1,0 +1,279 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Users, Plus, Star, Trash2, Pencil, Save, X, Loader2, Phone, Mail,
+  MessageCircle, AlertCircle,
+} from "lucide-react";
+import clsx from "clsx";
+import { api } from "@/api/client";
+
+interface Contact {
+  id: string;
+  customer_id: string;
+  name: string;
+  position: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  is_primary: boolean;
+  notes: string | null;
+}
+
+interface ContactForm {
+  name: string;
+  position: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+  is_primary: boolean;
+  notes: string;
+}
+
+const EMPTY: ContactForm = {
+  name: "", position: "", phone: "", whatsapp: "", email: "",
+  is_primary: false, notes: "",
+};
+
+export function ContactsSection({ customerId }: { customerId: string }) {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState<ContactForm>(EMPTY);
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const list = useQuery({
+    queryKey: ["customer-contacts", customerId],
+    queryFn: () =>
+      api.get(`/customers/${customerId}/contacts`).then((r) => r.data as Contact[]),
+  });
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ["customer-contacts", customerId] });
+  const onErr = (e: any) => setFlash({
+    kind: "err",
+    text: e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? "Save failed",
+  });
+
+  const create = useMutation({
+    mutationFn: () => api.post(`/customers/${customerId}/contacts`, form),
+    onSuccess: () => {
+      refresh(); setAdding(false); setForm(EMPTY);
+      setFlash({ kind: "ok", text: "Contact added." });
+    },
+    onError: onErr,
+  });
+  const patch = useMutation({
+    mutationFn: (id: string) => api.patch(`/customers/${customerId}/contacts/${id}`, form),
+    onSuccess: () => {
+      refresh(); setEditing(null); setForm(EMPTY);
+      setFlash({ kind: "ok", text: "Contact updated." });
+    },
+    onError: onErr,
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.delete(`/customers/${customerId}/contacts/${id}`),
+    onSuccess: () => { refresh(); setFlash({ kind: "ok", text: "Contact removed." }); },
+    onError: onErr,
+  });
+
+  function startEdit(c: Contact) {
+    setForm({
+      name: c.name,
+      position: c.position ?? "",
+      phone: c.phone ?? "",
+      whatsapp: c.whatsapp ?? "",
+      email: c.email ?? "",
+      is_primary: c.is_primary,
+      notes: c.notes ?? "",
+    });
+    setEditing(c.id);
+    setAdding(false);
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Users size={15} /> Contacts (PICs)
+          </div>
+          <div className="text-xs muted">
+            Every person at this company you talk to. Mark one as primary.
+          </div>
+        </div>
+        {!adding && !editing && (
+          <button
+            className="btn-primary"
+            onClick={() => { setForm(EMPTY); setAdding(true); }}
+          >
+            <Plus size={14} /> Add contact
+          </button>
+        )}
+      </header>
+
+      {flash && (
+        <div className={clsx(
+          "mx-5 mt-3 rounded-lg border px-3 py-2 text-sm flex items-start gap-2",
+          flash.kind === "ok"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-red-200 bg-red-50 text-red-800",
+        )}>
+          {flash.kind === "ok"
+            ? <Save size={14} className="mt-0.5 shrink-0" />
+            : <AlertCircle size={14} className="mt-0.5 shrink-0" />}
+          <span className="flex-1">{flash.text}</span>
+          <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
+
+      {(adding || editing) && (
+        <div className="mx-5 mt-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
+          <div className="text-xs font-semibold uppercase muted mb-2">
+            {editing ? "Edit contact" : "New contact"}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Full name *">
+              <input className="input" required value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </Field>
+            <Field label="Position / title">
+              <input className="input" value={form.position}
+                onChange={(e) => setForm({ ...form, position: e.target.value })}
+                placeholder="Procurement Manager" />
+            </Field>
+            <Field label="Phone">
+              <input className="input" value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </Field>
+            <Field label="WhatsApp">
+              <input className="input" value={form.whatsapp}
+                onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
+            </Field>
+            <Field label="Email">
+              <input className="input" type="email" value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </Field>
+            <label className="flex items-center gap-2 text-sm self-end pb-2">
+              <input
+                type="checkbox"
+                checked={form.is_primary}
+                onChange={(e) => setForm({ ...form, is_primary: e.target.checked })}
+                className="h-4 w-4 rounded border-ink-300 text-brand-600"
+              />
+              Primary contact
+            </label>
+            <div className="md:col-span-2">
+              <Field label="Notes">
+                <textarea className="input" rows={2} value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Best time to reach them, preferences, etc." />
+              </Field>
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <button className="btn-ghost" onClick={() => {
+              setAdding(false); setEditing(null); setForm(EMPTY);
+            }}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              disabled={create.isPending || patch.isPending || !form.name.trim()}
+              onClick={() => editing ? patch.mutate(editing) : create.mutate()}
+            >
+              {create.isPending || patch.isPending
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Save size={14} />}
+              {editing ? "Save changes" : "Add contact"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {list.isLoading ? (
+        <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : !list.data?.length ? (
+        <div className="p-8 text-center text-sm muted">
+          No additional contacts yet. The primary PIC on the customer header is enough — add more people here.
+        </div>
+      ) : (
+        <ul className="divide-y divide-ink-100">
+          {list.data.map((c) => (
+            <li key={c.id} className="p-4 flex items-start gap-3 flex-wrap">
+              <div className="h-10 w-10 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold shrink-0">
+                {c.name.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium">{c.name}</span>
+                  {c.is_primary && (
+                    <span className="chip bg-amber-50 text-amber-700 inline-flex items-center gap-1">
+                      <Star size={11} /> Primary
+                    </span>
+                  )}
+                  {c.position && <span className="text-xs muted">· {c.position}</span>}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-600">
+                  {c.phone && (
+                    <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 hover:text-brand-700">
+                      <Phone size={11} /> {c.phone}
+                    </a>
+                  )}
+                  {c.whatsapp && (
+                    <a
+                      href={`https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}`}
+                      target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1 hover:text-brand-700"
+                    >
+                      <MessageCircle size={11} /> {c.whatsapp}
+                    </a>
+                  )}
+                  {c.email && (
+                    <a href={`mailto:${c.email}`} className="inline-flex items-center gap-1 hover:text-brand-700">
+                      <Mail size={11} /> {c.email}
+                    </a>
+                  )}
+                </div>
+                {c.notes && (
+                  <div className="mt-1 text-xs muted">{c.notes}</div>
+                )}
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  className="btn-ghost"
+                  onClick={() => startEdit(c)}
+                  title="Edit"
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  className="btn-ghost text-red-600 hover:bg-red-50"
+                  onClick={() => {
+                    if (window.confirm(`Remove ${c.name} from this customer's contacts?`)) {
+                      del.mutate(c.id);
+                    }
+                  }}
+                  title="Remove"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
