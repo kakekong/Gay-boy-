@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Factory, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useT, useLangStore } from "@/store/lang";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -12,6 +13,9 @@ export default function LoginPage() {
   const setTokens = useAuthStore((s) => s.setTokens);
   const setUser = useAuthStore((s) => s.setUser);
   const nav = useNavigate();
+  const t = useT();
+  const lang = useLangStore((s) => s.lang);
+  const setLang = useLangStore((s) => s.setLang);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,7 +31,7 @@ export default function LoginPage() {
       else if (role === "supplier") nav("/supplier-portal");
       else                          nav("/");
     } catch (e: any) {
-      setErr(e.response?.data?.errors?.[0]?.message ?? "Login failed");
+      setErr(e.response?.data?.errors?.[0]?.message ?? t("Login failed", "Gagal masuk"));
     } finally {
       setBusy(false);
     }
@@ -53,12 +57,16 @@ export default function LoginPage() {
 
         <div className="relative space-y-6">
           <h1 className="text-4xl font-bold leading-tight">
-            Run your factory's whole sales journey from one screen.
+            {t(
+              "Run your factory's whole sales journey from one screen.",
+              "Jalankan seluruh proses penjualan pabrik Anda dari satu layar."
+            )}
           </h1>
           <p className="text-white/80 max-w-md">
-            CRM · Quotations · Purchasing · Operations · Finance — wired together
-            and watched over by an AI Command Center that flags risk, ranks your
-            day, and writes WhatsApp follow-ups for you.
+            {t(
+              "CRM · Quotations · Purchasing · Operations · Finance — wired together and watched over by an AI Command Center that flags risk, ranks your day, and writes WhatsApp follow-ups for you.",
+              "CRM · Penawaran · Pembelian · Operasi · Keuangan — terhubung dan diawasi oleh AI Command Center yang menandai risiko, mengurutkan tugas harian, dan menulis pesan WhatsApp tindak lanjut untuk Anda."
+            )}
           </p>
           <div className="flex flex-wrap gap-2">
             {["Mining", "PLTU", "Cement", "Sugar", "Pulp & Paper", "Food"].map((t) => (
@@ -90,13 +98,23 @@ export default function LoginPage() {
               </div>
               <span className="font-semibold">Transmisi Eng</span>
             </div>
-            <h2 className="section-title">Welcome back</h2>
-            <p className="text-sm muted">Sign in to continue.</p>
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="section-title">{t("Welcome back", "Selamat datang kembali")}</h2>
+              <button
+                type="button"
+                onClick={() => setLang(lang === "en" ? "id" : "en")}
+                className="text-[10px] font-semibold uppercase tracking-wider text-ink-500 border border-ink-200 rounded px-2 py-1 hover:bg-ink-50"
+                title={lang === "en" ? "Bahasa Indonesia" : "English"}
+              >
+                {lang === "en" ? "EN · ID" : "ID · EN"}
+              </button>
+            </div>
+            <p className="text-sm muted">{t("Sign in to continue.", "Masuk untuk melanjutkan.")}</p>
           </div>
 
           <div className="space-y-3">
             <label className="block">
-              <span className="text-xs font-medium text-ink-600">Email</span>
+              <span className="text-xs font-medium text-ink-600">{t("Email", "Email")}</span>
               <input
                 className="input mt-1"
                 value={email}
@@ -106,7 +124,7 @@ export default function LoginPage() {
               />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-ink-600">Password</span>
+              <span className="text-xs font-medium text-ink-600">{t("Password", "Kata sandi")}</span>
               <input
                 type="password"
                 className="input mt-1"
@@ -130,7 +148,7 @@ export default function LoginPage() {
             className="btn-primary w-full disabled:opacity-60"
           >
             {busy ? <Loader2 className="animate-spin" size={16} /> : <ArrowRight size={16} />}
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? t("Signing in…", "Memproses…") : t("Sign in", "Masuk")}
           </button>
         </form>
       </div>

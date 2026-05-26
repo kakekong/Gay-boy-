@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +27,14 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     stage: Mapped[str] = mapped_column(String(30), nullable=False, default="lead", index=True)
+
+    # Tax info (Indonesian context: NPWP / NPPKP / PKP status).
+    tax_id: Mapped[str | None] = mapped_column(String(32))
+    tax_name: Mapped[str | None] = mapped_column(String(255))
+    tax_address: Mapped[str | None] = mapped_column(Text)
+    is_pkp: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    nppkp_no: Mapped[str | None] = mapped_column(String(64))
+    tax_notes: Mapped[str | None] = mapped_column(Text)
     payment_terms: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     lifetime_value: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     lost_reason: Mapped[str | None] = mapped_column(Text)

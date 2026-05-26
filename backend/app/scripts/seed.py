@@ -58,6 +58,14 @@ COLUMN_MIGRATIONS: list[str] = [
     'CREATE INDEX IF NOT EXISTS ix_users_linked_customer_id ON users (linked_customer_id)',
     'CREATE INDEX IF NOT EXISTS ix_users_linked_supplier_id ON users (linked_supplier_id)',
 
+    # Customer gained tax info (NPWP / NPPKP / PKP status)
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id      VARCHAR(32)',
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_name    VARCHAR(255)',
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_address TEXT',
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_pkp BOOLEAN NOT NULL DEFAULT false",
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS nppkp_no    VARCHAR(64)',
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_notes   TEXT',
+
     # Project gained a shipping timeline + import flag
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_ship_from_origin DATE',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_ship_from_origin DATE',
