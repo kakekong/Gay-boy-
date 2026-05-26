@@ -5,7 +5,17 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Inject a build timestamp so we can see at a glance whether a deployed
+// device is running an old cached bundle.
+const BUILD_STAMP = new Date()
+  .toISOString()
+  .replace("T", " ")
+  .slice(0, 16);
+
 export default defineConfig({
+  define: {
+    __BUILD_STAMP__: JSON.stringify(BUILD_STAMP),
+  },
   plugins: [react()],
   resolve: {
     alias: {

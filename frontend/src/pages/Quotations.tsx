@@ -1,11 +1,8 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, FileText, Send } from "lucide-react";
+import { FileText, Send, Info } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { Modal } from "@/components/Modal";
-import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import type { Quotation } from "@/types";
 
 const STATUS: Record<string, string> = {
@@ -21,7 +18,6 @@ const STATUS: Record<string, string> = {
 export default function QuotationsPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
-  const [openNew, setOpenNew] = useState(false);
 
   const q = useQuery({
     queryKey: ["quotations"],
@@ -46,9 +42,9 @@ export default function QuotationsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Quotations</h1>
           <p className="text-sm muted">Price offers across every stage.</p>
         </div>
-        <button className="btn-primary" onClick={() => setOpenNew(true)}>
-          <Plus size={15} /> New quotation
-        </button>
+        <Link to="/customers" className="btn-ghost text-xs">
+          <Info size={13} /> To create one, open a customer in CRM
+        </Link>
       </div>
 
       <div className="table-shell">
@@ -106,23 +102,13 @@ export default function QuotationsPage() {
             {!q.data?.length && (
               <tr>
                 <td colSpan={6} className="td text-center muted py-12">
-                  No quotations yet — create your first one.
+                  No quotations yet — open a customer in CRM to create one.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-
-      <Modal
-        open={openNew}
-        onClose={() => setOpenNew(false)}
-        title="New quotation"
-        subtitle="Pick a customer, add line items, set discount. Discount tier is auto-detected."
-        size="xl"
-      >
-        <NewQuotationForm onClose={() => setOpenNew(false)} />
-      </Modal>
     </div>
   );
 }

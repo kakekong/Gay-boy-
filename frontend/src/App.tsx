@@ -1,8 +1,9 @@
 import { Suspense, lazy } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { Shell } from "@/layouts/Shell";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuthStore } from "@/store/auth";
 
 import LoginPage from "@/pages/Login";
@@ -82,35 +83,41 @@ function PortalShell({ children }: { children: React.ReactNode }) {
 
 function MainApp() {
   const user = useAuthStore((s) => s.user);
+  const location = useLocation();
   if (user?.role === "customer") {
     return (
       <PortalShell>
-        <Suspense fallback={<PageFallback />}>
-          <Routes>
-            <Route path="/portal" element={<CustomerPortalPage />} />
-            <Route path="/*" element={<Navigate to="/portal" replace />} />
-          </Routes>
-        </Suspense>
+        <ErrorBoundary resetKey={location.pathname}>
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/portal" element={<CustomerPortalPage />} />
+              <Route path="/*" element={<Navigate to="/portal" replace />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </PortalShell>
     );
   }
   if (user?.role === "supplier") {
     return (
       <PortalShell>
-        <Suspense fallback={<PageFallback />}>
-          <Routes>
-            <Route path="/supplier-portal" element={<SupplierPortalPage />} />
-            <Route path="/*" element={<Navigate to="/supplier-portal" replace />} />
-          </Routes>
-        </Suspense>
+        <ErrorBoundary resetKey={location.pathname}>
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/supplier-portal" element={<SupplierPortalPage />} />
+              <Route path="/*" element={<Navigate to="/supplier-portal" replace />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </PortalShell>
     );
   }
   return (
     <Shell>
       <CommandPalette />
-      <Suspense fallback={<PageFallback />}>
-        <Routes>
+      <ErrorBoundary resetKey={location.pathname}>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
@@ -143,6 +150,7 @@ function MainApp() {
           <Route path="/ai" element={<AICommandCenter />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </Shell>
   );
 }
