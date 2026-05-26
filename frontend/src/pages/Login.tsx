@@ -187,6 +187,10 @@ export default function LoginPage() {
               "Bermasalah masuk? Bersihkan data tersimpan"
             )}
           </button>
+
+          <div className="text-[10px] text-ink-300 text-center font-mono">
+            build {__BUILD_STAMP__}
+          </div>
         </form>
       </div>
     </div>

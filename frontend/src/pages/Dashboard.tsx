@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Users, FileText, Banknote, Wallet, ArrowUpRight, Sparkles, Plus, Target,
+  Users, FileText, Banknote, Wallet, ArrowUpRight, Sparkles, Target,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
@@ -43,9 +43,6 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2">
           <Link to="/ai" className="btn-ghost">
             <Sparkles size={15} /> AI Command Center
-          </Link>
-          <Link to="/quotations" className="btn-primary">
-            <Plus size={15} /> New quotation
           </Link>
         </div>
       </div>
