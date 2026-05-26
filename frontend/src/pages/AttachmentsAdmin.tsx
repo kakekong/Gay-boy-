@@ -60,12 +60,25 @@ export default function AttachmentsAdminPage() {
   });
 
   function download(id: string, filename: string) {
-    api.get(`/attachments/${id}/download`, { responseType: "blob" }).then((r) => {
-      const url = URL.createObjectURL(r.data);
-      const a = document.createElement("a");
-      a.href = url; a.download = filename; a.click();
-      URL.revokeObjectURL(url);
-    });
+    api.get(`/attachments/${id}/download`, { responseType: "blob" })
+      .then((r) => {
+        const url = URL.createObjectURL(r.data);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      })
+      .catch((e) => {
+        console.error("Download failed", e);
+        const msg = e?.response?.status === 410
+          ? "File missing from server storage — please re-upload."
+          : (e?.response?.data?.detail ?? "Download failed");
+        alert(msg);
+      });
   }
 
   if (!isDirector) {

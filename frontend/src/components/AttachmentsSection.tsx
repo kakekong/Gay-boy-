@@ -89,18 +89,37 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
     }
   }
 
+  function readErr(e: any): string {
+    if (e?.response?.status === 410) {
+      return "File is missing from server storage — it was probably wiped by a restart. Please re-upload it.";
+    }
+    return e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Download failed";
+  }
+
   function download(att: AttachmentRow) {
-    // Use existing API client (sends auth header) and trigger a save dialog
     api.get(`/attachments/${att.id}/download`, { responseType: "blob" })
       .then((r) => {
-        const url = URL.createObjectURL(r.data);
+        const blob = new Blob([r.data], {
+          type: att.content_type || "application/octet-stream",
+        });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
         a.download = att.filename;
+        a.rel = "noopener";
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        // Defer revoke so the browser has time to actually start the download.
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
       })
-      .catch(() => setErr("Download failed"));
+      .catch((e) => {
+        console.error("Download failed", e);
+        setErr(readErr(e));
+      });
   }
 
   function view(att: AttachmentRow) {
@@ -116,11 +135,23 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
           type: att.content_type || "application/octet-stream",
         });
         const url = URL.createObjectURL(blob);
-        window.open(url, "_blank", "noopener");
-        // Revoke after a delay so the new tab has time to load the URL
+        const w = window.open(url, "_blank", "noopener");
+        if (!w) {
+          // Pop-up blocked — fall back to navigating an anchor click.
+          const a = document.createElement("a");
+          a.href = url;
+          a.target = "_blank";
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
       })
-      .catch(() => setErr("Couldn't open file"));
+      .catch((e) => {
+        console.error("View failed", e);
+        setErr(readErr(e));
+      });
   }
 
   function viewable(ct: string | null): boolean {

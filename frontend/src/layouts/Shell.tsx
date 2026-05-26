@@ -11,80 +11,87 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
-import { useLangStore } from "@/store/lang";
+import { useLangStore, useT } from "@/store/lang";
 import { NotificationsBell } from "@/components/NotificationsBell";
-
-const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Workspace",
-    items: [
-      { to: "/", label: "Dashboard", icon: LayoutDashboard },
-      { to: "/customers", label: "CRM", icon: Users },
-      { to: "/quotations", label: "Quotations", icon: FileText },
-      { to: "/calendar", label: "Calendar", icon: CalendarDays },
-      { to: "/chat", label: "Chat", icon: MessageCircle, badgeQuery: "chat-unread" },
-      { to: "/approvals", label: "Approvals", icon: CheckSquare, roles: ["manager", "director"] },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { to: "/projects", label: "Projects", icon: Briefcase },
-      { to: "/purchasing", label: "Purchasing", icon: ShoppingCart,
-        roles: ["purchasing", "admin", "manager", "director"] },
-      { to: "/operation", label: "Operation", icon: Wrench },
-      { to: "/finance", label: "Finance", icon: Banknote },
-      { to: "/finance/payment-verification", label: "Payment verification", icon: Banknote,
-        roles: ["admin", "manager", "director"] },
-      { to: "/inventory", label: "Inventory", icon: Package },
-      { to: "/accounts", label: "Chart of Accounts", icon: BookOpen,
-        roles: ["admin", "director"] },
-    ],
-  },
-  {
-    label: "People",
-    items: [
-      { to: "/employees", label: "Employees", icon: Users,
-        roles: ["hr", "director"] },
-      { to: "/salary", label: "Salary", icon: Wallet,
-        roles: ["director"] },
-      { to: "/attendance", label: "Attendance", icon: Clock,
-        roles: ["sales", "admin", "hr", "manager", "director"] },
-      { to: "/sales-targets", label: "Sales Targets", icon: Target },
-      { to: "/admin/users", label: "Users", icon: UserCog,
-        roles: ["director"] },
-    ],
-  },
-  {
-    label: "Insights",
-    items: [
-      { to: "/kpi", label: "KPI", icon: BarChart3 },
-      { to: "/reports", label: "Reports", icon: BookOpen },
-      { to: "/executive", label: "Executive", icon: Crown, roles: ["manager", "director"] },
-      { to: "/ai", label: "AI Command", icon: BrainCircuit, accent: true },
-      { to: "/audit", label: "Audit log", icon: Shield,
-        roles: ["admin", "director"] },
-      { to: "/attachments", label: "All files", icon: FileText,
-        roles: ["director"] },
-      { to: "/role-guide", label: "Role guide", icon: Map },
-      { to: "/help", label: "Help", icon: HelpCircle },
-    ],
-  },
-];
 
 interface NavItem {
   to: string;
   label: string;
+  label_id: string;
   icon: LucideIcon;
   roles?: string[];
   accent?: boolean;
   badgeQuery?: string;
 }
 
+const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
+  {
+    label: "Workspace",
+    label_id: "Ruang kerja",
+    items: [
+      { to: "/", label: "Dashboard", label_id: "Dasbor", icon: LayoutDashboard },
+      { to: "/customers", label: "CRM", label_id: "Pelanggan", icon: Users },
+      { to: "/quotations", label: "Quotations", label_id: "Penawaran", icon: FileText },
+      { to: "/calendar", label: "Calendar", label_id: "Kalender", icon: CalendarDays },
+      { to: "/chat", label: "Chat", label_id: "Obrolan", icon: MessageCircle, badgeQuery: "chat-unread" },
+      { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare, roles: ["manager", "director"] },
+    ],
+  },
+  {
+    label: "Operations",
+    label_id: "Operasi",
+    items: [
+      { to: "/projects", label: "Projects", label_id: "Proyek", icon: Briefcase },
+      { to: "/purchasing", label: "Purchasing", label_id: "Pembelian", icon: ShoppingCart,
+        roles: ["purchasing", "admin", "manager", "director"] },
+      { to: "/operation", label: "Operation", label_id: "Operasi", icon: Wrench },
+      { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote },
+      { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
+        roles: ["admin", "manager", "director"] },
+      { to: "/inventory", label: "Inventory", label_id: "Inventaris", icon: Package },
+      { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
+        roles: ["admin", "director"] },
+    ],
+  },
+  {
+    label: "People",
+    label_id: "SDM",
+    items: [
+      { to: "/employees", label: "Employees", label_id: "Karyawan", icon: Users,
+        roles: ["hr", "director"] },
+      { to: "/salary", label: "Salary", label_id: "Gaji", icon: Wallet,
+        roles: ["director"] },
+      { to: "/attendance", label: "Attendance", label_id: "Absensi", icon: Clock,
+        roles: ["sales", "admin", "hr", "manager", "director"] },
+      { to: "/sales-targets", label: "Sales Targets", label_id: "Target penjualan", icon: Target },
+      { to: "/admin/users", label: "Users", label_id: "Pengguna", icon: UserCog,
+        roles: ["director"] },
+    ],
+  },
+  {
+    label: "Insights",
+    label_id: "Analitik",
+    items: [
+      { to: "/kpi", label: "KPI", label_id: "KPI", icon: BarChart3 },
+      { to: "/reports", label: "Reports", label_id: "Laporan", icon: BookOpen },
+      { to: "/executive", label: "Executive", label_id: "Eksekutif", icon: Crown, roles: ["manager", "director"] },
+      { to: "/ai", label: "AI Command", label_id: "AI Command", icon: BrainCircuit, accent: true },
+      { to: "/audit", label: "Audit log", label_id: "Log audit", icon: Shield,
+        roles: ["admin", "director"] },
+      { to: "/attachments", label: "All files", label_id: "Semua file", icon: FileText,
+        roles: ["director"] },
+      { to: "/role-guide", label: "Role guide", label_id: "Panduan peran", icon: Map },
+      { to: "/help", label: "Help", label_id: "Bantuan", icon: HelpCircle },
+    ],
+  },
+];
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const nav = useNavigate();
+  const t = useT();
+  const lang = useLangStore((s) => s.lang);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const unread = useQuery({
@@ -123,7 +130,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <div>
             <div className="font-semibold text-ink-900 leading-tight">Transmisi Eng</div>
             <div className="text-[10px] uppercase tracking-wider text-ink-400">
-              Project ERP · v0.1
+              {t("Project ERP · v0.1", "ERP Proyek · v0.1")}
             </div>
           </div>
           <button
@@ -144,7 +151,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             return (
               <div key={g.label}>
                 <div className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-                  {g.label}
+                  {lang === "id" ? g.label_id : g.label}
                 </div>
                 <div className="space-y-0.5">
                   {items.map((n) => (
@@ -165,7 +172,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                       }
                     >
                       <n.icon size={16} />
-                      <span className="flex-1">{n.label}</span>
+                      <span className="flex-1">{lang === "id" ? n.label_id : n.label}</span>
                       {n.accent && (
                         <span className="text-[9px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded bg-white/15">
                           AI
@@ -199,7 +206,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
             <button
               onClick={logout}
-              title="Logout"
+              title={t("Logout", "Keluar")}
               className="text-ink-400 hover:text-ink-700 p-1.5 rounded hover:bg-ink-100"
             >
               <LogOut size={15} />
@@ -233,7 +240,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             className="relative flex-1 max-w-xl text-left rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm shadow-soft hover:border-brand-300 transition-colors flex items-center gap-2 text-ink-500"
           >
             <Search size={15} className="text-ink-400" />
-            <span className="flex-1 truncate">Search customers, quotations, projects…</span>
+            <span className="flex-1 truncate">
+              {t("Search customers, quotations, projects…", "Cari pelanggan, penawaran, proyek…")}
+            </span>
             <span className="hidden sm:flex items-center gap-1">
               <span className="kbd">⌘</span>
               <span className="kbd">K</span>
