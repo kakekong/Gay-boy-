@@ -12,6 +12,8 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const setTokens = useAuthStore((s) => s.setTokens);
   const setUser = useAuthStore((s) => s.setUser);
+  const lastLogoutReason = useAuthStore((s) => s.lastLogoutReason);
+  const clearLogoutReason = useAuthStore((s) => s.clearLogoutReason);
   const nav = useNavigate();
   const t = useT();
   const lang = useLangStore((s) => s.lang);
@@ -136,6 +138,22 @@ export default function LoginPage() {
             </label>
           </div>
 
+          {lastLogoutReason && !err && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+              <div className="font-semibold mb-0.5">
+                {t("You were signed out", "Anda telah keluar")}
+              </div>
+              <div>{lastLogoutReason}</div>
+              <button
+                type="button"
+                onClick={clearLogoutReason}
+                className="mt-1 text-amber-700 underline hover:no-underline"
+              >
+                {t("Dismiss", "Tutup")}
+              </button>
+            </div>
+          )}
+
           {err && (
             <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
               {err}
@@ -149,6 +167,25 @@ export default function LoginPage() {
           >
             {busy ? <Loader2 className="animate-spin" size={16} /> : <ArrowRight size={16} />}
             {busy ? t("Signing in…", "Memproses…") : t("Sign in", "Masuk")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              try { localStorage.clear(); } catch {}
+              try { sessionStorage.clear(); } catch {}
+              window.location.reload();
+            }}
+            className="text-[11px] text-ink-400 hover:text-ink-700 underline w-full text-center"
+            title={t(
+              "Wipe any leftover login data from older app versions and reload",
+              "Hapus data login dari versi lama dan muat ulang"
+            )}
+          >
+            {t(
+              "Trouble signing in? Reset cached data",
+              "Bermasalah masuk? Bersihkan data tersimpan"
+            )}
           </button>
         </form>
       </div>

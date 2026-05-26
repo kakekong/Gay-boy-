@@ -107,19 +107,32 @@ async def main() -> None:
         await db.commit()
         print(f"CoA: {coa_created} account(s) inserted.")
 
-    # Demo users — only in dev. In prod, the director creates real accounts
-    # via Admin → Users, and any stray demo accounts get deactivated.
+    # Demo users — only in dev. In prod, we never auto-seed or auto-
+    # deactivate anything: the director manages real accounts through
+    # Admin → Users. Aggressively deactivating demo emails on every
+    # startup was kicking real users out when the HF Space cold-started
+    # (the seed runs again, flips is_active=false, next request 401s).
+    # If a director wants to remove a legacy demo account they can do
+    # it once from the UI.
     async with SessionLocal() as db:
         if is_prod:
-            seeded_emails = [u[0] for u in _USERS]
-            stale = (await db.scalars(
-                select(User).where(User.email.in_(seeded_emails), User.is_active.is_(True))
+            # Safety net: if a previous version of this script deactivated
+            # every director (the bug we just removed), reactivate them so
+            # the user isn't permanently locked out. Only triggers when
+            # there is literally no active director on the system.
+            active_directors = (await db.scalars(
+                select(User).where(User.role == "director", User.is_active.is_(True))
             )).all()
-            for u in stale:
-                u.is_active = False
-            if stale:
-                print(f"PROD: deactivated {len(stale)} demo user(s) "
-                      f"(set APP_ENV=dev if you want them).")
+            if not active_directors:
+                stale_directors = (await db.scalars(
+                    select(User).where(User.role == "director", User.is_active.is_(False))
+                )).all()
+                for u in stale_directors:
+                    u.is_active = True
+                if stale_directors:
+                    await db.commit()
+                    print(f"PROD: reactivated {len(stale_directors)} director "
+                          f"account(s) that had no active counterpart.")
         else:
             # Demo password must be supplied per-deployment so a public
             # instance never ships with a known director password — even if
