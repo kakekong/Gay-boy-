@@ -148,6 +148,7 @@ async def upload_attachment(
 @router.get("/{attachment_id}/download")
 async def download_attachment(
     attachment_id: UUID,
+    inline: bool = Query(False, description="Render in browser instead of forcing a download"),
     db: AsyncSession = Depends(get_db),
     _me: User = Depends(get_current_user),
 ):
@@ -156,10 +157,18 @@ async def download_attachment(
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if not os.path.exists(a.storage_path):
         raise HTTPException(status.HTTP_410_GONE, "File missing from storage")
+    media_type = a.content_type or "application/octet-stream"
+    # inline=1 lets the browser render PDFs/images directly in a new tab
+    # instead of always triggering a save dialog.
+    disposition = "inline" if inline else "attachment"
     return FileResponse(
         a.storage_path,
         filename=a.filename,
-        media_type=a.content_type or "application/octet-stream",
+        media_type=media_type,
+        headers={
+            "Content-Disposition":
+                f'{disposition}; filename="{a.filename}"',
+        },
     )
 
 
