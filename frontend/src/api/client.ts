@@ -6,7 +6,13 @@ import { useAuthStore } from "@/store/auth";
 // e.g. VITE_API_BASE=https://yourname-transmisi-api.hf.space/api/v1
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api/v1";
 
-export const api = axios.create({ baseURL: API_BASE });
+export const api = axios.create({
+  baseURL: API_BASE,
+  // HF Spaces on the free tier cold-start: the first request after sleep
+  // can take 30+ seconds. Don't time out earlier than that or the refresh
+  // call will fail and the user will get bounced out for no real reason.
+  timeout: 60_000,
+});
 
 api.interceptors.request.use((cfg) => {
   const token = useAuthStore.getState().accessToken;
@@ -24,13 +30,24 @@ async function refreshAccessToken(): Promise<string | null> {
   if (!refreshToken) return null;
   if (!refreshing) {
     refreshing = axios
-      .post(`${API_BASE}/auth/refresh`, null, { params: { token: refreshToken } })
+      .post(`${API_BASE}/auth/refresh`, null, {
+        params: { token: refreshToken },
+        timeout: 60_000,
+      })
       .then((r) => {
         store.setTokens(r.data.access_token, r.data.refresh_token);
         return r.data.access_token as string;
       })
-      .catch(() => {
-        store.logout();
+      .catch((e: AxiosError) => {
+        const code = e.response?.status;
+        // Only force a logout when the refresh token itself is rejected.
+        // Network errors, timeouts and 5xx (HF Space cold-starting,
+        // transient backend hiccups) should leave the user signed in so
+        // they can retry — kicking them out for a network blip is the
+        // bug we're trying to stop.
+        if (code === 401 || code === 403) {
+          store.logout();
+        }
         return null;
       })
       .finally(() => {
@@ -59,7 +76,9 @@ api.interceptors.response.use(
         original.headers = { ...(original.headers ?? {}), Authorization: `Bearer ${newToken}` };
         return api.request(original);
       }
-      useAuthStore.getState().logout();
+      // refreshAccessToken returned null. If it was a genuine auth
+      // failure it has already called logout(); otherwise we keep the
+      // session intact and just let this single request fail.
     }
     return Promise.reject(err);
   }

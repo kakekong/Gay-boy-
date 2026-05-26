@@ -13,6 +13,11 @@ const INDUSTRIES = [
 ];
 const STAGES = ["lead", "presentation", "engineering", "quotation"];
 
+// Preset position categories. "Other" reveals a free-text input so we
+// keep the existing string column on the backend without losing
+// flexibility.
+const POSITION_PRESETS = ["Maintenance", "Engineering", "Purchasing"] as const;
+
 interface Contact {
   name: string;
   position: string;
@@ -92,15 +97,10 @@ export function NewCustomerForm({ onClose }: Props) {
 
   function next() {
     setErr(null);
-    if (step === 1) {
-      if (!basic.company_name.trim()) {
-        setErr(t("Company name is required.", "Nama perusahaan wajib diisi."));
-        return;
-      }
-      setStep(2);
-    } else if (step === 2) {
-      setStep(3);
-    }
+    // No required-field gates between steps — users can browse all three
+    // panels freely. Validation only happens when Create is clicked.
+    if (step === 1) setStep(2);
+    else if (step === 2) setStep(3);
   }
   function back() {
     setErr(null);
@@ -109,6 +109,11 @@ export function NewCustomerForm({ onClose }: Props) {
   }
   function submit() {
     setErr(null);
+    if (!basic.company_name.trim()) {
+      setStep(1);
+      setErr(t("Company name is required.", "Nama perusahaan wajib diisi."));
+      return;
+    }
     create.mutate();
   }
 
@@ -149,8 +154,10 @@ export function NewCustomerForm({ onClose }: Props) {
               onChange={(e) => setBasic({ ...basic, pic_name: e.target.value })} />
           </Field>
           <Field label={t("PIC position", "Jabatan PIC")}>
-            <input className="input" value={basic.pic_position}
-              onChange={(e) => setBasic({ ...basic, pic_position: e.target.value })} />
+            <PositionPicker
+              value={basic.pic_position}
+              onChange={(v) => setBasic({ ...basic, pic_position: v })}
+            />
           </Field>
           <Field label={t("Phone", "Telepon")}>
             <input className="input" value={basic.phone}
@@ -212,8 +219,10 @@ export function NewCustomerForm({ onClose }: Props) {
                           onChange={(e) => updateContact(idx, { name: e.target.value })} />
                       </Field>
                       <Field label={t("Position", "Jabatan")}>
-                        <input className="input" value={c.position}
-                          onChange={(e) => updateContact(idx, { position: e.target.value })} />
+                        <PositionPicker
+                          value={c.position}
+                          onChange={(v) => updateContact(idx, { position: v })}
+                        />
                       </Field>
                       <Field label={t("Phone", "Telepon")}>
                         <input className="input" value={c.phone}
@@ -404,5 +413,55 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
       {children}
     </label>
+  );
+}
+
+function PositionPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const t = useT();
+  const isPreset = (POSITION_PRESETS as readonly string[]).includes(value);
+  // "Other" sticks even when the free-text field is empty, so the user
+  // can pick Other and start typing without the dropdown snapping back.
+  const [otherMode, setOtherMode] = useState<boolean>(!!value && !isPreset);
+  const selectValue = otherMode ? "other" : (isPreset ? value : "");
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <select
+        className="input"
+        value={selectValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "other") {
+            setOtherMode(true);
+            // Clear the value so the previous preset doesn't sneak through.
+            if (isPreset) onChange("");
+          } else {
+            setOtherMode(false);
+            onChange(v);
+          }
+        }}
+      >
+        <option value="">{t("— Select —", "— Pilih —")}</option>
+        <option value="Maintenance">{t("Maintenance", "Pemeliharaan")}</option>
+        <option value="Engineering">{t("Engineering", "Teknik")}</option>
+        <option value="Purchasing">{t("Purchasing", "Pembelian")}</option>
+        <option value="other">{t("Other…", "Lainnya…")}</option>
+      </select>
+      {otherMode && (
+        <input
+          className="input"
+          autoFocus
+          placeholder={t("Type position", "Ketik jabatan")}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
   );
 }
