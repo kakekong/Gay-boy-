@@ -36,6 +36,8 @@ async function refreshAccessToken(): Promise<string | null> {
       })
       .then((r) => {
         store.setTokens(r.data.access_token, r.data.refresh_token);
+        // eslint-disable-next-line no-console
+        console.info("[auth] token refreshed");
         return r.data.access_token as string;
       })
       .catch((e: AxiosError) => {
@@ -46,7 +48,15 @@ async function refreshAccessToken(): Promise<string | null> {
         // they can retry — kicking them out for a network blip is the
         // bug we're trying to stop.
         if (code === 401 || code === 403) {
-          store.logout();
+          store.logout(
+            `Refresh token rejected by server (HTTP ${code}). Your session is no longer valid — please sign in again.`
+          );
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[auth] refresh transient failure, keeping session:",
+            code ?? e.code ?? e.message
+          );
         }
         return null;
       })
@@ -64,10 +74,10 @@ api.interceptors.response.use(
     const status = err.response?.status;
 
     if (status === 401 && original && !original._retry) {
-      // Don't try to refresh the refresh call itself.
       const url = original.url ?? "";
+      // Don't try to refresh the refresh / login calls themselves.
       if (url.includes("/auth/refresh") || url.includes("/auth/login")) {
-        useAuthStore.getState().logout();
+        useAuthStore.getState().logout(`Auth endpoint ${url} returned 401.`);
         return Promise.reject(err);
       }
       original._retry = true;
@@ -76,9 +86,9 @@ api.interceptors.response.use(
         original.headers = { ...(original.headers ?? {}), Authorization: `Bearer ${newToken}` };
         return api.request(original);
       }
-      // refreshAccessToken returned null. If it was a genuine auth
-      // failure it has already called logout(); otherwise we keep the
-      // session intact and just let this single request fail.
+      // If refreshAccessToken returned null without already calling
+      // logout (i.e. a network / 5xx error), keep the session intact —
+      // the user can retry. Otherwise logout has already fired.
     }
     return Promise.reject(err);
   }
