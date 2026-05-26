@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     # Auth
     JWT_SECRET: str = Field(default="change-me-in-prod")
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TTL_MIN: int = 15
-    JWT_REFRESH_TTL_DAYS: int = 7
+    # 15 minutes was too aggressive in real use — sales kept getting kicked
+    # out mid-call. The frontend also auto-refreshes on 401, so this is the
+    # outer ceiling, not the typical lifetime.
+    JWT_ACCESS_TTL_MIN: int = 720          # 12 hours
+    JWT_REFRESH_TTL_DAYS: int = 30
 
     # Environment ("dev" seeds demo users; "prod" refuses defaults)
     APP_ENV: str = "dev"

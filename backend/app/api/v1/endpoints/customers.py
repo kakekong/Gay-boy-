@@ -70,11 +70,27 @@ async def create_customer(
     else:
         sales_pic = payload.sales_pic_id
     obj = Customer(
-        **payload.model_dump(exclude={"sales_pic_id"}),
+        **payload.model_dump(exclude={"sales_pic_id", "contacts"}),
         sales_pic_id=sales_pic,
         created_by=user.id, updated_by=user.id,
     )
     db.add(obj)
+    await db.flush()
+    # Multi-PIC: persist any extra contacts submitted with the wizard.
+    for c in payload.contacts:
+        name = (c.name or "").strip()
+        if not name:
+            continue
+        db.add(CustomerContact(
+            customer_id=obj.id,
+            name=name,
+            position=c.position,
+            phone=c.phone,
+            whatsapp=c.whatsapp,
+            email=c.email,
+            is_primary=c.is_primary,
+            notes=c.notes,
+        ))
     await db.flush()
     await ensure_stage_tasks(db, obj, obj.stage)
     return obj

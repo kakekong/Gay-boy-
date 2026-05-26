@@ -161,8 +161,7 @@ function ClaimCard({ claim, onVerify, onReject, busy }: {
         <Field label="Reference">{claim.reference ?? "—"}</Field>
         <Field label="Attachment">
           {claim.attachment_id
-            ? <a href={`/api/v1/attachments/${claim.attachment_id}/download`}
-                 className="text-brand-700 hover:underline">View</a>
+            ? <AttachmentLink id={claim.attachment_id} />
             : "—"}
         </Field>
       </div>
@@ -218,5 +217,35 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
       <div className="mt-0.5">{children}</div>
     </div>
+  );
+}
+
+// Plain <a href> 401s here because the browser doesn't carry the bearer
+// token. Fetch the file as a blob via the authenticated client, then open
+// the resulting blob URL in a new tab so the browser previews it inline.
+function AttachmentLink({ id }: { id: string }) {
+  const [busy, setBusy] = useState(false);
+  function open() {
+    setBusy(true);
+    api.get(`/attachments/${id}/download`, {
+      params: { inline: 1 },
+      responseType: "blob",
+    })
+      .then((r) => {
+        const url = URL.createObjectURL(r.data);
+        window.open(url, "_blank", "noopener");
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      })
+      .finally(() => setBusy(false));
+  }
+  return (
+    <button
+      onClick={open}
+      disabled={busy}
+      className="text-brand-700 hover:underline inline-flex items-center gap-1"
+    >
+      {busy && <Loader2 size={12} className="animate-spin" />}
+      View
+    </button>
   );
 }

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useAuthStore } from "@/store/auth";
+import { useLangStore } from "@/store/lang";
 
 const SECTIONS = [
   { id: "first-day",   label: "Your first day",   icon: KeyRound },
@@ -23,6 +24,7 @@ const SECTIONS = [
 export default function HelpPage() {
   const nav = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const lang = useLangStore((s) => s.lang);
   const [active, setActive] = useState("first-day");
 
   // Highlight section on scroll
@@ -58,12 +60,15 @@ export default function HelpPage() {
               Welcome{user?.full_name ? `, ${user.full_name.split(" ")[0]}` : ""} 👋
             </h1>
             <p className="text-white/80 text-sm mt-1 max-w-2xl">
-              A guided tour of every page and the most common workflows. Use the table of
-              contents on the right to jump around — no scrolling marathon needed.
+              {lang === "id"
+                ? "Panduan singkat setiap halaman dan alur kerja paling sering dipakai. Pakai daftar isi di kanan untuk berpindah cepat."
+                : "A guided tour of every page and the most common workflows. Use the table of contents on the right to jump around — no scrolling marathon needed."}
             </p>
           </div>
         </div>
       </div>
+
+      {lang === "id" && <IndonesianQuickGuide />}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-6">
         {/* Content */}
@@ -410,6 +415,56 @@ function T({ q, a }: { q: string; a: string }) {
       </summary>
       <p className="text-sm text-ink-600 mt-2">{a}</p>
     </details>
+  );
+}
+
+function IndonesianQuickGuide() {
+  return (
+    <div className="card p-5 lg:p-6 space-y-4 border-l-4 border-brand-500">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-brand-700 font-semibold">
+          Panduan singkat
+        </div>
+        <h2 className="text-xl font-semibold tracking-tight mt-0.5">
+          Mulai dalam 1 menit
+        </h2>
+        <p className="text-sm muted mt-1">
+          Ringkasan Bahasa Indonesia untuk halaman-halaman paling penting.
+          Konten lengkap (Bahasa Inggris) ada di bawah.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <IdTile title="Dashboard"
+          body="Ringkasan harian: tugas mendesak, deal berisiko, target Anda hari ini." />
+        <IdTile title="Pelanggan (CRM)"
+          body="Daftar semua pelanggan. Klik 'Pelanggan baru' untuk wizard 3 langkah: data dasar, kontak (PIC), data pajak (NPWP/PKP)." />
+        <IdTile title="Penawaran (Quotations)"
+          body="Buat penawaran ke pelanggan. Bisa diekspor ke PDF / Excel. Diskon di atas batas perlu persetujuan manajer." />
+        <IdTile title="Kalender"
+          body="Reminder per tahap (stage) muncul otomatis di sini. Centang kalau sudah selesai." />
+        <IdTile title="Persetujuan (Approvals)"
+          body="Permintaan pindah stage, diskon besar, perubahan data sensitif menunggu OK direktur di halaman ini." />
+        <IdTile title="Proyek & Operasi"
+          body="Setelah PO masuk, customer pindah ke Proyek. Pantau tanggal kirim, gambar teknik, dan invoice di sini." />
+        <IdTile title="Pembelian (Purchasing)"
+          body="PO ke supplier, RFQ, dan dokumen masuk dari supplier (invoice, drawing, surat jalan)." />
+        <IdTile title="Keuangan & Verifikasi Bayar"
+          body="Invoice dan pembayaran masuk. Bukti transfer pelanggan diverifikasi di Payment verification." />
+      </div>
+      <div className="rounded-lg bg-ink-50 border border-ink-100 p-3 text-xs text-ink-700">
+        <span className="font-semibold">Tip:</span> tombol bahasa di pojok kanan atas
+        bisa diklik kapan saja untuk berganti antara Bahasa Indonesia dan English.
+      </div>
+    </div>
+  );
+}
+
+function IdTile({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-xl border border-ink-100 bg-white p-3">
+      <div className="font-semibold text-sm">{title}</div>
+      <p className="text-xs text-ink-600 mt-1 leading-relaxed">{body}</p>
+    </div>
   );
 }
 function LayoutIcon() { return <Layout size={18} />; }

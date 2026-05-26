@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Paperclip, Upload, Download, Trash2, Loader2, FileText, FileImage,
   FileSpreadsheet, File as FileIcon, FileVideo, FileAudio, FileArchive,
+  Eye,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -102,6 +103,35 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
       .catch(() => setErr("Download failed"));
   }
 
+  function view(att: AttachmentRow) {
+    // Auth-aware in-tab preview: fetch as blob (so the Authorization header
+    // rides on the request), then open the blob URL in a new tab where the
+    // browser can render PDFs / images natively.
+    api.get(`/attachments/${att.id}/download`, {
+      params: { inline: 1 },
+      responseType: "blob",
+    })
+      .then((r) => {
+        const blob = new Blob([r.data], {
+          type: att.content_type || "application/octet-stream",
+        });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank", "noopener");
+        // Revoke after a delay so the new tab has time to load the URL
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      })
+      .catch(() => setErr("Couldn't open file"));
+  }
+
+  function viewable(ct: string | null): boolean {
+    const t = (ct || "").toLowerCase();
+    return t.startsWith("image/")
+        || t.startsWith("video/")
+        || t.startsWith("audio/")
+        || t.includes("pdf")
+        || t.startsWith("text/");
+  }
+
   const canDelete = (att: AttachmentRow) =>
     !!me && (att.uploaded_by === me.id || me.role === "admin" || me.role === "director");
 
@@ -171,6 +201,15 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
                       {" · "}{new Date(a.uploaded_at).toLocaleString()}
                     </div>
                   </div>
+                  {viewable(a.content_type) && (
+                    <button
+                      onClick={() => view(a)}
+                      className="btn-ghost"
+                      title="View in browser"
+                    >
+                      <Eye size={14} />
+                    </button>
+                  )}
                   <button
                     onClick={() => download(a)}
                     className="btn-ghost"

@@ -9,6 +9,7 @@ keeps demo installs upgradeable without alembic discipline.
 """
 
 import asyncio
+import os
 
 from sqlalchemy import select, text
 
@@ -56,6 +57,14 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_supplier_id UUID',
     'CREATE INDEX IF NOT EXISTS ix_users_linked_customer_id ON users (linked_customer_id)',
     'CREATE INDEX IF NOT EXISTS ix_users_linked_supplier_id ON users (linked_supplier_id)',
+
+    # Customer gained tax info (NPWP / NPPKP / PKP status)
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id      VARCHAR(32)',
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_name    VARCHAR(255)',
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_address TEXT',
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_pkp BOOLEAN NOT NULL DEFAULT false",
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS nppkp_no    VARCHAR(64)',
+    'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_notes   TEXT',
 
     # Project gained a shipping timeline + import flag
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_ship_from_origin DATE',
@@ -112,13 +121,21 @@ async def main() -> None:
                 print(f"PROD: deactivated {len(stale)} demo user(s) "
                       f"(set APP_ENV=dev if you want them).")
         else:
-            for email, name, role in _USERS:
-                existing = await db.scalar(select(User).where(User.email == email))
-                if existing:
-                    continue
-                db.add(User(email=email, full_name=name, role=role,
-                            password_hash=hash_password("demo1234"), is_active=True))
-            await db.flush()
+            # Demo password must be supplied per-deployment so a public
+            # instance never ships with a known director password — even if
+            # APP_ENV is misconfigured. Leave DEMO_SEED_PASSWORD unset to
+            # skip seeding privileged demo accounts entirely.
+            demo_pw = os.getenv("DEMO_SEED_PASSWORD", "").strip()
+            if not demo_pw:
+                print("Skipping demo-user seed: DEMO_SEED_PASSWORD not set.")
+            else:
+                for email, name, role in _USERS:
+                    existing = await db.scalar(select(User).where(User.email == email))
+                    if existing:
+                        continue
+                    db.add(User(email=email, full_name=name, role=role,
+                                password_hash=hash_password(demo_pw), is_active=True))
+                await db.flush()
 
         if not is_prod:
             sales1 = await db.scalar(select(User).where(User.email == "sales1@demo.local"))
@@ -150,7 +167,7 @@ async def main() -> None:
         await db.commit()
         if spawned:
             print(f"Stage tasks: spawned {spawned} reminder(s).")
-    print("Seed complete. Login with director@demo.local / demo1234 etc.")
+    print("Seed complete.")
 
 
 if __name__ == "__main__":

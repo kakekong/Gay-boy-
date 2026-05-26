@@ -10,11 +10,13 @@ import { StageBadge } from "@/components/StageBadge";
 import { PipelineView } from "@/components/PipelineView";
 import { Modal } from "@/components/Modal";
 import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
+import { useT } from "@/store/lang";
 import type { Customer } from "@/types";
 
 type ViewMode = "table" | "pipeline";
 
 export default function CustomersPage() {
+  const t = useT();
   const [view, setView] = useState<ViewMode>(() => {
     return (localStorage.getItem("customers-view") as ViewMode) || "table";
   });
@@ -66,9 +68,12 @@ export default function CustomersPage() {
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Customers</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("Customers", "Pelanggan")}</h1>
           <p className="text-sm muted">
-            {q.data?.total ?? rows.length} record{(q.data?.total ?? rows.length) === 1 ? "" : "s"}
+            {q.data?.total ?? rows.length} {t(
+              (q.data?.total ?? rows.length) === 1 ? "record" : "records",
+              "data"
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -83,7 +88,7 @@ export default function CustomersPage() {
                   : "text-ink-600 hover:bg-ink-50"
               )}
             >
-              <Table2 size={14} /> Table
+              <Table2 size={14} /> {t("Table", "Tabel")}
             </button>
             <button
               onClick={() => setView("pipeline")}
@@ -94,12 +99,12 @@ export default function CustomersPage() {
                   : "text-ink-600 hover:bg-ink-50"
               )}
             >
-              <Columns3 size={14} /> Pipeline
+              <Columns3 size={14} /> {t("Pipeline", "Pipeline")}
             </button>
           </div>
-          <button className="btn-ghost" onClick={exportCsv}><Download size={15} /> Export</button>
+          <button className="btn-ghost" onClick={exportCsv}><Download size={15} /> {t("Export", "Ekspor")}</button>
           <button className="btn-primary" onClick={() => setOpenNew(true)}>
-            <Plus size={15} /> New customer
+            <Plus size={15} /> {t("New customer", "Pelanggan baru")}
           </button>
         </div>
       </div>
@@ -200,8 +205,11 @@ export default function CustomersPage() {
       <Modal
         open={openNew}
         onClose={() => setOpenNew(false)}
-        title="New customer"
-        subtitle="Add a company to your CRM. You'll be assigned as Sales PIC."
+        title={t("New customer", "Pelanggan baru")}
+        subtitle={t(
+          "Add a company to your CRM. You'll be assigned as Sales PIC.",
+          "Tambahkan perusahaan ke CRM Anda. Anda akan menjadi Sales PIC-nya."
+        )}
         size="lg"
       >
         <NewCustomerForm onClose={() => setOpenNew(false)} />

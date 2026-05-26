@@ -11,6 +11,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useLangStore } from "@/store/lang";
 import { NotificationsBell } from "@/components/NotificationsBell";
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
@@ -251,6 +252,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </span>
             )}
           </button>
+          <LangToggle />
           <NotificationsBell />
           <div className="hidden md:flex items-center gap-2 pl-2 border-l border-ink-200 ml-1">
             <div className="text-right leading-tight">
@@ -272,5 +274,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
     </div>
+  );
+}
+
+function LangToggle() {
+  const lang = useLangStore((s) => s.lang);
+  const setLang = useLangStore((s) => s.setLang);
+  const next = lang === "en" ? "id" : "en";
+  return (
+    <button
+      onClick={() => setLang(next)}
+      title={lang === "en" ? "Ganti ke Bahasa Indonesia" : "Switch to English"}
+      className="px-2 py-1.5 rounded-lg text-xs font-semibold text-ink-600 hover:bg-ink-100 hover:text-ink-900 border border-ink-200"
+    >
+      {lang === "en" ? "EN · ID" : "ID · EN"}
+    </button>
   );
 }
