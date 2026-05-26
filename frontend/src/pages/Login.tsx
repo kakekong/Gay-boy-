@@ -5,8 +5,8 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("director@demo.local");
-  const [password, setPassword] = useState("demo1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const setTokens = useAuthStore((s) => s.setTokens);
@@ -132,11 +132,6 @@ export default function LoginPage() {
             {busy ? <Loader2 className="animate-spin" size={16} /> : <ArrowRight size={16} />}
             {busy ? "Signing in…" : "Sign in"}
           </button>
-
-          <div className="text-[11px] muted text-center pt-2 border-t border-ink-100">
-            Demo · <code>director / manager / sales1 / admin</code>@demo.local
-            · password <code>demo1234</code>
-          </div>
         </form>
       </div>
     </div>

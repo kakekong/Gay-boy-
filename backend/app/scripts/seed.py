@@ -9,6 +9,7 @@ keeps demo installs upgradeable without alembic discipline.
 """
 
 import asyncio
+import os
 
 from sqlalchemy import select, text
 
@@ -112,13 +113,21 @@ async def main() -> None:
                 print(f"PROD: deactivated {len(stale)} demo user(s) "
                       f"(set APP_ENV=dev if you want them).")
         else:
-            for email, name, role in _USERS:
-                existing = await db.scalar(select(User).where(User.email == email))
-                if existing:
-                    continue
-                db.add(User(email=email, full_name=name, role=role,
-                            password_hash=hash_password("demo1234"), is_active=True))
-            await db.flush()
+            # Demo password must be supplied per-deployment so a public
+            # instance never ships with a known director password — even if
+            # APP_ENV is misconfigured. Leave DEMO_SEED_PASSWORD unset to
+            # skip seeding privileged demo accounts entirely.
+            demo_pw = os.getenv("DEMO_SEED_PASSWORD", "").strip()
+            if not demo_pw:
+                print("Skipping demo-user seed: DEMO_SEED_PASSWORD not set.")
+            else:
+                for email, name, role in _USERS:
+                    existing = await db.scalar(select(User).where(User.email == email))
+                    if existing:
+                        continue
+                    db.add(User(email=email, full_name=name, role=role,
+                                password_hash=hash_password(demo_pw), is_active=True))
+                await db.flush()
 
         if not is_prod:
             sales1 = await db.scalar(select(User).where(User.email == "sales1@demo.local"))
@@ -150,7 +159,7 @@ async def main() -> None:
         await db.commit()
         if spawned:
             print(f"Stage tasks: spawned {spawned} reminder(s).")
-    print("Seed complete. Login with director@demo.local / demo1234 etc.")
+    print("Seed complete.")
 
 
 if __name__ == "__main__":
