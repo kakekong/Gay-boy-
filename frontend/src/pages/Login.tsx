@@ -2,12 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Factory, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
-import { useAuthStore } from "@/store/auth";
+import { useAuthStore, setAuthPersistence } from "@/store/auth";
 import { useT, useLangStore } from "@/store/lang";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Default OFF so the session is wiped when the tab closes. Opting in
+  // re-enables localStorage persistence across restarts.
+  const [rememberMe, setRememberMe] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const setTokens = useAuthStore((s) => s.setTokens);
@@ -24,6 +27,10 @@ export default function LoginPage() {
     setBusy(true);
     setErr(null);
     try {
+      // Route the upcoming token writes to the right storage BEFORE we
+      // call setTokens. Without this, the write would land in whatever
+      // storage was active before the user toggled the checkbox.
+      setAuthPersistence(rememberMe);
       const t = await api.post("/auth/login", { email, password });
       setTokens(t.data.access_token, t.data.refresh_token);
       const me = await api.get("/auth/me");
@@ -135,6 +142,26 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 autoComplete="current-password"
               />
+            </label>
+
+            <label className="flex items-start gap-2 cursor-pointer select-none pt-1">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span className="text-xs text-ink-600 leading-tight">
+                <span className="font-medium">
+                  {t("Keep me signed in on this device", "Tetap masuk di perangkat ini")}
+                </span>
+                <span className="block text-[11px] text-ink-400 mt-0.5">
+                  {t(
+                    "Leave this off on a shared computer — closing the tab signs you out automatically.",
+                    "Biarkan tidak dicentang di komputer bersama — menutup tab akan otomatis keluar."
+                  )}
+                </span>
+              </span>
             </label>
           </div>
 
