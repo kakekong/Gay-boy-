@@ -19,7 +19,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, can_approve_quotation
 from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
-from app.models.crm import Activity, Customer, Reminder
+from app.models.crm import Activity, Customer, CustomerContact, Reminder
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
 from app.schemas.quotation import (
@@ -56,6 +56,7 @@ async def create_quotation(
     q = Quotation(
         number=number,
         customer_id=payload.customer_id,
+        contact_id=payload.contact_id,
         variant=payload.variant,
         sales_pic_id=user.id,
         discount_pct=payload.discount_pct,
@@ -264,16 +265,40 @@ def _idr(n) -> str:
     return f"{sign}Rp {s}"
 
 
-async def _quotation_bundle(db: AsyncSession, q_id: UUID) -> tuple[Quotation, list, Customer | None]:
+async def _quotation_bundle(
+    db: AsyncSession, q_id: UUID
+) -> tuple[Quotation, list, Customer | None, CustomerContact | None, User | None]:
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
     items = (await db.scalars(
         select(QuotationItem).where(QuotationItem.quotation_id == q.id)
-        .order_by(QuotationItem.position.asc())
+        .order_by(QuotationItem.line_no.asc())
     )).all()
     cust = await db.get(Customer, q.customer_id) if q.customer_id else None
-    return q, items, cust
+    contact = await db.get(CustomerContact, q.contact_id) if q.contact_id else None
+    sales = await db.get(User, q.sales_pic_id) if q.sales_pic_id else None
+    return q, items, cust, contact, sales
+
+
+def _pic_fields(cust: Customer | None, contact: CustomerContact | None) -> dict:
+    """Return the addressed-to PIC details. Falls back to the customer
+    record's primary PIC when no specific contact was selected."""
+    if contact:
+        return {
+            "name":     contact.name or "—",
+            "position": contact.position or "—",
+            "email":    contact.email or "—",
+            "phone":    contact.phone or contact.whatsapp or "—",
+        }
+    if cust:
+        return {
+            "name":     cust.pic_name or "—",
+            "position": cust.pic_position or "—",
+            "email":    cust.email or "—",
+            "phone":    cust.phone or cust.whatsapp or "—",
+        }
+    return {"name": "—", "position": "—", "email": "—", "phone": "—"}
 
 
 @router.get("/{q_id}/export.pdf")
@@ -291,9 +316,10 @@ async def export_quotation_pdf(
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     )
 
-    q, items, cust = await _quotation_bundle(db, q_id)
+    q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    pic = _pic_fields(cust, contact)
 
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -304,6 +330,9 @@ async def export_quotation_pdf(
     )
     styles = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=styles["Title"], fontSize=18, alignment=0)
+    section = ParagraphStyle("section", parent=styles["BodyText"],
+                             fontSize=10, fontName="Helvetica-Bold",
+                             textColor=colors.HexColor("#1f2937"), spaceAfter=2)
     body = styles["BodyText"]
     label = ParagraphStyle("label", parent=body, textColor=colors.grey, fontSize=8, leading=10)
     flow: list = []
@@ -312,15 +341,35 @@ async def export_quotation_pdf(
     flow.append(Paragraph(f"Quotation <b>{q.number}</b>", body))
     flow.append(Spacer(1, 6*mm))
 
+    # ── Customer block: company, address, addressed-to PIC ──────────────
+    flow.append(Paragraph("Bill to / Addressed to", section))
+    cust_block = [
+        ["Customer",       cust.company_name if cust else "—"],
+        ["Address",        (cust.company_address if cust and cust.company_address else "—")],
+        ["PIC",            pic["name"]],
+        ["Department",     pic["position"]],
+        ["Email",          pic["email"]],
+        ["Phone",          pic["phone"]],
+    ]
+    cust_table = Table(cust_block, colWidths=[35*mm, 145*mm])
+    cust_table.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    flow.append(cust_table)
+    flow.append(Spacer(1, 5*mm))
+
+    # ── Quote meta ──────────────────────────────────────────────────────
     meta = [
-        ["Customer", cust.company_name if cust else "—"],
-        ["Industry", (cust.industry if cust else "—").title()],
-        ["Variant", (q.variant or "—").title()],
-        ["Status", (q.status or "—").replace("_", " ").title()],
-        ["Issued", q.created_at.strftime("%Y-%m-%d") if q.created_at else "—"],
+        ["Variant",     (q.variant or "—").title()],
+        ["Status",      (q.status or "—").replace("_", " ").title()],
+        ["Issued",      q.created_at.strftime("%Y-%m-%d") if q.created_at else "—"],
         ["Valid until", q.valid_until.strftime("%Y-%m-%d") if q.valid_until else "—"],
     ]
-    t = Table(meta, colWidths=[35*mm, 130*mm])
+    t = Table(meta, colWidths=[35*mm, 145*mm])
     t.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
         ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
@@ -338,7 +387,7 @@ async def export_quotation_pdf(
             str(i),
             it.description or "",
             f"{float(it.qty or 0):g}",
-            it.unit or "",
+            it.uom or "",
             _idr(it.unit_price),
             _idr(float(it.qty or 0) * float(it.unit_price or 0)),
         ])
@@ -361,13 +410,14 @@ async def export_quotation_pdf(
     flow.append(Spacer(1, 4*mm))
 
     subtotal = float(q.subtotal or 0)
-    disc_amt = subtotal * (float(q.discount_pct or 0) / 100.0)
-    tax = float(q.tax_amount or 0)
+    disc_amt = float(q.discount_amount or 0)
+    after = subtotal - disc_amt
+    tax = after * (float(q.tax_pct or 0) / 100.0)
     total = float(q.total or 0)
     totals = [
         ["Subtotal", _idr(subtotal)],
         [f"Discount ({float(q.discount_pct or 0):.1f}%)", f"−{_idr(disc_amt)}"],
-        ["Tax", _idr(tax)],
+        [f"Tax ({float(q.tax_pct or 0):.1f}%)", _idr(tax)],
         ["TOTAL", _idr(total)],
     ]
     t2 = Table(totals, colWidths=[150*mm, 30*mm])
@@ -384,8 +434,26 @@ async def export_quotation_pdf(
     if q.notes:
         flow.append(Paragraph("<b>Notes</b>", body))
         flow.append(Paragraph(q.notes.replace("\n", "<br/>"), body))
+        flow.append(Spacer(1, 6*mm))
 
-    flow.append(Spacer(1, 12*mm))
+    # ── Sales rep block (at the very bottom, as requested) ─────────────
+    flow.append(Spacer(1, 6*mm))
+    flow.append(Paragraph("Issued by", section))
+    sales_rows = [
+        ["Sales rep", sales.full_name if sales else "—"],
+        ["Email",     sales.email if sales else "—"],
+        ["Phone",     ((sales.phone if sales else None) or (sales.whatsapp_id if sales else None) or "—")],
+    ]
+    sales_table = Table(sales_rows, colWidths=[35*mm, 145*mm])
+    sales_table.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    flow.append(sales_table)
+
+    flow.append(Spacer(1, 8*mm))
     flow.append(Paragraph(
         "Generated by Transmisi Eng. Prices in IDR. "
         "Quotation valid for the period above.",
@@ -412,9 +480,10 @@ async def export_quotation_excel(
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
-    q, items, cust = await _quotation_bundle(db, q_id)
+    q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    pic = _pic_fields(cust, contact)
 
     wb = Workbook()
     ws = wb.active
@@ -434,9 +503,16 @@ async def export_quotation_excel(
     ws.merge_cells("A2:F2")
 
     row = 4
+    ws.cell(row=row, column=1, value="Bill to / Addressed to").font = bold
+    row += 1
     for label, value in [
         ("Customer",      cust.company_name if cust else "—"),
-        ("Industry",      (cust.industry if cust else "—").title()),
+        ("Address",       (cust.company_address if cust and cust.company_address else "—")),
+        ("PIC",           pic["name"]),
+        ("Department",    pic["position"]),
+        ("Email",         pic["email"]),
+        ("Phone",         pic["phone"]),
+        ("",              ""),
         ("Variant",       (q.variant or "—").title()),
         ("Status",        (q.status or "—").replace("_", " ").title()),
         ("Issued",        q.created_at.strftime("%Y-%m-%d") if q.created_at else "—"),
@@ -462,7 +538,7 @@ async def export_quotation_excel(
             i,
             it.description or "",
             float(it.qty or 0),
-            it.unit or "",
+            it.uom or "",
             float(it.unit_price or 0),
             line_total,
         ]
@@ -477,14 +553,15 @@ async def export_quotation_excel(
 
     # Totals block
     subtotal = float(q.subtotal or 0)
-    disc_amt = subtotal * (float(q.discount_pct or 0) / 100.0)
-    tax = float(q.tax_amount or 0)
+    disc_amt = float(q.discount_amount or 0)
+    after = subtotal - disc_amt
+    tax = after * (float(q.tax_pct or 0) / 100.0)
     total = float(q.total or 0)
     row += 1
     for label, value, fmt in [
         ("Subtotal",                                      subtotal, '"Rp" #,##0'),
         (f"Discount ({float(q.discount_pct or 0):.1f}%)", -disc_amt, '"Rp" #,##0'),
-        ("Tax",                                           tax,      '"Rp" #,##0'),
+        (f"Tax ({float(q.tax_pct or 0):.1f}%)",           tax,      '"Rp" #,##0'),
         ("TOTAL",                                         total,    '"Rp" #,##0'),
     ]:
         ws.cell(row=row, column=5, value=label).font = bold
@@ -506,6 +583,19 @@ async def export_quotation_excel(
         ws.cell(row=row, column=1, value=q.notes)
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
         ws.cell(row=row, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+
+    # ── Sales rep block at the bottom ────────────────────────────────────
+    row += 2
+    ws.cell(row=row, column=1, value="Issued by").font = bold
+    row += 1
+    for label, value in [
+        ("Sales rep", sales.full_name if sales else "—"),
+        ("Email",     sales.email if sales else "—"),
+        ("Phone",     ((sales.phone if sales else None) or (sales.whatsapp_id if sales else None) or "—")),
+    ]:
+        ws.cell(row=row, column=1, value=label).font = bold
+        ws.cell(row=row, column=2, value=value)
+        row += 1
 
     buf = BytesIO()
     wb.save(buf)

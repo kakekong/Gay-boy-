@@ -39,6 +39,13 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     sales_pic_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+    # The customer-side PIC this quotation is addressed to. Null means
+    # "use the primary contact stored on the customer record itself."
+    contact_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("customer_contacts.id", ondelete="SET NULL"),
+        index=True,
+    )
 
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False, index=True)
     currency: Mapped[str] = mapped_column(String(8), default="IDR", nullable=False)
