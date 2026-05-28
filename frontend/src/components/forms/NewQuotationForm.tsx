@@ -28,7 +28,24 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
       .then((r) => r.data.data as Customer[]),
   });
 
+  // Pull the picked customer's extra PICs (multi-PIC contacts) so the user
+  // can choose which one this quote is addressed to.
+  const contacts = useQuery({
+    queryKey: ["customer-contacts", customerId],
+    queryFn: () => api.get(`/customers/${customerId}/contacts`)
+      .then((r) => r.data as Array<{
+        id: string; name: string; position: string | null; email: string | null;
+      }>),
+    enabled: !!customerId,
+  });
+
+  const selectedCustomer = (customers.data ?? []).find((c) => c.id === customerId);
+  const primaryPicLabel = selectedCustomer?.pic_name
+    ? `${selectedCustomer.pic_name} (primary on customer record)`
+    : "Primary PIC on customer record";
+
   const [customerId, setCustomerId] = useState(preselectCustomerId ?? "");
+  const [contactId, setContactId] = useState<string>("");  // "" = primary PIC on customer record
   const [variant, setVariant] = useState<"short" | "detailed">("detailed");
   const [discountPct, setDiscountPct] = useState(0);
   const [taxPct, setTaxPct] = useState(11);
@@ -76,6 +93,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
     }
     create.mutate({
       customer_id: customerId,
+      contact_id: contactId || null,
       variant,
       discount_pct: discountPct,
       tax_pct: taxPct,
@@ -103,10 +121,28 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label="Customer *">
           <select className="input" value={customerId} required
-            onChange={(e) => setCustomerId(e.target.value)}>
+            onChange={(e) => {
+              setCustomerId(e.target.value);
+              setContactId("");  // reset PIC when switching customer
+            }}>
             <option value="">— select customer —</option>
             {(customers.data ?? []).map((c) => (
               <option key={c.id} value={c.id}>{c.company_name}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Addressed to (PIC)">
+          <select
+            className="input"
+            value={contactId}
+            disabled={!customerId}
+            onChange={(e) => setContactId(e.target.value)}
+          >
+            <option value="">{primaryPicLabel}</option>
+            {(contacts.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}{c.position ? ` — ${c.position}` : ""}
+              </option>
             ))}
           </select>
         </Field>

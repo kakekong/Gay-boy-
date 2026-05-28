@@ -25,6 +25,9 @@ class QuotationItemOut(QuotationItemIn):
 
 class QuotationCreate(BaseModel):
     customer_id: UUID
+    # Which PIC at the customer this quote is addressed to. Null = use the
+    # primary PIC stored on the customer record.
+    contact_id: UUID | None = None
     variant: str = Field(default="detailed", pattern="^(short|detailed)$")
     items: list[QuotationItemIn]
     discount_pct: float = 0
@@ -37,6 +40,7 @@ class QuotationOut(BaseModel):
     id: UUID
     number: str
     customer_id: UUID
+    contact_id: UUID | None = None
     version: int
     variant: str
     status: str

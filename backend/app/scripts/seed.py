@@ -58,6 +58,11 @@ COLUMN_MIGRATIONS: list[str] = [
     'CREATE INDEX IF NOT EXISTS ix_users_linked_customer_id ON users (linked_customer_id)',
     'CREATE INDEX IF NOT EXISTS ix_users_linked_supplier_id ON users (linked_supplier_id)',
 
+    # Quotation gained an addressed-to contact (which customer PIC this
+    # quotation is for). NULL means "use the primary PIC on the customer."
+    'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS contact_id UUID',
+    'CREATE INDEX IF NOT EXISTS ix_quotations_contact_id ON quotations (contact_id)',
+
     # Customer gained tax info (NPWP / NPPKP / PKP status)
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id      VARCHAR(32)',
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_name    VARCHAR(255)',
