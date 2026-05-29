@@ -175,6 +175,84 @@ async def create_po(
     }
 
 
+class POPatch(BaseModel):
+    number: str | None = None
+    po_date: str | None = None        # ISO YYYY-MM-DD
+    quoted_lead_days: int | None = None
+    total: float | None = None
+    status: str | None = None         # open | received | closed | cancelled
+    items: list | None = None
+
+
+@router.patch("/po/{po_id}")
+async def update_po(
+    po_id: UUID,
+    payload: POPatch,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_director_only),
+):
+    """Update an existing supplier PO. Director-only, same as create.
+
+    Renaming the PO number is allowed but the new value must be unique —
+    a conflict returns 409 so the UI can show "that number's already
+    used" instead of letting the DB raise an opaque IntegrityError.
+    """
+    from datetime import date as date_t
+    from app.models.purchasing import SupplierPO
+
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "number" in data:
+        new_num = (data["number"] or "").strip()
+        if not new_num:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO number cannot be empty")
+        if new_num != po.number:
+            clash = await db.scalar(
+                select(SupplierPO).where(
+                    SupplierPO.number == new_num, SupplierPO.id != po_id
+                )
+            )
+            if clash:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"PO number '{new_num}' is already used by another PO",
+                )
+            po.number = new_num
+
+    if "po_date" in data:
+        raw = data["po_date"]
+        if raw is None or raw == "":
+            po.po_date = None
+        else:
+            try:
+                po.po_date = date_t.fromisoformat(raw)
+            except ValueError:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
+
+    if "quoted_lead_days" in data:
+        po.quoted_lead_days = data["quoted_lead_days"]
+    if "total" in data and data["total"] is not None:
+        po.total = data["total"]
+    if "status" in data and data["status"]:
+        po.status = data["status"]
+    if "items" in data and data["items"] is not None:
+        po.items = data["items"]
+
+    await db.flush()
+    return {
+        "id": str(po.id), "number": po.number, "status": po.status,
+        "supplier_id": str(po.supplier_id),
+        "project_id": str(po.project_id) if po.project_id else None,
+        "po_date": po.po_date, "total": float(po.total or 0),
+        "quoted_lead_days": po.quoted_lead_days,
+        "items": po.items,
+    }
+
+
 # ─── PR / RFQ / PO stubs (kept) ──────────────────────────────────────────────
 
 # PR/RFQ/GR/QC are intentionally not implemented in this build — the
