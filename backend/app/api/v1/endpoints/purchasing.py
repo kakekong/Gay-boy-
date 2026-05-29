@@ -175,6 +175,41 @@ async def create_po(
     }
 
 
+@router.get("/po/{po_id}")
+async def get_po(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_director_only),
+):
+    """Full PO detail with supplier and project context for the detail page."""
+    from app.models.operation import Project
+    from app.models.purchasing import Supplier, SupplierPO
+
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    supplier = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    project = await db.get(Project, po.project_id) if po.project_id else None
+    return {
+        "id": str(po.id),
+        "number": po.number,
+        "status": po.status,
+        "supplier_id": str(po.supplier_id),
+        "supplier_name": supplier.name if supplier else None,
+        "supplier_category": supplier.category if supplier else None,
+        "project_id": str(po.project_id) if po.project_id else None,
+        "project_code": project.code if project else None,
+        "project_status": project.status if project else None,
+        "project_target_delivery": project.target_delivery if project else None,
+        "project_actual_delivery": project.actual_delivery if project else None,
+        "po_date": po.po_date,
+        "quoted_lead_days": po.quoted_lead_days,
+        "total": float(po.total or 0),
+        "items": po.items,
+        "created_at": po.created_at,
+    }
+
+
 class POPatch(BaseModel):
     number: str | None = None
     po_date: str | None = None        # ISO YYYY-MM-DD
