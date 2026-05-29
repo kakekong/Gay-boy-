@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   Truck, Plus, Loader2, AlertCircle, X, Save, Pencil, Check,
-  Search, Filter,
+  Search, Filter, ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -37,6 +38,7 @@ const idr = (n: number) =>
 
 export default function PurchaseOrdersPage() {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const me = useAuthStore((s) => s.user);
   const isDirector = me?.role === "director";
 
@@ -224,14 +226,19 @@ export default function PurchaseOrdersPage() {
                 <th className="th">Lead</th>
                 <th className="th">Status</th>
                 <th className="th text-right">Total</th>
+                <th className="th w-8"></th>
               </tr>
             </thead>
             <tbody>
               {rows.map((p) => {
                 const editing = editingNumberId === p.id;
                 return (
-                  <tr key={p.id} className="tr-hover border-t border-ink-100">
-                    <td className="td">
+                  <tr
+                    key={p.id}
+                    className="tr-hover border-t border-ink-100 cursor-pointer"
+                    onClick={() => { if (!editing) nav(`/purchase-orders/${p.id}`); }}
+                  >
+                    <td className="td" onClick={(e) => e.stopPropagation()}>
                       {editing ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -291,6 +298,9 @@ export default function PurchaseOrdersPage() {
                       </span>
                     </td>
                     <td className="td text-right tabular-nums">{idr(p.total ?? 0)}</td>
+                    <td className="td text-right">
+                      <ChevronRight size={14} className="text-ink-400" />
+                    </td>
                   </tr>
                 );
               })}

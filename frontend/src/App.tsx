@@ -33,7 +33,8 @@ const CustomerPortalPage   = lazy(() => import("@/pages/CustomerPortal"));
 const SupplierPortalPage   = lazy(() => import("@/pages/SupplierPortal"));
 const PaymentVerificationPage = lazy(() => import("@/pages/PaymentVerification"));
 const PurchasingPage       = lazy(() => import("@/pages/Purchasing"));
-const PurchaseOrdersPage   = lazy(() => import("@/pages/PurchaseOrders"));
+const PurchaseOrdersPage      = lazy(() => import("@/pages/PurchaseOrders"));
+const PurchaseOrderDetailPage = lazy(() => import("@/pages/PurchaseOrderDetail"));
 const OperationPage        = lazy(() => import("@/pages/Operation"));
 const FinancePage          = lazy(() => import("@/pages/Finance"));
 const KpiPage              = lazy(() => import("@/pages/Kpi"));
@@ -144,6 +145,7 @@ function MainApp() {
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/purchasing" element={<PurchasingPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+          <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
           <Route path="/operation" element={<OperationPage />} />
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/finance/payment-verification" element={<PaymentVerificationPage />} />

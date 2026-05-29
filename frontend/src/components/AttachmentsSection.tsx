@@ -22,7 +22,7 @@ interface AttachmentRow {
 }
 
 interface Props {
-  ownerType: "customer" | "quotation" | "project";
+  ownerType: "customer" | "quotation" | "project" | "supplier_po";
   ownerId: string;
 }
 
