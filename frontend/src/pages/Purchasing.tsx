@@ -33,6 +33,16 @@ export default function PurchasingPage() {
   const [openNew, setOpenNew] = useState(false);
   const [openPO, setOpenPO] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // Tab persisted across sessions so the user lands back where they left off.
+  const [tab, setTab] = useState<"suppliers" | "pos">(() => {
+    const stored = localStorage.getItem("purchasing-tab");
+    if (stored === "pos") return "pos";
+    return "suppliers";
+  });
+  function pickTab(t: "suppliers" | "pos") {
+    setTab(t);
+    localStorage.setItem("purchasing-tab", t);
+  }
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],
@@ -91,6 +101,40 @@ export default function PurchasingPage() {
         </div>
       )}
 
+      {/* Tabs */}
+      <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
+        <button
+          onClick={() => pickTab("suppliers")}
+          className={clsx(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+            tab === "suppliers" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
+          )}
+        >
+          <Star size={14} /> Suppliers
+          {suppliers.data && (
+            <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
+              {suppliers.data.length}
+            </span>
+          )}
+        </button>
+        {isDirector && (
+          <button
+            onClick={() => pickTab("pos")}
+            className={clsx(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+              tab === "pos" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
+            )}
+          >
+            <Truck size={14} /> Purchase Orders
+            {pos.data && (
+              <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
+                {pos.data.length}
+              </span>
+            )}
+          </button>
+        )}
+      </div>
+
       <div className="card p-4 lg:p-6 overflow-x-auto">
         <div className="flex items-stretch gap-3 min-w-[700px]">
           {STAGES.map((s, i) => (
@@ -112,6 +156,7 @@ export default function PurchasingPage() {
         </div>
       </div>
 
+      {tab === "suppliers" && (
       <div className="card overflow-hidden">
         <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
           <div>
@@ -193,9 +238,10 @@ export default function PurchasingPage() {
           </table>
         )}
       </div>
+      )}
 
       {/* Supplier POs — director-only to limit who sees the supplier⇄customer mapping */}
-      {isDirector && (
+      {tab === "pos" && isDirector && (
       <div className="card overflow-hidden">
         <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
           <div>
