@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
-  MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map,
+  MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -44,6 +44,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/projects", label: "Projects", label_id: "Proyek", icon: Briefcase },
       { to: "/purchasing", label: "Purchasing", label_id: "Pembelian", icon: ShoppingCart,
         roles: ["purchasing", "admin", "manager", "director"] },
+      { to: "/purchase-orders", label: "Purchase Orders", label_id: "Purchase Orders", icon: Truck,
+        roles: ["director"] },
       { to: "/operation", label: "Operation", label_id: "Operasi", icon: Wrench },
       { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote },
       { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
