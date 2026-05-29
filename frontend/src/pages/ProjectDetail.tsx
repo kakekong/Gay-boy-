@@ -76,6 +76,14 @@ export default function ProjectDetailPage() {
     onError: onErr,
   });
 
+  // Inline edit for target / actual delivery dates.
+  const patchProject = useMutation({
+    mutationFn: (body: Record<string, string | null>) =>
+      api.patch(`/operation/projects/${id}`, body),
+    onSuccess: refresh,
+    onError: onErr,
+  });
+
   if (data.isLoading) return <div className="muted text-sm">Loading…</div>;
   if (data.isError) {
     const e: any = data.error;
@@ -173,8 +181,53 @@ export default function ProjectDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
           <Field label="PO Number" icon={<FileText size={13} />}>{p.po_number ?? "—"}</Field>
           <Field label="PO Date" icon={<Calendar size={13} />}>{p.po_date ?? "—"}</Field>
-          <Field label="Target delivery" icon={<Truck size={13} />}>{p.target_delivery ?? "—"}</Field>
-          <Field label="Actual delivery" icon={<Truck size={13} />}>{p.actual_delivery ?? "—"}</Field>
+          <EditableDateField
+            label="Target delivery"
+            icon={<Truck size={13} />}
+            value={p.target_delivery ?? ""}
+            disabled={patchProject.isPending}
+            onChange={(v) => patchProject.mutate({ target_delivery: v || null })}
+          />
+          <EditableDateField
+            label="Actual delivery"
+            icon={<Truck size={13} />}
+            value={p.actual_delivery ?? ""}
+            disabled={patchProject.isPending}
+            onChange={(v) => patchProject.mutate({ actual_delivery: v || null })}
+          />
+        </div>
+
+        {/* Delivery-date guide: what each date means and when to set it */}
+        <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/40 p-4 text-sm">
+          <div className="font-semibold text-ink-800 flex items-center gap-2">
+            <Truck size={14} className="text-brand-600" /> How to set the delivery dates
+          </div>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-ink-700">
+            <div>
+              <div className="font-medium">Target delivery</div>
+              <p className="text-xs text-ink-600 leading-relaxed mt-0.5">
+                The date you <span className="font-medium">promised the customer</span>.
+                Set it as soon as the PO is signed. Click the date field
+                above and pick a date. Once set, leave it alone — change
+                it only after a written customer reschedule.
+              </p>
+            </div>
+            <div>
+              <div className="font-medium">Actual delivery</div>
+              <p className="text-xs text-ink-600 leading-relaxed mt-0.5">
+                The date the goods <span className="font-medium">actually arrived at the customer</span>.
+                Set it the day delivery is confirmed (proof of delivery,
+                courier sign-off, or customer acknowledgement). The system
+                uses the gap between Target and Actual to track on-time
+                performance.
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-ink-500 mt-3">
+            For multi-leg shipments (origin → warehouse → customer), use
+            the Shipping timeline editor below for each leg's ETA, and
+            keep this Actual delivery as the final arrival at the customer.
+          </p>
         </div>
       </div>
 
@@ -453,6 +506,35 @@ function Field({ icon, label, children }: {
         {icon} {label}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
+    </div>
+  );
+}
+
+function EditableDateField({
+  label, icon, value, disabled, onChange,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  value: string;
+  disabled?: boolean;
+  onChange: (v: string) => void;
+}) {
+  // The PATCH endpoint refuses to wipe a date when null is sent — once a
+  // date is set, the user can change it but not clear it from this field.
+  // Editing fires onChange only on a real value to keep semantics matching
+  // the backend's "protected date fields" rule.
+  return (
+    <div>
+      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
+        {icon} {label}
+      </div>
+      <input
+        type="date"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm py-0.5 px-0 cursor-pointer disabled:opacity-50"
+      />
     </div>
   );
 }

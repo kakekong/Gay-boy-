@@ -460,6 +460,7 @@ function NewPOModal({
 }) {
   const [supplierId, setSupplierId] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [poNumber, setPoNumber] = useState("");
   const [poDate, setPoDate] = useState(new Date().toISOString().slice(0, 10));
   const [leadDays, setLeadDays] = useState("");
   const [total, setTotal] = useState("");
@@ -469,6 +470,7 @@ function NewPOModal({
     mutationFn: () => api.post("/purchasing/po", {
       supplier_id: supplierId,
       project_id: projectId,
+      number: poNumber.trim() || null,
       po_date: poDate || null,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
       total: total ? Number(total) : 0,
@@ -548,16 +550,39 @@ function NewPOModal({
             )}
           </label>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-xs font-medium text-ink-600 mb-1">PO date</span>
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                PO number
+              </span>
+              <input
+                className="input"
+                value={poNumber}
+                onChange={(e) => setPoNumber(e.target.value)}
+                placeholder="Auto-generated if blank (PO-YYMMDD-NNN)"
+              />
+              <span className="block text-[10px] text-ink-400 mt-1">
+                Leave blank to use the next sequential number.
+              </span>
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                PO date <span className="text-red-500">*</span>
+              </span>
               <input
                 type="date"
+                required
                 className="input"
                 value={poDate}
                 onChange={(e) => setPoDate(e.target.value)}
               />
+              <span className="block text-[10px] text-ink-400 mt-1">
+                The day the PO is issued.
+              </span>
             </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">Lead time (days)</span>
               <input
