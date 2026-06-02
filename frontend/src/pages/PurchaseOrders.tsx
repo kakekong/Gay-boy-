@@ -27,10 +27,11 @@ interface PO {
 }
 
 const STATUS_CHIP: Record<string, string> = {
-  open:      "bg-amber-50 text-amber-700",
-  received:  "bg-blue-50 text-blue-700",
-  closed:    "bg-emerald-50 text-emerald-700",
-  cancelled: "bg-red-50 text-red-700",
+  pending_approval: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  open:             "bg-blue-50 text-blue-700",
+  received:         "bg-cyan-50 text-cyan-700",
+  closed:           "bg-emerald-50 text-emerald-700",
+  cancelled:        "bg-red-50 text-red-700",
 };
 
 const idr = (n: number) =>
@@ -52,7 +53,6 @@ export default function PurchaseOrdersPage() {
   const pos = useQuery({
     queryKey: ["supplier-pos"],
     queryFn: () => api.get("/purchasing/po").then((r) => r.data as PO[]),
-    enabled: isDirector,
     retry: false,
   });
   const suppliers = useQuery({
@@ -63,24 +63,40 @@ export default function PurchaseOrdersPage() {
   const projects = useQuery({
     queryKey: ["projects-min"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data as any[]),
-    enabled: openNew && isDirector,
+    enabled: openNew,
     retry: false,
   });
 
   const patchPo = useMutation({
+    // axios treats 202 as a thrown error because we raise HTTPException(202)
+    // on the backend's approval path; catch both shapes so the user always
+    // sees a useful message.
     mutationFn: (vars: { id: string; body: Record<string, any> }) =>
       api.patch(`/purchasing/po/${vars.id}`, vars.body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["supplier-pos"] });
       setEditingNumberId(null);
     },
-    onError: (e: any) => setFlash({
-      kind: "err",
-      text: e?.response?.data?.errors?.[0]?.message
-        ?? e?.response?.data?.detail
-        ?? e?.message
-        ?? "Update failed",
-    }),
+    onError: (e: any) => {
+      const status = e?.response?.status;
+      if (status === 202) {
+        setEditingNumberId(null);
+        qc.invalidateQueries({ queryKey: ["supplier-pos"] });
+        setFlash({
+          kind: "ok",
+          text: e?.response?.data?.detail
+            ?? "Submitted for director approval.",
+        });
+        return;
+      }
+      setFlash({
+        kind: "err",
+        text: e?.response?.data?.errors?.[0]?.message
+          ?? e?.response?.data?.detail
+          ?? e?.message
+          ?? "Update failed",
+      });
+    },
   });
 
   const supplierName = (id: string) =>
@@ -114,19 +130,6 @@ export default function PurchaseOrdersPage() {
     patchPo.mutate({ id: po.id, body: { number: next } });
   }
 
-  if (!isDirector) {
-    return (
-      <div className="card p-12 text-center">
-        <AlertCircle size={28} className="mx-auto text-amber-500" />
-        <div className="mt-3 font-semibold">Director only</div>
-        <p className="text-sm muted mt-1 max-w-md mx-auto">
-          Supplier POs are restricted to the director to limit who sees the
-          supplier ⇄ customer mapping.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -135,8 +138,9 @@ export default function PurchaseOrdersPage() {
             <Truck size={22} className="text-brand-600" /> Purchase Orders
           </h1>
           <p className="text-sm muted">
-            Every supplier PO. Click a PO number to rename it; conflicts are
-            rejected so two POs can never share a number.
+            {isDirector
+              ? "Every supplier PO. Click a PO number to rename it."
+              : "Every PO change is submitted to the director for approval before it takes effect."}
           </p>
         </div>
         <button className="btn-primary" onClick={() => setOpenNew(true)}>
@@ -171,9 +175,10 @@ export default function PurchaseOrdersPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="input max-w-[180px]"
+          className="input max-w-[200px]"
         >
           <option value="">All statuses</option>
+          <option value="pending_approval">Pending approval</option>
           <option value="open">Open</option>
           <option value="received">Received</option>
           <option value="closed">Closed</option>
@@ -294,7 +299,7 @@ export default function PurchaseOrdersPage() {
                         "chip capitalize",
                         STATUS_CHIP[p.status] ?? "bg-ink-100 text-ink-700",
                       )}>
-                        {p.status}
+                        {p.status.replace(/_/g, " ")}
                       </span>
                     </td>
                     <td className="td text-right tabular-nums">{idr(p.total ?? 0)}</td>
@@ -315,10 +320,15 @@ export default function PurchaseOrdersPage() {
           projects={projects.data ?? []}
           projectsLoading={projects.isLoading}
           onClose={() => setOpenNew(false)}
-          onCreated={(number) => {
+          onCreated={(number, pendingApproval) => {
             qc.invalidateQueries({ queryKey: ["supplier-pos"] });
             setOpenNew(false);
-            setFlash({ kind: "ok", text: `PO ${number} issued.` });
+            setFlash({
+              kind: "ok",
+              text: pendingApproval
+                ? `PO ${number} submitted for director approval.`
+                : `PO ${number} issued.`,
+            });
           }}
           onError={(msg) => setFlash({ kind: "err", text: msg })}
         />
@@ -334,7 +344,7 @@ function NewPOModal({
   projects: any[];
   projectsLoading: boolean;
   onClose: () => void;
-  onCreated: (number: string) => void;
+  onCreated: (number: string, pendingApproval: boolean) => void;
   onError: (msg: string) => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -356,7 +366,7 @@ function NewPOModal({
       total: total ? Number(total) : 0,
       items: description ? [{ description, qty: 1 }] : [],
     }).then((r) => r.data),
-    onSuccess: (r) => onCreated(r.number),
+    onSuccess: (r) => onCreated(r.number, !!r.pending_approval),
     onError: (e: any) => onError(
       e?.response?.data?.errors?.[0]?.message
         ?? e?.response?.data?.detail

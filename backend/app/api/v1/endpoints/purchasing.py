@@ -10,9 +10,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.approval import request_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
+from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.purchasing import Supplier
 from app.models.user import User
 
@@ -92,7 +94,7 @@ _director_only = require(Role.DIRECTOR)
 @router.get("/po")
 async def list_pos(
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_director_only),
+    _u: User = Depends(_purchasing_or_director),
     supplier_id: UUID | None = None,
     project_id: UUID | None = None,
 ):
@@ -120,12 +122,14 @@ async def list_pos(
 async def create_po(
     payload: PoCreate,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_director_only),
+    user: User = Depends(_purchasing_or_director),
 ):
-    """Issue a supplier PO — **director only** to limit exposure of the
-    supplier⇄customer mapping. The PO must reference a supplier and a
-    project so the supplier portal can show it and updates flow to the
-    customer.
+    """Create a supplier PO. Every step in the PO lifecycle is gated on
+    director approval: when a non-director submits this, the PO is
+    created with status='pending_approval' and an ApprovalRequest is
+    filed for the director. The director sees it in /approvals and can
+    flip it to 'open' (or 'cancelled') from there. Director themselves
+    short-circuit and the PO comes up 'open' immediately.
     """
     from datetime import date as date_t
 
@@ -156,6 +160,7 @@ async def create_po(
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
 
+    is_director = Role(user.role) == Role.DIRECTOR
     po = SupplierPO(
         number=number,
         supplier_id=payload.supplier_id,
@@ -164,14 +169,28 @@ async def create_po(
         quoted_lead_days=payload.quoted_lead_days,
         total=payload.total,
         items=payload.items,
-        status="open",
+        status="open" if is_director else "pending_approval",
     )
     db.add(po)
     await db.flush()
+
+    if not is_director:
+        await request_approval(
+            db,
+            target_type="supplier_po",
+            target_id=po.id,
+            requested_by=user.id,
+            required_role=Role.DIRECTOR,
+            reason=f"Create PO {po.number} ({supplier.name}, project {project.code})",
+            payload={"action": "create"},
+        )
+
     return {
         "id": str(po.id), "number": po.number,
         "supplier_id": str(po.supplier_id),
         "project_id": str(po.project_id),
+        "status": po.status,
+        "pending_approval": not is_director,
     }
 
 
@@ -179,7 +198,7 @@ async def create_po(
 async def get_po(
     po_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_director_only),
+    _u: User = Depends(_purchasing_or_director),
 ):
     """Full PO detail with supplier and project context for the detail page."""
     from app.models.operation import Project
@@ -224,9 +243,13 @@ async def update_po(
     po_id: UUID,
     payload: POPatch,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_director_only),
+    user: User = Depends(_purchasing_or_director),
 ):
-    """Update an existing supplier PO. Director-only, same as create.
+    """Update an existing supplier PO. Every change is gated on director
+    approval: when a non-director submits this, the PO is left untouched
+    and an ApprovalRequest is filed with the proposed changes in its
+    payload. The director sees it in /approvals and the changes are
+    applied when they approve. Director themselves apply immediately.
 
     Renaming the PO number is allowed but the new value must be unique —
     a conflict returns 409 so the UI can show "that number's already
@@ -241,6 +264,8 @@ async def update_po(
 
     data = payload.model_dump(exclude_unset=True)
 
+    # Validate without mutating — same checks regardless of approval path,
+    # so we never queue a doomed approval the director can't apply later.
     if "number" in data:
         new_num = (data["number"] or "").strip()
         if not new_num:
@@ -256,18 +281,40 @@ async def update_po(
                     status.HTTP_409_CONFLICT,
                     f"PO number '{new_num}' is already used by another PO",
                 )
-            po.number = new_num
+        data["number"] = new_num
+    if "po_date" in data and data["po_date"] not in (None, ""):
+        try:
+            date_t.fromisoformat(data["po_date"])
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
 
+    is_director = Role(user.role) == Role.DIRECTOR
+    if not is_director:
+        # Drop the field outright if it would clear an existing date — the
+        # rule everywhere else in the app is "null doesn't wipe protected
+        # dates". The director can still set a date explicitly.
+        if data.get("po_date") in (None, ""):
+            data.pop("po_date", None)
+        await request_approval(
+            db,
+            target_type="supplier_po",
+            target_id=po.id,
+            requested_by=user.id,
+            required_role=Role.DIRECTOR,
+            reason=f"Update PO {po.number}: {', '.join(sorted(data.keys())) or 'no fields'}",
+            payload={"action": "update", "changes": data},
+        )
+        raise HTTPException(
+            status.HTTP_202_ACCEPTED,
+            "Submitted for director approval; changes will apply once approved.",
+        )
+
+    # Director path: apply immediately.
+    if "number" in data:
+        po.number = data["number"]
     if "po_date" in data:
         raw = data["po_date"]
-        if raw is None or raw == "":
-            po.po_date = None
-        else:
-            try:
-                po.po_date = date_t.fromisoformat(raw)
-            except ValueError:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
-
+        po.po_date = None if raw in (None, "") else date_t.fromisoformat(raw)
     if "quoted_lead_days" in data:
         po.quoted_lead_days = data["quoted_lead_days"]
     if "total" in data and data["total"] is not None:
