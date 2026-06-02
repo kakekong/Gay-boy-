@@ -7,6 +7,7 @@ from app.models.attendance import Attendance  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage  # noqa: F401
 from app.models.crm import Activity, Customer, Reminder  # noqa: F401
+from app.models.customer_po import CustomerPO  # noqa: F401
 from app.models.finance import Invoice, Payment  # noqa: F401
 from app.models.inventory import InventoryItem, InventoryMovement  # noqa: F401
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder  # noqa: F401
