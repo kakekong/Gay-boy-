@@ -466,6 +466,8 @@ function NewPOModal({
   const [total, setTotal] = useState("");
   const [description, setDescription] = useState("");
 
+  const [localErr, setLocalErr] = useState<string | null>(null);
+
   const create = useMutation({
     mutationFn: () => api.post("/purchasing/po", {
       supplier_id: supplierId,
@@ -477,13 +479,28 @@ function NewPOModal({
       items: description ? [{ description, qty: 1 }] : [],
     }).then((r) => r.data),
     onSuccess: (r) => onCreated(r.number),
-    onError: (e: any) => onError(
-      e?.response?.data?.errors?.[0]?.message
+    onError: (e: any) => {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.errors?.[0]?.message
         ?? e?.response?.data?.detail
         ?? e?.message
-        ?? "Failed to create PO"
-    ),
+        ?? "Failed to create PO";
+      setLocalErr(status ? `${msg} (HTTP ${status})` : msg);
+      onError(msg);
+    },
   });
+
+  function attemptSubmit() {
+    setLocalErr(null);
+    const missing: string[] = [];
+    if (!supplierId) missing.push("supplier");
+    if (!projectId) missing.push("project");
+    if (missing.length) {
+      setLocalErr(`Please choose a ${missing.join(" and a ")} first.`);
+      return;
+    }
+    create.mutate();
+  }
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
@@ -497,7 +514,7 @@ function NewPOModal({
           </p>
         </header>
         <form
-          onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
+          onSubmit={(e) => { e.preventDefault(); attemptSubmit(); }}
           className="flex-1 overflow-auto p-5 space-y-3"
         >
           <label className="block">
@@ -617,16 +634,34 @@ function NewPOModal({
             />
           </label>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={create.isPending || !supplierId || !projectId}
-            >
-              {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Issue PO
-            </button>
+          {localErr && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <span>{localErr}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
+            <div className="text-[11px] muted">
+              {(!supplierId || !projectId) && (
+                <>
+                  Need: {!supplierId && <span className="font-semibold">supplier</span>}
+                  {!supplierId && !projectId && " · "}
+                  {!projectId && <span className="font-semibold">project</span>}
+                </>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={create.isPending}
+              >
+                {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Issue PO
+              </button>
+            </div>
           </div>
         </form>
       </div>
