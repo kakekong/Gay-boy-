@@ -191,9 +191,11 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     q.status = "won"
-    # Auto-create project (deferred to service)
-    from app.services.project_factory import create_project_from_quotation
-    await create_project_from_quotation(db, q, user)
+    # Projects no longer auto-spawn from a Won quotation — a Customer PO
+    # has to be filed and approved by the director first. The Won flag
+    # just means "the customer said yes, we're waiting for paperwork."
+    # See app/api/v1/endpoints/customer_pos.py for the new gate.
+    #
     # Auto-post to the ledger (idempotent)
     try:
         await ledger.post_quotation(db, q)

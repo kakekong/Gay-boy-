@@ -63,6 +63,35 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS contact_id UUID',
     'CREATE INDEX IF NOT EXISTS ix_quotations_contact_id ON quotations (contact_id)',
 
+    # customer_pos table — created lazily here for installs upgrading from
+    # before the model existed. create_all() also handles fresh installs.
+    """
+    CREATE TABLE IF NOT EXISTS customer_pos (
+        id UUID PRIMARY KEY,
+        number VARCHAR(80) NOT NULL,
+        po_date DATE,
+        customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+        quotation_id UUID REFERENCES quotations(id) ON DELETE SET NULL,
+        project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        total NUMERIC(18,2) NOT NULL DEFAULT 0,
+        items JSONB NOT NULL DEFAULT '[]'::jsonb,
+        notes TEXT,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending_approval',
+        decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        decided_at TIMESTAMPTZ,
+        decision_notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_by UUID,
+        updated_by UUID
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_customer_pos_customer_id ON customer_pos (customer_id)",
+    "CREATE INDEX IF NOT EXISTS ix_customer_pos_quotation_id ON customer_pos (quotation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_customer_pos_project_id ON customer_pos (project_id)",
+    "CREATE INDEX IF NOT EXISTS ix_customer_pos_status ON customer_pos (status)",
+    "CREATE INDEX IF NOT EXISTS ix_customer_pos_number ON customer_pos (number)",
+
     # Customer gained tax info (NPWP / NPPKP / PKP status)
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id      VARCHAR(32)',
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_name    VARCHAR(255)',

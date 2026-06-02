@@ -545,6 +545,9 @@ export default function CustomerDetailPage() {
       {/* Multiple PICs / contacts */}
       <ContactsSection customerId={id!} />
 
+      {/* Incoming customer POs (gate to project creation) */}
+      <IncomingCustomerPOsSection customerId={id!} />
+
       {/* Supplier POs tied to this customer's projects */}
       <CustomerPOsSection customerId={id!} />
 
@@ -1351,11 +1354,11 @@ function CustomerPOsSection({ customerId }: { customerId: string }) {
       <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Truck size={15} className="text-brand-600" /> Purchase Orders
+            <Truck size={15} className="text-brand-600" /> Supplier POs (outbound)
           </div>
           <div className="text-xs muted">
-            Supplier POs issued for this customer's projects, with the
-            sales rep who owns each deal.
+            POs we issued to our suppliers for this customer's projects,
+            with the sales rep who owns each deal.
           </div>
         </div>
         <div className="text-[10px] uppercase tracking-wider muted">
@@ -1413,6 +1416,424 @@ function CustomerPOsSection({ customerId }: { customerId: string }) {
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+// ─── Incoming customer POs (the gate to project creation) ─────────────
+//
+// Every project now spawns from an approved customer PO instead of from
+// the moment a quotation is marked Won. This card lists the customer
+// POs filed for this customer, lets sales submit a new one (typed in,
+// or built from a won quotation's line items), and shows the project
+// each approved PO produced.
+
+interface IncomingCPO {
+  id: string;
+  number: string;
+  po_date: string | null;
+  total: number;
+  status: string;
+  quotation_id: string | null;
+  quotation_number: string | null;
+  project_id: string | null;
+  project_code: string | null;
+  decided_at: string | null;
+  decision_notes: string | null;
+  created_at: string;
+  items: Array<{ description?: string; qty?: number; unit_price?: number }>;
+}
+
+const CPOSTATUS: Record<string, string> = {
+  pending_approval: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  approved:         "bg-emerald-50 text-emerald-700",
+  rejected:         "bg-red-50 text-red-700",
+  cancelled:        "bg-ink-100 text-ink-600",
+};
+
+function IncomingCustomerPOsSection({ customerId }: { customerId: string }) {
+  const [open, setOpen] = useState(false);
+
+  const q = useQuery({
+    queryKey: ["incoming-customer-pos", customerId],
+    queryFn: () =>
+      api.get("/customer-pos", { params: { customer_id: customerId } })
+        .then((r) => r.data as IncomingCPO[]),
+    retry: false,
+  });
+
+  const rows = q.data ?? [];
+
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Receipt size={15} className="text-brand-600" /> Customer POs (incoming)
+          </div>
+          <div className="text-xs muted max-w-xl leading-relaxed mt-0.5">
+            The signed POs the customer sent us. Each one needs director
+            approval; approving one creates the project automatically and
+            sets the project's PO number and date.
+          </div>
+        </div>
+        <button className="btn-primary" onClick={() => setOpen(true)}>
+          <Plus size={14} /> Submit customer PO
+        </button>
+      </header>
+
+      {q.isLoading ? (
+        <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : !rows.length ? (
+        <div className="p-8 text-center text-sm muted">
+          No customer POs yet for this customer.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-ink-50/60">
+            <tr>
+              <th className="th">PO number</th>
+              <th className="th">PO date</th>
+              <th className="th">From quotation</th>
+              <th className="th">Project</th>
+              <th className="th">Status</th>
+              <th className="th text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => (
+              <tr key={p.id} className="border-t border-ink-100 tr-hover">
+                <td className="td font-mono text-xs">{p.number}</td>
+                <td className="td muted">{p.po_date ?? "—"}</td>
+                <td className="td">
+                  {p.quotation_id ? (
+                    <Link to={`/quotations/${p.quotation_id}`} className="font-mono text-xs text-brand-700 hover:underline">
+                      {p.quotation_number ?? p.quotation_id.slice(0, 8)}
+                    </Link>
+                  ) : <span className="muted">—</span>}
+                </td>
+                <td className="td">
+                  {p.project_id ? (
+                    <Link to={`/projects/${p.project_id}`} className="font-mono text-xs text-brand-700 hover:underline">
+                      {p.project_code ?? p.project_id.slice(0, 8)}
+                    </Link>
+                  ) : <span className="muted">—</span>}
+                </td>
+                <td className="td">
+                  <span className={clsx(
+                    "chip capitalize",
+                    CPOSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
+                  )}>
+                    {p.status.replace(/_/g, " ")}
+                  </span>
+                </td>
+                <td className="td text-right tabular-nums">{idr(p.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {open && (
+        <SubmitCustomerPOModal
+          customerId={customerId}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SubmitCustomerPOModal({
+  customerId, onClose,
+}: { customerId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const wonQuotes = useQuery({
+    queryKey: ["customer-won-quotes", customerId],
+    queryFn: () => api.get(`/customers/${customerId}/summary`)
+      .then((r) => {
+        const all = (r.data?.quotations ?? []) as Array<{
+          id: string; number: string; status: string; total: number;
+        }>;
+        return all.filter((x) => x.status === "won");
+      }),
+  });
+  const quoteItems = useQuery({
+    queryKey: ["quotation-items"],
+    enabled: false,  // fetched on-demand via select handler below
+    queryFn: async () => [],
+  });
+
+  const [quotationId, setQuotationId] = useState<string>("");
+  const [poNumber, setPoNumber] = useState("");
+  const [poDate, setPoDate] = useState(today);
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState<Array<{
+    description: string; qty: number; unit_price: number; uom?: string;
+    selected: boolean;
+  }>>([{ description: "", qty: 1, unit_price: 0, selected: true }]);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function loadQuotation(qid: string) {
+    setQuotationId(qid);
+    if (!qid) return;
+    try {
+      const res = await api.get(`/quotations/${qid}`);
+      const rawItems = res.data?.items ?? [];
+      setItems(rawItems.map((it: any) => ({
+        description: it.description ?? "",
+        qty: Number(it.qty ?? 1),
+        unit_price: Number(it.unit_price ?? 0),
+        uom: it.uom ?? undefined,
+        selected: true,
+      })));
+    } catch {
+      // Leave the existing items in place; user can edit manually.
+    }
+  }
+
+  const create = useMutation({
+    mutationFn: () => api.post("/customer-pos", {
+      customer_id: customerId,
+      quotation_id: quotationId || null,
+      number: poNumber.trim(),
+      po_date: poDate || null,
+      items: items
+        .filter((it) => it.selected && it.description.trim())
+        .map((it) => ({
+          description: it.description.trim(),
+          qty: Number(it.qty || 0),
+          unit_price: Number(it.unit_price || 0),
+          uom: it.uom ?? null,
+        })),
+      notes: notes || null,
+    }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["incoming-customer-pos", customerId] });
+      onClose();
+    },
+    onError: (e: any) => {
+      setErr(
+        e?.response?.data?.errors?.[0]?.message
+          ?? e?.response?.data?.detail
+          ?? e?.message
+          ?? "Failed to submit customer PO"
+      );
+    },
+  });
+
+  function submit() {
+    setErr(null);
+    if (!poNumber.trim()) {
+      setErr("Please type the customer's PO number.");
+      return;
+    }
+    if (!items.some((it) => it.selected && it.description.trim())) {
+      setErr("Pick at least one line item the customer ordered.");
+      return;
+    }
+    create.mutate();
+  }
+
+  const total = items
+    .filter((it) => it.selected)
+    .reduce((s, it) => s + Number(it.qty || 0) * Number(it.unit_price || 0), 0);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+        <header className="px-5 py-4 border-b border-ink-100">
+          <h2 className="text-lg font-semibold">Submit customer PO</h2>
+          <p className="text-sm muted mt-0.5">
+            The PO the customer sent you. Submit it for director approval —
+            on approval, the project is created automatically with this PO
+            number and date.
+          </p>
+        </header>
+        <div className="flex-1 overflow-auto p-5 space-y-4">
+          {/* Quotation picker */}
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">
+              From quotation (optional)
+            </span>
+            <select
+              className="input"
+              value={quotationId}
+              onChange={(e) => loadQuotation(e.target.value)}
+            >
+              <option value="">— type items in below —</option>
+              {(wonQuotes.data ?? []).map((qx) => (
+                <option key={qx.id} value={qx.id}>
+                  {qx.number} · Rp {Math.round(qx.total).toLocaleString("id-ID")}
+                </option>
+              ))}
+            </select>
+            <span className="block text-[11px] text-ink-500 mt-1">
+              Picking a won quotation auto-fills its line items. Untick the
+              ones the customer didn't actually order.
+            </span>
+          </label>
+
+          {/* PO number + date */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                PO number *
+              </span>
+              <input
+                className="input font-mono"
+                value={poNumber}
+                onChange={(e) => setPoNumber(e.target.value)}
+                placeholder="Whatever number the customer printed on the PO"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                PO date
+              </span>
+              <input
+                type="date"
+                className="input"
+                value={poDate}
+                onChange={(e) => setPoDate(e.target.value)}
+              />
+            </label>
+          </div>
+
+          {/* Items */}
+          <div className="card overflow-hidden">
+            <div className="px-3 py-2 border-b border-ink-100 bg-ink-50/60 text-xs font-semibold flex justify-between items-center">
+              <span>Items ({items.filter((it) => it.selected).length} selected)</span>
+              <button
+                type="button"
+                className="text-brand-700 hover:underline"
+                onClick={() => setItems((cur) => [
+                  ...cur, { description: "", qty: 1, unit_price: 0, selected: true },
+                ])}
+              >
+                + Add line
+              </button>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="text-[10px] uppercase muted">
+                <tr>
+                  <th className="px-2 py-1 w-8"></th>
+                  <th className="text-left px-2 py-1">Description</th>
+                  <th className="text-right px-2 py-1 w-20">Qty</th>
+                  <th className="text-right px-2 py-1 w-32">Unit price</th>
+                  <th className="text-right px-2 py-1 w-32">Line total</th>
+                  <th className="w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i} className="border-t border-ink-100">
+                    <td className="px-2 py-1 text-center">
+                      <input
+                        type="checkbox"
+                        checked={it.selected}
+                        onChange={(e) => setItems((cur) => cur.map(
+                          (x, j) => j === i ? { ...x, selected: e.target.checked } : x,
+                        ))}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        className="input py-1"
+                        value={it.description}
+                        onChange={(e) => setItems((cur) => cur.map(
+                          (x, j) => j === i ? { ...x, description: e.target.value } : x,
+                        ))}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        className="input py-1 text-right"
+                        value={it.qty}
+                        onChange={(e) => setItems((cur) => cur.map(
+                          (x, j) => j === i ? { ...x, qty: parseFloat(e.target.value || "0") } : x,
+                        ))}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        className="input py-1 text-right"
+                        value={it.unit_price}
+                        onChange={(e) => setItems((cur) => cur.map(
+                          (x, j) => j === i ? { ...x, unit_price: parseFloat(e.target.value || "0") } : x,
+                        ))}
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums muted">
+                      {it.selected ? idr(it.qty * it.unit_price) : "—"}
+                    </td>
+                    <td className="px-2 py-1 text-center">
+                      <button
+                        type="button"
+                        className="text-red-600 hover:bg-red-50 rounded p-1"
+                        onClick={() => setItems((cur) => cur.filter((_, j) => j !== i))}
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-ink-100 bg-ink-50/40">
+                  <td colSpan={4} className="px-2 py-1 text-right font-semibold">PO total</td>
+                  <td className="px-2 py-1 text-right font-semibold tabular-nums">
+                    {idr(total)}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">Notes</span>
+            <textarea
+              className="input min-h-[60px]"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Special instructions, exclusions, delivery terms…"
+            />
+          </label>
+
+          {err && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <span>{err}</span>
+            </div>
+          )}
+        </div>
+        <footer className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={submit}
+            disabled={create.isPending}
+          >
+            {create.isPending
+              ? <Loader2 size={14} className="animate-spin" />
+              : <CheckCircle2 size={14} />}
+            Submit for director approval
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }

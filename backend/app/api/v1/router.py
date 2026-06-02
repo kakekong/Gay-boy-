@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     portal,
     calendar,
     chat,
+    customer_pos,
     customers,
     dashboards,
     finance,
@@ -34,6 +35,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(customers.router, prefix="/customers", tags=["crm"])
+api_router.include_router(customer_pos.router, prefix="/customer-pos", tags=["customer-pos"])
 api_router.include_router(quotations.router, prefix="/quotations", tags=["quotation"])
 api_router.include_router(approvals.router, prefix="/approvals", tags=["approval"])
 api_router.include_router(purchasing.router, prefix="/purchasing", tags=["purchasing"])

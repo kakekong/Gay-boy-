@@ -126,6 +126,36 @@ async def apply_to_target(
             if "stage" in changes and changes["stage"] != prev_stage:
                 from app.core.stage_tasks import ensure_stage_tasks
                 await ensure_stage_tasks(db, c, changes["stage"])
+    elif req.target_type == "customer_po":
+        # Approving a customer PO spawns a Project; rejecting it parks
+        # the PO at status='rejected' so the sales team can file a new
+        # one if the paperwork changes.
+        from datetime import UTC, datetime as _dt
+        from app.api.v1.endpoints.customer_pos import _spawn_project
+        from app.models.customer_po import CustomerPO
+        po = await db.get(CustomerPO, req.target_id)
+        if po:
+            decider = await db.get(__import__("app.models.user", fromlist=["User"]).User, req.decided_by) if req.decided_by else None
+            po.decided_by = req.decided_by
+            po.decided_at = req.decided_at or _dt.now(UTC)
+            po.decision_notes = req.decision_notes
+            if approve:
+                po.status = "approved"
+                # Use the decider as the project's creator so authorship
+                # reflects who signed off — falling back to the requester
+                # if for any reason the decider record is missing.
+                actor = decider
+                if actor is None:
+                    from app.models.user import User as _UserModel
+                    actor = await db.get(_UserModel, req.requested_by)
+                if actor is not None:
+                    project = await _spawn_project(db, po, actor)
+                    po.project_id = project.id
+                    applied["project_id"] = str(project.id)
+                    applied["project_code"] = project.code
+            else:
+                po.status = "rejected"
+            applied["new_status"] = po.status
     elif req.target_type == "supplier_po":
         # Every PO step needs director approval. The original request
         # carries an "action" tag in its payload telling us how to apply
