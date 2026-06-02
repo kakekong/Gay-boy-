@@ -18,7 +18,13 @@ interface PO {
   number: string;
   status: string;
   supplier_id: string;
+  supplier_name: string | null;
   project_id: string | null;
+  project_code: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  sales_pic_id: string | null;
+  sales_pic_name: string | null;
   po_date: string | null;
   total: number;
   quoted_lead_days: number | null;
@@ -99,8 +105,10 @@ export default function PurchaseOrdersPage() {
     },
   });
 
-  const supplierName = (id: string) =>
-    (suppliers.data ?? []).find((s) => s.id === id)?.name ?? id.slice(0, 8);
+  const supplierName = (po: PO) =>
+    po.supplier_name
+    ?? (suppliers.data ?? []).find((s) => s.id === po.supplier_id)?.name
+    ?? po.supplier_id.slice(0, 8);
 
   const rows = useMemo(() => {
     let list = pos.data ?? [];
@@ -109,11 +117,13 @@ export default function PurchaseOrdersPage() {
       const q = search.trim().toLowerCase();
       list = list.filter((p) =>
         p.number.toLowerCase().includes(q)
-        || supplierName(p.supplier_id).toLowerCase().includes(q)
+        || supplierName(p).toLowerCase().includes(q)
+        || (p.customer_name ?? "").toLowerCase().includes(q)
+        || (p.sales_pic_name ?? "").toLowerCase().includes(q)
       );
     }
     return list;
-  // supplierName depends on suppliers.data which is referenced via closure
+  // supplierName closes over suppliers.data
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pos.data, suppliers.data, statusFilter, search]);
 
@@ -168,7 +178,7 @@ export default function PurchaseOrdersPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by PO number or supplier…"
+            placeholder="Search by PO number, supplier, customer or sales rep…"
             className="input pl-9"
           />
         </div>
@@ -226,9 +236,10 @@ export default function PurchaseOrdersPage() {
               <tr>
                 <th className="th">PO number</th>
                 <th className="th">Supplier</th>
+                <th className="th">Customer</th>
+                <th className="th">Sales rep</th>
                 <th className="th">Project</th>
                 <th className="th">PO date</th>
-                <th className="th">Lead</th>
                 <th className="th">Status</th>
                 <th className="th text-right">Total</th>
                 <th className="th w-8"></th>
@@ -286,14 +297,25 @@ export default function PurchaseOrdersPage() {
                         </button>
                       )}
                     </td>
-                    <td className="td">{supplierName(p.supplier_id)}</td>
+                    <td className="td">{supplierName(p)}</td>
+                    <td className="td">
+                      {p.customer_id && p.customer_name ? (
+                        <a
+                          href={`/customers/${p.customer_id}`}
+                          onClick={(e) => { e.stopPropagation(); }}
+                          className="text-brand-700 hover:underline"
+                        >
+                          {p.customer_name}
+                        </a>
+                      ) : "—"}
+                    </td>
+                    <td className="td muted">{p.sales_pic_name ?? "—"}</td>
                     <td className="td font-mono text-xs">
-                      {p.project_id ? p.project_id.slice(0, 8) : "—"}
+                      {p.project_id
+                        ? (p.project_code ?? p.project_id.slice(0, 8))
+                        : "—"}
                     </td>
                     <td className="td muted">{p.po_date ?? "—"}</td>
-                    <td className="td muted tabular-nums">
-                      {p.quoted_lead_days != null ? `${p.quoted_lead_days}d` : "—"}
-                    </td>
                     <td className="td">
                       <span className={clsx(
                         "chip capitalize",

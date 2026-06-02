@@ -545,6 +545,9 @@ export default function CustomerDetailPage() {
       {/* Multiple PICs / contacts */}
       <ContactsSection customerId={id!} />
 
+      {/* Supplier POs tied to this customer's projects */}
+      <CustomerPOsSection customerId={id!} />
+
       {/* Activity timeline */}
       <div className="card p-5">
         <div className="flex items-center justify-between mb-3">
@@ -1282,6 +1285,134 @@ function StageMoveRequestModal({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ─── Supplier POs for this customer ──────────────────────────────────────────
+//
+// Joins the PO list endpoint by ?customer_id=... and renders a compact
+// recap so anyone on the customer page can see which POs were placed for
+// this customer, which sales rep owns the deal, and the current status.
+
+interface CustomerPO {
+  id: string;
+  number: string;
+  status: string;
+  supplier_name: string | null;
+  project_code: string | null;
+  sales_pic_name: string | null;
+  po_date: string | null;
+  total: number;
+}
+
+const POSTATUS: Record<string, string> = {
+  pending_approval: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  open:             "bg-blue-50 text-blue-700",
+  received:         "bg-cyan-50 text-cyan-700",
+  closed:           "bg-emerald-50 text-emerald-700",
+  cancelled:        "bg-red-50 text-red-700",
+};
+
+function CustomerPOsSection({ customerId }: { customerId: string }) {
+  const q = useQuery({
+    queryKey: ["customer-pos", customerId],
+    queryFn: () =>
+      api.get("/purchasing/po", { params: { customer_id: customerId } })
+        .then((r) => r.data as CustomerPO[]),
+    retry: false,
+  });
+
+  if (q.error) {
+    const httpStatus = (q.error as any)?.response?.status;
+    if (httpStatus === 403) {
+      // Procurement-only data. Nothing to surface to other roles —
+      // hide the section entirely instead of showing a red banner.
+      return null;
+    }
+    return (
+      <div className="card p-5 text-sm text-red-700 flex items-start gap-2">
+        <AlertCircle size={16} className="mt-0.5 shrink-0" />
+        <div>
+          Couldn't load purchase orders.
+          <div className="text-xs muted mt-0.5">
+            {(q.error as any)?.response?.data?.detail ?? "Request failed"}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const rows = q.data ?? [];
+  const total = rows.reduce((s, r) => s + (r.total || 0), 0);
+
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Truck size={15} className="text-brand-600" /> Purchase Orders
+          </div>
+          <div className="text-xs muted">
+            Supplier POs issued for this customer's projects, with the
+            sales rep who owns each deal.
+          </div>
+        </div>
+        <div className="text-[10px] uppercase tracking-wider muted">
+          {rows.length} PO{rows.length === 1 ? "" : "s"} · {idr(total)}
+        </div>
+      </header>
+
+      {q.isLoading ? (
+        <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : !rows.length ? (
+        <div className="p-8 text-center text-sm muted">
+          No purchase orders yet for this customer.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-ink-50/60">
+            <tr>
+              <th className="th">PO number</th>
+              <th className="th">Supplier</th>
+              <th className="th">Project</th>
+              <th className="th">Sales rep</th>
+              <th className="th">PO date</th>
+              <th className="th">Status</th>
+              <th className="th text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => (
+              <tr key={p.id} className="border-t border-ink-100 tr-hover">
+                <td className="td">
+                  <Link
+                    to={`/purchase-orders/${p.id}`}
+                    className="font-mono text-xs text-brand-700 hover:underline"
+                  >
+                    {p.number}
+                  </Link>
+                </td>
+                <td className="td">{p.supplier_name ?? "—"}</td>
+                <td className="td font-mono text-xs muted">{p.project_code ?? "—"}</td>
+                <td className="td muted">{p.sales_pic_name ?? "—"}</td>
+                <td className="td muted">{p.po_date ?? "—"}</td>
+                <td className="td">
+                  <span className={clsx(
+                    "chip capitalize",
+                    POSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
+                  )}>
+                    {p.status.replace(/_/g, " ")}
+                  </span>
+                </td>
+                <td className="td text-right tabular-nums">{idr(p.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
