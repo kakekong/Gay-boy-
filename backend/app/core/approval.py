@@ -126,5 +126,27 @@ async def apply_to_target(
             if "stage" in changes and changes["stage"] != prev_stage:
                 from app.core.stage_tasks import ensure_stage_tasks
                 await ensure_stage_tasks(db, c, changes["stage"])
+    elif req.target_type == "supplier_po":
+        # Every PO step needs director approval. The original request
+        # carries an "action" tag in its payload telling us how to apply
+        # the decision: a freshly-created PO sits at pending_approval
+        # until the director flips it open; an update request stashes the
+        # proposed field changes and we apply them now.
+        from datetime import date as date_t
+        from app.models.purchasing import SupplierPO
+        po = await db.get(SupplierPO, req.target_id)
+        if po:
+            action = (req.payload or {}).get("action")
+            if action == "create":
+                po.status = "open" if approve else "cancelled"
+                applied["new_status"] = po.status
+            elif action == "update" and approve:
+                changes = (req.payload or {}).get("changes") or {}
+                for k, v in changes.items():
+                    if k == "po_date":
+                        po.po_date = None if v in (None, "") else date_t.fromisoformat(v)
+                    elif hasattr(po, k):
+                        setattr(po, k, v)
+                applied["applied_changes"] = list(changes.keys())
     # other target_types: no automatic propagation (yet)
     return applied

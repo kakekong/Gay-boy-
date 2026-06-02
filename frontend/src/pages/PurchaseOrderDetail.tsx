@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { useAuthStore } from "@/store/auth";
 
 interface POItem { description?: string; qty?: number }
 interface PO {
@@ -30,12 +31,13 @@ interface PO {
 }
 
 const STATUS_CHIP: Record<string, string> = {
-  open:      "bg-amber-50 text-amber-700",
-  received:  "bg-blue-50 text-blue-700",
-  closed:    "bg-emerald-50 text-emerald-700",
-  cancelled: "bg-red-50 text-red-700",
+  pending_approval: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  open:             "bg-blue-50 text-blue-700",
+  received:         "bg-cyan-50 text-cyan-700",
+  closed:           "bg-emerald-50 text-emerald-700",
+  cancelled:        "bg-red-50 text-red-700",
 };
-const STATUSES = ["open", "received", "closed", "cancelled"];
+const STATUSES = ["pending_approval", "open", "received", "closed", "cancelled"];
 
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -44,6 +46,8 @@ export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
+  const isDirector = me?.role === "director";
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editingNumber, setEditingNumber] = useState(false);
   const [draftNumber, setDraftNumber] = useState("");
@@ -57,13 +61,29 @@ export default function PurchaseOrderDetailPage() {
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["po", id] });
-  const onErr = (e: any) => setFlash({
-    kind: "err",
-    text: e?.response?.data?.errors?.[0]?.message
-      ?? e?.response?.data?.detail
-      ?? e?.message
-      ?? "Update failed",
-  });
+  const onErr = (e: any) => {
+    // 202 = accepted-but-pending-director-approval. The backend raises
+    // HTTPException there, which axios bubbles up as an error; surface
+    // it as a friendly green-banner ack instead of a red error.
+    if (e?.response?.status === 202) {
+      refresh();
+      setFlash({
+        kind: "ok",
+        text: e?.response?.data?.detail
+          ?? "Submitted for director approval; changes will apply once approved.",
+      });
+      setEditingNumber(false);
+      setEditingItems(false);
+      return;
+    }
+    setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Update failed",
+    });
+  };
 
   const patch = useMutation({
     mutationFn: (body: Record<string, any>) =>
@@ -133,6 +153,32 @@ export default function PurchaseOrderDetailPage() {
       <Link to="/purchase-orders" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-brand-700">
         <ArrowLeft size={14} /> All purchase orders
       </Link>
+
+      {!isDirector && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-medium">Approval required for every change</div>
+            <div className="text-xs mt-0.5">
+              Edits you make here are queued for director approval. The PO
+              won't show your change until the director approves it from
+              the Approvals page.
+            </div>
+          </div>
+        </div>
+      )}
+      {p.status === "pending_approval" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-medium">Waiting on director approval</div>
+            <div className="text-xs mt-0.5">
+              This PO was just created and is pending the director's sign-off.
+              Suppliers won't see it until it's approved.
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card p-6 lg:p-8 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
