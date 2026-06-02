@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 interface AttachmentRow {
   id: string;
@@ -50,6 +51,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [preview, setPreview] = useState<AttachmentRow | null>(null);
 
   const q = useQuery({
     queryKey: ["attachments", ownerType, ownerId],
@@ -99,35 +101,6 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
         ?? "Download failed";
   }
 
-  // The backend sometimes stores the content type as null or
-  // application/octet-stream (browser defaults). Infer a sensible MIME
-  // from the filename so PDFs/images preview correctly in a new tab.
-  function inferMime(att: AttachmentRow): string {
-    const declared = (att.content_type || "").toLowerCase();
-    if (declared && declared !== "application/octet-stream") return declared;
-    const ext = (att.filename.split(".").pop() || "").toLowerCase();
-    const map: Record<string, string> = {
-      pdf:  "application/pdf",
-      png:  "image/png",
-      jpg:  "image/jpeg",
-      jpeg: "image/jpeg",
-      gif:  "image/gif",
-      webp: "image/webp",
-      svg:  "image/svg+xml",
-      bmp:  "image/bmp",
-      mp4:  "video/mp4",
-      webm: "video/webm",
-      mov:  "video/quicktime",
-      mp3:  "audio/mpeg",
-      wav:  "audio/wav",
-      txt:  "text/plain",
-      csv:  "text/csv",
-      html: "text/html",
-      json: "application/json",
-    };
-    return map[ext] || declared || "application/octet-stream";
-  }
-
   function download(att: AttachmentRow) {
     api.get(`/attachments/${att.id}/download`, { responseType: "blob" })
       .then((r) => {
@@ -152,36 +125,14 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
   }
 
   function view(att: AttachmentRow) {
-    // Auth-aware in-tab preview: fetch as blob (so the Authorization header
-    // rides on the request), then open the blob URL in a new tab where the
-    // browser can render PDFs / images natively. We wrap the bytes in a
-    // Blob with an inferred MIME so even files stored without a proper
-    // content_type display correctly.
-    api.get(`/attachments/${att.id}/download`, {
-      params: { inline: 1 },
-      responseType: "blob",
-    })
-      .then((r) => {
-        const blob = new Blob([r.data], { type: inferMime(att) });
-        const url = URL.createObjectURL(blob);
-        const w = window.open(url, "_blank", "noopener");
-        if (!w) {
-          // Pop-up blocked — fall back to navigating an anchor click so
-          // the user still gets the file in a new tab.
-          const a = document.createElement("a");
-          a.href = url;
-          a.target = "_blank";
-          a.rel = "noopener";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      })
-      .catch((e) => {
-        console.error("View failed", e);
-        setErr(readErr(e));
-      });
+    // Open an in-SPA modal preview. We used to window.open the blob URL,
+    // but Safari blocks popups opened from async XHR callbacks, and the
+    // anchor-click fallback Safari treats as same-tab navigation — which
+    // routed through Vercel's SPA catchall and dumped the user back at
+    // the home page. Rendering inline in a modal keeps the user where
+    // they were and works the same in every browser.
+    setErr(null);
+    setPreview(att);
   }
 
   const canDelete = (att: AttachmentRow) =>
@@ -289,6 +240,15 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
         <div className="mt-3 rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
           {err}
         </div>
+      )}
+
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={preview.content_type}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   );

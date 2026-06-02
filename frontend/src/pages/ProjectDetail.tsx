@@ -50,6 +50,7 @@ export default function ProjectDetailPage() {
 
   const [newWoCode, setNewWoCode] = useState("");
   const [newWoStage, setNewWoStage] = useState("receiving");
+  const [flashErr, setFlashErr] = useState<string | null>(null);
 
   const onErr = (e: any) => alert(
     e?.response?.data?.errors?.[0]?.message
@@ -254,17 +255,25 @@ export default function ProjectDetailPage() {
 
       {/* Work orders */}
       <div className="card overflow-hidden">
-        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
-          <div>
+        <div className="px-5 py-3 border-b border-ink-100 flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0 flex-1">
             <div className="font-semibold flex items-center gap-2">
               <Wrench size={15} className="text-brand-600" /> Work orders
             </div>
-            <div className="text-xs muted">{wos.length} step(s)</div>
+            <div className="text-xs muted mt-0.5 max-w-xl leading-relaxed">
+              A work order is a single internal step on this project — receiving,
+              warehousing, QC, packaging, or delivery. Each one is a checkable
+              card the shop floor ticks off. Add one per stage you need to track,
+              then mark it complete as the work happens.
+            </div>
+          </div>
+          <div className="text-[10px] uppercase tracking-wider muted shrink-0">
+            {wos.length} step{wos.length === 1 ? "" : "s"}
           </div>
         </div>
         <div className="p-3 flex flex-wrap items-end gap-2 border-b border-ink-100 bg-ink-50/40">
           <div className="flex-1 min-w-[180px]">
-            <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Code</span>
+            <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Code *</span>
             <input className="input" value={newWoCode}
               onChange={(e) => setNewWoCode(e.target.value)}
               placeholder="e.g. WO-PRJ-2026-0042-02" />
@@ -276,13 +285,27 @@ export default function ProjectDetailPage() {
               {WO_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          {/* Only disable on in-flight submits. Clicking without a code
+              now flashes an inline hint instead of looking broken. */}
           <button className="btn-primary"
-            disabled={!newWoCode || addWO.isPending}
-            onClick={() => addWO.mutate()}>
+            disabled={addWO.isPending}
+            onClick={() => {
+              if (!newWoCode.trim()) {
+                setFlashErr("Please type a work-order code first (any identifier you want, e.g. WO-PRJ-2026-0042-02).");
+                return;
+              }
+              setFlashErr(null);
+              addWO.mutate();
+            }}>
             {addWO.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             Add work order
           </button>
         </div>
+        {flashErr && (
+          <div className="mx-3 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {flashErr}
+          </div>
+        )}
         {wos.length === 0 ? (
           <div className="p-8 text-center muted text-sm">No work orders yet.</div>
         ) : (
