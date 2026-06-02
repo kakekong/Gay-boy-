@@ -103,21 +103,46 @@ export default function PurchaseOrderDetailPage() {
     );
   }
   if (q.error || !q.data) {
-    const httpStatus = (q.error as any)?.response?.status;
+    const errAny = q.error as any;
+    const httpStatus = errAny?.response?.status;
+    const serverMsg = errAny?.response?.data?.detail
+      ?? errAny?.response?.data?.errors?.[0]?.message;
+    let title: string;
+    let body: string;
+    if (httpStatus === 403) {
+      title = "Not allowed";
+      body = "Purchase orders are restricted to procurement / manager / director roles.";
+    } else if (httpStatus === 404) {
+      title = "PO not found";
+      body = serverMsg
+        ?? "This PO doesn't exist, or the backend hasn't been restarted to pick up the new endpoint yet. Open the HF Space and click Restart Space, then come back.";
+    } else if (httpStatus) {
+      title = `Couldn't load this PO (HTTP ${httpStatus})`;
+      body = serverMsg ?? "The server rejected the request. Try again in a moment.";
+    } else {
+      title = "Couldn't reach the server";
+      body = "Looks like a network error. Check the connection or try again.";
+    }
     return (
       <div className="card p-10 text-center">
         <AlertCircle size={28} className="mx-auto text-amber-500" />
-        <div className="mt-3 font-semibold">
-          {httpStatus === 403 ? "Director only" : "Couldn't load this PO"}
+        <div className="mt-3 font-semibold">{title}</div>
+        <p className="text-sm muted mt-1 max-w-md mx-auto">{body}</p>
+        <div className="text-[10px] muted mt-2 font-mono">
+          GET /purchasing/po/{id}
         </div>
-        <p className="text-sm muted mt-1 max-w-md mx-auto">
-          {httpStatus === 403
-            ? "Supplier POs are restricted to the director."
-            : (q.error as any)?.response?.data?.detail ?? "Try again or go back."}
-        </p>
-        <button className="btn-ghost mt-4" onClick={() => nav("/purchase-orders")}>
-          <ArrowLeft size={14} /> Back to Purchase Orders
-        </button>
+        <div className="flex gap-2 justify-center mt-4">
+          <button className="btn-ghost" onClick={() => q.refetch()}>
+            <Loader2
+              size={13}
+              className={clsx(q.isFetching && "animate-spin")}
+            />
+            Retry
+          </button>
+          <button className="btn-ghost" onClick={() => nav("/purchase-orders")}>
+            <ArrowLeft size={14} /> Back to Purchase Orders
+          </button>
+        </div>
       </div>
     );
   }
