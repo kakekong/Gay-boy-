@@ -97,25 +97,86 @@ async def list_pos(
     _u: User = Depends(_purchasing_or_director),
     supplier_id: UUID | None = None,
     project_id: UUID | None = None,
+    customer_id: UUID | None = None,
 ):
-    from app.models.purchasing import SupplierPO
+    """All supplier POs.
+
+    Rows are enriched with supplier / project / customer / sales-rep
+    context so the list view, the PO recap and the per-customer PO
+    section can render in one round-trip. Use ?customer_id=… to scope
+    to a single customer's POs (joined via project.customer_id).
+    """
+    from app.models.crm import Customer
+    from app.models.operation import Project
+    from app.models.purchasing import Supplier, SupplierPO
+
     stmt = select(SupplierPO).order_by(SupplierPO.created_at.desc())
     if supplier_id:
         stmt = stmt.where(SupplierPO.supplier_id == supplier_id)
     if project_id:
         stmt = stmt.where(SupplierPO.project_id == project_id)
+    if customer_id:
+        # Join via project to filter by customer.
+        stmt = (
+            stmt.join(Project, Project.id == SupplierPO.project_id)
+            .where(Project.customer_id == customer_id)
+        )
     rows = (await db.scalars(stmt)).all()
-    return [
-        {
+
+    # Batch-load related rows so we don't N+1 supplier / project / customer
+    # / sales-rep lookups inside the list comprehension.
+    supplier_ids = {r.supplier_id for r in rows if r.supplier_id}
+    project_ids  = {r.project_id  for r in rows if r.project_id}
+    suppliers: dict[UUID, Supplier] = {}
+    projects:  dict[UUID, Project]  = {}
+    if supplier_ids:
+        for s in (await db.scalars(
+            select(Supplier).where(Supplier.id.in_(supplier_ids))
+        )).all():
+            suppliers[s.id] = s
+    if project_ids:
+        for p in (await db.scalars(
+            select(Project).where(Project.id.in_(project_ids))
+        )).all():
+            projects[p.id] = p
+
+    customer_ids = {p.customer_id for p in projects.values() if p.customer_id}
+    customers: dict[UUID, Customer] = {}
+    if customer_ids:
+        for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(customer_ids))
+        )).all():
+            customers[c.id] = c
+
+    sales_ids = {c.sales_pic_id for c in customers.values() if c.sales_pic_id}
+    sales_users: dict[UUID, User] = {}
+    if sales_ids:
+        for u in (await db.scalars(
+            select(User).where(User.id.in_(sales_ids))
+        )).all():
+            sales_users[u.id] = u
+
+    out = []
+    for r in rows:
+        proj = projects.get(r.project_id) if r.project_id else None
+        cust = customers.get(proj.customer_id) if proj else None
+        sales = sales_users.get(cust.sales_pic_id) if cust and cust.sales_pic_id else None
+        sup = suppliers.get(r.supplier_id)
+        out.append({
             "id": str(r.id), "number": r.number, "status": r.status,
             "supplier_id": str(r.supplier_id),
+            "supplier_name": sup.name if sup else None,
             "project_id": str(r.project_id) if r.project_id else None,
+            "project_code": proj.code if proj else None,
+            "customer_id": str(cust.id) if cust else None,
+            "customer_name": cust.company_name if cust else None,
+            "sales_pic_id": str(sales.id) if sales else None,
+            "sales_pic_name": sales.full_name if sales else None,
             "po_date": r.po_date, "total": float(r.total or 0),
             "quoted_lead_days": r.quoted_lead_days,
             "items": r.items, "created_at": r.created_at,
-        }
-        for r in rows
-    ]
+        })
+    return out
 
 
 @router.post("/po", status_code=201)
