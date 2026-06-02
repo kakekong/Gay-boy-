@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -180,8 +180,26 @@ export default function ProjectDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <Field label="PO Number" icon={<FileText size={13} />}>{p.po_number ?? "—"}</Field>
-          <Field label="PO Date" icon={<Calendar size={13} />}>{p.po_date ?? "—"}</Field>
+          <EditableTextField
+            label="PO Number"
+            icon={<FileText size={13} />}
+            value={p.po_number ?? ""}
+            disabled={patchProject.isPending}
+            placeholder="—"
+            onCommit={(v) => {
+              const next = v.trim();
+              if (next !== (p.po_number ?? "")) {
+                patchProject.mutate({ po_number: next || null });
+              }
+            }}
+          />
+          <EditableDateField
+            label="PO Date"
+            icon={<Calendar size={13} />}
+            value={p.po_date ?? ""}
+            disabled={patchProject.isPending}
+            onChange={(v) => patchProject.mutate({ po_date: v || null })}
+          />
           <EditableDateField
             label="Target delivery"
             icon={<Truck size={13} />}
@@ -529,6 +547,48 @@ function Field({ icon, label, children }: {
         {icon} {label}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
+    </div>
+  );
+}
+
+function EditableTextField({
+  label, icon, value, disabled, placeholder, onCommit,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  value: string;
+  disabled?: boolean;
+  placeholder?: string;
+  onCommit: (v: string) => void;
+}) {
+  // Local draft so typing doesn't fire a PATCH per keystroke. Commits on
+  // blur (the natural "I'm done editing" moment) and on Enter; Escape
+  // reverts to whatever the parent last passed in. The useEffect keeps
+  // the draft in sync if the server-side value changes from outside
+  // (refetch after a PATCH, or another user's edit).
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <div>
+      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
+        {icon} {label}
+      </div>
+      <input
+        type="text"
+        value={draft}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => onCommit(draft)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+          if (e.key === "Escape") {
+            setDraft(value);
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+        className="mt-1 w-full bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm py-0.5 px-0 disabled:opacity-50"
+      />
     </div>
   );
 }
