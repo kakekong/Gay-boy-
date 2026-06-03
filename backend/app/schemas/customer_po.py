@@ -15,7 +15,10 @@ class CustomerPOItem(BaseModel):
 
 class CustomerPOCreate(BaseModel):
     customer_id: UUID
-    quotation_id: UUID | None = None
+    # Linkage to the originating quotation is now required — every
+    # customer PO has to reference the won quote it's against. The
+    # endpoint also verifies the quote belongs to the same customer.
+    quotation_id: UUID
     number: str
     po_date: date | None = None
     items: list[CustomerPOItem] = Field(default_factory=list)
