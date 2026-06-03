@@ -22,6 +22,23 @@ const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.ro
 
 export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
   const qc = useQueryClient();
+
+  // State first — referenced by the queries below, so must be declared
+  // up front. Previously these lived further down and the contacts query
+  // hit them before initialization, which only blew up after Vite
+  // minified customerId → "m" ("Cannot access 'm' before initialization").
+  const [customerId, setCustomerId] = useState(preselectCustomerId ?? "");
+  const [contactId, setContactId] = useState<string>("");  // "" = primary PIC on customer record
+  const [variant, setVariant] = useState<"short" | "detailed">("detailed");
+  const [discountPct, setDiscountPct] = useState(0);
+  const [taxPct, setTaxPct] = useState(11);
+  const [validUntil, setValidUntil] = useState("");
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState<LineItem[]>([
+    { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" },
+  ]);
+  const [err, setErr] = useState<string | null>(null);
+
   const customers = useQuery({
     queryKey: ["customers"],
     queryFn: () => api.get("/customers", { params: { page_size: 200 } })
@@ -43,18 +60,6 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
   const primaryPicLabel = selectedCustomer?.pic_name
     ? `${selectedCustomer.pic_name} (primary on customer record)`
     : "Primary PIC on customer record";
-
-  const [customerId, setCustomerId] = useState(preselectCustomerId ?? "");
-  const [contactId, setContactId] = useState<string>("");  // "" = primary PIC on customer record
-  const [variant, setVariant] = useState<"short" | "detailed">("detailed");
-  const [discountPct, setDiscountPct] = useState(0);
-  const [taxPct, setTaxPct] = useState(11);
-  const [validUntil, setValidUntil] = useState("");
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<LineItem[]>([
-    { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" },
-  ]);
-  const [err, setErr] = useState<string | null>(null);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((s, it) => s + it.qty * it.unit_price, 0);
