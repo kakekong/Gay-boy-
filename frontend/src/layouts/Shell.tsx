@@ -6,6 +6,7 @@ import {
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
+  Receipt, ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -32,6 +33,11 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/", label: "Dashboard", label_id: "Dasbor", icon: LayoutDashboard },
       { to: "/customers", label: "CRM", label_id: "Pelanggan", icon: Users },
       { to: "/quotations", label: "Quotations", label_id: "Penawaran", icon: FileText },
+      { to: "/customer-pos", label: "Customer PO", label_id: "PO Pelanggan", icon: Receipt },
+      { to: "/purchase-orders", label: "Purchasing PO", label_id: "PO Pembelian", icon: Truck,
+        roles: ["director"] },
+      { to: "/po-recap", label: "PO Recap", label_id: "Rekap PO", icon: ClipboardList,
+        roles: ["director"] },
       { to: "/calendar", label: "Calendar", label_id: "Kalender", icon: CalendarDays },
       { to: "/chat", label: "Chat", label_id: "Obrolan", icon: MessageCircle, badgeQuery: "chat-unread" },
       { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare, roles: ["manager", "director"] },
@@ -44,8 +50,6 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/projects", label: "Projects", label_id: "Proyek", icon: Briefcase },
       { to: "/purchasing", label: "Purchasing", label_id: "Pembelian", icon: ShoppingCart,
         roles: ["purchasing", "admin", "manager", "director"] },
-      { to: "/purchase-orders", label: "Purchase Orders", label_id: "Purchase Orders", icon: Truck,
-        roles: ["director"] },
       { to: "/operation", label: "Operation", label_id: "Operasi", icon: Wrench },
       { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote },
       { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
