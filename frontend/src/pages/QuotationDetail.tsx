@@ -12,6 +12,7 @@ import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
 import { LinkedAccountsPanel } from "@/components/quotation/LinkedAccountsPanel";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { useAuthStore } from "@/store/auth";
 
 const STATUS_CHIP: Record<string, string> = {
@@ -314,6 +315,14 @@ export default function QuotationDetailPage() {
       {/* Linked Accounts (CoA) */}
       <LinkedAccountsPanel quotationId={Q.id} />
 
+      {/* Customer-PO submission gate (only when the quote is Won) */}
+      {Q.status === "won" && (
+        <WonNextStepCard
+          quotationId={Q.id}
+          customerId={Q.customer_id}
+        />
+      )}
+
       {/* Attachments */}
       <AttachmentsSection ownerType="quotation" ownerId={Q.id} />
 
@@ -473,6 +482,122 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between py-0.5">
       <span className="muted">{label}</span>
       <span className="tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+// ─── Won → customer-PO submission gate ─────────────────────────────────
+//
+// After a quotation is Won, a project no longer materialises
+// automatically — the customer first has to send us a PO, and the
+// director has to approve it. This card surfaces that next step on the
+// quotation detail page, lists any POs already filed for this quote,
+// and opens the submit modal pre-pointed at this quotation.
+
+interface CPORow {
+  id: string;
+  number: string;
+  status: string;
+  project_id: string | null;
+  project_code: string | null;
+  total: number;
+  po_date: string | null;
+}
+
+function WonNextStepCard({
+  quotationId, customerId,
+}: { quotationId: string; customerId: string }) {
+  const [open, setOpen] = useState(false);
+  const q = useQuery({
+    queryKey: ["customer-pos-for-quote", quotationId],
+    queryFn: () => api
+      .get("/customer-pos", { params: { customer_id: customerId } })
+      .then((r) => (r.data as Array<CPORow & { quotation_id: string | null }>)
+        .filter((p) => p.quotation_id === quotationId)),
+  });
+  const rows = q.data ?? [];
+  const hasApproved = rows.some((p) => p.status === "approved");
+  const pending = rows.filter((p) => p.status === "pending_approval");
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-xs uppercase tracking-wider muted">Next step</div>
+          <h3 className="text-base font-semibold mt-0.5">
+            {hasApproved
+              ? "Customer PO approved — project created"
+              : pending.length
+                ? "Customer PO submitted — waiting on director approval"
+                : "Submit the customer's PO"}
+          </h3>
+          <p className="text-sm muted mt-1 max-w-2xl">
+            {hasApproved
+              ? "The customer's PO has been approved by the director and the project is now active. Manage it from the Projects section."
+              : pending.length
+                ? "The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed."
+                : "Once you have the signed PO from the customer, file it here. You'll attach the actual PO file, pick the items they ordered out of this quote, and the director will approve it. Approval is what creates the project."}
+          </p>
+        </div>
+        {!hasApproved && (
+          <button className="btn-primary" onClick={() => setOpen(true)}>
+            <CheckCircle2 size={14} /> Submit customer PO
+          </button>
+        )}
+      </div>
+
+      {rows.length > 0 && (
+        <div className="rounded-xl border border-ink-100 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60 text-[10px] uppercase tracking-wider">
+              <tr>
+                <th className="px-3 py-1.5 text-left">PO number</th>
+                <th className="px-3 py-1.5 text-left">PO date</th>
+                <th className="px-3 py-1.5 text-left">Status</th>
+                <th className="px-3 py-1.5 text-left">Project</th>
+                <th className="px-3 py-1.5 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.id} className="border-t border-ink-100">
+                  <td className="px-3 py-1.5 font-mono text-xs">{p.number}</td>
+                  <td className="px-3 py-1.5 muted">{p.po_date ?? "—"}</td>
+                  <td className="px-3 py-1.5">
+                    <span className={clsx(
+                      "chip capitalize",
+                      p.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                        : p.status === "pending_approval" ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                        : p.status === "rejected" ? "bg-red-50 text-red-700"
+                        : "bg-ink-100 text-ink-600",
+                    )}>
+                      {p.status.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5">
+                    {p.project_id ? (
+                      <Link to={`/projects/${p.project_id}`} className="font-mono text-xs text-brand-700 hover:underline">
+                        {p.project_code ?? p.project_id.slice(0, 8)}
+                      </Link>
+                    ) : <span className="muted">—</span>}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {"Rp " + new Intl.NumberFormat("id-ID").format(Math.round(p.total || 0))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {open && (
+        <SubmitCustomerPOModal
+          customerId={customerId}
+          preselectQuotationId={quotationId}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 }

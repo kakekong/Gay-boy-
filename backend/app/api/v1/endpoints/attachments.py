@@ -21,7 +21,10 @@ from app.models.user import User
 router = APIRouter()
 
 
-ALLOWED_OWNERS = {"customer", "quotation", "project", "approval_request", "supplier_po"}
+ALLOWED_OWNERS = {
+    "customer", "quotation", "project", "approval_request",
+    "supplier_po", "customer_po",
+}
 MAX_FILE_SIZE_MB = 20
 
 

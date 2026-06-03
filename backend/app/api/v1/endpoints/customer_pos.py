@@ -125,14 +125,18 @@ async def create_customer_po(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Sales can only file POs for their own customers",
         )
-    quotation = None
-    if payload.quotation_id:
-        quotation = await db.get(Quotation, payload.quotation_id)
-        if not quotation or quotation.customer_id != payload.customer_id:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Quotation does not belong to this customer",
-            )
+    quotation = await db.get(Quotation, payload.quotation_id)
+    if not quotation or quotation.customer_id != payload.customer_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Quotation does not belong to this customer",
+        )
+    if quotation.status != "won":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Quotation status is '{quotation.status}', "
+            "but only Won quotations can have a customer PO submitted.",
+        )
     if not payload.number.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO number required")
 
