@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     DISCOUNT_AUTO_MAX: float = 5.0
     DISCOUNT_MANAGER_MAX: float = 15.0
 
+    # When true, EVERY submitted quotation requires director approval —
+    # the discount-tier auto-approve / manager-approve shortcuts are
+    # disabled. Set to false to fall back to the tiered thresholds above.
+    QUOTATION_ALWAYS_DIRECTOR_APPROVAL: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:
