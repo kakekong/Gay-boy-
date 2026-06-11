@@ -90,8 +90,19 @@ async def submit_quotation(
     if q.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only draft can be submitted")
 
-    rule = evaluate_discount(float(q.discount_pct))
-    if rule.required_role is None:
+    from app.core.config import settings
+
+    if settings.QUOTATION_ALWAYS_DIRECTOR_APPROVAL:
+        # Policy: every quotation needs the director's sign-off before it
+        # leaves draft — no discount-based auto-approve shortcut.
+        required_role = Role.DIRECTOR
+        reason = "Director approval required for every quotation"
+    else:
+        rule = evaluate_discount(float(q.discount_pct))
+        required_role = rule.required_role
+        reason = rule.reason
+
+    if required_role is None:
         q.status = "approved"
     else:
         q.status = "pending_approval"
@@ -100,8 +111,8 @@ async def submit_quotation(
             target_type="quotation",
             target_id=q.id,
             requested_by=user.id,
-            required_role=rule.required_role,
-            reason=rule.reason,
+            required_role=required_role,
+            reason=reason,
             payload={"discount_pct": float(q.discount_pct), "total": float(q.total)},
         )
     await audit_record(db, actor=user, action="submit", entity="quotation",
