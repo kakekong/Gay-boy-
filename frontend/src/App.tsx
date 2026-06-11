@@ -38,6 +38,9 @@ const PurchaseOrderDetailPage = lazy(() => import("@/pages/PurchaseOrderDetail")
 const CustomerPOsPage         = lazy(() => import("@/pages/CustomerPOs"));
 const CustomerPODetailPage    = lazy(() => import("@/pages/CustomerPODetail"));
 const PORecapPage             = lazy(() => import("@/pages/PORecap"));
+const OperationStagePage      = lazy(() => import("@/pages/OperationStage"));
+const PurchasingStagePage     = lazy(() => import("@/pages/PurchasingStage"));
+const SupplierDetailPage      = lazy(() => import("@/pages/SupplierDetail"));
 const OperationPage        = lazy(() => import("@/pages/Operation"));
 const FinancePage          = lazy(() => import("@/pages/Finance"));
 const KpiPage              = lazy(() => import("@/pages/Kpi"));
@@ -147,12 +150,15 @@ function MainApp() {
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/purchasing" element={<PurchasingPage />} />
+          <Route path="/purchasing/stage/:stage" element={<PurchasingStagePage />} />
+          <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
           <Route path="/customer-pos" element={<CustomerPOsPage />} />
           <Route path="/customer-pos/:id" element={<CustomerPODetailPage />} />
           <Route path="/po-recap" element={<PORecapPage />} />
           <Route path="/operation" element={<OperationPage />} />
+          <Route path="/operation/stage/:stage" element={<OperationStagePage />} />
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/finance/payment-verification" element={<PaymentVerificationPage />} />
           <Route path="/kpi" element={<KpiPage />} />

@@ -53,6 +53,51 @@ async def list_suppliers(
     ]
 
 
+@router.get("/suppliers/{supplier_id}")
+async def get_supplier(
+    supplier_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Supplier detail with a recap of POs we've issued. Used by the
+    new supplier detail screen behind a click on the Purchasing board."""
+    from app.models.purchasing import Supplier, SupplierPO
+
+    s = await db.get(Supplier, supplier_id)
+    if not s:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Supplier not found")
+    po_rows = (await db.scalars(
+        select(SupplierPO)
+        .where(SupplierPO.supplier_id == supplier_id)
+        .order_by(SupplierPO.created_at.desc())
+    )).all()
+    open_pos = [p for p in po_rows if p.status in ("open", "pending_approval")]
+    return {
+        "id": str(s.id),
+        "name": s.name,
+        "category": s.category,
+        "rating": float(s.rating or 0),
+        "lead_time_days_avg": float(s.lead_time_days_avg or 0),
+        "qc_fail_rate": float(s.qc_fail_rate or 0),
+        "price_volatility": float(s.price_volatility or 0),
+        "contact": s.contact or {},
+        "po_count": len(po_rows),
+        "open_po_count": len(open_pos),
+        "lifetime_value": float(sum(float(p.total or 0) for p in po_rows)),
+        "purchase_orders": [
+            {
+                "id": str(p.id),
+                "number": p.number,
+                "status": p.status,
+                "po_date": p.po_date,
+                "total": float(p.total or 0),
+                "project_id": str(p.project_id) if p.project_id else None,
+            }
+            for p in po_rows
+        ],
+    }
+
+
 @router.post("/suppliers", status_code=201)
 async def create_supplier(
     payload: SupplierIn,

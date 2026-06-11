@@ -256,6 +256,68 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
             "completed_at": w.completed_at}
 
 
+@router.get("/work-orders")
+async def list_work_orders(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+    stage: str | None = None,
+    completed: bool | None = None,
+    project_id: UUID | None = None,
+):
+    """List work orders, optionally scoped to a stage / completion / project.
+
+    Used by the Operation board's per-stage screens — pass ?stage=receiving
+    to render a focused view of just that column."""
+    from app.models.crm import Customer
+    stmt = select(WorkOrder).order_by(WorkOrder.created_at.desc())
+    if stage:
+        stmt = stmt.where(WorkOrder.stage == stage)
+    if project_id:
+        stmt = stmt.where(WorkOrder.project_id == project_id)
+    if completed is True:
+        stmt = stmt.where(WorkOrder.completed_at.is_not(None))
+    elif completed is False:
+        stmt = stmt.where(WorkOrder.completed_at.is_(None))
+    rows = (await db.scalars(stmt)).all()
+
+    # Batch-load project + customer info for the table view.
+    project_ids = {w.project_id for w in rows if w.project_id}
+    projects: dict[UUID, Project] = {}
+    if project_ids:
+        for p in (await db.scalars(
+            select(Project).where(Project.id.in_(project_ids))
+        )).all():
+            projects[p.id] = p
+    customer_ids = {p.customer_id for p in projects.values() if p.customer_id}
+    customers: dict[UUID, Customer] = {}
+    if customer_ids:
+        for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(customer_ids))
+        )).all():
+            customers[c.id] = c
+
+    out = []
+    for w in rows:
+        proj = projects.get(w.project_id) if w.project_id else None
+        cust = customers.get(proj.customer_id) if proj else None
+        out.append({
+            "id": str(w.id),
+            "code": w.code,
+            "stage": w.stage,
+            "notes": w.notes,
+            "started_at": w.started_at,
+            "completed_at": w.completed_at,
+            "created_at": w.created_at,
+            "project_id": str(w.project_id) if w.project_id else None,
+            "project_code": proj.code if proj else None,
+            "project_status": proj.status if proj else None,
+            "project_target_delivery": proj.target_delivery if proj else None,
+            "customer_id": str(cust.id) if cust else None,
+            "customer_name": cust.company_name if cust else None,
+        })
+    return out
+
+
 class DeliveryIn(BaseModel):
     number: str
     split_index: int = 1
