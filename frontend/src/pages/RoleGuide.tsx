@@ -532,7 +532,13 @@ export default function RoleGuidePage() {
     if (r) setActive(r.key);
   }, [me?.role]);
 
-  const section = ROLES.find((r) => r.key === active) ?? ROLES[0];
+  // Non-directors are pinned to their own role guide — the director is
+  // the only role that can browse every playbook via the tab strip.
+  const isDirector = me?.role === "director";
+  const effectiveKey: RoleKey = isDirector
+    ? active
+    : ((ROLES.find((r) => r.key === me?.role)?.key ?? active) as RoleKey);
+  const section = ROLES.find((r) => r.key === effectiveKey) ?? ROLES[0];
 
   return (
     <div className="space-y-5">
@@ -542,10 +548,15 @@ export default function RoleGuidePage() {
             <Map size={22} className="text-brand-600" /> {t("Role guide", "Panduan peran")}
           </h1>
           <p className="text-sm muted">
-            {t(
-              "Pick your role. Get your daily workflow, the buttons you'll touch, and the rules.",
-              "Pilih peran Anda. Lihat alur kerja harian, tombol yang akan Anda pakai, dan aturannya.",
-            )}{" "}
+            {isDirector
+              ? t(
+                  "Pick any role to read its daily workflow, the buttons they'll touch, and the rules.",
+                  "Pilih peran mana saja untuk membaca alur kerja harian, tombol yang dipakai, dan aturannya.",
+                )
+              : t(
+                  "Your daily workflow, the buttons you'll touch, and the rules for your role.",
+                  "Alur kerja harian Anda, tombol yang Anda pakai, dan aturan untuk peran Anda.",
+                )}{" "}
             {me?.role && (
               <span>
                 {t("You're logged in as", "Anda masuk sebagai")}{" "}
@@ -556,34 +567,38 @@ export default function RoleGuidePage() {
         </div>
       </div>
 
-      {/* Role tabs */}
-      <div className="card p-1 flex flex-wrap gap-1">
-        {ROLES.map((r) => {
-          const Icon = r.Icon;
-          const isMe = me?.role === r.key;
-          return (
-            <button
-              key={r.key}
-              onClick={() => setActive(r.key)}
-              className={clsx(
-                "px-3 py-1.5 rounded-md text-sm font-medium inline-flex items-center gap-1.5",
-                active === r.key
-                  ? "bg-brand-600 text-white shadow-sm"
-                  : "text-ink-600 hover:bg-ink-100",
-              )}
-            >
-              <Icon size={14} />
-              <span>{t(r.label, r.label_id)}</span>
-              {isMe && (
-                <span className={clsx(
-                  "text-[9px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded",
-                  active === r.key ? "bg-white/20" : "bg-brand-50 text-brand-700",
-                )}>{t("You", "Anda")}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Role tabs — each user only sees their own role guide. The
+          director oversees the whole company, so they keep the full
+          tab strip to read every role's playbook. */}
+      {me?.role === "director" ? (
+        <div className="card p-1 flex flex-wrap gap-1">
+          {ROLES.map((r) => {
+            const Icon = r.Icon;
+            const isMe = me?.role === r.key;
+            return (
+              <button
+                key={r.key}
+                onClick={() => setActive(r.key)}
+                className={clsx(
+                  "px-3 py-1.5 rounded-md text-sm font-medium inline-flex items-center gap-1.5",
+                  active === r.key
+                    ? "bg-brand-600 text-white shadow-sm"
+                    : "text-ink-600 hover:bg-ink-100",
+                )}
+              >
+                <Icon size={14} />
+                <span>{t(r.label, r.label_id)}</span>
+                {isMe && (
+                  <span className={clsx(
+                    "text-[9px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded",
+                    active === r.key ? "bg-white/20" : "bg-brand-50 text-brand-700",
+                  )}>{t("You", "Anda")}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* Header card */}
       <div className="card p-5 lg:p-6 bg-gradient-to-br from-brand-600 to-brand-700 text-white">
