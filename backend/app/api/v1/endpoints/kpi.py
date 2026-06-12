@@ -2,12 +2,14 @@
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import Role, require
 from app.models.crm import Customer
 from app.models.finance import Invoice
 from app.models.operation import Project
@@ -85,3 +87,58 @@ async def finance_kpi(db: AsyncSession = Depends(get_db),
         )
     )
     return {"collected": float(paid or 0), "outstanding": float(outstanding or 0)}
+
+
+# ─── Export (PDF / Excel) — director only ───────────────────────────────────
+
+def _pretty(k: str) -> str:
+    return k.replace("_", " ").title()
+
+
+def _pretty_val(v) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, float):
+        return f"{v:,.0f}" if v >= 1000 else f"{v:g}"
+    return str(v)
+
+
+@router.get("/export.{ext}")
+async def export_kpi(
+    ext: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.DIRECTOR)),
+):
+    if ext not in ("pdf", "xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ext must be pdf or xlsx")
+
+    sales = await sales_kpi(range_days=30, db=db, _user=user)
+    ops = await operation_kpi(db=db, _user=user)
+    purch = await purchasing_kpi(_user=user)
+    fin = await finance_kpi(db=db, _user=user)
+
+    def section(name: str, data: dict) -> dict:
+        return {
+            "name": name,
+            "headers": ["Metric", "Value"],
+            "rows": [[_pretty(k), _pretty_val(v)] for k, v in data.items()],
+        }
+
+    sections = [
+        section("Sales", sales),
+        section("Operation", ops),
+        section("Purchasing", purch),
+        section("Finance", fin),
+    ]
+
+    from app.services.tabular_export import render_pdf, render_xlsx
+    if ext == "pdf":
+        data = render_pdf("KPI dashboard", sections)
+        media = "application/pdf"
+    else:
+        data = render_xlsx("KPI dashboard", sections)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(
+        content=data, media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="kpi.{ext}"'},
+    )

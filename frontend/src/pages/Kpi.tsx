@@ -1,6 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, Download } from "lucide-react";
 import { api } from "@/api/client";
+
+function exportKpi(ext: "pdf" | "xlsx") {
+  api.get(`/kpi/export.${ext}`, { responseType: "blob" })
+    .then((r) => {
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kpi.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    })
+    .catch((e) => alert(e?.response?.data?.detail ?? "Export failed"));
+}
 
 export default function KpiPage() {
   const sales = useQuery({ queryKey: ["kpi-sales"],   queryFn: () => api.get("/kpi/sales").then(r => r.data) });
@@ -17,11 +32,21 @@ export default function KpiPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <BarChart3 size={22} className="text-brand-600" /> KPIs
-        </h1>
-        <p className="text-sm muted">Performance across every department.</p>
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <BarChart3 size={22} className="text-brand-600" /> KPIs
+          </h1>
+          <p className="text-sm muted">Performance across every department.</p>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={() => exportKpi("pdf")}>
+            <Download size={15} /> PDF
+          </button>
+          <button className="btn-ghost" onClick={() => exportKpi("xlsx")}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

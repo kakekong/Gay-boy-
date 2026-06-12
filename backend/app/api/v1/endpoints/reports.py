@@ -7,7 +7,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -233,3 +234,131 @@ async def lost_deals(
         "by_reason": dict(by_reason),
         "total_lost_value": float(sum(i["total"] for i in items)),
     }
+
+
+# ─── Export (PDF / Excel) ───────────────────────────────────────────────────
+
+_REPORT_LABELS = {
+    "pnl": "Profit & Loss",
+    "ar": "AR Aging detail",
+    "sales": "Sales by salesperson",
+    "pipeline": "Pipeline by stage",
+    "lost": "Lost deals",
+}
+
+
+def _idr(n) -> str:
+    return "Rp " + f"{float(n or 0):,.0f}".replace(",", ".")
+
+
+async def _report_sections(report: str, db: AsyncSession, user: User) -> list[dict]:
+    """Build export sections for a given report tab."""
+    if report == "pnl":
+        d = await pnl(db=db, _u=user)
+        tot = d["totals"]
+        sections = [{
+            "name": "P&L summary",
+            "headers": ["Metric", "Value"],
+            "rows": [
+                ["Revenue", _idr(tot["revenue"])],
+                ["COGS", _idr(tot["cogs"])],
+                ["Gross profit", _idr(tot["gross_profit"])],
+                ["Expense", _idr(tot["expense"])],
+                ["Operating income", _idr(tot["operating_income"])],
+                ["Other income", _idr(tot["other_income"])],
+                ["Other expense", _idr(tot["other_expense"])],
+                ["Net income", _idr(tot["net_income"])],
+            ],
+        }]
+        for acc_type, accs in d["by_type"].items():
+            sections.append({
+                "name": acc_type[:31],
+                "headers": ["Account no", "Name", "Balance"],
+                "rows": [[a["account_no"], a["name"], _idr(a["balance"])] for a in accs],
+            })
+        return sections
+
+    if report == "ar":
+        d = await ar_aging_detail(db=db, _u=user)
+        bucket_rows = [[k, _idr(v)] for k, v in d["buckets"].items()]
+        return [
+            {"name": "AR buckets", "headers": ["Bucket", "Total"], "rows": bucket_rows},
+            {
+                "name": "AR detail",
+                "headers": ["Invoice", "Customer", "Due date", "Days overdue", "Total", "Status"],
+                "rows": [[
+                    i["number"], i["customer_name"], str(i["due_date"] or ""),
+                    i["days_overdue"] if i["days_overdue"] is not None else "",
+                    _idr(i["total"]), i["status"],
+                ] for i in d["items"]],
+            },
+        ]
+
+    if report == "sales":
+        d = await sales_by_person(range_days=90, db=db, _u=user)
+        return [{
+            "name": "Sales by salesperson",
+            "headers": ["Salesperson", "Quotes", "Won", "Lost", "Win rate", "Pipeline", "Won revenue"],
+            "rows": [[
+                r["full_name"], r["quotations"], r["won"], r["lost"],
+                f"{r['win_rate'] * 100:.1f}%", _idr(r["pipeline_value"]), _idr(r["won_revenue"]),
+            ] for r in d["rows"]],
+        }]
+
+    if report == "pipeline":
+        d = await pipeline_by_stage(db=db, _u=user)
+        return [{
+            "name": "Pipeline by stage",
+            "headers": ["Stage", "Customers", "Value"],
+            "rows": [[
+                r["stage"].replace("_", " ").title(), r["count"], _idr(r["value"]),
+            ] for r in d["rows"]],
+        }]
+
+    if report == "lost":
+        d = await lost_deals(db=db, _u=user)
+        return [
+            {
+                "name": "Lost deals",
+                "headers": ["Quote", "Customer", "Industry", "Discount %", "Total", "Reason"],
+                "rows": [[
+                    i["number"], i["customer_name"], i["industry"],
+                    f"{i['discount_pct']:.1f}", _idr(i["total"]), i["reason"],
+                ] for i in d["items"]],
+            },
+            {
+                "name": "By reason",
+                "headers": ["Reason", "Count"],
+                "rows": [[k, v] for k, v in d["by_reason"].items()],
+            },
+        ]
+
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown report '{report}'")
+
+
+@router.get("/export.{ext}")
+async def export_report(
+    ext: str,
+    report: str = Query(..., description="pnl | ar | sales | pipeline | lost"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if ext not in ("pdf", "xlsx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ext must be pdf or xlsx")
+    label = _REPORT_LABELS.get(report)
+    if not label:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown report '{report}'")
+    sections = await _report_sections(report, db, user)
+
+    from app.services.tabular_export import render_pdf, render_xlsx
+    if ext == "pdf":
+        data = render_pdf(label, sections)
+        media = "application/pdf"
+    else:
+        data = render_xlsx(label, sections)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    safe = report.replace(" ", "_")
+    return Response(
+        content=data, media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="report-{safe}.{ext}"'},
+    )
