@@ -141,8 +141,11 @@ export default function CustomerDetailPage() {
     }),
   });
   const isDirector = me?.role === "director";
+  // Managers and directors hold stage-approval authority, so their own
+  // moves apply instantly. Everyone else opens the request modal.
+  const canApproveStage = me?.role === "director" || me?.role === "manager";
   const onStagePicked = (stage: string) => {
-    if (isDirector) {
+    if (canApproveStage) {
       moveStage.mutate(stage);
     } else {
       setMoveTarget(stage);
@@ -609,8 +612,8 @@ export default function CustomerDetailPage() {
             setStageFlash({
               kind: "wait",
               text: filesAttached
-                ? `Request sent to the director with ${filesAttached} file(s).`
-                : "Request sent to the director.",
+                ? `Request sent for manager/director approval with ${filesAttached} file(s).`
+                : "Request sent for manager/director approval.",
             });
           }}
         />
@@ -1208,8 +1211,9 @@ function StageMoveRequestModal({
             <span className="chip bg-brand-50 text-brand-700 capitalize">{toStage.replace(/_/g, " ")}</span>
           </p>
           <p className="text-xs muted mt-2">
-            The director will see this request in their Approvals inbox. They
-            need to click Approve before the stage actually moves.
+            A manager or director will see this request in their Approvals
+            inbox. Either of them needs to click Approve before the stage
+            actually moves.
           </p>
         </header>
 
@@ -1234,7 +1238,7 @@ function StageMoveRequestModal({
                   ? "Customer wants 10% off. I think 7% is defensible — see comparison attached."
                   : toStage === "quotation"
                   ? "Tech spec finalized. Sending the quote at IDR 850M, 30-day terms."
-                  : `Tell the director what's pushing this deal into "${toStage.replace(/_/g, " ")}" — be specific.`
+                  : `Tell the manager/director what's pushing this deal into "${toStage.replace(/_/g, " ")}" — be specific.`
               }
             />
           </label>
@@ -1261,7 +1265,7 @@ function StageMoveRequestModal({
             )}
             <div className="text-[11px] muted mt-1">
               Attach signed POs, PDFs, drawings, anything that helps the
-              director decide. Max 20 MB per file.
+              manager/director decide. Max 20 MB per file.
             </div>
           </div>
 
@@ -1284,7 +1288,7 @@ function StageMoveRequestModal({
               {submit.isPending
                 ? <Loader2 size={14} className="animate-spin" />
                 : <ChevronRight size={14} />}
-              Send to director
+              Send for approval
             </button>
           </div>
         </form>

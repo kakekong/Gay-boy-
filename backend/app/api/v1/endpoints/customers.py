@@ -125,12 +125,14 @@ async def update_customer(
     changes = payload.model_dump(exclude_unset=True)
 
     # Stage transitions are sensitive — every move along the pipeline needs
-    # the director to sign off, regardless of role. Director can still
-    # move freely.
+    # a manager or director to sign off. Managers and directors can move
+    # freely (they hold the approval authority); everyone else queues a
+    # request that either a manager or a director can clear.
     stage_change = "stage" in changes and changes["stage"] != obj.stage
-    needs_director_for_stage = stage_change and Role(user.role) != Role.DIRECTOR
+    can_approve_stage = Role(user.role) in (Role.MANAGER, Role.DIRECTOR)
+    needs_approval_for_stage = stage_change and not can_approve_stage
 
-    if rule.required_role is None and not needs_director_for_stage:
+    if rule.required_role is None and not needs_approval_for_stage:
         before = {k: getattr(obj, k) for k in changes.keys()}
         prev_stage = obj.stage
         for k, v in changes.items():
@@ -143,10 +145,10 @@ async def update_customer(
         return obj
 
     # Either a sensitive data change (admin role) or a stage transition.
-    required_role = Role.DIRECTOR if needs_director_for_stage else rule.required_role
+    required_role = Role.MANAGER if needs_approval_for_stage else rule.required_role
     reason = (
-        f"Stage move {obj.stage} → {changes['stage']} needs director approval"
-        if needs_director_for_stage else rule.reason
+        f"Stage move {obj.stage} → {changes['stage']} needs manager/director approval"
+        if needs_approval_for_stage else rule.reason
     )
     await request_approval(
         db,
@@ -625,10 +627,12 @@ async def request_stage_move(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Sales/manager/admin requests a stage move with a written reason and
-    optional supporting files. Director sees all of this in /approvals.
+    """Sales/admin requests a stage move with a written reason and optional
+    supporting files. A manager or director sees all of this in /approvals
+    and either of them can approve it.
 
-    Director themself short-circuits — direct stage moves still go through
+    Managers and directors short-circuit — their own stage moves apply
+    directly (they hold the approval authority) via this endpoint or
     PATCH /customers/:id.
     """
     from app.core.config import settings
@@ -648,8 +652,9 @@ async def request_stage_move(
             status.HTTP_400_BAD_REQUEST,
             f"Customer is already in stage '{target_stage}'",
         )
-    # If the requester is the director, apply directly — no approval queue.
-    if Role(user.role) == Role.DIRECTOR:
+    # Managers and directors hold approval authority — apply directly, no
+    # approval queue.
+    if Role(user.role) in (Role.MANAGER, Role.DIRECTOR):
         prev_stage = obj.stage
         obj.stage = target_stage
         obj.updated_by = user.id
@@ -663,13 +668,13 @@ async def request_stage_move(
         )
         return {"applied": True, "stage": target_stage}
 
-    # Otherwise create an approval request for the director.
+    # Otherwise create an approval request that a manager or director can clear.
     req = await request_approval(
         db,
         target_type="customer",
         target_id=obj.id,
         requested_by=user.id,
-        required_role=Role.DIRECTOR,
+        required_role=Role.MANAGER,
         reason=f"Move {obj.stage} → {target_stage}: {reason.strip()}",
         payload={
             "changes": {"stage": target_stage},
