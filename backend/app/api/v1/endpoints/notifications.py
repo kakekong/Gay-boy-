@@ -62,6 +62,37 @@ async def list_notifications(
                 "at": a.created_at,
             })
 
+    # 1b. Decision on YOUR request (any role) — surface the outcome + the
+    # reason the approver gave so the requester learns why.
+    decided_stmt = (
+        select(ApprovalRequest)
+        .where(
+            ApprovalRequest.requested_by == me.id,
+            ApprovalRequest.status.in_([
+                ApprovalStatus.APPROVED.value, ApprovalStatus.REJECTED.value,
+            ]),
+            ApprovalRequest.decided_at.is_not(None),
+            ApprovalRequest.decided_at >= now - timedelta(days=7),
+        )
+        .order_by(ApprovalRequest.decided_at.desc())
+        .limit(20)
+    )
+    for a in (await db.scalars(decided_stmt)).all():
+        approved = a.status == ApprovalStatus.APPROVED.value
+        verb = "approved" if approved else "rejected"
+        reason = (a.decision_notes or "").strip()
+        items.append({
+            "id": f"approval-decided:{a.id}",
+            "kind": "approval_decided",
+            "severity": "low" if approved else "medium",
+            "title": f"Your {a.target_type} request was {verb}",
+            "body": (f"Reason: {reason}" if reason
+                     else ("Approved." if approved
+                           else "Rejected (no reason given).")),
+            "link": "/approvals" if role in (Role.MANAGER, Role.DIRECTOR) else "/",
+            "at": a.decided_at,
+        })
+
     # 2. At-risk open quotations owned by the caller (or all if manager+)
     seven_days_ago = now - timedelta(days=7)
     q_stmt = (

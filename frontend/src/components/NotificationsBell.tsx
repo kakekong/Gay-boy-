@@ -10,7 +10,7 @@ import { api } from "@/api/client";
 
 interface NotificationItem {
   id: string;
-  kind: "approval" | "at_risk_deal" | "payment_due" | "drawing_pending" | "chat" | "stage_task";
+  kind: "approval" | "approval_decided" | "at_risk_deal" | "payment_due" | "drawing_pending" | "chat" | "stage_task";
   severity: "low" | "medium" | "high";
   title: string;
   body: string;
@@ -20,6 +20,7 @@ interface NotificationItem {
 
 const ICON: Record<string, any> = {
   approval:         CheckSquare,
+  approval_decided: CheckSquare,
   at_risk_deal:     AlertTriangle,
   payment_due:      AlertCircle,
   drawing_pending:  Truck,
