@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   Check, X, ShieldCheck, AlertCircle, Loader2, CheckCircle2,
-  Download, ChevronRight, FileText, Building2,
+  Download, ChevronRight, FileText, Building2, Eye, History,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 interface ApprovalAttachment {
   id: string;
@@ -46,8 +47,12 @@ export default function ApprovalsPage() {
   });
 
   const decide = useMutation({
-    mutationFn: ({ id, approve }: { id: string; approve: boolean }) =>
-      api.post(`/approvals/${id}/${approve ? "approve" : "reject"}`).then((r) => r.data),
+    mutationFn: ({ id, approve, notes }: { id: string; approve: boolean; notes?: string }) =>
+      api.post(
+        `/approvals/${id}/${approve ? "approve" : "reject"}`,
+        null,
+        { params: notes ? { notes } : undefined },
+      ).then((r) => r.data),
     onSuccess: (data: any, vars) => {
       qc.invalidateQueries({ queryKey: ["approvals"] });
       qc.invalidateQueries({ queryKey: ["quotation"] });
@@ -126,6 +131,20 @@ export default function ApprovalsPage() {
 
 function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
   const [showRaw, setShowRaw] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [noteErr, setNoteErr] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ApprovalAttachment | null>(null);
+
+  function act(approve: boolean) {
+    // A reason is required when rejecting so the requester knows why;
+    // optional (but encouraged) on approve.
+    if (!approve && !notes.trim()) {
+      setNoteErr("Please give a reason for rejecting — the requester will see it.");
+      return;
+    }
+    setNoteErr(null);
+    decide.mutate({ id: r.id, approve, notes: notes.trim() || undefined });
+  }
 
   // Detect a stage move under both payload shapes:
   // - new flow (rich): payload.from_stage + payload.to_stage + payload.narrative
@@ -241,6 +260,13 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                     <span className="truncate flex-1">{a.filename}</span>
                     <span className="muted tabular-nums">{humanSize(a.size)}</span>
                     <button
+                      onClick={() => setPreview(a)}
+                      className="btn-ghost px-2 py-1 text-xs"
+                      title="View without downloading"
+                    >
+                      <Eye size={11} />
+                    </button>
+                    <button
                       onClick={() => download(a.id, a.filename)}
                       className="btn-ghost px-2 py-1 text-xs"
                       title="Download"
@@ -268,24 +294,45 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
           </div>
         </div>
 
-        <div className="flex gap-2 shrink-0">
-          <button
-            onClick={() => decide.mutate({ id: r.id, approve: false })}
-            className="btn-danger"
-            disabled={decide.isPending}
-          >
-            <X size={15} /> Reject
-          </button>
-          <button
-            onClick={() => decide.mutate({ id: r.id, approve: true })}
-            className="btn-success"
-            disabled={decide.isPending}
-          >
-            {decide.isPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-            Approve
-          </button>
+        <div className="flex flex-col gap-2 shrink-0 w-full sm:w-72">
+          <textarea
+            value={notes}
+            onChange={(e) => { setNotes(e.target.value); setNoteErr(null); }}
+            rows={2}
+            className="input text-sm"
+            placeholder="Reason for your decision (required to reject, shown to the requester)…"
+          />
+          {noteErr && (
+            <div className="text-[11px] text-red-700">{noteErr}</div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => act(false)}
+              className="btn-danger flex-1"
+              disabled={decide.isPending}
+            >
+              <X size={15} /> Reject
+            </button>
+            <button
+              onClick={() => act(true)}
+              className="btn-success flex-1"
+              disabled={decide.isPending}
+            >
+              {decide.isPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+              Approve
+            </button>
+          </div>
         </div>
       </div>
+
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={preview.content_type}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }

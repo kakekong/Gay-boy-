@@ -33,6 +33,21 @@ function exportCsv(filename: string, header: string[], rows: (string | number)[]
   URL.revokeObjectURL(a.href);
 }
 
+function exportServer(report: TabId, ext: "pdf" | "xlsx") {
+  api.get(`/reports/export.${ext}`, { params: { report }, responseType: "blob" })
+    .then((r) => {
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${report}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    })
+    .catch((e) => alert(e?.response?.data?.detail ?? "Export failed"));
+}
+
 export default function ReportsPage() {
   const [tab, setTab] = useState<TabId>("pnl");
 
@@ -43,7 +58,15 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <BookOpen size={22} className="text-brand-600" /> Reports
           </h1>
-          <p className="text-sm muted">Snapshots of the business. Click Export to download as CSV.</p>
+          <p className="text-sm muted">Snapshots of the business. Export the current report as PDF, Excel, or CSV.</p>
+        </div>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={() => exportServer(tab, "pdf")}>
+            <Download size={15} /> PDF
+          </button>
+          <button className="btn-ghost" onClick={() => exportServer(tab, "xlsx")}>
+            <Download size={15} /> Excel
+          </button>
         </div>
       </div>
 

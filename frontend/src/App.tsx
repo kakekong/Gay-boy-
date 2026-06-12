@@ -54,6 +54,13 @@ function Protected({ children }: { children: JSX.Element }) {
   return token ? children : <Navigate to="/login" replace />;
 }
 
+/** Gate a route to specific roles; bounce others back to the dashboard. */
+function RequireRole({ roles, children }: { roles: string[]; children: JSX.Element }) {
+  const user = useAuthStore((s) => s.user);
+  if (user && roles.includes(user.role)) return children;
+  return <Navigate to="/" replace />;
+}
+
 function PageFallback() {
   return (
     <div className="min-h-[50vh] grid place-items-center text-ink-400">
@@ -142,7 +149,7 @@ function MainApp() {
           <Route path="/help" element={<HelpPage />} />
           <Route path="/role-guide" element={<RoleGuidePage />} />
           <Route path="/attachments" element={<AttachmentsAdminPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reports" element={<RequireRole roles={["director"]}><ReportsPage /></RequireRole>} />
           <Route path="/sales-targets" element={<SalesTargetsPage />} />
           <Route path="/audit" element={<AuditLogPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
@@ -161,7 +168,7 @@ function MainApp() {
           <Route path="/operation/stage/:stage" element={<OperationStagePage />} />
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/finance/payment-verification" element={<PaymentVerificationPage />} />
-          <Route path="/kpi" element={<KpiPage />} />
+          <Route path="/kpi" element={<RequireRole roles={["director"]}><KpiPage /></RequireRole>} />
           <Route path="/executive" element={<ExecutivePage />} />
           <Route path="/ai" element={<AICommandCenter />} />
         </Routes>
