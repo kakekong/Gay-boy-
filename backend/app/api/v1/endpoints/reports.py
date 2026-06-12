@@ -13,13 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.crm import Customer
 from app.models.finance import Invoice
 from app.models.quotation import Quotation
 from app.models.user import User
 
-router = APIRouter()
+# Reports are a director-only management surface. Gate the whole router.
+router = APIRouter(dependencies=[Depends(require(Role.DIRECTOR))])
 
 
 # ─── P&L (uses current CoA balances) ────────────────────────────────────────

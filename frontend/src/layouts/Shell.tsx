@@ -78,8 +78,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
     label: "Insights",
     label_id: "Analitik",
     items: [
-      { to: "/kpi", label: "KPI", label_id: "KPI", icon: BarChart3 },
-      { to: "/reports", label: "Reports", label_id: "Laporan", icon: BookOpen },
+      { to: "/kpi", label: "KPI", label_id: "KPI", icon: BarChart3, roles: ["director"] },
+      { to: "/reports", label: "Reports", label_id: "Laporan", icon: BookOpen, roles: ["director"] },
       { to: "/executive", label: "Executive", label_id: "Eksekutif", icon: Crown, roles: ["manager", "director"] },
       { to: "/ai", label: "AI Command", label_id: "AI Command", icon: BrainCircuit, accent: true },
       { to: "/audit", label: "Audit log", label_id: "Log audit", icon: Shield,
