@@ -43,25 +43,31 @@ const ROLES: RoleSection[] = [
       "tick any overdue stage-checklist items. That's your 5-minute warm-up.",
     flow: [
       { title: "New inquiry comes in", detail: "WhatsApp, email, or referral" },
-      { title: "+ New customer", detail: "Add the company to the CRM (stage: Lead)" },
+      { title: "+ New customer", detail: "3-step wizard: basics → PICs (WhatsApp/email/details) → tax info (NPWP/PKP)" },
       { title: "Tick first-contact + qualify-need", detail: "Stage checklist on the customer page" },
       { title: "Click 'Advance to Presentation'", detail: "→ amber banner: sent to director for approval. Once approved, send deck." },
-      { title: "Click 'Advance to Quotation' (again, director approves)", detail: "Then + New quotation. Discount ≤5% auto, ≤15% manager, >15% director" },
-      { title: "Submit quotation → wait for approval → Send", detail: "Customer accepts" },
-      { title: "Click 'Mark deal Won' — director approves", detail: "Director takes over for the supplier PO" },
+      { title: "Click 'Advance to Quotation' (director approves)", detail: "Then open the customer → + New quotation. Pick the PIC it's addressed to." },
+      { title: "Submit quotation → director approves", detail: "EVERY quotation now needs director sign-off in /approvals before it can be sent." },
+      { title: "Mark deal Won", detail: "No project yet — the quote just flips to Won." },
+      { title: "Customer sends their signed PO → Submit customer PO", detail: "On the quote's 'Next step' card: attach the PO file, pick which line items they actually ordered, set the PO number." },
+      { title: "Director approves the customer PO → project is created", detail: "The project carries the PO number, date and value automatically." },
     ],
     buttons: [
-      { page: "Customers", button: "+ New customer", effect: "Add a company" },
+      { page: "Customers", button: "+ New customer", effect: "3-step wizard (basics / PICs / tax)" },
       { page: "Customer page", button: "Advance to …", effect: "Request a stage move (director approves)" },
       { page: "Customer page", button: "Log activity", effect: "Record a call or WhatsApp" },
       { page: "Customer page", button: "AI suggest", effect: "Generate a Bahasa Indonesia follow-up" },
       { page: "Customer page", button: "Stage checklist circle", effect: "Tick required actions off" },
-      { page: "Quotation page", button: "Submit", effect: "Send to manager for approval" },
+      { page: "Quotation page", button: "Submit", effect: "Send to director for approval (always)" },
+      { page: "Quotation page (Won)", button: "Submit customer PO", effect: "File the customer's PO → director approval → project" },
+      { page: "Customer PO", button: "(sidebar, Workspace)", effect: "Track the POs you've filed and their status" },
       { page: "Notifications bell", button: "Any item", effect: "Jump to whatever needs you" },
     ],
     rules: [
       "You can only edit customers assigned to you (sales PIC).",
-      "Discounts over 5% require approval before you can send the quote.",
+      "EVERY quotation needs director approval before it leaves draft — there's no more discount-based auto-approve.",
+      "A project is NOT created when you mark a quote Won. You file the customer's PO (with the PO file + ordered items), and the director's approval of that PO is what spawns the project.",
+      "When the customer only orders some of the quoted items, untick the rest in the Submit-customer-PO modal and edit prices if they negotiated.",
       "Every stage move needs the director's approval — the customer stays on the old stage until they click Approve in /approvals.",
       "Overdue stage tasks light up the bell and the calendar in red.",
     ],
@@ -81,17 +87,18 @@ const ROLES: RoleSection[] = [
       { title: "Director needs a vendor", detail: "Asks you to add them" },
       { title: "Open Purchasing page" },
       { title: "+ New supplier", detail: "Name, category, initial rating, contact PIC" },
-      { title: "Supplier appears in director's PO modal" },
-      { title: "Director issues PO", detail: "(out of your hands — director picks supplier + project)" },
+      { title: "Click a supplier row → supplier detail", detail: "See rating, lead time, QC fail %, and every PO issued to them" },
+      { title: "Director issues the supplier PO", detail: "(out of your hands — director links supplier + project)" },
       { title: "Supplier portal lights up", detail: "Supplier uploads drawing, sets ETA" },
       { title: "Customer sees forecast instantly" },
     ],
     buttons: [
       { page: "Purchasing", button: "+ New supplier", effect: "Add a vendor" },
-      { page: "Purchasing (supplier row)", button: "(read-only)", effect: "View rating, lead time, QC fail %" },
+      { page: "Purchasing (supplier row)", button: "Click row", effect: "Open the supplier detail page + PO history" },
+      { page: "Purchasing board", button: "Stage cards", effect: "PR / RFQ / GR / QC explain each procurement step; Supplier PO opens the PO list" },
     ],
     rules: [
-      "You can see the supplier directory, but not the Supplier-POs table — that's director-only.",
+      "You can see the supplier directory and each supplier's PO history, but only the director can issue a supplier PO.",
       "Keep rating + lead-time fresh; the AI vendor-picker uses both.",
     ],
   },
@@ -175,8 +182,8 @@ const ROLES: RoleSection[] = [
       { page: "Employees", button: "(sales person)", effect: "See KPIs and won revenue" },
     ],
     rules: [
-      "You can approve discounts up to 15% and 'data change' requests from admins.",
-      "Stage transitions (lead → presentation → … → won) go to the director, not you — your own stage moves on customers also go through the director.",
+      "You approve 'data change' requests from admins. Quotations now route to the director, not you.",
+      "Stage transitions (lead → presentation → … → won), quotations, and customer POs all go to the director, not you — your own stage moves on customers also go through the director.",
       "Anything bigger waits for the director.",
     ],
   },
@@ -188,30 +195,34 @@ const ROLES: RoleSection[] = [
     blurb:
       "The biggest hat. You see everything, sign off on financial moves, " +
       "and own the supplier ⇄ customer link.",
-    daily: "Morning: Approvals (stage moves + discounts). Monday: Executive Dashboard + AI Recommendations. End of month: Salary.",
+    daily: "Morning: Approvals (quotations + customer POs + stage moves). Monday: Executive Dashboard + AI Recommendations. End of month: Salary.",
     flow: [
-      { title: "Open Approvals first", detail: "Stage-move requests from sales/manager/admin — green-light or reject" },
+      { title: "Open Approvals first", detail: "Quotations, customer POs, stage-move requests — green-light or reject. Approving a quotation lets sales send it." },
+      { title: "Approve a customer PO → project is created", detail: "The project carries the customer's PO number, date and ordered items. This is the ONLY way projects are made now." },
       { title: "Executive Dashboard", detail: "Read the AI recommendations" },
-      { title: "Won deal needs material → Purchasing → + New PO", detail: "Pick supplier + project" },
+      { title: "Project needs material → Purchasing → + New PO", detail: "Link a supplier + project. Non-directors who file a supplier PO need your approval too." },
+      { title: "Track everything on PO Recap", detail: "Customer POs + supplier POs in one view, with who's in charge of each." },
       { title: "Supplier portal lights up automatically", detail: "Supplier uploads drawing + sets warehouse ETA" },
-      { title: "Customer's portal updates with no internal step" },
-      { title: "Spot-check uploads on the All files page", detail: "Audit every drawing/invoice/proof in the system" },
+      { title: "Drive work on the Operation board", detail: "Each stage (Receiving → … → Delivery) is its own screen; mark work orders Done / Advance them." },
       { title: "End of month: Salary → generate → post → mark paid" },
-      { title: "Admin → Users: hire / fire / reset password as needed" },
     ],
     buttons: [
-      { page: "Approvals", button: "Approve / Reject", effect: "Sign off on every stage move + discount + data change" },
-      { page: "Purchasing", button: "+ New PO  (director-only)", effect: "Link a supplier to a project" },
+      { page: "Approvals", button: "Approve / Reject", effect: "Sign off on every quotation, customer PO, supplier PO, stage move + data change" },
+      { page: "Customer PO (Workspace)", button: "Row / detail", effect: "See every incoming customer PO + the project it spawned" },
+      { page: "Purchasing PO (Workspace)", button: "+ New PO", effect: "Issue a supplier PO (link supplier + project)" },
+      { page: "PO Recap (Workspace)", button: "Tabs + search", effect: "All POs in one place, with the person in charge" },
+      { page: "Operation board", button: "Stage card", effect: "Open a stage's work-order list; mark Done / Advance" },
+      { page: "Purchasing (supplier row)", button: "Click row", effect: "Supplier detail + full PO history" },
       { page: "All files", button: "Search / filter / download", effect: "Audit every upload in the system" },
       { page: "Salary", button: "Post to ledger / Mark paid", effect: "Finalize payroll" },
       { page: "Admin → Users", button: "+ New user", effect: "Create any account, any role" },
-      { page: "Payment verification", button: "Verify / Reject", effect: "Settle customer payments" },
-      { page: "Executive Dashboard", button: "AI Recommendations", effect: "Upsell ideas & supplier switches" },
     ],
     rules: [
-      "Only YOU can issue a PO and decide which supplier serves which project — keeps the customer ↔ supplier mapping private.",
+      "EVERY quotation needs your approval before sales can send it — no auto-approve on small discounts anymore.",
+      "A customer PO is the gate to project creation: approving it is what spawns the project (carrying the PO number / date / value).",
+      "Only YOU can issue a supplier PO and decide which supplier serves which project — keeps the customer ↔ supplier mapping private. Non-directors can request one, but it waits for your approval.",
       "Only YOU can approve a CRM stage transition. Every 'Advance to …' from sales/manager/admin queues up in Approvals.",
-      "Only YOU can see All files (the system-wide upload audit).",
+      "PO Recap is director-only — the company-wide view of customer + supplier POs.",
       "Mark-paid + post-to-ledger feel irreversible — reverse uses a matching reversal entry, not a hard delete.",
     ],
   },
@@ -479,11 +490,11 @@ function SystemFlow() {
     <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
       {lane("🏢", "Customer", ["sends inquiry", "approves drawings", "pays invoices"], "border-cyan-200")}
       {arrow}
-      {lane("👤", "Sales", ["adds customer", "builds quote", "moves stages"], "border-brand-200")}
+      {lane("👤", "Sales", ["adds customer", "builds quote", "files customer PO"], "border-brand-200")}
       {arrow}
-      {lane("📊", "Manager", ["approves discounts ≤15%", "reviews data changes"], "border-emerald-200")}
+      {lane("📊", "Manager", ["reviews data changes", "watches at-risk deals"], "border-emerald-200")}
       {arrow}
-      {lane("👑", "Director", ["approves big stuff", "issues supplier PO"], "border-red-200")}
+      {lane("👑", "Director", ["approves quotes + customer POs", "customer PO → creates project", "issues supplier PO"], "border-red-200")}
       {arrow}
       {lane("🏭", "Supplier", ["uploads drawing", "sets warehouse ETA"], "border-teal-200")}
       {arrow}
