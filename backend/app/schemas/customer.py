@@ -65,6 +65,7 @@ class CustomerUpdate(BaseModel):
 class CustomerOut(CustomerBase):
     id: UUID
     sales_pic_id: UUID | None
+    sales_pic_name: str | None = None
     stage: str
     lifetime_value: float
     lost_reason: str | None = None

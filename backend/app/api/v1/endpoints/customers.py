@@ -56,8 +56,21 @@ async def list_customers(
         base.order_by(Customer.created_at.desc())
         .offset((page - 1) * page_size).limit(page_size)
     )).all()
-    return Page(data=[CustomerOut.model_validate(r) for r in rows],
-                page=page, page_size=page_size, total=total)
+    # Batch-load sales rep names so the list view can show "Sales rep"
+    # column without N+1 round-trips.
+    sales_ids = {r.sales_pic_id for r in rows if r.sales_pic_id}
+    sales_names: dict = {}
+    if sales_ids:
+        for u in (await db.scalars(
+            select(User).where(User.id.in_(sales_ids))
+        )).all():
+            sales_names[u.id] = u.full_name
+    out: list[CustomerOut] = []
+    for r in rows:
+        c = CustomerOut.model_validate(r)
+        c.sales_pic_name = sales_names.get(r.sales_pic_id) if r.sales_pic_id else None
+        out.append(c)
+    return Page(data=out, page=page, page_size=page_size, total=total)
 
 
 @router.post("", response_model=CustomerOut, status_code=201)

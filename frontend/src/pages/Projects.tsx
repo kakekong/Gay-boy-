@@ -44,7 +44,7 @@ export default function ProjectsPage() {
               <th className="th">Code</th>
               <th className="th">Status</th>
               <th className="th text-right">PO Value</th>
-              <th className="th">Margin (est / act)</th>
+              <th className="th">Customer</th>
               <th className="th">Target delivery</th>
             </tr>
           </thead>
@@ -72,7 +72,15 @@ export default function ProjectsPage() {
                 </td>
                 <td className="td text-right tabular-nums">{idr(p.po_value)}</td>
                 <td className="td">
-                  <MarginBar est={p.margin_estimate * 100} act={p.margin_actual * 100} />
+                  {p.customer_id ? (
+                    <Link
+                      to={`/customers/${p.customer_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-brand-700 hover:underline"
+                    >
+                      {p.customer_name ?? p.customer_id.slice(0, 8)}
+                    </Link>
+                  ) : <span className="muted">—</span>}
                 </td>
                 <td className="td muted">{p.target_delivery ?? "—"}</td>
               </tr>
@@ -91,17 +99,3 @@ export default function ProjectsPage() {
   );
 }
 
-function MarginBar({ est, act }: { est: number; act: number }) {
-  return (
-    <div className="w-44">
-      <div className="flex justify-between text-[10px] muted">
-        <span>est {est.toFixed(1)}%</span>
-        <span>act {act.toFixed(1)}%</span>
-      </div>
-      <div className="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden flex">
-        <div className="h-full bg-ink-300" style={{ width: `${Math.max(0, Math.min(100, est))}%` }} />
-        <div className="h-full bg-emerald-500 -ml-px" style={{ width: `${Math.max(0, Math.min(100, act))}%` }} />
-      </div>
-    </div>
-  );
-}

@@ -52,7 +52,7 @@ async def create_quotation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    number = await next_quotation_number(db)
+    number = await next_quotation_number(db, customer_id=payload.customer_id)
     q = Quotation(
         number=number,
         customer_id=payload.customer_id,
