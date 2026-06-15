@@ -35,9 +35,19 @@ async def list_projects(db: AsyncSession = Depends(get_db),
             Customer.sales_pic_id == user.id
         )
     rows = (await db.scalars(stmt)).all()
+    # Batch-load customer names so the Projects list can show "Customer"
+    # column without an N+1 fetch per row.
+    cust_ids = {p.customer_id for p in rows if p.customer_id}
+    customer_names: dict = {}
+    if cust_ids:
+        for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(cust_ids))
+        )).all():
+            customer_names[c.id] = c.company_name
     return [
         {
             "id": str(p.id), "code": p.code, "customer_id": str(p.customer_id),
+            "customer_name": customer_names.get(p.customer_id),
             "status": p.status, "po_value": float(p.po_value),
             "target_delivery": p.target_delivery, "actual_delivery": p.actual_delivery,
             "margin_estimate": float(p.margin_estimate), "margin_actual": float(p.margin_actual),

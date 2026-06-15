@@ -358,6 +358,15 @@ export default function QuotationDetailPage() {
               {(followups.data?.reminders ?? []).map((r: any) => {
                 const due = new Date(r.due_at);
                 const overdue = due < new Date();
+                // "Send quotation to customer" reminders can't be marked
+                // Done before the quote is approved — sales mustn't send
+                // an unapproved quote to the customer.
+                const looksLikeSend = /\bsend\b.*customer|kirim.*pelanggan/i
+                  .test(`${r.message ?? ""} ${r.kind ?? ""}`);
+                const blockedBeforeApproval =
+                  looksLikeSend &&
+                  Q.status !== "approved" && Q.status !== "sent" &&
+                  Q.status !== "won";
                 return (
                   <li
                     key={r.id}
@@ -381,12 +390,20 @@ export default function QuotationDetailPage() {
                       <div className="text-[11px] muted">
                         {due.toLocaleString()} · {r.channel}
                         {overdue && <span className="ml-2 text-red-700 font-medium">OVERDUE</span>}
+                        {blockedBeforeApproval && (
+                          <span className="ml-2 text-amber-700 font-medium">
+                            Locked — quote not approved yet
+                          </span>
+                        )}
                       </div>
                     </div>
                     <button
-                      className="btn-ghost text-emerald-700"
+                      className="btn-ghost text-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
                       onClick={() => completeReminder.mutate(r.id)}
-                      disabled={completeReminder.isPending}
+                      disabled={completeReminder.isPending || blockedBeforeApproval}
+                      title={blockedBeforeApproval
+                        ? "Quotation must be approved before it can be sent to the customer."
+                        : "Mark this reminder done"}
                     >
                       <CheckCircle size={14} /> Done
                     </button>

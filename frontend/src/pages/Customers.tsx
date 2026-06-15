@@ -46,9 +46,9 @@ export default function CustomersPage() {
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
 
   function exportCsv() {
-    const header = "company_name,industry,pic_name,stage,lifetime_value\n";
+    const header = "company_name,industry,pic_name,sales_pic_name,stage,lifetime_value\n";
     const body = rows.map((r) =>
-      [r.company_name, r.industry, r.pic_name ?? "", r.stage, r.lifetime_value ?? 0]
+      [r.company_name, r.industry, r.pic_name ?? "", r.sales_pic_name ?? "", r.stage, r.lifetime_value ?? 0]
         .map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")
     ).join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -166,6 +166,7 @@ export default function CustomersPage() {
                   <th className="th">Company</th>
                   <th className="th">Industry</th>
                   <th className="th">PIC</th>
+                  <th className="th">Sales</th>
                   <th className="th">Stage</th>
                   <th className="th text-right">Lifetime value</th>
                 </tr>
@@ -183,13 +184,14 @@ export default function CustomersPage() {
                     </td>
                     <td className="td capitalize muted">{c.industry}</td>
                     <td className="td">{c.pic_name ?? "—"}</td>
+                    <td className="td muted">{c.sales_pic_name ?? "—"}</td>
                     <td className="td"><StageBadge stage={c.stage} /></td>
                     <td className="td text-right tabular-nums">{idr(c.lifetime_value ?? 0)}</td>
                   </tr>
                 ))}
                 {!rows.length && (
                   <tr>
-                    <td colSpan={5} className="td text-center muted py-12">
+                    <td colSpan={6} className="td text-center muted py-12">
                       No customers match your filter.
                     </td>
                   </tr>

@@ -1,13 +1,15 @@
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Receipt, Building2, FileText, Briefcase, Calendar,
-  Loader2, AlertCircle,
+  Loader2, AlertCircle, Check, X,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
+import { useAuthStore } from "@/store/auth";
 
 interface CustomerPO {
   id: string;
@@ -46,12 +48,48 @@ const idr = (n: number) =>
 export default function CustomerPODetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
+  const canDecide = me?.role === "manager" || me?.role === "director";
+  const [reason, setReason] = useState("");
+  const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const q = useQuery({
     queryKey: ["customer-po", id],
     queryFn: () => api.get(`/customer-pos/${id}`).then((r) => r.data as CustomerPO),
     enabled: !!id,
   });
+
+  const decide = useMutation({
+    mutationFn: (vars: { approve: boolean }) =>
+      api.post(`/customer-pos/${id}/${vars.approve ? "approve" : "reject"}`,
+        { notes: reason.trim() || null }),
+    onSuccess: (_r, vars) => {
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      qc.invalidateQueries({ queryKey: ["incoming-customer-pos"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-all"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-for-quote"] });
+      setReason("");
+      setFlash({ kind: "ok", text: vars.approve ? "PO approved — project created." : "PO rejected." });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.detail ?? e?.message ?? "Action failed",
+    }),
+  });
+
+  function onApprove() {
+    setFlash(null);
+    decide.mutate({ approve: true });
+  }
+  function onReject() {
+    setFlash(null);
+    if (!reason.trim()) {
+      setFlash({ kind: "err", text: "Please give a reason for rejecting." });
+      return;
+    }
+    decide.mutate({ approve: false });
+  }
 
   if (q.isLoading) {
     return (
@@ -117,6 +155,55 @@ export default function CustomerPODetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Manager/Director approve/reject panel — only while pending. */}
+        {canDecide && p.status === "pending_approval" && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 space-y-2">
+            <div className="text-xs font-semibold text-amber-900">
+              Decision — approving creates the project; rejecting sends it back to sales.
+            </div>
+            <textarea
+              className="input text-sm"
+              rows={2}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (required to reject, shown to the requester)…"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={onReject}
+                className="btn-danger"
+                disabled={decide.isPending}
+              >
+                <X size={14} /> Reject
+              </button>
+              <button
+                onClick={onApprove}
+                className="btn-success"
+                disabled={decide.isPending}
+              >
+                {decide.isPending
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <Check size={14} />}
+                Approve
+              </button>
+            </div>
+          </div>
+        )}
+
+        {flash && (
+          <div className={clsx(
+            "rounded-lg border px-3 py-2 text-sm flex items-start gap-2",
+            flash.kind === "ok"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800",
+          )}>
+            <span className="flex-1">{flash.text}</span>
+            <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">
+              <X size={12} />
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 text-sm border-t border-ink-100">
           <Meta label="Customer" icon={<Building2 size={12} />}>

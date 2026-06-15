@@ -11,6 +11,7 @@ export interface Customer {
   whatsapp?: string;
   stage: Stage;
   sales_pic_id?: string;
+  sales_pic_name?: string | null;
   lifetime_value: number;
 }
 

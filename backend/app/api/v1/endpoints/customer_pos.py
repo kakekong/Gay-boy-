@@ -249,6 +249,93 @@ async def update_customer_po(
     return await _enrich(db, po)
 
 
+from pydantic import BaseModel as _BaseModel
+
+
+class _DecisionIn(_BaseModel):
+    notes: str | None = None
+
+
+async def _decide_customer_po(
+    po_id: UUID, approve: bool, notes: str | None,
+    db: AsyncSession, user: User,
+):
+    """Approve or reject a pending customer PO right from its detail page.
+
+    Mirrors the quotation page's Approve/Reject buttons. Finds the
+    matching pending ApprovalRequest, runs decide() + apply_to_target()
+    (which spawns the project on approval), and returns the enriched PO.
+    """
+    from app.core.approval import apply_to_target, decide
+    from app.core.audit import record as audit_record
+    if Role(user.role) not in (Role.MANAGER, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only a manager or director can approve / reject a customer PO.",
+        )
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    if po.status != "pending_approval":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Customer PO is already '{po.status}'.",
+        )
+    req = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "customer_po",
+            ApprovalRequest.target_id == po_id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )
+    if not req:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No pending approval request for this PO.",
+        )
+    try:
+        await decide(
+            db, request_id=req.id, decider_id=user.id,
+            decider_role=Role(user.role), approve=approve, notes=notes,
+        )
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
+    await apply_to_target(db, req, approve=approve)
+    await audit_record(
+        db, actor=user,
+        action="approve_request" if approve else "reject_request",
+        entity="customer_po", entity_id=po.id,
+        after={"approval_request_id": str(req.id), "notes": notes},
+    )
+    await db.flush()
+    return await _enrich(db, po)
+
+
+@router.post("/{po_id}/approve", response_model=CustomerPOOut)
+async def approve_customer_po(
+    po_id: UUID,
+    payload: _DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await _decide_customer_po(po_id, True, payload.notes, db, user)
+
+
+@router.post("/{po_id}/reject", response_model=CustomerPOOut)
+async def reject_customer_po(
+    po_id: UUID,
+    payload: _DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not (payload.notes or "").strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Please give a reason for rejecting — the requester will see it.",
+        )
+    return await _decide_customer_po(po_id, False, payload.notes, db, user)
+
+
 async def _spawn_project(
     db: AsyncSession, po: CustomerPO, user: User
 ) -> Project:
