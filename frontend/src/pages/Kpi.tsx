@@ -2,6 +2,25 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Download } from "lucide-react";
 import { api } from "@/api/client";
 
+async function readBlobError(e: any): Promise<string> {
+  const status = e?.response?.status;
+  const blob: Blob | undefined = e?.response?.data;
+  let detail = "";
+  if (blob && typeof blob.text === "function") {
+    try {
+      const text = await blob.text();
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.detail ?? parsed?.errors?.[0]?.message ?? text;
+      } catch {
+        detail = text;
+      }
+    } catch { /* fall through */ }
+  }
+  if (!detail) detail = e?.message ?? "Export failed";
+  return status ? `Export failed (HTTP ${status}): ${detail}` : detail;
+}
+
 function exportKpi(ext: "pdf" | "xlsx") {
   api.get(`/kpi/export.${ext}`, { responseType: "blob" })
     .then((r) => {
@@ -14,7 +33,10 @@ function exportKpi(ext: "pdf" | "xlsx") {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     })
-    .catch((e) => alert(e?.response?.data?.detail ?? "Export failed"));
+    .catch(async (e) => {
+      console.error("KPI export failed", e);
+      alert(await readBlobError(e));
+    });
 }
 
 export default function KpiPage() {

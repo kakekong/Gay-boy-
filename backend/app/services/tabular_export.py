@@ -83,20 +83,46 @@ def render_pdf(title: str, sections: list[dict]) -> bytes:
     return buf.getvalue()
 
 
+def _safe_cell(v):
+    """openpyxl is picky about value types — coerce Decimal / date /
+    datetime / unknown objects to safe primitives or strings."""
+    from datetime import date as _date, datetime as _dt
+    from decimal import Decimal
+    if v is None:
+        return ""
+    if isinstance(v, (int, float, str, bool)):
+        return v
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (_date, _dt)):
+        return v.isoformat()
+    return str(v)
+
+
 def render_xlsx(title: str, sections: list[dict]) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
 
     wb = Workbook()
     first = True
     bold = Font(bold=True)
     header_fill = PatternFill("solid", fgColor="EEF0F4")
     right = Alignment(horizontal="right")
+    used_titles: set[str] = set()
 
     for sec in sections:
         ws = wb.active if first else wb.create_sheet()
         first = False
-        ws.title = (sec["name"] or "Sheet")[:31].replace("/", "-")
+        base = (sec["name"] or "Sheet")[:31].replace("/", "-").replace("\\", "-")
+        title_safe = base
+        n = 2
+        while title_safe in used_titles:
+            suffix = f" {n}"
+            title_safe = (base[: 31 - len(suffix)] + suffix)
+            n += 1
+        used_titles.add(title_safe)
+        ws.title = title_safe
 
         ws["A1"] = "Transmisi Eng"
         ws["A1"].font = Font(bold=True, size=14)
@@ -107,21 +133,22 @@ def render_xlsx(title: str, sections: list[dict]) -> bytes:
         row = 5
         headers = sec["headers"]
         for col_idx, h in enumerate(headers, start=1):
-            cell = ws.cell(row=row, column=col_idx, value=h)
+            cell = ws.cell(row=row, column=col_idx, value=_safe_cell(h))
             cell.font = bold
             cell.fill = header_fill
         row += 1
         for r in sec["rows"]:
             for col_idx, v in enumerate(r, start=1):
-                cell = ws.cell(row=row, column=col_idx, value=v)
+                cell = ws.cell(row=row, column=col_idx, value=_safe_cell(v))
                 if col_idx > 1 and isinstance(v, (int, float)):
                     cell.alignment = right
             row += 1
 
-        # Reasonable column widths
+        # Reasonable column widths — use openpyxl's column-letter helper
+        # so this works past column Z too.
         for col_idx, h in enumerate(headers, start=1):
             width = max(12, min(48, len(str(h)) + 4))
-            ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else "A"].width = width
+            ws.column_dimensions[get_column_letter(col_idx)].width = width
 
     buf = BytesIO()
     wb.save(buf)
