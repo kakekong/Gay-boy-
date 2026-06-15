@@ -53,7 +53,7 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/operation", label: "Operation", label_id: "Operasi", icon: Wrench },
       { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote },
       { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
-        roles: ["admin", "manager", "director"] },
+        roles: ["admin", "finance", "manager", "director"] },
       { to: "/inventory", label: "Inventory", label_id: "Inventaris", icon: Package },
       { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
         roles: ["admin", "director"] },

@@ -45,7 +45,7 @@ class UserPatch(BaseModel):
     linked_supplier_id: UUID | None = None
 
 
-VALID_ROLES = {"sales", "admin", "hr", "manager", "director", "customer", "supplier", "purchasing"}
+VALID_ROLES = {"sales", "admin", "hr", "finance", "manager", "director", "customer", "supplier", "purchasing"}
 
 router = APIRouter()
 

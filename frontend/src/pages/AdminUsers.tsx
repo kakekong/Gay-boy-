@@ -21,6 +21,7 @@ const ROLE_CHIP: Record<string, string> = {
   sales:    "bg-brand-50 text-brand-700",
   admin:    "bg-violet-50 text-violet-700",
   hr:       "bg-amber-50 text-amber-700",
+  finance:  "bg-lime-50 text-lime-700",
   manager:  "bg-emerald-50 text-emerald-700",
   director: "bg-red-50 text-red-700",
   purchasing: "bg-orange-50 text-orange-700",
@@ -28,7 +29,7 @@ const ROLE_CHIP: Record<string, string> = {
   supplier: "bg-teal-50 text-teal-700",
 };
 
-const ROLES = ["sales", "admin", "hr", "manager", "director", "purchasing", "customer", "supplier"];
+const ROLES = ["sales", "admin", "hr", "finance", "manager", "director", "purchasing", "customer", "supplier"];
 
 interface Customer { id: string; company_name: string; }
 interface Supplier { id: string; name: string; }
