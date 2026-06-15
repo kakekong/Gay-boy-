@@ -103,15 +103,7 @@ def _pretty_val(v) -> str:
     return str(v)
 
 
-@router.get("/export.{ext}")
-async def export_kpi(
-    ext: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require(Role.DIRECTOR)),
-):
-    if ext not in ("pdf", "xlsx"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ext must be pdf or xlsx")
-
+async def _build_kpi_export(ext: str, db: AsyncSession, user: User) -> Response:
     sales = await sales_kpi(range_days=30, db=db, _user=user)
     ops = await operation_kpi(db=db, _user=user)
     purch = await purchasing_kpi(_user=user)
@@ -142,3 +134,19 @@ async def export_kpi(
         content=data, media_type=media,
         headers={"Content-Disposition": f'attachment; filename="kpi.{ext}"'},
     )
+
+
+@router.get("/export.pdf")
+async def export_kpi_pdf(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.DIRECTOR)),
+):
+    return await _build_kpi_export("pdf", db, user)
+
+
+@router.get("/export.xlsx")
+async def export_kpi_xlsx(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.DIRECTOR)),
+):
+    return await _build_kpi_export("xlsx", db, user)
