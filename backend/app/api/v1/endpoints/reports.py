@@ -336,15 +336,9 @@ async def _report_sections(report: str, db: AsyncSession, user: User) -> list[di
     raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown report '{report}'")
 
 
-@router.get("/export.{ext}")
-async def export_report(
-    ext: str,
-    report: str = Query(..., description="pnl | ar | sales | pipeline | lost"),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    if ext not in ("pdf", "xlsx"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ext must be pdf or xlsx")
+async def _build_report_export(
+    ext: str, report: str, db: AsyncSession, user: User,
+) -> Response:
     label = _REPORT_LABELS.get(report)
     if not label:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown report '{report}'")
@@ -362,3 +356,21 @@ async def export_report(
         content=data, media_type=media,
         headers={"Content-Disposition": f'attachment; filename="report-{safe}.{ext}"'},
     )
+
+
+@router.get("/export.pdf")
+async def export_report_pdf(
+    report: str = Query(..., description="pnl | ar | sales | pipeline | lost"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await _build_report_export("pdf", report, db, user)
+
+
+@router.get("/export.xlsx")
+async def export_report_xlsx(
+    report: str = Query(..., description="pnl | ar | sales | pipeline | lost"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await _build_report_export("xlsx", report, db, user)
