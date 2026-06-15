@@ -12,6 +12,7 @@ import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
 import { LinkedAccountsPanel } from "@/components/quotation/LinkedAccountsPanel";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { CommentThread } from "@/components/CommentThread";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { useAuthStore } from "@/store/auth";
 
@@ -325,6 +326,8 @@ export default function QuotationDetailPage() {
 
       {/* Attachments */}
       <AttachmentsSection ownerType="quotation" ownerId={Q.id} />
+
+      <CommentThread ownerType="quotation" ownerId={Q.id} />
 
       {/* Follow-ups */}
       <div className="card p-5">
