@@ -33,6 +33,28 @@ function exportCsv(filename: string, header: string[], rows: (string | number)[]
   URL.revokeObjectURL(a.href);
 }
 
+async function readBlobError(e: any): Promise<string> {
+  // When responseType is "blob", an error body comes back as a Blob too,
+  // so e.response.data.detail is undefined. Read the blob as text and
+  // surface the server's actual message instead of the generic fallback.
+  const status = e?.response?.status;
+  const blob: Blob | undefined = e?.response?.data;
+  let detail = "";
+  if (blob && typeof blob.text === "function") {
+    try {
+      const text = await blob.text();
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.detail ?? parsed?.errors?.[0]?.message ?? text;
+      } catch {
+        detail = text;
+      }
+    } catch { /* fall through */ }
+  }
+  if (!detail) detail = e?.message ?? "Export failed";
+  return status ? `Export failed (HTTP ${status}): ${detail}` : detail;
+}
+
 function exportServer(report: TabId, ext: "pdf" | "xlsx") {
   api.get(`/reports/export.${ext}`, { params: { report }, responseType: "blob" })
     .then((r) => {
@@ -45,7 +67,10 @@ function exportServer(report: TabId, ext: "pdf" | "xlsx") {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     })
-    .catch((e) => alert(e?.response?.data?.detail ?? "Export failed"));
+    .catch(async (e) => {
+      console.error("Report export failed", e);
+      alert(await readBlobError(e));
+    });
 }
 
 export default function ReportsPage() {
