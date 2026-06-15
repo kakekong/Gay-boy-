@@ -201,6 +201,17 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    # Pipeline gate: a deal can't be marked Won until its customer has
+    # reached negotiation (and that stage move was approved). Stops sales
+    # jumping straight to Won from an earlier stage.
+    from app.core.stage_playbook import stage_index
+    cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+    if cust and stage_index(cust.stage) < stage_index("negotiation"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Customer is still at '{cust.stage}'. Advance the pipeline to "
+            "negotiation (with approval) before marking the deal Won.",
+        )
     q.status = "won"
     # Projects no longer auto-spawn from a Won quotation — a Customer PO
     # has to be filed and approved by the director first. The Won flag

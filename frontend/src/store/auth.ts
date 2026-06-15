@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 export type Role =
-  | "sales" | "admin" | "hr" | "manager" | "director"
+  | "sales" | "admin" | "hr" | "finance" | "manager" | "director"
   | "customer" | "supplier" | "purchasing";
 
 interface AuthState {

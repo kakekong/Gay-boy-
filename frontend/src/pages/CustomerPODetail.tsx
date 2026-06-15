@@ -7,6 +7,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { CommentThread } from "@/components/CommentThread";
 
 interface CustomerPO {
   id: string;
@@ -231,6 +232,8 @@ export default function CustomerPODetailPage() {
 
       {/* PO file (and any other attachments) */}
       <AttachmentsSection ownerType="customer_po" ownerId={p.id} />
+
+      <CommentThread ownerType="customer_po" ownerId={p.id} />
     </div>
   );
 }

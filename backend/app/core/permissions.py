@@ -13,6 +13,7 @@ class Role(StrEnum):
     SALES = "sales"
     ADMIN = "admin"
     HR = "hr"
+    FINANCE = "finance"
     MANAGER = "manager"
     DIRECTOR = "director"
     CUSTOMER = "customer"
@@ -23,7 +24,7 @@ class Role(StrEnum):
 _HIERARCHY = {
     Role.CUSTOMER: 0, Role.SUPPLIER: 0,
     Role.SALES: 1,
-    Role.ADMIN: 2, Role.HR: 2, Role.PURCHASING: 2,
+    Role.ADMIN: 2, Role.HR: 2, Role.PURCHASING: 2, Role.FINANCE: 2,
     Role.MANAGER: 3,
     Role.DIRECTOR: 4,
 }

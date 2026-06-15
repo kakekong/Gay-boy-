@@ -92,6 +92,20 @@ COLUMN_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS ix_customer_pos_status ON customer_pos (status)",
     "CREATE INDEX IF NOT EXISTS ix_customer_pos_number ON customer_pos (number)",
 
+    # entity_comments — chat thread on quotations + POs
+    """
+    CREATE TABLE IF NOT EXISTS entity_comments (
+        id UUID PRIMARY KEY,
+        owner_type VARCHAR(40) NOT NULL,
+        owner_id UUID NOT NULL,
+        author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        body TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_entity_comments_owner ON entity_comments (owner_type, owner_id)",
+
     # Customer gained tax info (NPWP / NPPKP / PKP status)
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id      VARCHAR(32)',
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_name    VARCHAR(255)',

@@ -13,6 +13,7 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, can_view_customer, filter_to_role_scope
+from app.core.stage_playbook import is_forward_skip
 from app.core.stage_tasks import (
     ensure_stage_tasks,
     stage_tasks_for,
@@ -129,6 +130,14 @@ async def update_customer(
     # freely (they hold the approval authority); everyone else queues a
     # request that either a manager or a director can clear.
     stage_change = "stage" in changes and changes["stage"] != obj.stage
+    # The pipeline must be walked in order — no skipping a stage forward.
+    if stage_change and is_forward_skip(obj.stage, changes["stage"]):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Can't skip from '{obj.stage}' straight to '{changes['stage']}'. "
+            "Move one stage at a time — each stage must be approved before "
+            "the next.",
+        )
     can_approve_stage = Role(user.role) in (Role.MANAGER, Role.DIRECTOR)
     needs_approval_for_stage = stage_change and not can_approve_stage
 
@@ -651,6 +660,13 @@ async def request_stage_move(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"Customer is already in stage '{target_stage}'",
+        )
+    if is_forward_skip(obj.stage, target_stage):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Can't skip from '{obj.stage}' straight to '{target_stage}'. "
+            "Move one stage at a time — each stage must be approved before "
+            "the next.",
         )
     # Managers and directors hold approval authority — apply directly, no
     # approval queue.

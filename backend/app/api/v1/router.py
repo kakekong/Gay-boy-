@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     portal,
     calendar,
     chat,
+    comments,
     customer_pos,
     customers,
     dashboards,
@@ -58,5 +59,6 @@ api_router.include_router(kpi.router, prefix="/kpi", tags=["kpi"])
 api_router.include_router(dashboards.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
+api_router.include_router(comments.router, prefix="/comments", tags=["comments"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])

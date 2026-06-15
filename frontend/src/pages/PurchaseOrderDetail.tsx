@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { CommentThread } from "@/components/CommentThread";
 import { useAuthStore } from "@/store/auth";
 
 interface POItem { description?: string; qty?: number }
@@ -469,6 +470,8 @@ export default function PurchaseOrderDetailPage() {
 
       {/* Attachments (PO-scoped) */}
       <AttachmentsSection ownerType="supplier_po" ownerId={p.id} />
+
+      <CommentThread ownerType="supplier_po" ownerId={p.id} />
     </div>
   );
 }

@@ -20,6 +20,12 @@ interface LineItem {
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
+/** Keep at most `max` lines of text (truncates extra lines). */
+function capLines(text: string, max: number): string {
+  const lines = text.split("\n");
+  return lines.length <= max ? text : lines.slice(0, max).join("\n");
+}
+
 export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
   const qc = useQueryClient();
 
@@ -30,6 +36,8 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
   const [customerId, setCustomerId] = useState(preselectCustomerId ?? "");
   const [contactId, setContactId] = useState<string>("");  // "" = primary PIC on customer record
   const [variant, setVariant] = useState<"short" | "detailed">("detailed");
+  // Short variant caps each item description at 5 lines, detailed at 20.
+  const maxLines = variant === "short" ? 5 : 20;
   const [discountPct, setDiscountPct] = useState(0);
   const [taxPct, setTaxPct] = useState(11);
   const [validUntil, setValidUntil] = useState("");
@@ -153,9 +161,17 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
         </Field>
         <Field label="Variant">
           <select className="input" value={variant}
-            onChange={(e) => setVariant(e.target.value as any)}>
-            <option value="detailed">detailed</option>
-            <option value="short">short</option>
+            onChange={(e) => {
+              const v = e.target.value as "short" | "detailed";
+              setVariant(v);
+              const cap = v === "short" ? 5 : 20;
+              // Re-cap existing descriptions to the new line limit.
+              setItems((cur) => cur.map((it) => ({
+                ...it, description: capLines(it.description, cap),
+              })));
+            }}>
+            <option value="detailed">detailed (max 20 lines / item)</option>
+            <option value="short">short (max 5 lines / item)</option>
           </select>
         </Field>
         <Field label="Valid until">
@@ -181,9 +197,17 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
           {items.map((it, i) => (
             <div key={i} className="grid grid-cols-12 gap-2 items-end">
               <div className="col-span-12 md:col-span-5">
-                <span className="text-[10px] uppercase text-ink-500">Description</span>
-                <input className="input" value={it.description}
-                  onChange={(e) => update(i, "description", e.target.value)}
+                <span className="text-[10px] uppercase text-ink-500 flex items-center justify-between">
+                  <span>Description</span>
+                  <span className="normal-case text-ink-400">
+                    {it.description.split("\n").length}/{maxLines} lines
+                  </span>
+                </span>
+                <textarea
+                  className="input min-h-[38px] resize-y"
+                  rows={Math.min(maxLines, Math.max(1, it.description.split("\n").length))}
+                  value={it.description}
+                  onChange={(e) => update(i, "description", capLines(e.target.value, maxLines))}
                   placeholder="e.g. Custom transition chute, carbon steel 3mm" />
               </div>
               <div className="col-span-3 md:col-span-1">

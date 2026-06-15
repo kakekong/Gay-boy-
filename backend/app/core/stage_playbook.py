@@ -70,3 +70,34 @@ STAGE_PLAYBOOK: dict[str, list[StageTask]] = {
 
 def playbook_for(stage: str) -> list[StageTask]:
     return STAGE_PLAYBOOK.get(stage, [])
+
+
+# ─── Canonical pipeline order ────────────────────────────────────────────────
+# The deal pipeline must be walked in order — you can't skip a stage. A
+# forward move is only allowed to the immediately-next stage. Backward
+# moves (regressions) are allowed (you can always pull a deal back).
+STAGE_ORDER: list[str] = [
+    "lead", "presentation", "engineering", "quotation", "negotiation",
+    "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
+    "closed_won", "closed_lost",
+]
+
+
+def stage_index(stage: str) -> int:
+    """Position in the pipeline, or -1 if unknown."""
+    try:
+        return STAGE_ORDER.index(stage)
+    except ValueError:
+        return -1
+
+
+def is_forward_skip(from_stage: str, to_stage: str) -> bool:
+    """True when moving forward by more than one stage (skipping). Backward
+    moves and single-step forward moves return False. closed_lost is a
+    valid jump from anywhere (a deal can die at any point)."""
+    if to_stage == "closed_lost":
+        return False
+    fi, ti = stage_index(from_stage), stage_index(to_stage)
+    if fi < 0 or ti < 0:
+        return False
+    return ti > fi + 1

@@ -23,7 +23,7 @@ from app.models.payment_claim import PaymentClaim
 from app.models.user import User
 
 router = APIRouter()
-_finance = require(Role.ADMIN, Role.MANAGER, Role.DIRECTOR)
+_finance = require(Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
 
 
 class ClaimIn(BaseModel):
@@ -105,7 +105,7 @@ async def my_claims(
     me: User = Depends(get_current_user),
 ):
     """Claims the current user submitted (or, for finance, all)."""
-    if Role(me.role) in (Role.ADMIN, Role.MANAGER, Role.DIRECTOR):
+    if Role(me.role) in (Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR):
         rows = (await db.scalars(
             select(PaymentClaim).order_by(PaymentClaim.created_at.desc())
         )).all()
