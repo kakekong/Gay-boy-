@@ -80,6 +80,8 @@ export default function QuotationDetailPage() {
   });
 
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [lostOpen, setLostOpen] = useState(false);
+  const [lostReason, setLostReason] = useState("");
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["quotation", id] });
@@ -119,12 +121,10 @@ export default function QuotationDetailPage() {
     onSuccess: onActionSuccess("Mark won"), onError: onActionError,
   });
   const lost = useMutation({
-    mutationFn: () => {
-      const reason = window.prompt("Lost reason?") ?? "";
-      if (!reason.trim()) return Promise.reject(new Error("cancelled"));
-      return api.post(`/quotations/${id}/lost`, null, { params: { reason } });
-    },
-    onSuccess: onActionSuccess("Mark lost"), onError: onActionError,
+    mutationFn: (reason: string) =>
+      api.post(`/quotations/${id}/lost`, null, { params: { reason } }),
+    onSuccess: () => { setLostOpen(false); setLostReason(""); onActionSuccess("Mark lost")(); },
+    onError: onActionError,
   });
 
   if (q.isLoading) return <div className="muted">Loading…</div>;
@@ -216,7 +216,7 @@ export default function QuotationDetailPage() {
                 <button className="btn-success" onClick={() => won.mutate()} disabled={won.isPending}>
                   <Trophy size={15} /> Mark won
                 </button>
-                <button className="btn-ghost text-red-600" onClick={() => lost.mutate()} disabled={lost.isPending}>
+                <button className="btn-ghost text-red-600" onClick={() => setLostOpen(true)} disabled={lost.isPending}>
                   <Frown size={15} /> Mark lost
                 </button>
               </>
@@ -479,6 +479,43 @@ export default function QuotationDetailPage() {
           customerId={Q.customer_id}
           onClose={() => setOpenFollowup(false)}
         />
+      </Modal>
+
+      <Modal
+        open={lostOpen}
+        onClose={() => setLostOpen(false)}
+        title="Mark quotation as lost"
+        subtitle={`Tell us why ${Q.number} didn't close — write as much detail as you like.`}
+        size="md"
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">
+              Reason it was lost <span className="text-red-500">*</span>
+            </span>
+            <textarea
+              className="input min-h-[120px]"
+              autoFocus
+              value={lostReason}
+              onChange={(e) => setLostReason(e.target.value)}
+              placeholder="e.g. Lost on price — competitor came in 12% lower. Customer also wanted a 45-day lead time we couldn't meet…"
+            />
+            <span className="block text-[11px] text-ink-400 mt-1">
+              This is saved on the quotation and feeds the Lost-deal report.
+            </span>
+          </label>
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost" onClick={() => setLostOpen(false)}>Cancel</button>
+            <button
+              className="btn-danger"
+              disabled={lost.isPending || !lostReason.trim()}
+              onClick={() => lost.mutate(lostReason.trim())}
+            >
+              {lost.isPending ? <Loader2 size={14} className="animate-spin" /> : <Frown size={14} />}
+              Mark lost
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
