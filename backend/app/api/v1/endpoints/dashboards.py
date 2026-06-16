@@ -47,8 +47,20 @@ async def ai_command(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    at_risk = await deal_risk.list_at_risk(db, limit=10)
+    # Sales only ever see their own data — their personal priority actions,
+    # but none of the company-wide analytics (other reps' at-risk deals,
+    # profit alerts, or the whole-company forecast).
     actions = await smart_reminder.top_actions_for(db, user_id=user.id, limit=10)
+    if Role(user.role) == Role.SALES:
+        return {
+            "at_risk_deals": [],
+            "top_priority_actions": actions,
+            "profit_alerts": [],
+            "forecast_vs_reality": {"forecast": 0.0, "reality": 0.0},
+            "recommendations": [],
+            "scoped_to_self": True,
+        }
+    at_risk = await deal_risk.list_at_risk(db, limit=10)
     profit_alerts = await profit_engine.alerts(db, limit=10)
     return {
         "at_risk_deals": at_risk,

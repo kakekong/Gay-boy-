@@ -22,19 +22,25 @@ router = APIRouter()
 @router.get("/sales")
 async def sales_kpi(range_days: int = 30,
                     db: AsyncSession = Depends(get_db),
-                    _user: User = Depends(get_current_user)):
+                    user: User = Depends(get_current_user)):
     since = datetime.now(UTC) - timedelta(days=range_days)
-    new_leads = await db.scalar(
-        select(func.count(Customer.id)).where(Customer.created_at >= since)
+    is_sales = Role(user.role) == Role.SALES
+
+    leads_q = select(func.count(Customer.id)).where(Customer.created_at >= since)
+    if is_sales:
+        leads_q = leads_q.where(Customer.sales_pic_id == user.id)
+    new_leads = await db.scalar(leads_q)
+
+    quotes_q = select(func.count(Quotation.id)).where(Quotation.created_at >= since)
+    won_q = select(func.count(Quotation.id)).where(
+        Quotation.status == "won", Quotation.updated_at >= since
     )
-    quotes = await db.scalar(
-        select(func.count(Quotation.id)).where(Quotation.created_at >= since)
-    )
-    won = await db.scalar(
-        select(func.count(Quotation.id)).where(
-            Quotation.status == "won", Quotation.updated_at >= since
-        )
-    )
+    if is_sales:
+        # Quotation carries the sales rep directly (sales_pic_id).
+        quotes_q = quotes_q.where(Quotation.sales_pic_id == user.id)
+        won_q = won_q.where(Quotation.sales_pic_id == user.id)
+    quotes = await db.scalar(quotes_q)
+    won = await db.scalar(won_q)
     lead_to_quote = (quotes / new_leads) if new_leads else 0
     quote_to_win = (won / quotes) if quotes else 0
     return {
@@ -77,15 +83,19 @@ async def purchasing_kpi(_user: User = Depends(get_current_user)):
 
 @router.get("/finance")
 async def finance_kpi(db: AsyncSession = Depends(get_db),
-                      _user: User = Depends(get_current_user)):
-    paid = await db.scalar(
-        select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.status == "paid")
+                      user: User = Depends(get_current_user)):
+    is_sales = Role(user.role) == Role.SALES
+    paid_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.status == "paid")
+    out_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(
+        Invoice.status.in_(["issued", "partial", "overdue"])
     )
-    outstanding = await db.scalar(
-        select(func.coalesce(func.sum(Invoice.total), 0)).where(
-            Invoice.status.in_(["issued", "partial", "overdue"])
-        )
-    )
+    if is_sales:
+        # Sales only sees the AR / collected for their own customers.
+        own = select(Customer.id).where(Customer.sales_pic_id == user.id)
+        paid_q = paid_q.where(Invoice.customer_id.in_(own))
+        out_q = out_q.where(Invoice.customer_id.in_(own))
+    paid = await db.scalar(paid_q)
+    outstanding = await db.scalar(out_q)
     return {"collected": float(paid or 0), "outstanding": float(outstanding or 0)}
 
 
