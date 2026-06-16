@@ -936,3 +936,126 @@ async def export_customer_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _customer_export_sections(s: dict) -> list[dict]:
+    """Build tabular_export sections from a customer summary (shared by the
+    PDF and Excel exporters; mirrors the CSV layout)."""
+    cust = s["customer"]
+    stats = s["stats"]
+    sections: list[dict] = [
+        {
+            "name": "Profile",
+            "headers": ["Field", "Value"],
+            "rows": [
+                ["Company name", cust["company_name"]],
+                ["Industry", cust["industry"]],
+                ["Stage", cust["stage"]],
+                ["PIC name", cust["pic_name"] or ""],
+                ["PIC position", cust["pic_position"] or ""],
+                ["Phone", cust["phone"] or ""],
+                ["WhatsApp", cust["whatsapp"] or ""],
+                ["Email", cust["email"] or ""],
+                ["Company address", cust["company_address"] or ""],
+                ["Delivery address", cust["delivery_address"] or ""],
+                ["Customer since", str(cust["created_at"] or "")],
+                ["Lost reason", cust.get("lost_reason") or ""],
+            ],
+        },
+        {
+            "name": "Financial summary",
+            "headers": ["Metric", "Value"],
+            "rows": [
+                ["Lifetime value", _fmt_idr(cust["lifetime_value"])],
+                ["Total quoted (all-time)", _fmt_idr(stats["total_quoted"])],
+                ["Won revenue", _fmt_idr(stats["won_revenue"])],
+                ["Pipeline (open quotes)", _fmt_idr(stats["pipeline_value"])],
+                ["Total invoiced", _fmt_idr(stats["total_invoiced"])],
+                ["Total paid", _fmt_idr(stats["total_paid"])],
+                ["Outstanding AR", _fmt_idr(stats["outstanding_ar"])],
+            ],
+        },
+        {
+            "name": "Engagement",
+            "headers": ["Metric", "Value"],
+            "rows": [
+                ["Quotations · total", stats["total_quotations"]],
+                ["Quotations · open", stats["open_quotations"]],
+                ["Quotations · won", stats["won"]],
+                ["Quotations · lost", stats["lost"]],
+                ["Win rate", f"{stats['win_rate'] * 100:.1f}%"],
+                ["Projects · active", stats["active_projects"]],
+                ["Projects · completed", stats["completed_projects"]],
+                ["Overdue invoices", stats["overdue_invoices"]],
+                ["Activities logged", stats["activities_logged"]],
+            ],
+        },
+        {
+            "name": "Quotations",
+            "headers": ["Number", "Status", "Variant", "Discount %", "Total", "Valid until"],
+            "rows": [[
+                q["number"], q["status"], q["variant"],
+                f"{q['discount_pct']:.1f}", _fmt_idr(q["total"]), str(q["valid_until"] or ""),
+            ] for q in s["quotations"]],
+        },
+        {
+            "name": "Projects",
+            "headers": ["Code", "Status", "PO Number", "PO Value", "Target", "Actual"],
+            "rows": [[
+                p["code"], p["status"], p["po_number"] or "", _fmt_idr(p["po_value"]),
+                str(p["target_delivery"] or ""), str(p["actual_delivery"] or ""),
+            ] for p in s["projects"]],
+        },
+        {
+            "name": "Invoices",
+            "headers": ["Number", "Type", "Issue", "Due", "Total", "Status"],
+            "rows": [[
+                i["number"], i["type"], str(i["issue_date"] or ""), str(i["due_date"] or ""),
+                _fmt_idr(i["total"]), i["status"],
+            ] for i in s["invoices"]],
+        },
+    ]
+    return sections
+
+
+@router.get("/{customer_id}/export.pdf")
+async def export_customer_pdf(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not can_view_customer(user, c.sales_pic_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    s = await _build_summary(db, c)
+    from app.services.tabular_export import render_pdf
+    data = render_pdf(f"Customer report — {c.company_name}", _customer_export_sections(s))
+    safe = "".join(ch if ch.isalnum() else "_" for ch in c.company_name)[:60]
+    return Response(
+        content=data, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe}_customer-report.pdf"'},
+    )
+
+
+@router.get("/{customer_id}/export.xlsx")
+async def export_customer_xlsx(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not can_view_customer(user, c.sales_pic_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    s = await _build_summary(db, c)
+    from app.services.tabular_export import render_xlsx
+    data = render_xlsx(f"Customer report — {c.company_name}", _customer_export_sections(s))
+    safe = "".join(ch if ch.isalnum() else "_" for ch in c.company_name)[:60]
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe}_customer-report.xlsx"'},
+    )
