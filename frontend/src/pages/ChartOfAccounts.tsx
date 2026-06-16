@@ -112,14 +112,39 @@ export default function ChartOfAccountsPage() {
   }
 
   async function share() {
-    const text = rows.slice(0, 50).map((r) => `${r.account_no}\t${r.name}\t${fmtIDR(r.balance)}`).join("\n");
+    const text = rows.map((r) => `${r.account_no}\t${r.name}\t${fmtIDR(r.balance)}`).join("\n");
+    // Try the native share sheet, then the async clipboard, then a
+    // legacy execCommand fallback (works on http / older browsers).
     try {
-      if (navigator.share) await navigator.share({ title: "Chart of Accounts", text });
-      else {
-        await navigator.clipboard.writeText(text);
-        alert("Copied to clipboard.");
+      if (navigator.share) {
+        await navigator.share({ title: "Chart of Accounts", text });
+        return;
       }
-    } catch { /* user cancelled */ }
+    } catch { /* user cancelled the share sheet */ return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(`Copied ${rows.length} accounts to the clipboard.`);
+      return;
+    } catch { /* fall through to legacy path */ }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      alert(`Copied ${rows.length} accounts to the clipboard.`);
+    } catch {
+      alert("Couldn't copy automatically — use Export instead.");
+    }
+  }
+
+  function resetFilters() {
+    setType("All");
+    setSuspended("all");
+    setSearch("");
   }
 
   function print() { window.print(); }
@@ -186,13 +211,18 @@ export default function ChartOfAccountsPage() {
         <button className="btn-ghost" onClick={exportCsv} title="Export CSV">
           <Download size={15} />
         </button>
-        <button className="btn-ghost" onClick={share} title="Share">
+        <button className="btn-ghost" onClick={share} title="Copy account list to clipboard">
           <Share2 size={15} />
         </button>
         <button className="btn-ghost" onClick={print} title="Print">
           <Printer size={15} />
         </button>
-        <button className="btn-ghost" title="Settings">
+        <button
+          className={clsx("btn-ghost", filtersActive && "text-brand-700")}
+          onClick={resetFilters}
+          disabled={!filtersActive}
+          title={filtersActive ? "Reset all filters" : "No filters to reset"}
+        >
           <Settings2 size={15} />
         </button>
 

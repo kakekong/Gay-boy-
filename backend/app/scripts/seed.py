@@ -106,6 +106,22 @@ COLUMN_MIGRATIONS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS ix_entity_comments_owner ON entity_comments (owner_type, owner_id)",
 
+    # custom_roles — director-defined named roles with a page permission set
+    """
+    CREATE TABLE IF NOT EXISTS custom_roles (
+        id UUID PRIMARY KEY,
+        name VARCHAR(60) NOT NULL,
+        base_role VARCHAR(20) NOT NULL DEFAULT 'sales',
+        pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        description VARCHAR(255),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_custom_roles_name ON custom_roles (name)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_role_id UUID",
+    "CREATE INDEX IF NOT EXISTS ix_users_custom_role_id ON users (custom_role_id)",
+
     # Customer gained tax info (NPWP / NPPKP / PKP status)
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id      VARCHAR(32)',
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_name    VARCHAR(255)',

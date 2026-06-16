@@ -32,6 +32,7 @@ class UserCreate(BaseModel):
     whatsapp_id: str | None = None
     linked_customer_id: UUID | None = None
     linked_supplier_id: UUID | None = None
+    custom_role_id: UUID | None = None
 
 
 class UserPatch(BaseModel):
@@ -43,6 +44,7 @@ class UserPatch(BaseModel):
     password: str | None = None
     linked_customer_id: UUID | None = None
     linked_supplier_id: UUID | None = None
+    custom_role_id: UUID | None = None
 
 
 VALID_ROLES = {"sales", "admin", "hr", "finance", "manager", "director", "customer", "supplier", "purchasing"}
@@ -69,6 +71,16 @@ async def list_employees(
         like = f"%{q}%"
         stmt = stmt.where((User.full_name.ilike(like)) | (User.email.ilike(like)))
     rows = (await db.scalars(stmt)).all()
+
+    # Bulk-load custom role names for the assigned users.
+    from app.models.custom_role import CustomRole
+    cr_ids = {r.custom_role_id for r in rows if r.custom_role_id}
+    cr_names: dict = {}
+    if cr_ids:
+        for cr in (await db.scalars(
+            select(CustomRole).where(CustomRole.id.in_(cr_ids))
+        )).all():
+            cr_names[cr.id] = cr.name
 
     # Bulk load tags for all users in one query
     tag_map: dict[str, list[dict]] = {}
@@ -117,6 +129,8 @@ async def list_employees(
             "email": r.email,
             "full_name": r.full_name,
             "role": r.role,
+            "custom_role_id": str(r.custom_role_id) if r.custom_role_id else None,
+            "custom_role_name": cr_names.get(r.custom_role_id) if r.custom_role_id else None,
             "phone": r.phone,
             "is_active": r.is_active,
             "tags": tag_map.get(str(r.id), []),
@@ -311,15 +325,25 @@ async def create_user(
     if payload.role == "supplier" and not payload.linked_supplier_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "supplier accounts need linked_supplier_id")
+    # If a custom role is chosen, force the base role to the custom role's
+    # base_role so all API security checks stay consistent.
+    role = payload.role
+    if payload.custom_role_id:
+        from app.models.custom_role import CustomRole
+        cr = await db.get(CustomRole, payload.custom_role_id)
+        if not cr:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown custom_role_id")
+        role = cr.base_role
     u = User(
         email=payload.email.lower(),
         password_hash=hash_password(payload.password),
         full_name=payload.full_name,
-        role=payload.role,
+        role=role,
         phone=payload.phone,
         whatsapp_id=payload.whatsapp_id,
         linked_customer_id=payload.linked_customer_id,
         linked_supplier_id=payload.linked_supplier_id,
+        custom_role_id=payload.custom_role_id,
         is_active=True,
     )
     db.add(u)
@@ -344,6 +368,14 @@ async def update_user(
         if len(data["password"]) < 6:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "password too short")
         u.password_hash = hash_password(data.pop("password"))
+    # Assigning a custom role pins the base role to the custom role's tier;
+    # clearing it (custom_role_id=None) leaves the explicit role as-is.
+    if "custom_role_id" in data and data["custom_role_id"]:
+        from app.models.custom_role import CustomRole
+        cr = await db.get(CustomRole, data["custom_role_id"])
+        if not cr:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown custom_role_id")
+        data["role"] = cr.base_role
     for k, v in data.items():
         setattr(u, k, v)
     return {"id": str(u.id), "ok": True}

@@ -21,3 +21,6 @@ class User(Base, UUIDPK, TimestampMixin):
     # Portal scopes — only set for customer / supplier accounts
     linked_customer_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     linked_supplier_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
+    # Optional director-defined custom role (drives display name + sidebar
+    # pages; the `role` column above is still the API security tier).
+    custom_role_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)

@@ -152,17 +152,26 @@ export default function CustomerDetailPage() {
     }
   };
 
-  function exportCsv() {
-    api.get(`/customers/${id}/export.csv`, { responseType: "blob" }).then((r) => {
-      const url = URL.createObjectURL(r.data);
-      const a = document.createElement("a");
-      a.href = url;
-      const cd = (r.headers as any)["content-disposition"] ?? "";
-      const m = /filename="?([^"]+)"?/.exec(cd);
-      a.download = m?.[1] ?? `customer-${id}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
+  function exportAs(ext: "csv" | "pdf" | "xlsx") {
+    api.get(`/customers/${id}/export.${ext}`, { responseType: "blob" })
+      .then((r) => {
+        const url = URL.createObjectURL(r.data);
+        const a = document.createElement("a");
+        a.href = url;
+        const cd = (r.headers as any)["content-disposition"] ?? "";
+        const m = /filename="?([^"]+)"?/.exec(cd);
+        a.download = m?.[1] ?? `customer-${id}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      })
+      .catch(async (e) => {
+        // blob error bodies need reading as text
+        let detail = "Export failed";
+        try { detail = JSON.parse(await e?.response?.data?.text())?.detail ?? detail; } catch {}
+        alert(detail);
+      });
   }
 
   const aiSuggest = useMutation({
@@ -206,8 +215,14 @@ export default function CustomerDetailPage() {
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button className="btn-ghost" onClick={exportCsv} title="Download a complete customer report as CSV">
-              <Download size={15} /> Export spreadsheet
+            <button className="btn-ghost" onClick={() => exportAs("pdf")} title="Download a complete customer report as PDF">
+              <Download size={15} /> PDF
+            </button>
+            <button className="btn-ghost" onClick={() => exportAs("xlsx")} title="Download a complete customer report as Excel">
+              <Download size={15} /> Excel
+            </button>
+            <button className="btn-ghost" onClick={() => exportAs("csv")} title="Download a complete customer report as CSV">
+              <Download size={15} /> CSV
             </button>
             <button className="btn-ghost" onClick={openWhatsApp}>
               <MessageCircle size={15} /> WhatsApp
