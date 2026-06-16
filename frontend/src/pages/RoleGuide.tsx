@@ -8,7 +8,7 @@ import { useAuthStore } from "@/store/auth";
 import { useT } from "@/store/lang";
 
 type RoleKey =
-  | "sales" | "purchasing" | "hr" | "admin" | "manager" | "director"
+  | "sales" | "purchasing" | "hr" | "finance" | "admin" | "manager" | "director"
   | "customer" | "supplier";
 
 interface Step {
@@ -261,6 +261,41 @@ const ROLES: RoleSection[] = [
     ],
   },
   {
+    key: "finance",
+    label: "Finance",
+    label_id: "Keuangan",
+    emoji: "💰",
+    Icon: BarChart3,
+    blurb: "You handle the money side — verifying customer payments and watching AR.",
+    blurb_id: "Anda menangani sisi keuangan — memverifikasi pembayaran pelanggan dan memantau piutang.",
+    daily: "Check Payment verification for new proofs of payment. Match incoming money to open invoices.",
+    daily_id: "Cek Verifikasi pembayaran untuk bukti baru. Cocokkan uang masuk dengan faktur terbuka.",
+    flow: [
+      { title: "Customer uploads a payment proof", title_id: "Pelanggan unggah bukti bayar",
+        detail: "From their portal — 'I paid this'", detail_id: "Dari portal mereka — 'Saya sudah bayar'" },
+      { title: "Open Payment verification", title_id: "Buka Verifikasi pembayaran" },
+      { title: "Match the amount + reference to the invoice", title_id: "Cocokkan jumlah + referensi dengan faktur",
+        detail: "View the proof file inline", detail_id: "Lihat file bukti langsung" },
+      { title: "Verify → invoice marked paid", title_id: "Verifikasi → faktur ditandai lunas",
+        detail: "Or Reject with a reason", detail_id: "Atau Tolak dengan alasan" },
+      { title: "Watch outstanding AR on the Finance page", title_id: "Pantau piutang di halaman Keuangan" },
+    ],
+    buttons: [
+      { page: "Payment verification", page_id: "Verifikasi pembayaran", button: "Verify / Reject", button_id: "Verifikasi / Tolak",
+        effect: "Settle or bounce a customer payment", effect_id: "Selesaikan atau tolak pembayaran pelanggan" },
+      { page: "Finance", page_id: "Keuangan", button: "(read)", button_id: "(lihat)",
+        effect: "See invoices, payments, outstanding AR", effect_id: "Lihat faktur, pembayaran, piutang" },
+    ],
+    rules: [
+      "You verify payments and read the finance figures, but the director still signs off on quotations and POs.",
+      "Reject a payment proof with a clear reason — the customer sees it.",
+    ],
+    rules_id: [
+      "Anda memverifikasi pembayaran dan membaca angka keuangan, tapi direktur tetap menyetujui penawaran dan PO.",
+      "Tolak bukti bayar dengan alasan jelas — pelanggan akan melihatnya.",
+    ],
+  },
+  {
     key: "manager",
     label: "Manager",
     label_id: "Manajer",
@@ -365,8 +400,12 @@ const ROLES: RoleSection[] = [
         effect: "Finalize payroll", effect_id: "Finalisasi payroll" },
       { page: "Admin → Users", page_id: "Admin → Pengguna", button: "+ New user", button_id: "+ Pengguna baru",
         effect: "Create any account, any role", effect_id: "Buat akun apa saja, peran apa saja" },
+      { page: "Admin → Users", page_id: "Admin → Pengguna", button: "Custom roles", button_id: "Peran khusus",
+        effect: "Build your own role: name + base tier + which pages it sees",
+        effect_id: "Buat peran sendiri: nama + tingkat dasar + halaman yang bisa dilihat" },
     ],
     rules: [
+      "Build custom roles (Admin → Users → Custom roles) when the fixed roles don't fit — pick a name, a base access tier, and tick the pages it can open.",
       "EVERY quotation needs your approval before sales can send it — no auto-approve on small discounts anymore.",
       "A customer PO is the gate to project creation: approving it is what spawns the project (carrying the PO number / date / value).",
       "Only YOU can issue a supplier PO and decide which supplier serves which project — keeps the customer ↔ supplier mapping private. Non-directors can request one, but it waits for your approval.",
@@ -375,6 +414,7 @@ const ROLES: RoleSection[] = [
       "Mark-paid + post-to-ledger feel irreversible — reverse uses a matching reversal entry, not a hard delete.",
     ],
     rules_id: [
+      "Buat peran khusus (Admin → Pengguna → Peran khusus) kalau peran bawaan tidak cocok — pilih nama, tingkat akses dasar, dan centang halaman yang bisa dibuka.",
       "SETIAP penawaran butuh persetujuan Anda sebelum sales bisa mengirimnya — tidak ada lagi auto-approve untuk diskon kecil.",
       "PO pelanggan adalah gerbang pembuatan proyek: menyetujuinya yang membentuk proyek (membawa nomor PO / tanggal / nilai).",
       "Hanya ANDA yang bisa menerbitkan PO supplier dan menentukan supplier mana melayani proyek mana — menjaga pemetaan pelanggan ↔ supplier tetap rahasia. Non-direktur bisa meminta, tapi menunggu persetujuan Anda.",
