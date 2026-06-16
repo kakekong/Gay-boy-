@@ -83,5 +83,15 @@ async def refresh(token: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)):
-    return user
+async def me(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    out = UserOut.model_validate(user)
+    if user.custom_role_id:
+        from app.models.custom_role import CustomRole
+        cr = await db.get(CustomRole, user.custom_role_id)
+        if cr:
+            out.custom_role_name = cr.name
+            out.custom_role_pages = cr.pages or []
+    return out

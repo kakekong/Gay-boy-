@@ -13,8 +13,18 @@ interface User {
   email: string;
   full_name: string;
   role: string;
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
   phone?: string | null;
   is_active: boolean;
+}
+
+interface CustomRole {
+  id: string;
+  name: string;
+  base_role: string;
+  pages: string[];
+  description?: string | null;
 }
 
 const ROLE_CHIP: Record<string, string> = {
@@ -44,6 +54,12 @@ export default function AdminUsersPage() {
   const [form, setForm] = useState({
     email: "", full_name: "", role: "sales", password: "",
     phone: "", linked_customer_id: "", linked_supplier_id: "",
+    custom_role_id: "",
+  });
+
+  const customRoles = useQuery({
+    queryKey: ["custom-roles"],
+    queryFn: () => api.get("/custom-roles").then((r) => r.data as CustomRole[]),
   });
 
   const users = useQuery({
@@ -90,12 +106,14 @@ export default function AdminUsersPage() {
       ...form,
       linked_customer_id: form.linked_customer_id || null,
       linked_supplier_id: form.linked_supplier_id || null,
+      custom_role_id: form.custom_role_id || null,
       phone: form.phone || null,
     }),
     onSuccess: () => {
       setOpenNew(false);
       setForm({ email: "", full_name: "", role: "sales", password: "",
-                phone: "", linked_customer_id: "", linked_supplier_id: "" });
+                phone: "", linked_customer_id: "", linked_supplier_id: "",
+                custom_role_id: "" });
       setFlash({ kind: "ok", text: "User created." });
       qc.invalidateQueries({ queryKey: ["admin-users"] });
     },
@@ -195,8 +213,14 @@ export default function AdminUsersPage() {
                 <td className="td font-medium">{u.full_name}</td>
                 <td className="td muted">{u.email}</td>
                 <td className="td">
-                  <span className={clsx("chip uppercase",
-                    ROLE_CHIP[u.role] ?? "bg-ink-100 text-ink-700")}>{u.role}</span>
+                  {u.custom_role_name ? (
+                    <span className="chip bg-indigo-50 text-indigo-700" title={`Base role: ${u.role}`}>
+                      {u.custom_role_name}
+                    </span>
+                  ) : (
+                    <span className={clsx("chip uppercase",
+                      ROLE_CHIP[u.role] ?? "bg-ink-100 text-ink-700")}>{u.role}</span>
+                  )}
                 </td>
                 <td className="td muted">{u.phone ?? "—"}</td>
                 <td className="td">
@@ -275,6 +299,9 @@ export default function AdminUsersPage() {
         </Modal>
       )}
 
+      {/* Custom roles manager */}
+      <CustomRolesManager />
+
       {/* Edit modal */}
       {editing && (
         <Modal title={`Edit ${editing.full_name}`} subtitle={editing.email}
@@ -284,6 +311,172 @@ export default function AdminUsersPage() {
             onClose={() => setEditing(null)}
             patch={patch}
           />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function CustomRolesManager() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<CustomRole | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const roles = useQuery({
+    queryKey: ["custom-roles"],
+    queryFn: () => api.get("/custom-roles").then((r) => r.data as CustomRole[]),
+  });
+  const catalog = useQuery({
+    queryKey: ["custom-roles-catalog"],
+    queryFn: () => api.get("/custom-roles/catalog").then((r) => r.data as {
+      pages: { path: string; label: string }[]; base_roles: string[];
+    }),
+    enabled: open || !!editing,
+  });
+
+  const [form, setForm] = useState<{ name: string; base_role: string; pages: string[]; description: string }>(
+    { name: "", base_role: "sales", pages: [], description: "" },
+  );
+
+  function startNew() {
+    setForm({ name: "", base_role: "sales", pages: [], description: "" });
+    setEditing(null);
+    setOpen(true);
+    setErr(null);
+  }
+  function startEdit(r: CustomRole) {
+    setForm({ name: r.name, base_role: r.base_role, pages: [...r.pages], description: r.description ?? "" });
+    setEditing(r);
+    setOpen(true);
+    setErr(null);
+  }
+
+  const save = useMutation({
+    mutationFn: () => editing
+      ? api.patch(`/custom-roles/${editing.id}`, form)
+      : api.post("/custom-roles", form),
+    onSuccess: () => {
+      setOpen(false); setEditing(null);
+      qc.invalidateQueries({ queryKey: ["custom-roles"] });
+    },
+    onError: (e: any) => setErr(e?.response?.data?.detail ?? "Couldn't save role"),
+  });
+  const del = useMutation({
+    mutationFn: (rid: string) => api.delete(`/custom-roles/${rid}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["custom-roles"] }),
+  });
+
+  function togglePage(path: string) {
+    setForm((f) => ({
+      ...f,
+      pages: f.pages.includes(path) ? f.pages.filter((p) => p !== path) : [...f.pages, path],
+    }));
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-4 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Shield size={15} className="text-brand-600" /> Custom roles
+          </div>
+          <div className="text-xs muted">
+            Build your own roles like Discord — pick a name, a base access tier, and the pages they can see.
+          </div>
+        </div>
+        <button className="btn-primary" onClick={startNew}>
+          <Plus size={14} /> New custom role
+        </button>
+      </header>
+
+      {roles.isLoading ? (
+        <div className="p-6 text-center text-sm muted">Loading…</div>
+      ) : !roles.data?.length ? (
+        <div className="p-8 text-center text-sm muted">
+          No custom roles yet. Create one, then assign it to a user above.
+        </div>
+      ) : (
+        <ul className="divide-y divide-ink-100">
+          {roles.data.map((r) => (
+            <li key={r.id} className="px-5 py-3 flex items-center gap-3 flex-wrap">
+              <span className="chip bg-indigo-50 text-indigo-700">{r.name}</span>
+              <span className="text-[11px] uppercase muted">base: {r.base_role}</span>
+              <span className="text-xs muted flex-1">{r.pages.length} page(s)</span>
+              <button className="btn-ghost" onClick={() => startEdit(r)} title="Edit">
+                <Pencil size={13} />
+              </button>
+              <button
+                className="btn-ghost text-red-600 hover:bg-red-50"
+                title="Delete (users keep their base role)"
+                onClick={() => {
+                  if (window.confirm(`Delete custom role "${r.name}"? Users on it revert to their base role.`))
+                    del.mutate(r.id);
+                }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {open && (
+        <Modal
+          title={editing ? `Edit role: ${editing.name}` : "New custom role"}
+          subtitle="Name it, pick the base access tier, tick the pages it can open."
+          onClose={() => setOpen(false)}
+        >
+          <div className="space-y-3">
+            <Field label="Role name *">
+              <input className="input" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Finance Manager" />
+            </Field>
+            <Field label="Base access tier *">
+              <select className="input" value={form.base_role}
+                onChange={(e) => setForm({ ...form, base_role: e.target.value })}>
+                {(catalog.data?.base_roles ?? ["sales", "admin", "hr", "finance", "purchasing", "manager", "director"])
+                  .map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+              <span className="block text-[11px] text-ink-400 mt-1">
+                Controls what the API allows. Pages below control what they see.
+              </span>
+            </Field>
+            <Field label="Description">
+              <input className="input" value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </Field>
+            <div>
+              <span className="block text-xs font-medium text-ink-600 mb-1">Pages they can access</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[280px] overflow-y-auto rounded-lg border border-ink-200 p-2">
+                {(catalog.data?.pages ?? []).map((p) => (
+                  <label key={p.path} className="flex items-center gap-2 text-sm px-2 py-1 rounded hover:bg-ink-50">
+                    <input
+                      type="checkbox"
+                      checked={form.pages.includes(p.path)}
+                      onChange={() => togglePage(p.path)}
+                      className="h-4 w-4 rounded border-ink-300 text-brand-600"
+                    />
+                    {p.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {err && (
+              <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
+                {err}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+              <button className="btn-primary" disabled={save.isPending || !form.name.trim()}
+                onClick={() => { setErr(null); save.mutate(); }}>
+                {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                {editing ? "Save role" : "Create role"}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>
@@ -325,8 +518,26 @@ function UserForm({
         </Field>
         <Field label="Role *">
           <select className="input" value={form.role}
+            disabled={!!form.custom_role_id}
             onChange={(e: any) => setForm({ ...form, role: e.target.value })}>
             {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Custom role">
+          <select className="input" value={form.custom_role_id}
+            onChange={(e: any) => {
+              const cr = (customRoles.data ?? []).find((x) => x.id === e.target.value);
+              setForm({
+                ...form,
+                custom_role_id: e.target.value,
+                // Pin the base role to the custom role's tier.
+                role: cr ? cr.base_role : form.role,
+              });
+            }}>
+            <option value="">— none (use base role) —</option>
+            {(customRoles.data ?? []).map((cr) => (
+              <option key={cr.id} value={cr.id}>{cr.name} (base: {cr.base_role})</option>
+            ))}
           </select>
         </Field>
         <Field label="Password *">
@@ -538,9 +749,17 @@ function EditForm({ user, onClose, patch }: any) {
   const [role, setRole] = useState(user.role);
   const [phone, setPhone] = useState(user.phone ?? "");
   const [pwd, setPwd] = useState("");
+  const [customRoleId, setCustomRoleId] = useState<string>(user.custom_role_id ?? "");
+  const customRoles = useQuery({
+    queryKey: ["custom-roles"],
+    queryFn: () => api.get("/custom-roles").then((r) => r.data as CustomRole[]),
+  });
 
   function save() {
-    const body: any = { full_name: name, role, phone: phone || null };
+    const body: any = {
+      full_name: name, role, phone: phone || null,
+      custom_role_id: customRoleId || null,
+    };
     if (pwd) body.password = pwd;
     patch.mutate({ id: user.id, body });
   }
@@ -550,8 +769,22 @@ function EditForm({ user, onClose, patch }: any) {
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <Field label="Role">
-        <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+        <select className="input" value={role} disabled={!!customRoleId}
+          onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </Field>
+      <Field label="Custom role">
+        <select className="input" value={customRoleId}
+          onChange={(e) => {
+            const cr = (customRoles.data ?? []).find((x) => x.id === e.target.value);
+            setCustomRoleId(e.target.value);
+            if (cr) setRole(cr.base_role);
+          }}>
+          <option value="">— none (use base role) —</option>
+          {(customRoles.data ?? []).map((cr) => (
+            <option key={cr.id} value={cr.id}>{cr.name} (base: {cr.base_role})</option>
+          ))}
         </select>
       </Field>
       <Field label="Phone">

@@ -21,5 +21,9 @@ class UserOut(BaseModel):
     role: str
     phone: str | None = None
     is_active: bool
+    # Custom role overlay (display name + allowed pages), when assigned.
+    custom_role_id: UUID | None = None
+    custom_role_name: str | None = None
+    custom_role_pages: list[str] | None = None
 
     model_config = {"from_attributes": True}

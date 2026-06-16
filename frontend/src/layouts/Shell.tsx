@@ -150,9 +150,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           {NAV_GROUPS.map((g) => {
-            const items = g.items.filter(
-              (n) => !n.roles || (user && n.roles.includes(user.role))
-            );
+            // A custom role overrides page visibility: the user sees exactly
+            // the pages granted to their custom role (plus Help, always).
+            const customPages = user?.custom_role_pages;
+            const items = g.items.filter((n) => {
+              if (customPages && customPages.length) {
+                return customPages.includes(n.to) || n.to === "/help";
+              }
+              return !n.roles || (user && n.roles.includes(user.role));
+            });
             if (!items.length) return null;
             return (
               <div key={g.label}>
@@ -207,7 +213,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 {user?.full_name ?? "—"}
               </div>
               <div className="text-[11px] uppercase tracking-wide text-ink-400">
-                {user?.role}
+                {user?.custom_role_name ?? user?.role}
               </div>
             </div>
             <button
@@ -273,7 +279,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <div className="text-right leading-tight">
               <div className="text-sm font-medium text-ink-900">{user?.full_name}</div>
               <div className="text-[11px] uppercase tracking-wide text-ink-400">
-                {user?.role}
+                {user?.custom_role_name ?? user?.role}
               </div>
             </div>
             <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-semibold text-sm">

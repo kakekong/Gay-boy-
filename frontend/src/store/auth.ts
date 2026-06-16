@@ -8,7 +8,11 @@ export type Role =
 interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
-  user: { id: string; email: string; full_name: string; role: Role } | null;
+  user: {
+    id: string; email: string; full_name: string; role: Role;
+    custom_role_name?: string | null;
+    custom_role_pages?: string[] | null;
+  } | null;
   // Diagnostic: why was the user last bounced to the login page? Surfaced
   // as a banner on the Login page and logged to the console, so we can
   // tell the difference between a real "session expired" and a backend
