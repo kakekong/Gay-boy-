@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,25 @@ from app.core.errors import install_error_handlers
 from app.core.logging import setup_logging
 
 setup_logging()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """On boot, make sure the DB schema exists.
+
+    Creates any tables the running code knows about but the database is
+    missing (e.g. ``entity_comments`` for the Discussion feature) so a fresh
+    deploy or a Hugging Face Space rebuild "just works" without a separate
+    ``python -m app.scripts.seed`` step. Idempotent — create_all only adds
+    missing tables — and never blocks startup if the DB is briefly
+    unreachable.
+    """
+    try:
+        from app.scripts.seed import ensure_schema
+        await ensure_schema()
+    except Exception:
+        logging.getLogger(__name__).exception("startup ensure_schema failed")
+    yield
 
 
 def _enforce_prod_safety() -> None:
@@ -42,6 +62,7 @@ app = FastAPI(
     description="Enterprise CRM + ERP + AI for project-based industrial engineering.",
     docs_url="/docs",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
