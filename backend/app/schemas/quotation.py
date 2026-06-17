@@ -34,6 +34,11 @@ class QuotationCreate(BaseModel):
     tax_pct: float = 11
     valid_until: date | None = None
     notes: str | None = None
+    # Quotation number is auto-generated from the fixed company token, but the
+    # user may type a custom full number here when needed (blank = auto). A
+    # number_token overrides just the <TOK> segment of the auto number.
+    number: str | None = None
+    number_token: str | None = None
 
 
 class QuotationOut(BaseModel):

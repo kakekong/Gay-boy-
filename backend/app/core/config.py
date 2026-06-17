@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # disabled. Set to false to fall back to the tiered thresholds above.
     QUOTATION_ALWAYS_DIRECTOR_APPROVAL: bool = True
 
+    # Fixed company token baked into every auto-generated quotation number,
+    # e.g. "TSE" → QT-TSE-2026-0005. Sales can still override the full number
+    # per-quotation when needed (see QuotationCreate.number).
+    QUOTATION_COMPANY_TOKEN: str = "TSE"
+
 
 @lru_cache
 def get_settings() -> Settings:

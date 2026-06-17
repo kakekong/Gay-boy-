@@ -118,7 +118,15 @@ export default function QuotationDetailPage() {
   });
   const won = useMutation({
     mutationFn: () => api.post(`/quotations/${id}/won`),
-    onSuccess: onActionSuccess("Mark won"), onError: onActionError,
+    onSuccess: (res: any) => {
+      refresh();
+      if (res?.status === 202) {
+        setFlash({ kind: "ok", text: "Mark-won sent to the director for approval." });
+      } else {
+        setFlash({ kind: "ok", text: "Mark won succeeded." });
+      }
+    },
+    onError: onActionError,
   });
   const lost = useMutation({
     mutationFn: (reason: string) =>
@@ -313,8 +321,8 @@ export default function QuotationDetailPage() {
         </div>
       </div>
 
-      {/* Linked Accounts (CoA) */}
-      <LinkedAccountsPanel quotationId={Q.id} />
+      {/* Linked Accounts (CoA) — back-office only, hidden from sales */}
+      {user?.role !== "sales" && <LinkedAccountsPanel quotationId={Q.id} />}
 
       {/* Customer-PO submission gate (only when the quote is Won) */}
       {Q.status === "won" && (

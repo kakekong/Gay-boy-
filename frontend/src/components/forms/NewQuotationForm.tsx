@@ -41,6 +41,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
   const [discountPct, setDiscountPct] = useState(0);
   const [taxPct, setTaxPct] = useState(11);
   const [validUntil, setValidUntil] = useState("");
+  const [number, setNumber] = useState("");  // blank = auto company number
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<LineItem[]>([
     { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" },
@@ -107,6 +108,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
     create.mutate({
       customer_id: customerId,
       contact_id: contactId || null,
+      number: number.trim() || null,
       variant,
       discount_pct: discountPct,
       tax_pct: taxPct,
@@ -177,6 +179,11 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
         <Field label="Valid until">
           <input type="date" className="input" value={validUntil}
             onChange={(e) => setValidUntil(e.target.value)} />
+        </Field>
+        <Field label="Quotation number">
+          <input className="input font-mono" value={number}
+            onChange={(e) => setNumber(e.target.value)}
+            placeholder="Auto (leave blank for company number)" />
         </Field>
         <Field label="Tax %">
           <input type="number" min={0} max={50} step={0.1} className="input"

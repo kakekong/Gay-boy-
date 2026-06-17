@@ -11,6 +11,7 @@ from app.core.permissions import Role, require
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.attachment import Attachment
 from app.models.crm import Customer
+from app.models.quotation import Quotation
 from app.models.user import User
 
 router = APIRouter()
@@ -31,14 +32,23 @@ async def inbox(
     if not rows:
         return []
 
-    # Bulk-load target customers (most approvals are customer stage moves)
-    cust_ids = {r.target_id for r in rows if r.target_type == "customer"}
+    # Bulk-load target customers (stage moves + follow-up requests both point
+    # at a customer) and quotations (mark-won requests point at a quotation).
+    cust_ids = {r.target_id for r in rows if r.target_type in ("customer", "followup")}
     customers: dict[UUID, Customer] = {}
     if cust_ids:
         crows = (await db.scalars(
             select(Customer).where(Customer.id.in_(cust_ids))
         )).all()
         customers = {c.id: c for c in crows}
+
+    quote_ids = {r.target_id for r in rows if r.target_type == "quotation_won"}
+    quotations: dict[UUID, Quotation] = {}
+    if quote_ids:
+        qrows = (await db.scalars(
+            select(Quotation).where(Quotation.id.in_(quote_ids))
+        )).all()
+        quotations = {q.id: q for q in qrows}
 
     # Bulk-load requester names
     requester_ids = {r.requested_by for r in rows}
@@ -82,11 +92,19 @@ async def inbox(
         ):
             payload["from_stage"] = cust.stage
             payload["to_stage"] = payload["changes"]["stage"]
+        if r.target_type == "quotation_won":
+            qq = quotations.get(r.target_id)
+            target_label = qq.number if qq else None
+        elif r.target_type in ("customer", "followup"):
+            c = customers.get(r.target_id)
+            target_label = c.company_name if c else None
+        else:
+            target_label = cust.company_name if cust else None
         out.append({
             "id": str(r.id),
             "target_type": r.target_type,
             "target_id": str(r.target_id),
-            "target_label": cust.company_name if cust else None,
+            "target_label": target_label,
             "required_role": r.required_role,
             "reason": r.reason,
             "payload": payload,

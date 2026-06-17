@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,7 @@ from app.core.approval import (
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, can_approve_quotation
+from app.core.permissions import Role, can_approve_quotation, require
 from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.crm import Activity, Customer, CustomerContact, Reminder
@@ -32,6 +32,9 @@ from app.services import ledger
 from app.services.numbering import next_quotation_number
 
 router = APIRouter()
+
+# The ledger / chart-of-accounts is back-office only — sales never see it.
+_ledger_viewer = require(Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
 
 
 def _recalc(q: Quotation, items: list[QuotationItem]) -> None:
@@ -52,7 +55,22 @@ async def create_quotation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    number = await next_quotation_number(db, customer_id=payload.customer_id)
+    # Number is auto-generated from the fixed company token, but the user may
+    # supply a custom full number (editable when needed) or just override the
+    # token segment.
+    custom = (payload.number or "").strip()
+    if custom:
+        clash = await db.scalar(
+            select(func.count(Quotation.id)).where(Quotation.number == custom)
+        )
+        if clash:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Quotation number '{custom}' already exists.",
+            )
+        number = custom
+    else:
+        number = await next_quotation_number(db, token=payload.number_token)
     q = Quotation(
         number=number,
         customer_id=payload.customer_id,
@@ -211,6 +229,41 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
             status.HTTP_400_BAD_REQUEST,
             f"Customer is still at '{cust.stage}'. Advance the pipeline to "
             "negotiation (with approval) before marking the deal Won.",
+        )
+    # Only the director can flip a deal to Won directly. Everyone else files
+    # an approval request; the Won + ledger posting happen on approval.
+    if Role(user.role) != Role.DIRECTOR:
+        existing = await db.scalar(
+            select(ApprovalRequest).where(
+                ApprovalRequest.target_type == "quotation_won",
+                ApprovalRequest.target_id == q.id,
+                ApprovalRequest.status == ApprovalStatus.PENDING.value,
+            )
+        )
+        if not existing:
+            await request_approval(
+                db,
+                target_type="quotation_won",
+                target_id=q.id,
+                requested_by=user.id,
+                required_role=Role.DIRECTOR,
+                reason=f"Mark quotation {q.number} as Won",
+                payload={
+                    "total": float(q.total or 0),
+                    "customer_id": str(q.customer_id) if q.customer_id else None,
+                    "quotation_number": q.number,
+                },
+            )
+        await audit_record(db, actor=user, action="won_requested",
+                           entity="quotation", entity_id=q.id,
+                           after={"status": "pending_won_approval"})
+        await db.flush()
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "pending_approval",
+                "message": "Mark-won sent to the director for approval.",
+            },
         )
     q.status = "won"
     # Projects no longer auto-spawn from a Won quotation — a Customer PO
@@ -674,6 +727,35 @@ async def log_followup(
     if not payload.notes or not payload.notes.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Notes required.")
 
+    # Sales follow-ups are routed through the director: the activity + reminder
+    # are only created once the request is approved (see core/approval.py).
+    if Role(user.role) == Role.SALES:
+        req = await request_approval(
+            db,
+            target_type="followup",
+            target_id=q.customer_id,
+            requested_by=user.id,
+            required_role=Role.DIRECTOR,
+            reason=f"Follow-up on quotation {q.number}",
+            payload={
+                "source": "quotation",
+                "quotation_id": str(q_id),
+                "quotation_number": q.number,
+                "notes": payload.notes,
+                "next_at": payload.next_at.isoformat() if payload.next_at else None,
+                "next_channel": payload.next_channel,
+            },
+        )
+        await db.flush()
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "pending_approval",
+                "approval_request_id": str(req.id),
+                "message": "Follow-up sent to the director for approval.",
+            },
+        )
+
     activity = Activity(
         customer_id=q.customer_id,
         user_id=user.id,
@@ -782,7 +864,7 @@ async def followup_reminder_done(
 async def get_account_links(
     q_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_ledger_viewer),
 ):
     q = await _scoped_quote(q_id, db, user)
     amounts = ledger.compute_amounts(q)
@@ -813,7 +895,7 @@ async def update_account_links(
     q_id: UUID,
     payload: QuotationAccountLinks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_ledger_viewer),
 ):
     q = await _scoped_quote(q_id, db, user)
     if q.is_posted:
@@ -832,7 +914,7 @@ async def update_account_links(
 async def post_to_ledger(
     q_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_ledger_viewer),
 ):
     q = await _scoped_quote(q_id, db, user)
     await ledger.post_quotation(db, q)
@@ -843,7 +925,7 @@ async def post_to_ledger(
 async def reverse_from_ledger(
     q_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_ledger_viewer),
 ):
     q = await _scoped_quote(q_id, db, user)
     await ledger.reverse_quotation(db, q)

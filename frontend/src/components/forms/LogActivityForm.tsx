@@ -20,13 +20,20 @@ export function LogActivityForm({ customerId, onClose }: Props) {
   const [direction, setDirection] = useState("outbound");
   const [notes, setNotes] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const create = useMutation({
     mutationFn: () => api.post(`/customers/${customerId}/activities`, {
       type, direction, notes,
     }).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["activities", customerId] });
+      qc.invalidateQueries({ queryKey: ["approvals"] });
+      // Sales follow-ups are held for director approval.
+      if (data?.status === "pending_approval") {
+        setInfo(data?.message ?? "Follow-up sent to the director for approval.");
+        return;
+      }
       onClose();
     },
     onError: (e: any) => {
@@ -68,12 +75,24 @@ export function LogActivityForm({ customerId, onClose }: Props) {
         </div>
       )}
 
+      {info && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+          {info}
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={create.isPending}>
-          {create.isPending && <Loader2 size={14} className="animate-spin" />}
-          {create.isPending ? "Saving…" : "Save activity"}
-        </button>
+        {info ? (
+          <button type="button" className="btn-primary" onClick={onClose}>Close</button>
+        ) : (
+          <>
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={create.isPending}>
+              {create.isPending && <Loader2 size={14} className="animate-spin" />}
+              {create.isPending ? "Saving…" : "Save activity"}
+            </button>
+          </>
+        )}
       </div>
     </form>
   );

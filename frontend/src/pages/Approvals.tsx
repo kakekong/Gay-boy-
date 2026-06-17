@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import {
   Check, X, ShieldCheck, AlertCircle, Loader2, CheckCircle2,
   Download, ChevronRight, FileText, Building2, Eye, History,
+  MessageSquare, Trophy,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -92,7 +93,8 @@ export default function ApprovalsPage() {
           <ShieldCheck size={22} className="text-brand-600" /> Approval inbox
         </h1>
         <p className="text-sm muted">
-          Discount and data-change requests routed to you by the rule engine.
+          Discounts, stage moves, follow-ups and mark-won requests routed to you
+          for sign-off.
         </p>
       </div>
 
@@ -156,6 +158,11 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
   const isStageMove = r.target_type === "customer" && !!toStage;
   const narrative = (r.payload?.narrative ?? "") as string;
 
+  const isFollowup = r.target_type === "followup";
+  const isWon = r.target_type === "quotation_won";
+  const fmtIdr = (n: number) =>
+    "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+
   function download(id: string, filename: string) {
     api.get(`/attachments/${id}/download`, { responseType: "blob" })
       .then((rsp) => {
@@ -186,6 +193,14 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             {isStageMove ? (
               <span className="chip bg-violet-50 text-violet-700 inline-flex items-center gap-1">
                 <ChevronRight size={11} /> Stage move
+              </span>
+            ) : isFollowup ? (
+              <span className="chip bg-sky-50 text-sky-700 inline-flex items-center gap-1">
+                <MessageSquare size={11} /> Follow-up
+              </span>
+            ) : isWon ? (
+              <span className="chip bg-emerald-50 text-emerald-700 inline-flex items-center gap-1">
+                <Trophy size={11} /> Mark won
               </span>
             ) : (
               <span className="chip bg-brand-50 text-brand-700 capitalize">
@@ -240,6 +255,57 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                   <div className="text-xs muted italic">{r.reason}</div>
                 )
               )}
+            </div>
+          ) : isFollowup ? (
+            <div className="mt-3 space-y-2">
+              {r.target_label && (
+                <Link
+                  to={`/customers/${r.target_id}`}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-900 hover:text-brand-700"
+                >
+                  <Building2 size={14} />
+                  {r.target_label}
+                </Link>
+              )}
+              {r.payload?.quotation_number && (
+                <div className="text-xs muted">
+                  On quotation{" "}
+                  <span className="font-mono text-ink-700">
+                    {r.payload.quotation_number}
+                  </span>
+                </div>
+              )}
+              {r.payload?.notes && (
+                <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-sm whitespace-pre-wrap">
+                  <div className="text-[10px] uppercase tracking-wider muted mb-1">
+                    Follow-up note
+                  </div>
+                  {r.payload.notes}
+                </div>
+              )}
+              {r.payload?.next_at && (
+                <div className="text-xs muted">
+                  Next touchpoint: {new Date(r.payload.next_at).toLocaleString()}
+                  {r.payload?.next_channel ? ` · ${r.payload.next_channel}` : ""}
+                </div>
+              )}
+            </div>
+          ) : isWon ? (
+            <div className="mt-3 space-y-2">
+              <Link
+                to={`/quotations/${r.target_id}`}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-900 hover:text-brand-700"
+              >
+                <FileText size={14} />
+                {r.target_label ?? "Quotation"}
+              </Link>
+              <div className="text-sm">
+                Mark this deal as <b>Won</b>
+                {typeof r.payload?.total === "number" && (
+                  <> · total <b className="tabular-nums">{fmtIdr(r.payload.total)}</b></>
+                )}
+              </div>
+              {r.reason && <div className="text-xs muted italic">{r.reason}</div>}
             </div>
           ) : (
             <div className="mt-2 text-sm font-medium text-ink-900">{r.reason}</div>

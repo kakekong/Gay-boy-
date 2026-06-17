@@ -178,5 +178,67 @@ async def apply_to_target(
                     elif hasattr(po, k):
                         setattr(po, k, v)
                 applied["applied_changes"] = list(changes.keys())
+    elif req.target_type == "followup":
+        # Sales-initiated follow-ups are deferred: on approval we materialise
+        # the activity (and a reminder, for the quotation flow) using the
+        # original requester as the author. Rejection leaves nothing behind.
+        if approve:
+            from app.models.crm import Activity, Reminder
+            p = req.payload or {}
+            customer_id = req.target_id
+            user_id = req.requested_by
+            if p.get("source") == "quotation":
+                act = Activity(
+                    customer_id=customer_id, user_id=user_id, type="follow_up",
+                    direction="outbound", occurred_at=datetime.now(UTC),
+                    notes=p.get("notes"),
+                    meta={
+                        "quotation_id": p.get("quotation_id"),
+                        "quotation_number": p.get("quotation_number"),
+                    },
+                )
+                db.add(act)
+                await db.flush()
+                applied["activity_id"] = str(act.id)
+                if p.get("next_at"):
+                    rem = Reminder(
+                        customer_id=customer_id, user_id=user_id,
+                        kind="follow_up",
+                        due_at=datetime.fromisoformat(p["next_at"]),
+                        channel=p.get("next_channel") or "dashboard",
+                        message=f"Follow up on quotation {p.get('quotation_number')}",
+                        status="pending",
+                    )
+                    db.add(rem)
+                    await db.flush()
+                    applied["reminder_id"] = str(rem.id)
+            else:
+                act = Activity(
+                    customer_id=customer_id, user_id=user_id,
+                    type=p.get("type", "follow_up"),
+                    direction=p.get("direction", "internal"),
+                    occurred_at=datetime.now(UTC),
+                    notes=p.get("notes"),
+                    meta=p.get("meta") or {},
+                )
+                db.add(act)
+                await db.flush()
+                applied["activity_id"] = str(act.id)
+    elif req.target_type == "quotation_won":
+        # Marking a deal Won is director-gated. On approval the quotation flips
+        # to 'won' and posts to the ledger (idempotent, best-effort).
+        from app.models.quotation import Quotation
+        q = await db.get(Quotation, req.target_id)
+        if q and approve:
+            q.status = "won"
+            from app.services import ledger
+            try:
+                await ledger.post_quotation(db, q)
+            except Exception:
+                pass
+            applied["new_status"] = "won"
+        elif q:
+            # Rejected: the quote stays where it was (approved/sent).
+            applied["new_status"] = q.status
     # other target_types: no automatic propagation (yet)
     return applied

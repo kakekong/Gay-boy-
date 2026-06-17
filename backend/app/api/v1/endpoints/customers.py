@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -352,6 +352,36 @@ async def create_activity(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if not can_view_customer(user, obj.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+
+    # Sales follow-ups need the director's sign-off — the activity is only
+    # written once approved (see core/approval.py). Other activity types and
+    # other roles log directly.
+    if payload.type == "follow_up" and Role(user.role) == Role.SALES:
+        req = await request_approval(
+            db,
+            target_type="followup",
+            target_id=customer_id,
+            requested_by=user.id,
+            required_role=Role.DIRECTOR,
+            reason="Follow-up activity",
+            payload={
+                "source": "customer",
+                "type": payload.type,
+                "direction": payload.direction,
+                "notes": payload.notes,
+                "meta": payload.meta or {},
+            },
+        )
+        await db.flush()
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "pending_approval",
+                "approval_request_id": str(req.id),
+                "message": "Follow-up sent to the director for approval.",
+            },
+        )
+
     a = Activity(
         customer_id=customer_id,
         user_id=user.id,
