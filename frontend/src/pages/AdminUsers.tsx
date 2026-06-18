@@ -382,7 +382,7 @@ function CustomRolesManager() {
             <Shield size={15} className="text-brand-600" /> Custom roles
           </div>
           <div className="text-xs muted">
-            Build your own roles like Discord — pick a name, a base access tier, and the pages they can see.
+            Build your own roles — pick a name, a base access tier, and the pages they can see.
           </div>
         </div>
         <button className="btn-primary" onClick={startNew}>
