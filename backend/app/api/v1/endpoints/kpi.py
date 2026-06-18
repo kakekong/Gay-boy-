@@ -114,10 +114,10 @@ def _pretty_val(v) -> str:
 
 
 async def _build_kpi_export(ext: str, db: AsyncSession, user: User) -> Response:
-    sales = await sales_kpi(range_days=30, db=db, _user=user)
+    sales = await sales_kpi(range_days=30, db=db, user=user)
     ops = await operation_kpi(db=db, _user=user)
     purch = await purchasing_kpi(_user=user)
-    fin = await finance_kpi(db=db, _user=user)
+    fin = await finance_kpi(db=db, user=user)
 
     def section(name: str, data: dict) -> dict:
         return {
