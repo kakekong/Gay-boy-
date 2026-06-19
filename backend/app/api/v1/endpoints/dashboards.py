@@ -42,6 +42,100 @@ async def executive(
     }
 
 
+@router.get("/my-queue")
+async def my_queue(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The current user's personal action queue: their own quotations that
+    need a next step (submit / chase to Won) plus reminders that are due.
+    Scoped to the signed-in user regardless of role — it's *my* queue."""
+    from datetime import UTC, datetime
+
+    from app.models.crm import Reminder
+
+    PER_BUCKET = 8
+
+    async def _bucket(*statuses: str) -> tuple[list[dict], int]:
+        base = select(Quotation).where(
+            Quotation.sales_pic_id == user.id,
+            Quotation.status.in_(statuses),
+        )
+        total = await db.scalar(
+            select(func.count()).select_from(base.subquery())
+        )
+        rows = (await db.scalars(
+            base.order_by(Quotation.created_at.desc()).limit(PER_BUCKET)
+        )).all()
+        cust_ids = {q.customer_id for q in rows if q.customer_id}
+        names: dict = {}
+        if cust_ids:
+            for c in (await db.scalars(
+                select(Customer).where(Customer.id.in_(cust_ids))
+            )).all():
+                names[c.id] = c.company_name
+        items = [
+            {
+                "id": str(q.id),
+                "number": q.number,
+                "customer_name": names.get(q.customer_id),
+                "total": float(q.total or 0),
+                "status": q.status,
+                "created_at": q.created_at,
+            }
+            for q in rows
+        ]
+        return items, int(total or 0)
+
+    drafts, drafts_n = await _bucket("draft", "rejected")
+    pending, pending_n = await _bucket("pending_approval")
+    approved, approved_n = await _bucket("approved")
+
+    # Reminders that are due now (or overdue) and still pending, mine only.
+    now = datetime.now(UTC)
+    rem_base = select(Reminder).where(
+        Reminder.user_id == user.id,
+        Reminder.status == "pending",
+        Reminder.due_at <= now,
+    )
+    rem_n = await db.scalar(select(func.count()).select_from(rem_base.subquery()))
+    rem_rows = (await db.scalars(
+        rem_base.order_by(Reminder.due_at.asc()).limit(PER_BUCKET)
+    )).all()
+    rem_cust_ids = {r.customer_id for r in rem_rows if r.customer_id}
+    rem_names: dict = {}
+    if rem_cust_ids:
+        for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(rem_cust_ids))
+        )).all():
+            rem_names[c.id] = c.company_name
+    reminders_due = [
+        {
+            "id": str(r.id),
+            "kind": r.kind,
+            "due_at": r.due_at,
+            "message": r.message,
+            "channel": r.channel,
+            "customer_id": str(r.customer_id) if r.customer_id else None,
+            "customer_name": rem_names.get(r.customer_id) if r.customer_id else None,
+        }
+        for r in rem_rows
+    ]
+
+    return {
+        "drafts": drafts,
+        "pending_approval": pending,
+        "approved": approved,
+        "reminders_due": reminders_due,
+        "counts": {
+            "drafts": drafts_n,
+            "pending_approval": pending_n,
+            "approved": approved_n,
+            "reminders_due": int(rem_n or 0),
+        },
+    }
+
+
 @router.get("/ai-command")
 async def ai_command(
     db: AsyncSession = Depends(get_db),

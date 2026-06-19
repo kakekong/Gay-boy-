@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Plus, Loader2, Trash2, Pencil, Save, X, KeyRound, UserCheck, UserX,
-  AlertCircle, ExternalLink,
+  AlertCircle, ExternalLink, Eye,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
+import { startViewAs } from "@/lib/viewAs";
 
 interface User {
   id: string;
@@ -47,6 +49,7 @@ interface Supplier { id: string; name: string; }
 
 export default function AdminUsersPage() {
   const qc = useQueryClient();
+  const me = useAuthStore((s) => s.user);
   const [openNew, setOpenNew] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -236,6 +239,22 @@ export default function AdminUsersPage() {
                     <button className="btn-ghost" onClick={() => setEditing(u)}>
                       <Pencil size={13} />
                     </button>
+                    {u.is_active && u.id !== me?.id && (
+                      <button
+                        className="btn-ghost text-brand-700 hover:bg-brand-50"
+                        title={`View the app as ${u.full_name}`}
+                        onClick={async () => {
+                          if (window.confirm(
+                            `View the app as ${u.full_name}?\n\n` +
+                            `You'll see exactly what they see (their data + sidebar). ` +
+                            `A banner stays up the whole time — click "Exit view-as" to return to your own account.`
+                          )) {
+                            try { await startViewAs(u.id); }
+                            catch { window.alert("Couldn't switch to that user."); }
+                          }
+                        }}
+                      ><Eye size={13} /></button>
+                    )}
                     {u.is_active ? (
                       <button
                         className="btn-ghost text-red-600 hover:bg-red-50"

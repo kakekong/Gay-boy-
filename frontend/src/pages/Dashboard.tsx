@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   Users, FileText, Banknote, Wallet, ArrowUpRight, Sparkles, Target,
+  ListTodo, Send, Clock, BellRing, Trophy,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
@@ -125,6 +126,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="space-y-4">
+        {user?.role === "sales" && <MyQueueCard />}
         {user?.role === "sales" && myTarget.data && (
           <div className="card p-5">
             <div className="flex items-start gap-3 mb-2">
@@ -191,5 +193,168 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+interface QueueItem {
+  id: string;
+  number: string;
+  customer_name: string | null;
+  total: number;
+  status: string;
+}
+interface ReminderDue {
+  id: string;
+  kind: string;
+  due_at: string;
+  message: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+}
+interface MyQueue {
+  drafts: QueueItem[];
+  pending_approval: QueueItem[];
+  approved: QueueItem[];
+  reminders_due: ReminderDue[];
+  counts: {
+    drafts: number;
+    pending_approval: number;
+    approved: number;
+    reminders_due: number;
+  };
+}
+
+function MyQueueCard() {
+  const q = useQuery({
+    queryKey: ["my-queue"],
+    queryFn: () => api.get("/dashboard/my-queue").then((r) => r.data as MyQueue),
+    refetchInterval: 60_000,
+  });
+  const idr = (n: number) =>
+    "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+
+  const c = q.data?.counts;
+  const totalOpen =
+    (c?.drafts ?? 0) + (c?.approved ?? 0) + (c?.reminders_due ?? 0);
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white">
+          <ListTodo size={18} />
+        </div>
+        <div className="flex-1">
+          <div className="section-title">My queue</div>
+          <p className="text-sm muted">
+            {q.isLoading
+              ? "Loading…"
+              : totalOpen === 0
+                ? "All caught up 🎉"
+                : `${totalOpen} item${totalOpen === 1 ? "" : "s"} need your attention`}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <QueueBucket
+          icon={<BellRing size={14} className="text-red-600" />}
+          label="Follow-ups due"
+          count={c?.reminders_due ?? 0}
+          tone="red"
+        >
+          {(q.data?.reminders_due ?? []).map((r) => (
+            <Link
+              key={r.id}
+              to={r.customer_id ? `/customers/${r.customer_id}` : "/calendar"}
+              className="flex items-center justify-between gap-2 text-sm py-1 hover:text-brand-700"
+            >
+              <span className="truncate">
+                {r.customer_name ?? r.kind}
+                {r.message ? <span className="muted"> · {r.message}</span> : null}
+              </span>
+              <span className="text-[11px] text-red-600 shrink-0 inline-flex items-center gap-1">
+                <Clock size={11} />
+                {new Date(r.due_at).toLocaleDateString()}
+              </span>
+            </Link>
+          ))}
+        </QueueBucket>
+
+        <QueueBucket
+          icon={<Send size={14} className="text-amber-600" />}
+          label="Drafts to submit"
+          count={c?.drafts ?? 0}
+          tone="amber"
+        >
+          {(q.data?.drafts ?? []).map((d) => (
+            <QuoteLine key={d.id} item={d} idr={idr} />
+          ))}
+        </QueueBucket>
+
+        <QueueBucket
+          icon={<Trophy size={14} className="text-emerald-600" />}
+          label="Approved · chase to Won"
+          count={c?.approved ?? 0}
+          tone="emerald"
+        >
+          {(q.data?.approved ?? []).map((d) => (
+            <QuoteLine key={d.id} item={d} idr={idr} />
+          ))}
+        </QueueBucket>
+
+        {(c?.pending_approval ?? 0) > 0 && (
+          <div className="text-xs muted flex items-center gap-1.5 pt-1">
+            <Clock size={12} />
+            {c?.pending_approval} awaiting approval
+          </div>
+        )}
+      </div>
+
+      <Link to="/quotations" className="btn-ghost w-full mt-4">
+        Open quotations <ArrowUpRight size={14} />
+      </Link>
+    </div>
+  );
+}
+
+function QueueBucket({
+  icon, label, count, tone, children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  tone: "red" | "amber" | "emerald";
+  children: React.ReactNode;
+}) {
+  if (count === 0) return null;
+  const ring = {
+    red: "bg-red-50 text-red-700",
+    amber: "bg-amber-50 text-amber-700",
+    emerald: "bg-emerald-50 text-emerald-700",
+  }[tone];
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        {icon}
+        <span className="text-sm font-medium">{label}</span>
+        <span className={clsx("chip ml-auto", ring)}>{count}</span>
+      </div>
+      <div className="pl-6 divide-y divide-ink-100">{children}</div>
+    </div>
+  );
+}
+
+function QuoteLine({ item, idr }: { item: QueueItem; idr: (n: number) => string }) {
+  return (
+    <Link
+      to={`/quotations/${item.id}`}
+      className="flex items-center justify-between gap-2 text-sm py-1 hover:text-brand-700"
+    >
+      <span className="truncate">
+        <span className="font-mono text-xs">{item.number}</span>
+        {item.customer_name ? <span className="muted"> · {item.customer_name}</span> : null}
+      </span>
+      <span className="tabular-nums text-xs shrink-0">{idr(item.total)}</span>
+    </Link>
   );
 }

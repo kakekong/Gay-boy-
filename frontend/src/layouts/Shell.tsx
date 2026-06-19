@@ -6,7 +6,7 @@ import {
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList,
+  Receipt, ClipboardList, Eye,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -14,6 +14,7 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useLangStore, useT } from "@/store/lang";
 import { NotificationsBell } from "@/components/NotificationsBell";
+import { exitViewAs } from "@/lib/viewAs";
 
 interface NavItem {
   to: string;
@@ -308,12 +309,41 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
+        <ImpersonationBanner />
+
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
             {children}
           </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+function ImpersonationBanner() {
+  const impersonating = useAuthStore((s) => !!s.impersonationOrigin);
+  const origin = useAuthStore((s) => s.impersonationOrigin);
+  const user = useAuthStore((s) => s.user);
+  if (!impersonating) return null;
+  return (
+    <div className="bg-amber-500 text-amber-950 px-4 lg:px-6 py-2 flex items-center gap-3 text-sm font-medium shadow-soft z-20">
+      <Eye size={16} className="shrink-0" />
+      <span className="flex-1 min-w-0 truncate">
+        Viewing as <b>{user?.full_name}</b>
+        <span className="font-normal"> ({user?.custom_role_name ?? user?.role})</span>
+        {origin?.user?.full_name && (
+          <span className="hidden sm:inline font-normal opacity-80">
+            {" "}· you are {origin.user.full_name}
+          </span>
+        )}
+      </span>
+      <button
+        onClick={exitViewAs}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-950/90 text-amber-50 px-3 py-1.5 text-xs font-semibold hover:bg-amber-950"
+      >
+        <LogOut size={13} /> Exit view-as
+      </button>
     </div>
   );
 }

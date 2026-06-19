@@ -1,12 +1,15 @@
 import time
 from collections import defaultdict, deque
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import Role, require
 from app.core.security import (
     decode_token,
     make_access_token,
@@ -99,3 +102,31 @@ async def me(
     if user.pages:
         out.custom_role_pages = user.pages
     return out
+
+
+@router.post("/impersonate/{user_id}", response_model=TokenPair)
+async def impersonate(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    director: User = Depends(require(Role.DIRECTOR)),
+):
+    """Director-only "View as": mint a token pair for another user so the
+    director can see the app exactly as that user does (data scope + sidebar).
+    The frontend stashes the director's own session and restores it on exit —
+    there's no time gate, it's manual enter/exit. Audit-logged."""
+    if user_id == director.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Already signed in as yourself")
+    target = await db.scalar(
+        select(User).where(User.id == user_id, User.is_active.is_(True))
+    )
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found or inactive")
+    await audit_record(
+        db, actor=director, action="impersonate", entity="user",
+        entity_id=target.id,
+        after={"as_email": target.email, "as_role": target.role},
+    )
+    return TokenPair(
+        access_token=make_access_token(target.id, target.role),
+        refresh_token=make_refresh_token(target.id),
+    )

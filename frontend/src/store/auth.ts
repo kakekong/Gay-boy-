@@ -18,10 +18,23 @@ interface AuthState {
   // tell the difference between a real "session expired" and a backend
   // rejecting tokens.
   lastLogoutReason: string | null;
+  // "View as" / impersonation: when a director is viewing the app as another
+  // user, the director's own session is stashed here so it can be restored
+  // on exit. Non-null === currently impersonating.
+  impersonationOrigin: {
+    accessToken: string | null;
+    refreshToken: string | null;
+    user: AuthState["user"];
+  } | null;
   setTokens: (a: string, r: string) => void;
   setUser: (u: AuthState["user"]) => void;
   logout: (reason?: string) => void;
   clearLogoutReason: () => void;
+  // Stash the current (director) session and swap in the impersonation tokens.
+  // Call setUser afterwards with the target's /me payload.
+  startImpersonation: (access: string, refresh: string) => void;
+  // Restore the stashed director session.
+  stopImpersonation: () => void;
 }
 
 // Where to persist the session.
@@ -97,6 +110,7 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       user: null,
       lastLogoutReason: null,
+      impersonationOrigin: null,
       setTokens: (a, r) => set({ accessToken: a, refreshToken: r, lastLogoutReason: null }),
       setUser: (u) => set({ user: u }),
       logout: (reason) => {
@@ -114,10 +128,35 @@ export const useAuthStore = create<AuthState>()(
           accessToken: null,
           refreshToken: null,
           user: null,
+          impersonationOrigin: null,
           lastLogoutReason: reason ?? null,
         });
       },
       clearLogoutReason: () => set({ lastLogoutReason: null }),
+      startImpersonation: (access, refresh) =>
+        set((s) => ({
+          // Don't overwrite an existing stash if somehow called twice — keep
+          // the original director session as the one true thing to restore.
+          impersonationOrigin: s.impersonationOrigin ?? {
+            accessToken: s.accessToken,
+            refreshToken: s.refreshToken,
+            user: s.user,
+          },
+          accessToken: access,
+          refreshToken: refresh,
+          lastLogoutReason: null,
+        })),
+      stopImpersonation: () =>
+        set((s) => {
+          const origin = s.impersonationOrigin;
+          if (!origin) return {};
+          return {
+            accessToken: origin.accessToken,
+            refreshToken: origin.refreshToken,
+            user: origin.user,
+            impersonationOrigin: null,
+          };
+        }),
     }),
     {
       name: STORE_NAME,

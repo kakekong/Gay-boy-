@@ -105,6 +105,8 @@ async def submit_quotation(
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     if q.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only draft can be submitted")
 
@@ -219,6 +221,8 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     # Pipeline gate: a deal can't be marked Won until its customer has
     # reached negotiation (and that stage move was approved). Stops sales
     # jumping straight to Won from an earlier stage.
@@ -331,7 +335,11 @@ async def list_quotations(
 @router.get("/stats")
 async def stats(db: AsyncSession = Depends(get_db),
                 user: User = Depends(get_current_user)):
-    total = await db.scalar(select(func.count(Quotation.id)))
+    stmt = select(func.count(Quotation.id))
+    # Sales only count their own quotations, in line with the scoped list.
+    if Role(user.role) == Role.SALES:
+        stmt = stmt.where(Quotation.sales_pic_id == user.id)
+    total = await db.scalar(stmt)
     return {"total": total or 0}
 
 
