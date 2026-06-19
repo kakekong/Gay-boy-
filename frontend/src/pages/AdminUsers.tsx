@@ -15,6 +15,7 @@ interface User {
   role: string;
   custom_role_id?: string | null;
   custom_role_name?: string | null;
+  pages?: string[];
   phone?: string | null;
   is_active: boolean;
 }
@@ -750,15 +751,35 @@ function EditForm({ user, onClose, patch }: any) {
   const [phone, setPhone] = useState(user.phone ?? "");
   const [pwd, setPwd] = useState("");
   const [customRoleId, setCustomRoleId] = useState<string>(user.custom_role_id ?? "");
+  // Per-user page override: when overrideOn is true the user sees exactly
+  // the ticked pages (wins over role / custom-role defaults). Off = clear
+  // the override and fall back to the role's pages.
+  const [overrideOn, setOverrideOn] = useState<boolean>(!!(user.pages && user.pages.length));
+  const [pages, setPages] = useState<string[]>(user.pages ?? []);
+
   const customRoles = useQuery({
     queryKey: ["custom-roles"],
     queryFn: () => api.get("/custom-roles").then((r) => r.data as CustomRole[]),
   });
+  const catalog = useQuery({
+    queryKey: ["custom-roles-catalog"],
+    queryFn: () =>
+      api.get("/custom-roles/catalog").then(
+        (r) => r.data as { pages: { path: string; label: string }[] },
+      ),
+  });
+
+  function togglePage(p: string) {
+    setPages((cur) => cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]);
+  }
 
   function save() {
     const body: any = {
       full_name: name, role, phone: phone || null,
       custom_role_id: customRoleId || null,
+      // Empty list clears the override on the backend; otherwise send what
+      // was ticked. If override is OFF, send an empty list to clear.
+      pages: overrideOn ? pages : [],
     };
     if (pwd) body.password = pwd;
     patch.mutate({ id: user.id, body });
@@ -794,6 +815,77 @@ function EditForm({ user, onClose, patch }: any) {
         <input className="input" type="text" value={pwd} onChange={(e) => setPwd(e.target.value)}
           placeholder="new password (optional)" />
       </Field>
+
+      <div className="rounded-xl border border-ink-200 bg-ink-50/40 p-3 space-y-3">
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            checked={overrideOn}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setOverrideOn(on);
+              // First time switching on with nothing selected, seed with the
+              // pages this user currently has, so the director sees a sane
+              // starting point rather than an empty sidebar.
+              if (on && pages.length === 0 && user.pages?.length) {
+                setPages(user.pages);
+              }
+            }}
+          />
+          <div className="flex-1">
+            <div className="text-sm font-medium">Override sidebar pages for this user</div>
+            <div className="text-[11px] muted">
+              When on, this user sees only the ticked pages (plus Help) —
+              overrides their role / custom-role defaults. Off = fall back to
+              the role's pages.
+            </div>
+          </div>
+        </label>
+        {overrideOn && (
+          <>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="muted">
+                {pages.length} of {catalog.data?.pages.length ?? 0} pages selected
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="text-brand-700 hover:underline"
+                  onClick={() => setPages((catalog.data?.pages ?? []).map((p) => p.path))}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  className="text-brand-700 hover:underline"
+                  onClick={() => setPages([])}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-ink-200 bg-white p-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+              {(catalog.data?.pages ?? []).map((p) => (
+                <label
+                  key={p.path}
+                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-ink-50 cursor-pointer text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                    checked={pages.includes(p.path)}
+                    onChange={() => togglePage(p.path)}
+                  />
+                  <span className="flex-1 truncate">{p.label}</span>
+                  <span className="text-[10px] text-ink-400 font-mono">{p.path}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="flex justify-end gap-2 pt-2">
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn-primary" disabled={patch.isPending} onClick={save}>

@@ -33,6 +33,7 @@ class UserCreate(BaseModel):
     linked_customer_id: UUID | None = None
     linked_supplier_id: UUID | None = None
     custom_role_id: UUID | None = None
+    pages: list[str] | None = None
 
 
 class UserPatch(BaseModel):
@@ -45,9 +46,20 @@ class UserPatch(BaseModel):
     linked_customer_id: UUID | None = None
     linked_supplier_id: UUID | None = None
     custom_role_id: UUID | None = None
+    pages: list[str] | None = None
 
 
 VALID_ROLES = {"sales", "admin", "hr", "finance", "manager", "director", "customer", "supplier", "purchasing"}
+
+
+def _validate_pages(pages: list[str] | None) -> None:
+    """Reject any page path not in the shared catalog."""
+    if not pages:
+        return
+    from app.api.v1.endpoints.custom_roles import _VALID_PAGES
+    bad = [p for p in pages if p not in _VALID_PAGES]
+    if bad:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown pages: {bad}")
 
 router = APIRouter()
 
@@ -131,6 +143,7 @@ async def list_employees(
             "role": r.role,
             "custom_role_id": str(r.custom_role_id) if r.custom_role_id else None,
             "custom_role_name": cr_names.get(r.custom_role_id) if r.custom_role_id else None,
+            "pages": r.pages or [],
             "phone": r.phone,
             "is_active": r.is_active,
             "tags": tag_map.get(str(r.id), []),
@@ -334,6 +347,7 @@ async def create_user(
         if not cr:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown custom_role_id")
         role = cr.base_role
+    _validate_pages(payload.pages)
     u = User(
         email=payload.email.lower(),
         password_hash=hash_password(payload.password),
@@ -344,6 +358,7 @@ async def create_user(
         linked_customer_id=payload.linked_customer_id,
         linked_supplier_id=payload.linked_supplier_id,
         custom_role_id=payload.custom_role_id,
+        pages=payload.pages or None,
         is_active=True,
     )
     db.add(u)
@@ -364,6 +379,10 @@ async def update_user(
     data = payload.model_dump(exclude_unset=True)
     if "role" in data and data["role"] not in VALID_ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role")
+    if "pages" in data:
+        _validate_pages(data["pages"])
+        # An empty list clears the override (stored as NULL).
+        data["pages"] = data["pages"] or None
     if "password" in data:
         if len(data["password"]) < 6:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "password too short")

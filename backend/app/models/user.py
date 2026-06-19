@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import Boolean, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,3 +25,7 @@ class User(Base, UUIDPK, TimestampMixin):
     # Optional director-defined custom role (drives display name + sidebar
     # pages; the `role` column above is still the API security tier).
     custom_role_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
+    # Optional per-user sidebar page override. When set (non-empty), these
+    # pages take precedence over the role / custom-role defaults — lets the
+    # director tailor exactly which pages a single user sees.
+    pages: Mapped[list | None] = mapped_column(JSONB, nullable=True)

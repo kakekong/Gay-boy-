@@ -94,4 +94,8 @@ async def me(
         if cr:
             out.custom_role_name = cr.name
             out.custom_role_pages = cr.pages or []
+    # A per-user page override (when set) wins over the custom-role pages —
+    # the sidebar gates on custom_role_pages, so funnel the effective set here.
+    if user.pages:
+        out.custom_role_pages = user.pages
     return out

@@ -34,6 +34,8 @@ _USERS = [
 # Every statement here is idempotent (`ADD COLUMN IF NOT EXISTS`). Add new
 # entries below as the model evolves. Postgres-only.
 COLUMN_MIGRATIONS: list[str] = [
+    # Users gained an optional per-user sidebar page override
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pages JSONB",
     # Quotation gained CoA linkage + ledger-posting state
     'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_revenue_no    VARCHAR(40)',
     'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_receivable_no VARCHAR(40)',

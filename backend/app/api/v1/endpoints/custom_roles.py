@@ -40,6 +40,7 @@ PAGE_CATALOG = [
     {"path": "/finance/payment-verification", "label": "Payment verification"},
     {"path": "/inventory", "label": "Inventory"},
     {"path": "/accounts", "label": "Chart of Accounts"},
+    {"path": "/recent-ledgers", "label": "Recent ledgers"},
     {"path": "/employees", "label": "Employees"},
     {"path": "/salary", "label": "Salary"},
     {"path": "/attendance", "label": "Attendance"},

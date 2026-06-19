@@ -16,6 +16,7 @@ const CustomerDetailPage   = lazy(() => import("@/pages/CustomerDetail"));
 const QuotationDetailPage  = lazy(() => import("@/pages/QuotationDetail"));
 const CalendarPage         = lazy(() => import("@/pages/Calendar"));
 const ChartOfAccountsPage  = lazy(() => import("@/pages/ChartOfAccounts"));
+const RecentLedgersPage    = lazy(() => import("@/pages/RecentLedgers"));
 const EmployeesPage        = lazy(() => import("@/pages/Employees"));
 const EmployeeDetailPage   = lazy(() => import("@/pages/EmployeeDetail"));
 const SalaryPage           = lazy(() => import("@/pages/Salary"));
@@ -141,6 +142,7 @@ function MainApp() {
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/accounts" element={<ChartOfAccountsPage />} />
+          <Route path="/recent-ledgers" element={<RequireRole roles={["finance", "director"]}><RecentLedgersPage /></RequireRole>} />
           <Route path="/employees" element={<EmployeesPage />} />
           <Route path="/employees/:id" element={<EmployeeDetailPage />} />
           <Route path="/salary" element={<SalaryPage />} />
