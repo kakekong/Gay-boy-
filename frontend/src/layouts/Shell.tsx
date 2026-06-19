@@ -94,6 +94,19 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
   },
 ];
 
+// Hard caps for built-in base roles: when a role appears here it sees ONLY
+// these pages in the sidebar (plus Help, always), regardless of the per-item
+// `roles` lists. A custom role or per-user page override still wins over this.
+export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
+  finance: [
+    "/recent-ledgers",
+    "/accounts",
+    "/finance/payment-verification",
+    "/finance",
+    "/chat",
+  ],
+};
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -155,9 +168,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
             // A custom role overrides page visibility: the user sees exactly
             // the pages granted to their custom role (plus Help, always).
             const customPages = user?.custom_role_pages;
+            const roleAllowlist = user ? ROLE_PAGE_ALLOWLIST[user.role] : undefined;
             const items = g.items.filter((n) => {
               if (customPages && customPages.length) {
                 return customPages.includes(n.to) || n.to === "/help";
+              }
+              if (roleAllowlist) {
+                return roleAllowlist.includes(n.to) || n.to === "/help";
               }
               return !n.roles || (user && n.roles.includes(user.role));
             });

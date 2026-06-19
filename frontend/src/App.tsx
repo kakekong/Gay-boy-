@@ -1,7 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { Shell } from "@/layouts/Shell";
+import { Shell, ROLE_PAGE_ALLOWLIST } from "@/layouts/Shell";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuthStore } from "@/store/auth";
@@ -60,6 +60,23 @@ function RequireRole({ roles, children }: { roles: string[]; children: JSX.Eleme
   const user = useAuthStore((s) => s.user);
   if (user && roles.includes(user.role)) return children;
   return <Navigate to="/" replace />;
+}
+
+// Enforce the built-in role page allowlist (e.g. finance) at the route level,
+// so a capped role can't reach a hidden page by typing the URL. A custom role
+// or per-user page override (custom_role_pages) wins and disables this cap.
+function RoleRouteGuard({ children }: { children: JSX.Element }) {
+  const user = useAuthStore((s) => s.user);
+  const location = useLocation();
+  if (!user) return children;
+  if (user.custom_role_pages && user.custom_role_pages.length) return children;
+  const allow = ROLE_PAGE_ALLOWLIST[user.role];
+  if (!allow) return children;
+  const path = location.pathname;
+  const ok =
+    path === "/help" ||
+    allow.some((p) => path === p || path.startsWith(p + "/"));
+  return ok ? children : <Navigate to={allow[0]} replace />;
 }
 
 function PageFallback() {
@@ -133,6 +150,7 @@ function MainApp() {
       <CommandPalette />
       <ErrorBoundary resetKey={location.pathname}>
         <Suspense fallback={<PageFallback />}>
+          <RoleRouteGuard>
           <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/customers" element={<CustomersPage />} />
@@ -174,6 +192,7 @@ function MainApp() {
           <Route path="/executive" element={<ExecutivePage />} />
           <Route path="/ai" element={<AICommandCenter />} />
         </Routes>
+          </RoleRouteGuard>
       </Suspense>
       </ErrorBoundary>
     </Shell>
