@@ -104,6 +104,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/finance/payment-verification",
     "/finance",
     "/chat",
+    "/role-guide",
   ],
 };
 
