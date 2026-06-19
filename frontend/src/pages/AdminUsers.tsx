@@ -284,6 +284,7 @@ export default function AdminUsersPage() {
                onClose={() => setOpenNew(false)}>
           <UserForm
             form={form} setForm={setForm}
+            customRoles={customRoles}
             customers={customers.data ?? []}
             customersLoading={customers.isLoading}
             customersError={customers.error as any}
@@ -502,7 +503,7 @@ function Modal({ title, subtitle, onClose, children }: {
 }
 
 function UserForm({
-  form, setForm, customers, customersLoading, customersError, customersRefetch,
+  form, setForm, customRoles, customers, customersLoading, customersError, customersRefetch,
   suppliers, suppliersLoading, suppliersError, suppliersRefetch,
   isPending, submitLabel, onSubmit, onCancel,
 }: any) {
@@ -527,7 +528,7 @@ function UserForm({
         <Field label="Custom role">
           <select className="input" value={form.custom_role_id}
             onChange={(e: any) => {
-              const cr = (customRoles.data ?? []).find((x) => x.id === e.target.value);
+              const cr = (customRoles.data ?? []).find((x: CustomRole) => x.id === e.target.value);
               setForm({
                 ...form,
                 custom_role_id: e.target.value,
@@ -536,7 +537,7 @@ function UserForm({
               });
             }}>
             <option value="">— none (use base role) —</option>
-            {(customRoles.data ?? []).map((cr) => (
+            {(customRoles.data ?? []).map((cr: CustomRole) => (
               <option key={cr.id} value={cr.id}>{cr.name} (base: {cr.base_role})</option>
             ))}
           </select>
