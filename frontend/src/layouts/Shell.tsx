@@ -107,6 +107,16 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/chat",
     "/role-guide",
   ],
+  purchasing: [
+    "/purchasing",       // supplier directory + procurement board (+ /stage)
+    "/suppliers",        // supplier detail pages (route guard; not a nav item)
+    "/purchase-orders",  // view supplier-PO list + history
+    "/inventory",
+    "/calendar",
+    "/projects",
+    "/chat",
+    "/role-guide",
+  ],
 };
 
 export function Shell({ children }: { children: React.ReactNode }) {
