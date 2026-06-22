@@ -14,7 +14,6 @@ from app.core.approval import request_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
-from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.purchasing import Supplier
 from app.models.user import User
 
@@ -133,7 +132,6 @@ class PoCreate(BaseModel):
 
 
 _purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.ADMIN)
-_director_only = require(Role.DIRECTOR)
 
 
 @router.get("/po")
@@ -362,6 +360,7 @@ async def update_po(
     used" instead of letting the DB raise an opaque IntegrityError.
     """
     from datetime import date as date_t
+
     from app.models.purchasing import SupplierPO
 
     po = await db.get(SupplierPO, po_id)
@@ -441,44 +440,356 @@ async def update_po(
     }
 
 
-# ─── PR / RFQ / PO stubs (kept) ──────────────────────────────────────────────
+# ─── Purchase Requests (PR) ──────────────────────────────────────────────────
+# A PR signals demand against a project. It commits no money, so any of the
+# procurement-board roles can raise and close one — no director approval gate.
 
-# PR/RFQ/GR/QC are intentionally not implemented in this build — the
-# director-owned PO flow (POST /purchasing/po) covers the procurement
-# loop. These stubs return 501 so a caller never thinks a TODO succeeded.
+def _seq_number(db_count: int, prefix: str) -> str:
+    from datetime import date as date_t
+    ts = date_t.today().strftime("%y%m%d")
+    return f"{prefix}-{ts}-{db_count + 1:03d}"
+
+
+class PRIn(BaseModel):
+    project_id: UUID | None = None
+    items: list[dict] = []
+    notes: str | None = None
+
+
+class PRPatch(BaseModel):
+    status: str | None = None          # open | closed
+    items: list[dict] | None = None
+    notes: str | None = None
+
 
 @router.get("/pr")
-async def list_pr(_user: User = Depends(get_current_user)):
-    return []
+async def list_pr(
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+    project_id: UUID | None = None,
+    status_filter: str | None = None,
+):
+    from app.models.operation import Project
+    from app.models.purchasing import PurchaseRequest
+
+    stmt = select(PurchaseRequest).order_by(PurchaseRequest.created_at.desc())
+    if project_id:
+        stmt = stmt.where(PurchaseRequest.project_id == project_id)
+    if status_filter:
+        stmt = stmt.where(PurchaseRequest.status == status_filter)
+    rows = (await db.scalars(stmt)).all()
+
+    project_ids = {r.project_id for r in rows if r.project_id}
+    requester_ids = {r.requested_by for r in rows if r.requested_by}
+    projects: dict[UUID, Project] = {}
+    requesters: dict[UUID, User] = {}
+    if project_ids:
+        for p in (await db.scalars(select(Project).where(Project.id.in_(project_ids)))).all():
+            projects[p.id] = p
+    if requester_ids:
+        for u in (await db.scalars(select(User).where(User.id.in_(requester_ids)))).all():
+            requesters[u.id] = u
+
+    return [
+        {
+            "id": str(r.id), "number": r.number, "status": r.status,
+            "project_id": str(r.project_id) if r.project_id else None,
+            "project_code": projects[r.project_id].code if r.project_id in projects else None,
+            "requested_by": str(r.requested_by) if r.requested_by else None,
+            "requested_by_name": (
+                requesters[r.requested_by].full_name if r.requested_by in requesters else None
+            ),
+            "items": r.items, "notes": r.notes, "created_at": r.created_at,
+        }
+        for r in rows
+    ]
 
 
-def _not_implemented():
-    raise HTTPException(
-        status.HTTP_501_NOT_IMPLEMENTED,
-        "Not in this release — use the director PO flow at POST /purchasing/po",
+@router.post("/pr", status_code=201)
+async def create_pr(
+    payload: PRIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_purchasing_or_director),
+):
+    from datetime import date as date_t
+
+    from app.models.operation import Project
+    from app.models.purchasing import PurchaseRequest
+
+    if payload.project_id:
+        if not await db.get(Project, payload.project_id):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
+    count = await db.scalar(
+        select(func.count(PurchaseRequest.id)).where(
+            PurchaseRequest.number.like(f"PR-{date_t.today():%y%m%d}-%")
+        )
+    ) or 0
+    pr = PurchaseRequest(
+        number=_seq_number(count, "PR"),
+        project_id=payload.project_id,
+        requested_by=user.id,
+        items=payload.items or [],
+        notes=payload.notes,
+        status="open",
     )
+    db.add(pr)
+    await db.flush()
+    return {"id": str(pr.id), "number": pr.number, "status": pr.status}
 
 
-@router.post("/pr")
-async def create_pr(_user: User = Depends(_director_only)):
-    _not_implemented()
+@router.patch("/pr/{pr_id}")
+async def update_pr(
+    pr_id: UUID,
+    payload: PRPatch,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    from app.models.purchasing import PurchaseRequest
+
+    pr = await db.get(PurchaseRequest, pr_id)
+    if not pr:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PR not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "status" in data and data["status"]:
+        if data["status"] not in ("open", "closed"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "status must be open or closed")
+        pr.status = data["status"]
+    if "items" in data and data["items"] is not None:
+        pr.items = data["items"]
+    if "notes" in data:
+        pr.notes = data["notes"]
+    await db.flush()
+    return {"id": str(pr.id), "number": pr.number, "status": pr.status}
 
 
-@router.post("/pr/{pr_id}/rfq")
-async def spawn_rfq(pr_id: str, _user: User = Depends(_director_only)):
-    _not_implemented()
+# ─── RFQ (request for quotation) ─────────────────────────────────────────────
+# One RFQ row = one supplier's quote against a PR. Listing all RFQs for a PR
+# gives the price/lead-time comparison the director uses to award a PO.
+
+class RFQIn(BaseModel):
+    supplier_id: UUID
+    quoted_lines: list[dict] = []
+    quoted_lead_days: int | None = None
 
 
-@router.post("/rfq/{rfq_id}/po")
-async def rfq_to_po(rfq_id: str, _user: User = Depends(_director_only)):
-    _not_implemented()
+@router.get("/rfq")
+async def list_rfq(
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+    pr_id: UUID | None = None,
+):
+    from app.models.purchasing import RFQ, PurchaseRequest, Supplier
+
+    stmt = select(RFQ).order_by(RFQ.created_at.desc())
+    if pr_id:
+        stmt = stmt.where(RFQ.pr_id == pr_id)
+    rows = (await db.scalars(stmt)).all()
+    sup_ids = {r.supplier_id for r in rows}
+    pr_ids = {r.pr_id for r in rows}
+    sups: dict[UUID, Supplier] = {}
+    prs: dict[UUID, PurchaseRequest] = {}
+    if sup_ids:
+        for s in (await db.scalars(select(Supplier).where(Supplier.id.in_(sup_ids)))).all():
+            sups[s.id] = s
+    if pr_ids:
+        pr_q = select(PurchaseRequest).where(PurchaseRequest.id.in_(pr_ids))
+        for p in (await db.scalars(pr_q)).all():
+            prs[p.id] = p
+    return [
+        {
+            "id": str(r.id), "pr_id": str(r.pr_id),
+            "pr_number": prs[r.pr_id].number if r.pr_id in prs else None,
+            "supplier_id": str(r.supplier_id),
+            "supplier_name": sups[r.supplier_id].name if r.supplier_id in sups else None,
+            "quoted_lines": r.quoted_lines, "quoted_lead_days": r.quoted_lead_days,
+            "quoted_total": float(
+                sum(float(line.get("amount", 0) or 0) for line in (r.quoted_lines or []))
+            ),
+            "status": r.status, "created_at": r.created_at,
+        }
+        for r in rows
+    ]
 
 
-@router.post("/po/{po_id}/gr")
-async def goods_receipt(po_id: str, _user: User = Depends(_director_only)):
-    _not_implemented()
+@router.post("/pr/{pr_id}/rfq", status_code=201)
+async def spawn_rfq(
+    pr_id: UUID,
+    payload: RFQIn,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    from app.models.purchasing import RFQ, PurchaseRequest, Supplier
+
+    if not await db.get(PurchaseRequest, pr_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown PR")
+    if not await db.get(Supplier, payload.supplier_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown supplier")
+    rfq = RFQ(
+        pr_id=pr_id,
+        supplier_id=payload.supplier_id,
+        quoted_lines=payload.quoted_lines or [],
+        quoted_lead_days=payload.quoted_lead_days,
+        status="open",
+    )
+    db.add(rfq)
+    await db.flush()
+    return {"id": str(rfq.id), "pr_id": str(pr_id), "supplier_id": str(payload.supplier_id)}
 
 
-@router.post("/po/{po_id}/qc")
-async def qc(po_id: str, _user: User = Depends(_director_only)):
-    _not_implemented()
+# ─── Goods Receipt (GR) ──────────────────────────────────────────────────────
+
+class GRIn(BaseModel):
+    received_at: str | None = None     # ISO date
+    items: list[dict] = []
+    status: str = "received"
+
+
+@router.get("/gr")
+async def list_gr(
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+    po_id: UUID | None = None,
+):
+    from app.models.purchasing import GoodsReceipt, SupplierPO
+
+    stmt = select(GoodsReceipt).order_by(GoodsReceipt.created_at.desc())
+    if po_id:
+        stmt = stmt.where(GoodsReceipt.po_id == po_id)
+    rows = (await db.scalars(stmt)).all()
+    po_ids = {r.po_id for r in rows}
+    pos: dict[UUID, SupplierPO] = {}
+    if po_ids:
+        for p in (await db.scalars(select(SupplierPO).where(SupplierPO.id.in_(po_ids)))).all():
+            pos[p.id] = p
+    return [
+        {
+            "id": str(r.id), "po_id": str(r.po_id),
+            "po_number": pos[r.po_id].number if r.po_id in pos else None,
+            "received_at": r.received_at, "items": r.items, "status": r.status,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/po/{po_id}/gr", status_code=201)
+async def goods_receipt(
+    po_id: UUID,
+    payload: GRIn,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    from datetime import date as date_t
+
+    from app.models.purchasing import GoodsReceipt, SupplierPO
+
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown PO")
+    received = None
+    if payload.received_at:
+        try:
+            received = date_t.fromisoformat(payload.received_at)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "received_at must be YYYY-MM-DD")
+    gr = GoodsReceipt(
+        po_id=po_id,
+        received_at=received or date_t.today(),
+        items=payload.items or [],
+        status=payload.status or "received",
+    )
+    db.add(gr)
+    # Receiving goods moves the PO to 'received' so the board reflects progress.
+    if po.status in ("open", "pending_approval"):
+        po.status = "received"
+    await db.flush()
+    return {"id": str(gr.id), "po_id": str(po_id), "status": gr.status}
+
+
+# ─── QC (incoming inspection) ────────────────────────────────────────────────
+
+class QCIn(BaseModel):
+    pass_qty: float = 0
+    fail_qty: float = 0
+    findings: str | None = None
+    decision: str = "accepted"         # accepted | rejected | conditional
+
+
+@router.get("/qc")
+async def list_qc(
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+    po_id: UUID | None = None,
+):
+    from app.models.purchasing import QCReport, SupplierPO
+
+    stmt = select(QCReport).order_by(QCReport.created_at.desc())
+    if po_id:
+        stmt = stmt.where(QCReport.po_id == po_id)
+    rows = (await db.scalars(stmt)).all()
+    po_ids = {r.po_id for r in rows}
+    pos: dict[UUID, SupplierPO] = {}
+    if po_ids:
+        for p in (await db.scalars(select(SupplierPO).where(SupplierPO.id.in_(po_ids)))).all():
+            pos[p.id] = p
+    return [
+        {
+            "id": str(r.id), "po_id": str(r.po_id),
+            "po_number": pos[r.po_id].number if r.po_id in pos else None,
+            "supplier_id": str(pos[r.po_id].supplier_id) if r.po_id in pos else None,
+            "pass_qty": float(r.pass_qty or 0), "fail_qty": float(r.fail_qty or 0),
+            "findings": r.findings, "decision": r.decision, "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/po/{po_id}/qc", status_code=201)
+async def qc(
+    po_id: UUID,
+    payload: QCIn,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    """Record an incoming-QC result for a PO and refresh the supplier's
+    rolling QC fail rate (total failed / total inspected across all their
+    POs) so the supplier directory reflects real quality history."""
+    from app.models.purchasing import QCReport, Supplier, SupplierPO
+
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown PO")
+    if payload.decision not in ("accepted", "rejected", "conditional"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid decision")
+    report = QCReport(
+        po_id=po_id,
+        pass_qty=payload.pass_qty,
+        fail_qty=payload.fail_qty,
+        findings=payload.findings,
+        decision=payload.decision,
+    )
+    db.add(report)
+    await db.flush()
+
+    # Recompute the supplier's QC fail rate across every QC report for their POs.
+    supplier_po_ids = (await db.scalars(
+        select(SupplierPO.id).where(SupplierPO.supplier_id == po.supplier_id)
+    )).all()
+    if supplier_po_ids:
+        agg = (await db.execute(
+            select(
+                func.coalesce(func.sum(QCReport.pass_qty), 0),
+                func.coalesce(func.sum(QCReport.fail_qty), 0),
+            ).where(QCReport.po_id.in_(supplier_po_ids))
+        )).one()
+        total_pass, total_fail = float(agg[0]), float(agg[1])
+        inspected = total_pass + total_fail
+        if inspected > 0:
+            supplier = await db.get(Supplier, po.supplier_id)
+            if supplier:
+                supplier.qc_fail_rate = round(total_fail / inspected, 4)
+    await db.flush()
+    return {
+        "id": str(report.id), "po_id": str(po_id), "decision": report.decision,
+        "pass_qty": float(report.pass_qty), "fail_qty": float(report.fail_qty),
+    }

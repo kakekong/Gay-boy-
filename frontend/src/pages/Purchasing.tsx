@@ -15,24 +15,19 @@ interface PStage {
   icon: typeof ClipboardList;
   hint: string;
   to: string | null;
-  comingSoon?: boolean;
 }
 
 const STAGES: PStage[] = [
-  // PR / RFQ / GR / QC are deliberately stubs in this build — the
-  // director-owned PO flow covers procurement end-to-end, but the cards
-  // still link to a placeholder page so the UI shape stays consistent
-  // for when those workflows ship.
   { key: "PR",  label: "Purchase Request", icon: ClipboardList, hint: "Internal request",
-    to: "/purchasing/stage/pr",  comingSoon: true },
+    to: "/purchasing/stage/pr" },
   { key: "RFQ", label: "RFQ",              icon: Send,          hint: "Quote suppliers",
-    to: "/purchasing/stage/rfq", comingSoon: true },
+    to: "/purchasing/stage/rfq" },
   { key: "PO",  label: "Supplier PO",      icon: Truck,         hint: "Order placed",
     to: "/purchase-orders" },
   { key: "GR",  label: "Goods Receipt",    icon: PackageCheck,  hint: "Received",
-    to: "/purchasing/stage/gr",  comingSoon: true },
+    to: "/purchasing/stage/gr" },
   { key: "QC",  label: "QC",               icon: CheckCircle2,  hint: "Quality check",
-    to: "/purchasing/stage/qc",  comingSoon: true },
+    to: "/purchasing/stage/qc" },
 ];
 
 interface Supplier {
@@ -85,6 +80,24 @@ export default function PurchasingPage() {
     enabled: openPO && isDirector,
     retry: false,
   });
+
+  // Live counts for the procurement-chain cards. Each stage endpoint is
+  // purchasing-gated, same audience as this page.
+  const prList  = useQuery({ queryKey: ["pr-list"],  queryFn: () => api.get("/purchasing/pr").then((r) => r.data as any[]),  retry: false });
+  const rfqList = useQuery({ queryKey: ["rfq-list"], queryFn: () => api.get("/purchasing/rfq").then((r) => r.data as any[]), retry: false });
+  const grList  = useQuery({ queryKey: ["gr-list"],  queryFn: () => api.get("/purchasing/gr").then((r) => r.data as any[]),  retry: false });
+  const qcList  = useQuery({ queryKey: ["qc-list"],  queryFn: () => api.get("/purchasing/qc").then((r) => r.data as any[]),  retry: false });
+
+  const stageCount = (key: string): number => {
+    switch (key) {
+      case "PR":  return prList.data?.filter((p: any) => p.status === "open").length ?? 0;
+      case "RFQ": return rfqList.data?.length ?? 0;
+      case "PO":  return pos.data?.filter((p: any) => p.status === "open" || p.status === "pending_approval").length ?? 0;
+      case "GR":  return grList.data?.length ?? 0;
+      case "QC":  return qcList.data?.length ?? 0;
+      default:    return 0;
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -158,9 +171,7 @@ export default function PurchasingPage() {
       <div className="card p-4 lg:p-6 overflow-x-auto">
         <div className="flex items-stretch gap-3 min-w-[700px]">
           {STAGES.map((s, i) => {
-            const count = s.key === "PO" ? (pos.data?.filter(
-              (p: any) => p.status === "open" || p.status === "pending_approval",
-            ).length ?? 0) : 0;
+            const count = stageCount(s.key);
             const inner = (
               <div className="flex-1 rounded-xl border border-ink-200 hover:border-brand-300 transition-colors p-4 bg-white relative">
                 <div className="flex items-center gap-2 text-ink-800">
@@ -171,9 +182,7 @@ export default function PurchasingPage() {
                 <div className="mt-3 text-2xl font-semibold tabular-nums text-ink-900">
                   {count}
                 </div>
-                <div className="text-[11px] muted">
-                  {s.comingSoon ? "coming soon" : "open documents"}
-                </div>
+                <div className="text-[11px] muted">open documents</div>
                 <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-700 font-semibold">
                   Open <ChevronRight size={11} />
                 </div>
