@@ -21,6 +21,19 @@ from app.models.user import User
 router = APIRouter()
 
 
+def _can_see_project_money(user: User) -> bool:
+    """Whether this user may see a project's deal economics.
+
+    Purchasing works the procurement side — items requested, suppliers,
+    goods receipt, QC — and has no business reason to see PO value,
+    margins, or invoice amounts. Everyone else (sales on their own
+    customers, admin, finance, manager, director) may. We blank the
+    numbers to None rather than dropping the keys so the API shape stays
+    stable for the frontend.
+    """
+    return Role(user.role) != Role.PURCHASING
+
+
 @router.get("/projects")
 async def list_projects(db: AsyncSession = Depends(get_db),
                         user: User = Depends(get_current_user)):
@@ -44,13 +57,16 @@ async def list_projects(db: AsyncSession = Depends(get_db),
             select(Customer).where(Customer.id.in_(cust_ids))
         )).all():
             customer_names[c.id] = c.company_name
+    show_money = _can_see_project_money(user)
     return [
         {
             "id": str(p.id), "code": p.code, "customer_id": str(p.customer_id),
             "customer_name": customer_names.get(p.customer_id),
-            "status": p.status, "po_value": float(p.po_value),
+            "status": p.status,
+            "po_value": float(p.po_value) if show_money else None,
             "target_delivery": p.target_delivery, "actual_delivery": p.actual_delivery,
-            "margin_estimate": float(p.margin_estimate), "margin_actual": float(p.margin_actual),
+            "margin_estimate": float(p.margin_estimate) if show_money else None,
+            "margin_actual": float(p.margin_actual) if show_money else None,
         } for p in rows
     ]
 
@@ -68,22 +84,24 @@ async def get_project(project_id: UUID,
         not customer or customer.sales_pic_id != user.id
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    show_money = _can_see_project_money(user)
     return {
         "id": str(p.id), "code": p.code, "status": p.status,
         "po_number": p.po_number, "po_date": p.po_date,
-        "po_value": float(p.po_value or 0),
+        "po_value": float(p.po_value or 0) if show_money else None,
         "start_date": p.start_date,
         "target_delivery": p.target_delivery,
         "actual_delivery": p.actual_delivery,
-        "margin_estimate": float(p.margin_estimate or 0),
-        "margin_actual": float(p.margin_actual or 0),
+        "margin_estimate": float(p.margin_estimate or 0) if show_money else None,
+        "margin_actual": float(p.margin_actual or 0) if show_money else None,
         "customer": {
             "id": str(customer.id), "company_name": customer.company_name,
             "industry": customer.industry, "stage": customer.stage,
         } if customer else None,
         "quotation": {
             "id": str(quotation.id), "number": quotation.number,
-            "status": quotation.status, "total": float(quotation.total or 0),
+            "status": quotation.status,
+            "total": float(quotation.total or 0) if show_money else None,
         } if quotation else None,
         "created_at": p.created_at,
     }
@@ -92,7 +110,7 @@ async def get_project(project_id: UUID,
 @router.get("/projects/{project_id}/full")
 async def project_full(project_id: UUID,
                        db: AsyncSession = Depends(get_db),
-                       _user: User = Depends(get_current_user)):
+                       user: User = Depends(get_current_user)):
     """Project + all related records, used by the project detail page."""
     p = await db.get(Project, project_id)
     if not p:
@@ -122,16 +140,17 @@ async def project_full(project_id: UUID,
         .order_by(PurchaseRequest.created_at.desc())
     )).all()
 
+    show_money = _can_see_project_money(user)
     return {
         "project": {
             "id": str(p.id), "code": p.code, "status": p.status,
             "po_number": p.po_number, "po_date": p.po_date,
-            "po_value": float(p.po_value or 0),
+            "po_value": float(p.po_value or 0) if show_money else None,
             "start_date": p.start_date,
             "target_delivery": p.target_delivery,
             "actual_delivery": p.actual_delivery,
-            "margin_estimate": float(p.margin_estimate or 0),
-            "margin_actual": float(p.margin_actual or 0),
+            "margin_estimate": float(p.margin_estimate or 0) if show_money else None,
+            "margin_actual": float(p.margin_actual or 0) if show_money else None,
             "created_at": p.created_at,
         },
         "customer": {
@@ -140,7 +159,8 @@ async def project_full(project_id: UUID,
         } if customer else None,
         "quotation": {
             "id": str(quotation.id), "number": quotation.number,
-            "status": quotation.status, "total": float(quotation.total or 0),
+            "status": quotation.status,
+            "total": float(quotation.total or 0) if show_money else None,
         } if quotation else None,
         "work_orders": [
             {
@@ -168,8 +188,10 @@ async def project_full(project_id: UUID,
             {
                 "id": str(i.id), "number": i.number, "type": i.type,
                 "termin_index": i.termin_index, "issue_date": i.issue_date,
-                "due_date": i.due_date, "amount": float(i.amount or 0),
-                "tax_amount": float(i.tax_amount or 0), "total": float(i.total or 0),
+                "due_date": i.due_date,
+                "amount": float(i.amount or 0) if show_money else None,
+                "tax_amount": float(i.tax_amount or 0) if show_money else None,
+                "total": float(i.total or 0) if show_money else None,
                 "status": i.status,
             } for i in invoices
         ],

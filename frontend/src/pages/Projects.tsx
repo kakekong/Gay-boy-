@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Briefcase } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 
 const STATUS_COLOR: Record<string, string> = {
   new:               "bg-ink-100 text-ink-700",
@@ -20,6 +21,8 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function ProjectsPage() {
   const nav = useNavigate();
+  // Purchasing sees projects for procurement context but not deal economics.
+  const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
   const q = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data),
@@ -43,7 +46,7 @@ export default function ProjectsPage() {
             <tr>
               <th className="th">Code</th>
               <th className="th">Status</th>
-              <th className="th text-right">PO Value</th>
+              {showMoney && <th className="th text-right">PO Value</th>}
               <th className="th">Customer</th>
               <th className="th">Target delivery</th>
             </tr>
@@ -70,7 +73,9 @@ export default function ProjectsPage() {
                     {p.status.replace(/_/g, " ")}
                   </span>
                 </td>
-                <td className="td text-right tabular-nums">{idr(p.po_value)}</td>
+                {showMoney && (
+                  <td className="td text-right tabular-nums">{idr(p.po_value)}</td>
+                )}
                 <td className="td">
                   {p.customer_id ? (
                     <Link
@@ -87,7 +92,7 @@ export default function ProjectsPage() {
             ))}
             {!q.data?.length && (
               <tr>
-                <td colSpan={5} className="td text-center muted py-12">
+                <td colSpan={showMoney ? 5 : 4} className="td text-center muted py-12">
                   No projects yet.
                 </td>
               </tr>

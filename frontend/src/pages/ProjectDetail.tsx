@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
@@ -39,6 +40,10 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const qc = useQueryClient();
+  // Purchasing sees the project's procurement detail (items, work orders,
+  // drawings, deliveries) but not its deal economics — PO value, margins,
+  // or invoice amounts. The backend nulls these for purchasing too.
+  const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -250,22 +255,24 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Profit / Margin */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <Stat label="PO value"      value={idr(p.po_value)}              tone="brand"   />
-        <Stat label="Margin (est)"  value={pct(p.margin_estimate)}       tone="amber"   />
-        <Stat
-          label="Margin (actual)"
-          value={pct(p.margin_actual)}
-          tone={marginDelta < -0.05 ? "red"
-                : marginDelta < 0    ? "amber" : "emerald"}
-        />
-        <Stat
-          label="Delta vs estimate"
-          value={`${marginDelta >= 0 ? "+" : ""}${(marginDelta * 100).toFixed(1)} pp`}
-          tone={marginDelta < -0.05 ? "red" : marginDelta < 0 ? "amber" : "emerald"}
-        />
-      </div>
+      {/* Profit / Margin — hidden from purchasing */}
+      {showMoney && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <Stat label="PO value"      value={idr(p.po_value)}              tone="brand"   />
+          <Stat label="Margin (est)"  value={pct(p.margin_estimate)}       tone="amber"   />
+          <Stat
+            label="Margin (actual)"
+            value={pct(p.margin_actual)}
+            tone={marginDelta < -0.05 ? "red"
+                  : marginDelta < 0    ? "amber" : "emerald"}
+          />
+          <Stat
+            label="Delta vs estimate"
+            value={`${marginDelta >= 0 ? "+" : ""}${(marginDelta * 100).toFixed(1)} pp`}
+            tone={marginDelta < -0.05 ? "red" : marginDelta < 0 ? "amber" : "emerald"}
+          />
+        </div>
+      )}
 
       {/* Shipping timeline */}
       <ShippingTimeline projectId={p.id} />
@@ -486,7 +493,7 @@ export default function ProjectDetailPage() {
                 <th className="th">Type</th>
                 <th className="th">Due</th>
                 <th className="th">Status</th>
-                <th className="th text-right">Total</th>
+                {showMoney && <th className="th text-right">Total</th>}
               </tr>
             </thead>
             <tbody>
@@ -496,7 +503,9 @@ export default function ProjectDetailPage() {
                   <td className="td capitalize">{i.type}{i.termin_index ? ` #${i.termin_index}` : ""}</td>
                   <td className="td muted">{i.due_date ?? "—"}</td>
                   <td className="td"><span className="chip bg-ink-100 text-ink-700">{i.status}</span></td>
-                  <td className="td text-right font-medium tabular-nums">{idr(i.total)}</td>
+                  {showMoney && (
+                    <td className="td text-right font-medium tabular-nums">{idr(i.total)}</td>
+                  )}
                 </tr>
               ))}
             </tbody>
