@@ -9,15 +9,50 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import and_, exists, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import Role
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage
 from app.models.user import User
 
 router = APIRouter()
+
+
+# ─── Department / cross-department governance ─────────────────────────────────
+# A "department" is a role group. Cross-department chats (members spanning more
+# than one department) may only be started by a director or HR; the director can
+# chat unrestricted, and silently monitor any cross-department channel.
+
+_DEPARTMENTS = {
+    "sales": "sales", "finance": "finance", "hr": "hr",
+    "purchasing": "purchasing", "admin": "admin",
+    "manager": "management", "director": "management",
+    "customer": "external", "supplier": "external",
+}
+
+
+def _dept(role: str | None) -> str:
+    return _DEPARTMENTS.get(role or "", role or "unknown")
+
+
+def _is_cross_dept(roles) -> bool:
+    return len({_dept(r) for r in roles}) > 1
+
+
+def _may_start_cross_dept(role: str | None) -> bool:
+    return role in ("director", "hr")
+
+
+async def _channel_member_roles(db: AsyncSession, channel_id: UUID) -> list[str]:
+    rows = (await db.execute(
+        select(User.role)
+        .join(ChatChannelMember, ChatChannelMember.user_id == User.id)
+        .where(ChatChannelMember.channel_id == channel_id)
+    )).all()
+    return [r[0] for r in rows]
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -51,6 +86,14 @@ async def _ensure_member(db: AsyncSession, channel_id: UUID, user_id: UUID) -> C
     if not m:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this channel")
     return m
+
+
+async def _ensure_can_read(db: AsyncSession, channel_id: UUID, me: User) -> None:
+    """Membership is required to read a channel — except the director, who can
+    silently monitor any channel without joining (no read-receipt is written)."""
+    if Role(me.role) == Role.DIRECTOR:
+        return
+    await _ensure_member(db, channel_id, me.id)
 
 
 # ─── Lightweight contact list (everyone can read) ────────────────────────────
@@ -138,6 +181,48 @@ async def list_channels(db: AsyncSession = Depends(get_db),
     return out
 
 
+@router.get("/monitor")
+async def monitor_cross_dept(db: AsyncSession = Depends(get_db),
+                            me: User = Depends(get_current_user)):
+    """Director-only: every cross-department channel/DM, so the director can
+    silently oversee chats that span teams — including ones they're not in.
+    Reading a channel from here writes no read-receipt and adds no membership."""
+    if Role(me.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Director only")
+    channels = (await db.scalars(
+        select(ChatChannel).order_by(ChatChannel.created_at.desc())
+    )).all()
+    out: list[dict] = []
+    for ch in channels:
+        members = (await db.execute(
+            select(User).join(ChatChannelMember, ChatChannelMember.user_id == User.id)
+            .where(ChatChannelMember.channel_id == ch.id)
+        )).scalars().all()
+        if not _is_cross_dept([u.role for u in members]):
+            continue
+        creator = await db.get(User, ch.created_by) if ch.created_by else None
+        last_msg = await db.scalar(
+            select(ChatMessage).where(
+                ChatMessage.channel_id == ch.id, ChatMessage.deleted_at.is_(None)
+            ).order_by(ChatMessage.created_at.desc()).limit(1)
+        )
+        out.append({
+            "id": str(ch.id),
+            "kind": ch.kind,
+            "title": ch.name or ", ".join(u.full_name for u in members),
+            "created_by_name": creator.full_name if creator else None,
+            "created_by_role": creator.role if creator else None,
+            "members": [
+                {"id": str(u.id), "full_name": u.full_name, "role": u.role}
+                for u in members
+            ],
+            "last_message": {
+                "body": last_msg.body, "at": last_msg.created_at,
+            } if last_msg else None,
+        })
+    return out
+
+
 @router.post("/dm/{user_id}")
 async def get_or_create_dm(
     user_id: UUID,
@@ -150,6 +235,13 @@ async def get_or_create_dm(
     other = await db.get(User, user_id)
     if not other or not other.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    # Cross-department DMs may only be started by a director or HR.
+    if _is_cross_dept([me.role, other.role]) and not _may_start_cross_dept(me.role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Cross-department chats can only be started by a director.",
+        )
 
     # Find a DM channel where both are members
     a_member = ChatChannelMember.__table__.alias("a")
@@ -188,7 +280,7 @@ async def list_messages(
     me: User = Depends(get_current_user),
     limit: int = Query(100, ge=1, le=500),
 ):
-    await _ensure_member(db, channel_id, me.id)
+    await _ensure_can_read(db, channel_id, me)
     rows = (await db.scalars(
         select(ChatMessage)
         .where(ChatMessage.channel_id == channel_id)
@@ -344,15 +436,26 @@ async def create_channel(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Channel name required")
-    ch = ChatChannel(name=name, kind="channel", created_by=me.id)
-    db.add(ch)
-    await db.flush()
-    # Always add the creator
+
+    # Resolve the active members up front so we can check departments.
     member_set = set(payload.member_ids) | {me.id}
+    members: list[User] = []
     for uid in member_set:
         u = await db.get(User, uid)
         if u and u.is_active:
-            db.add(ChatChannelMember(channel_id=ch.id, user_id=uid))
+            members.append(u)
+    roles = [u.role for u in members]
+    if _is_cross_dept(roles) and not _may_start_cross_dept(me.role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Cross-department channels can only be started by a director.",
+        )
+
+    ch = ChatChannel(name=name, kind="channel", created_by=me.id)
+    db.add(ch)
+    await db.flush()
+    for u in members:
+        db.add(ChatChannelMember(channel_id=ch.id, user_id=u.id))
     await db.flush()
     return {"id": str(ch.id), "name": ch.name, "kind": "channel"}
 
@@ -363,7 +466,7 @@ async def list_members(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    await _ensure_member(db, channel_id, me.id)
+    await _ensure_can_read(db, channel_id, me)
     rows = (await db.execute(
         select(User)
         .join(ChatChannelMember, ChatChannelMember.user_id == User.id)
@@ -400,6 +503,17 @@ async def add_member(
     )
     if existing:
         return {"ok": True, "already_member": True}
+    # Adding someone from another department turns this into a cross-department
+    # channel — same gate as creating one.
+    new_user = await db.get(User, payload.user_id)
+    if new_user:
+        roles = await _channel_member_roles(db, channel_id)
+        roles.append(new_user.role)
+        if _is_cross_dept(roles) and not _may_start_cross_dept(me.role):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Only a director can add a member from another department.",
+            )
     db.add(ChatChannelMember(channel_id=channel_id, user_id=payload.user_id))
     await db.flush()
     return {"ok": True}

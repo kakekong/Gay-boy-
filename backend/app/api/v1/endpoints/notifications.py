@@ -23,7 +23,7 @@ from app.core.stage_playbook import playbook_for
 from app.core.stage_tasks import parse_stage_task_kind
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.attendance import Attendance
-from app.models.chat import ChatChannelMember, ChatMessage
+from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage
 from app.models.crm import Activity, Customer, Reminder
 from app.models.finance import Invoice
 from app.models.operation import Drawing, Project
@@ -275,6 +275,35 @@ async def list_notifications(
                 "link": f"/projects/{p.id}",
                 "at": now,
             })
+
+    # 6c. Director: HR-started cross-department chats (silent oversight).
+    if role == Role.DIRECTOR:
+        hr_ids = (await db.scalars(
+            select(User.id).where(User.role == Role.HR.value)
+        )).all()
+        if hr_ids:
+            recent_chans = (await db.scalars(
+                select(ChatChannel).where(
+                    ChatChannel.created_by.in_(hr_ids),
+                    ChatChannel.created_at >= now - timedelta(days=7),
+                ).order_by(ChatChannel.created_at.desc()).limit(30)
+            )).all()
+            for ch in recent_chans:
+                roles = (await db.execute(
+                    select(User.role)
+                    .join(ChatChannelMember, ChatChannelMember.user_id == User.id)
+                    .where(ChatChannelMember.channel_id == ch.id)
+                )).all()
+                if len({r[0] for r in roles}) > 1:  # cross-department
+                    items.append({
+                        "id": f"hr-chat:{ch.id}",
+                        "kind": "chat_oversight",
+                        "severity": "low",
+                        "title": "HR started a cross-department chat",
+                        "body": ch.name or "Direct message across teams",
+                        "link": "/chat",
+                        "at": ch.created_at,
+                    })
 
     # 5. Chat unread (single roll-up row if any)
     members = (await db.scalars(

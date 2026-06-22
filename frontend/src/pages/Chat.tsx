@@ -63,6 +63,14 @@ export default function ChatPage() {
   const [editDraft, setEditDraft] = useState("");
   const [search, setSearch] = useState("");
   const [contactSearch, setContactSearch] = useState("");
+  const isDirector = me?.role === "director";
+  const [monitorMode, setMonitorMode] = useState(false);
+
+  const monitor = useQuery({
+    queryKey: ["chat-monitor"],
+    queryFn: () => api.get("/chat/monitor").then((r) => r.data as Channel[]),
+    enabled: isDirector && monitorMode,
+  });
   const threadRef = useRef<HTMLDivElement>(null);
 
   const channels = useQuery({
@@ -151,6 +159,7 @@ export default function ChatPage() {
       setActive(data.id);
       qc.invalidateQueries({ queryKey: ["chat-channels"] });
     },
+    onError: showErr,
   });
 
   const newDm = useMutation({
@@ -161,16 +170,19 @@ export default function ChatPage() {
       setActive(data.id);
       qc.invalidateQueries({ queryKey: ["chat-channels"] });
     },
+    onError: showErr,
   });
 
   const filteredChannels = useMemo(() => {
-    const arr = channels.data ?? [];
+    const arr = (monitorMode ? monitor.data : channels.data) ?? [];
     if (!search) return arr;
     const s = search.toLowerCase();
     return arr.filter((c) => c.title.toLowerCase().includes(s));
-  }, [channels.data, search]);
+  }, [channels.data, monitor.data, monitorMode, search]);
 
-  const activeChannel = (channels.data ?? []).find((c) => c.id === active);
+  const activeChannel =
+    (channels.data ?? []).find((c) => c.id === active)
+    ?? (monitor.data ?? []).find((c) => c.id === active);
 
   const filteredContacts = useMemo(() => {
     const arr = contacts.data ?? [];
@@ -213,6 +225,20 @@ export default function ChatPage() {
             >
               <Plus size={14} /> New chat
             </button>
+            {isDirector && (
+              <button
+                onClick={() => { setMonitorMode((v) => !v); setActive(null); }}
+                className={clsx(
+                  "w-full justify-center text-xs rounded-lg px-3 py-1.5 border",
+                  monitorMode
+                    ? "bg-amber-50 border-amber-200 text-amber-800"
+                    : "border-ink-200 text-ink-600 hover:bg-ink-50",
+                )}
+                title="Silently view chats that span departments"
+              >
+                {monitorMode ? "Viewing cross-dept chats" : "Monitor cross-dept"}
+              </button>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {filteredChannels.length === 0 ? (
