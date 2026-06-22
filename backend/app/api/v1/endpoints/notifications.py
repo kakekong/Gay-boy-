@@ -10,7 +10,7 @@ Pulls live signals from across the system:
 Computed at request time — no separate notifications table.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -22,12 +22,17 @@ from app.core.permissions import Role
 from app.core.stage_playbook import playbook_for
 from app.core.stage_tasks import parse_stage_task_kind
 from app.models.approval import ApprovalRequest, ApprovalStatus
+from app.models.attendance import Attendance
 from app.models.chat import ChatChannelMember, ChatMessage
 from app.models.crm import Activity, Customer, Reminder
 from app.models.finance import Invoice
-from app.models.operation import Drawing
+from app.models.operation import Drawing, Project
 from app.models.quotation import Quotation
 from app.models.user import User
+
+# Office timezone for "late" attendance — the business runs on WIB (UTC+7).
+_WIB = timezone(timedelta(hours=7))
+_LATE_CUTOFF = time(9, 15)
 
 router = APIRouter()
 
@@ -201,6 +206,75 @@ async def list_notifications(
             "link": "/projects",
             "at": d.created_at,
         })
+
+    # 6. People oversight (manager/director): attendance + missed deadlines
+    if role in (Role.MANAGER, Role.DIRECTOR):
+        # 6a. Attendance today — who's missing or late (weekdays only)
+        if today.weekday() < 5:
+            internal = (await db.scalars(
+                select(User).where(
+                    User.is_active.is_(True),
+                    User.role.notin_(["customer", "supplier"]),
+                )
+            )).all()
+            today_att = {
+                a.user_id: a for a in (await db.scalars(
+                    select(Attendance).where(Attendance.date == today)
+                )).all()
+            }
+            missing = 0
+            late = 0
+            for u in internal:
+                a = today_att.get(u.id)
+                if a is None or a.clock_in is None:
+                    # An explicit leave/sick/holiday/wfh status isn't "missing".
+                    if a and a.status in ("leave", "sick", "holiday", "wfh"):
+                        continue
+                    missing += 1
+                elif a.clock_in.astimezone(_WIB).time() > _LATE_CUTOFF:
+                    late += 1
+            if missing:
+                items.append({
+                    "id": "attendance-missing",
+                    "kind": "attendance",
+                    "severity": "medium",
+                    "title": f"{missing} employee(s) not clocked in today",
+                    "body": "No attendance recorded yet for today",
+                    "link": "/attendance",
+                    "at": now,
+                })
+            if late:
+                items.append({
+                    "id": "attendance-late",
+                    "kind": "attendance",
+                    "severity": "low",
+                    "title": f"{late} employee(s) clocked in late today",
+                    "body": f"After {_LATE_CUTOFF.strftime('%H:%M')} WIB",
+                    "link": "/attendance",
+                    "at": now,
+                })
+
+        # 6b. Projects past their promised delivery without an actual delivery
+        overdue_proj = (await db.scalars(
+            select(Project).where(
+                Project.target_delivery.is_not(None),
+                Project.target_delivery < today,
+                Project.actual_delivery.is_(None),
+                Project.status.notin_(["delivered", "invoiced", "paid", "closed"]),
+            ).order_by(Project.target_delivery.asc()).limit(15)
+        )).all()
+        for p in overdue_proj:
+            days_over = (today - p.target_delivery).days
+            st = p.status.replace("_", " ")
+            items.append({
+                "id": f"deadline:{p.id}",
+                "kind": "missed_deadline",
+                "severity": "high",
+                "title": f"Missed deadline: {p.code}",
+                "body": f"Target delivery {days_over} day(s) ago, still {st}",
+                "link": f"/projects/{p.id}",
+                "at": now,
+            })
 
     # 5. Chat unread (single roll-up row if any)
     members = (await db.scalars(

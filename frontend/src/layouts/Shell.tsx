@@ -75,7 +75,7 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/salary", label: "Salary", label_id: "Gaji", icon: Wallet,
         roles: ["director"] },
       { to: "/attendance", label: "Attendance", label_id: "Absensi", icon: Clock,
-        roles: ["sales", "admin", "hr", "manager", "director"] },
+        roles: ["sales", "admin", "hr", "finance", "purchasing", "manager", "director"] },
       { to: "/sales-targets", label: "Sales Targets", label_id: "Target penjualan", icon: Target },
       { to: "/admin/users", label: "Users", label_id: "Pengguna", icon: UserCog,
         roles: ["director"] },
@@ -126,6 +126,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/finance/payment-verification",
     "/finance/estimated",
     "/finance",
+    "/attendance",
     "/chat",
     "/role-guide",
   ],
@@ -136,6 +137,15 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/inventory",
     "/calendar",
     "/projects",
+    "/attendance",
+    "/chat",
+    "/role-guide",
+  ],
+  // HR is scoped tightly: people + attendance + chat only. Crucially this
+  // keeps HR out of CRM, finance, quotations, etc.
+  hr: [
+    "/employees",
+    "/attendance",
     "/chat",
     "/role-guide",
   ],

@@ -152,6 +152,63 @@ async def list_attendance(
     return [await _serialize(db, a) for a in rows]
 
 
+@router.get("/summary-all")
+async def summary_all(
+    period: str = Query(..., description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_hr_or_director),
+):
+    """Per-employee attendance roll-up for a month — powers the Attendance
+    page's summary section. One row per active internal employee."""
+    try:
+        y, m = period.split("-")
+        start = date_t(int(y), int(m), 1)
+        end = date_t(int(y) + (1 if m == "12" else 0),
+                     1 if m == "12" else int(m) + 1, 1)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "period must be YYYY-MM")
+
+    workdays = 0
+    d = start
+    while d < end:
+        if d.weekday() < 5:
+            workdays += 1
+        d += timedelta(days=1)
+
+    users = (await db.scalars(
+        select(User).where(
+            User.is_active.is_(True),
+            User.role.notin_(["customer", "supplier"]),
+        ).order_by(User.full_name.asc())
+    )).all()
+    rows = (await db.scalars(
+        select(Attendance).where(Attendance.date >= start, Attendance.date < end)
+    )).all()
+    by_user: dict = {}
+    for a in rows:
+        bucket = by_user.setdefault(a.user_id, {"counts": {}, "hours": 0.0})
+        bucket["counts"][a.status] = bucket["counts"].get(a.status, 0) + 1
+        bucket["hours"] += float(a.hours or 0)
+
+    out = []
+    for u in users:
+        b = by_user.get(u.id, {"counts": {}, "hours": 0.0})
+        c = b["counts"]
+        present_like = c.get("present", 0) + c.get("wfh", 0)
+        out.append({
+            "user_id": str(u.id),
+            "user_name": u.full_name,
+            "role": u.role,
+            "present_like_days": present_like,
+            "absent_days": c.get("absent", 0),
+            "half_days": c.get("half_day", 0),
+            "leave_days": c.get("leave", 0) + c.get("sick", 0),
+            "total_hours": round(b["hours"], 2),
+            "counts": c,
+        })
+    return {"period": period, "workdays_in_month": workdays, "rows": out}
+
+
 @router.post("/manual", status_code=201)
 async def manual_entry(
     payload: ManualIn,

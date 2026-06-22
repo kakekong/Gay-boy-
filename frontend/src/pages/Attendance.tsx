@@ -58,6 +58,13 @@ export default function AttendancePage() {
     enabled: !!canManage,
   });
 
+  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const summary = useQuery({
+    queryKey: ["attendance-summary-all", period],
+    queryFn: () => api.get("/attendance/summary-all", { params: { period } }).then((r) => r.data),
+    enabled: !!canManage,
+  });
+
   const clockIn = useMutation({
     mutationFn: () => api.post("/attendance/clock-in"),
     onSuccess: () => {
@@ -222,6 +229,59 @@ export default function AttendancePage() {
           </tbody>
         </table>
       </div>
+
+      {/* HR / Director: monthly summary per employee */}
+      {canManage && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-semibold">Attendance summary</div>
+              <div className="text-xs muted">
+                Per-employee roll-up · {summary.data?.workdays_in_month ?? "—"} workdays in month
+              </div>
+            </div>
+            <input
+              type="month"
+              className="input w-auto"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">Employee</th>
+                  <th className="th">Role</th>
+                  <th className="th text-right">Present</th>
+                  <th className="th text-right">Absent</th>
+                  <th className="th text-right">Half day</th>
+                  <th className="th text-right">Leave/Sick</th>
+                  <th className="th text-right">Hours</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(summary.data?.rows ?? []).map((r: any) => (
+                  <tr key={r.user_id} className="border-t border-ink-100">
+                    <td className="td font-medium">{r.user_name}</td>
+                    <td className="td muted capitalize">{r.role}</td>
+                    <td className="td text-right tabular-nums text-emerald-700">{r.present_like_days}</td>
+                    <td className="td text-right tabular-nums text-red-700">{r.absent_days}</td>
+                    <td className="td text-right tabular-nums">{r.half_days}</td>
+                    <td className="td text-right tabular-nums">{r.leave_days}</td>
+                    <td className="td text-right tabular-nums">{Number(r.total_hours).toFixed(1)}</td>
+                  </tr>
+                ))}
+                {!summary.data?.rows?.length && (
+                  <tr><td colSpan={7} className="td text-center muted py-8">
+                    {summary.isLoading ? "Loading…" : "No data for this month."}
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* HR / Director: everyone */}
       {canManage && (
