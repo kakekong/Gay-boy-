@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { downloadFile } from "@/lib/download";
 import { AccountModal, type AccountRow } from "@/components/forms/AccountModal";
 
 const SUSPEND_OPTS = [
@@ -210,6 +211,16 @@ export default function ChartOfAccountsPage() {
 
         <button className="btn-ghost" onClick={exportCsv} title="Export CSV">
           <Download size={15} />
+        </button>
+        <button className="btn-ghost text-xs"
+          onClick={() => downloadFile("/accounts/export.xlsx", "chart-of-accounts.xlsx")}
+          title="Export Excel">
+          Excel
+        </button>
+        <button className="btn-ghost text-xs"
+          onClick={() => downloadFile("/accounts/export.pdf", "chart-of-accounts.pdf")}
+          title="Export PDF">
+          PDF
         </button>
         <button className="btn-ghost" onClick={share} title="Copy account list to clipboard">
           <Share2 size={15} />

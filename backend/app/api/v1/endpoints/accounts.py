@@ -4,6 +4,7 @@ import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,6 +108,40 @@ async def list_accounts(
         stmt = stmt.where((Account.account_no.ilike(like)) | (Account.name.ilike(like)))
     rows = (await db.scalars(stmt)).all()
     return [AccountOut.model_validate(r) for r in rows]
+
+
+def _idr(n) -> str:
+    return "Rp " + f"{int(round(float(n or 0))):,}".replace(",", ".")
+
+
+async def _coa_sections(db: AsyncSession) -> list[dict]:
+    rows = (await db.scalars(select(Account).order_by(Account.account_no.asc()))).all()
+    return [{
+        "name": "Chart of Accounts",
+        "headers": ["Account No", "Name", "Type", "Balance"],
+        "rows": [[r.account_no, r.name, r.account_type, _idr(r.balance)] for r in rows],
+    }]
+
+
+@router.get("/export.pdf")
+async def export_coa_pdf(db: AsyncSession = Depends(get_db),
+                         _user: User = Depends(_admin_or_director)):
+    from app.services.tabular_export import render_pdf
+    data = render_pdf("Chart of Accounts", await _coa_sections(db))
+    return Response(content=data, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="chart-of-accounts.pdf"'})
+
+
+@router.get("/export.xlsx")
+async def export_coa_xlsx(db: AsyncSession = Depends(get_db),
+                          _user: User = Depends(_admin_or_director)):
+    from app.services.tabular_export import render_xlsx
+    data = render_xlsx("Chart of Accounts", await _coa_sections(db))
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="chart-of-accounts.xlsx"'},
+    )
 
 
 @router.get("/{account_id}", response_model=AccountOut)
