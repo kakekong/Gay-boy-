@@ -28,6 +28,18 @@ ALLOWED_OWNERS = {
 MAX_FILE_SIZE_MB = 20
 
 
+def _attachment_visible_to(owner_type: str, role: Role) -> bool:
+    """Who may list/open files of a given owner type.
+
+    Supplier-side files (supplier POs and the documents suppliers upload) are
+    commercially sensitive — restricted to director and purchasing. Everything
+    else stays visible to any authenticated internal user.
+    """
+    if owner_type == "supplier_po":
+        return role in (Role.DIRECTOR, Role.PURCHASING)
+    return True
+
+
 def _safe_filename(name: str) -> str:
     name = name.strip().replace("\\", "/").split("/")[-1]
     name = re.sub(r"[^A-Za-z0-9._\- ]+", "_", name)[:200]
@@ -66,10 +78,12 @@ async def list_attachments(
     owner_type: str = Query(...),
     owner_id: UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    _me: User = Depends(get_current_user),
+    me: User = Depends(get_current_user),
 ):
     if owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
+    if not _attachment_visible_to(owner_type, Role(me.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view these files")
     rows = (await db.scalars(
         select(Attachment)
         .where(Attachment.owner_type == owner_type, Attachment.owner_id == owner_id)
@@ -153,11 +167,13 @@ async def download_attachment(
     attachment_id: UUID,
     inline: bool = Query(False, description="Render in browser instead of forcing a download"),
     db: AsyncSession = Depends(get_db),
-    _me: User = Depends(get_current_user),
+    me: User = Depends(get_current_user),
 ):
     a = await db.get(Attachment, attachment_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not _attachment_visible_to(a.owner_type, Role(me.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
     if not os.path.exists(a.storage_path):
         raise HTTPException(status.HTTP_410_GONE, "File missing from storage")
     media_type = a.content_type or "application/octet-stream"
