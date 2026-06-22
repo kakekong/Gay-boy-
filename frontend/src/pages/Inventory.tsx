@@ -273,9 +273,33 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
   });
   const [rows, setRows] = useState<Row[]>([blank()]);
   const [err, setErr] = useState<string | null>(null);
+  const [importWarn, setImportWarn] = useState<string[]>([]);
 
   const update = (i: number, k: keyof Row, v: string) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+
+  const importFile = useMutation({
+    mutationFn: (f: File) => {
+      const fd = new FormData();
+      fd.append("file", f);
+      return api.post("/inventory/parse-file", fd).then((r) => r.data);
+    },
+    onSuccess: (data: any) => {
+      const parsed: Row[] = (data.items ?? []).map((it: any) => ({
+        sku: "", name: it.name ?? "", category: it.category ?? "", uom: it.uom ?? "pcs",
+        unit_cost: String(it.unit_cost ?? ""), current_stock: String(it.current_stock ?? ""),
+        reorder_point: "", reorder_qty: "",
+      }));
+      setImportWarn(data.warnings ?? []);
+      // Replace empty starter rows; otherwise append the imported lines.
+      const hasContent = rows.some((r) => r.sku.trim() || r.name.trim());
+      setRows(parsed.length ? (hasContent ? [...rows, ...parsed] : parsed) : rows);
+      if (!parsed.length) setErr("No rows could be read from that file — add them manually.");
+    },
+    onError: (e: any) =>
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail ?? "Could not read that file."),
+  });
 
   const save = useMutation({
     mutationFn: () => api.post("/inventory/bulk", {
@@ -355,13 +379,32 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
           </tbody>
         </table>
       </div>
-      <button type="button" className="btn-ghost text-xs" onClick={() => setRows([...rows, blank()])}>
-        <Plus size={13} /> Add row
-      </button>
-
-      <div className="rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-xs text-ink-600">
-        Importing from a PDF, Excel or Word file is coming next — for now, enter rows manually or paste them in.
+      <div className="flex items-center gap-3 flex-wrap">
+        <button type="button" className="btn-ghost text-xs" onClick={() => setRows([...rows, blank()])}>
+          <Plus size={13} /> Add row
+        </button>
+        <label className="btn-ghost text-xs cursor-pointer">
+          {importFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+          Import from file
+          <input
+            type="file"
+            className="hidden"
+            accept=".xlsx,.csv,.pdf,.doc,.docx,application/pdf,text/csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) { setErr(null); importFile.mutate(f); }
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <span className="text-[11px] muted">Excel, CSV, PDF or Word — review before submitting.</span>
       </div>
+
+      {importWarn.length > 0 && (
+        <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-800 space-y-0.5">
+          {importWarn.map((w, i) => <div key={i}>{w}</div>)}
+        </div>
+      )}
 
       {err && (
         <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">{err}</div>

@@ -9,7 +9,7 @@ that purchasing handles via the existing flow.
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -217,6 +217,40 @@ async def create_item(payload: ItemIn,
     db.add(r)
     await db.flush()
     return {"id": str(r.id), "ok": True}
+
+
+@router.post("/parse-file")
+async def parse_file(file: UploadFile,
+                     _u: User = Depends(_can_add)):
+    """Parse an uploaded Excel/CSV/PDF/Word file into draft inventory rows so
+    the add form can be pre-filled. Nothing is persisted — the caller reviews
+    and edits before submitting (which still goes through director approval)."""
+    from app.services import quote_import
+
+    MAX_BYTES = 5 * 1024 * 1024
+    blob = await file.read()
+    if len(blob) > MAX_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large (max 5 MB)")
+    parsed = await quote_import.parse_upload(
+        blob, filename=file.filename, content_type=file.content_type
+    )
+    # Map quote-style line items onto the inventory shape. SKU is left blank
+    # for the user to fill — source docs rarely carry our internal SKUs.
+    items = [
+        {
+            "sku": "",
+            "name": it.get("description") or "",
+            "category": "",
+            "uom": it.get("uom") or "pcs",
+            "unit_cost": float(it.get("unit_price") or it.get("cost_estimate") or 0),
+            "current_stock": float(it.get("qty") or 0),
+            "reorder_point": 0,
+            "reorder_qty": 0,
+        }
+        for it in (parsed.get("items") or [])
+        if (it.get("description") or "").strip()
+    ]
+    return {"items": items, "warnings": parsed.get("warnings", []), "source": parsed.get("source")}
 
 
 @router.post("/bulk", status_code=201)
