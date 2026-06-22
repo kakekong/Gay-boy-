@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileText, Send, CheckCircle2, XCircle, Trophy, Frown,
   ArrowLeft, Building2, Calendar, Receipt, ShieldCheck, ShieldAlert, Crown, Loader2,
-  MessageCircle, Plus, Bell, CheckCircle, Link2, BookOpen, Undo2, Save,
+  MessageCircle, Plus, Bell, CheckCircle, Link2, BookOpen, Undo2, Save, Pencil,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -14,6 +14,7 @@ import { LinkedAccountsPanel } from "@/components/quotation/LinkedAccountsPanel"
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
+import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { useAuthStore } from "@/store/auth";
 
 const STATUS_CHIP: Record<string, string> = {
@@ -82,6 +83,7 @@ export default function QuotationDetailPage() {
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lostOpen, setLostOpen] = useState(false);
   const [lostReason, setLostReason] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["quotation", id] });
@@ -153,6 +155,8 @@ export default function QuotationDetailPage() {
   const canSubmit  = isOwner && Q.status === "draft";
   const canDecide  = canApprove && Q.status === "pending_approval";
   const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent");
+  const canEdit = (isOwner || user?.role === "director") &&
+    (Q.status === "draft" || Q.status === "rejected");
 
   return (
     <div className="space-y-6">
@@ -204,6 +208,11 @@ export default function QuotationDetailPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {canEdit && (
+              <button className="btn-ghost" onClick={() => setEditOpen(true)}>
+                <Pencil size={15} /> Edit
+              </button>
+            )}
             {canSubmit && (
               <button className="btn-primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
                 <Send size={15} /> Submit
@@ -487,6 +496,16 @@ export default function QuotationDetailPage() {
           customerId={Q.customer_id}
           onClose={() => setOpenFollowup(false)}
         />
+      </Modal>
+
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={`Edit ${Q.number}`}
+        subtitle="Adjust the details or line items — re-import from a file if you like. Changes are saved as a draft."
+        size="xl"
+      >
+        <NewQuotationForm quote={Q} onClose={() => setEditOpen(false)} />
       </Modal>
 
       <Modal

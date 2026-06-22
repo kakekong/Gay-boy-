@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, ShieldCheck, ShieldAlert, Crown } from "lucide-react";
+import {
+  Loader2, Plus, Trash2, ShieldCheck, ShieldAlert, Crown, Upload, FileSpreadsheet,
+} from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import type { Customer } from "@/types";
@@ -8,6 +10,9 @@ import type { Customer } from "@/types";
 interface Props {
   onClose: () => void;
   preselectCustomerId?: string;
+  // When provided, the form edits this existing quotation (PATCH) instead of
+  // creating a new one. Pass the full quotation object (with items).
+  quote?: any;
 }
 
 interface LineItem {
@@ -26,27 +31,39 @@ function capLines(text: string, max: number): string {
   return lines.length <= max ? text : lines.slice(0, max).join("\n");
 }
 
-export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
+export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props) {
   const qc = useQueryClient();
+  const editing = !!quote;
 
   // State first — referenced by the queries below, so must be declared
   // up front. Previously these lived further down and the contacts query
   // hit them before initialization, which only blew up after Vite
   // minified customerId → "m" ("Cannot access 'm' before initialization").
-  const [customerId, setCustomerId] = useState(preselectCustomerId ?? "");
-  const [contactId, setContactId] = useState<string>("");  // "" = primary PIC on customer record
-  const [variant, setVariant] = useState<"short" | "detailed">("detailed");
+  const [customerId, setCustomerId] = useState(quote?.customer_id ?? preselectCustomerId ?? "");
+  const [contactId, setContactId] = useState<string>(quote?.contact_id ?? "");  // "" = primary PIC
+  const [variant, setVariant] = useState<"short" | "detailed">(quote?.variant ?? "detailed");
   // Short variant caps each item description at 5 lines, detailed at 20.
   const maxLines = variant === "short" ? 5 : 20;
-  const [discountPct, setDiscountPct] = useState(0);
-  const [taxPct, setTaxPct] = useState(11);
-  const [validUntil, setValidUntil] = useState("");
-  const [number, setNumber] = useState("");  // blank = auto company number
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<LineItem[]>([
-    { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" },
-  ]);
+  const [discountPct, setDiscountPct] = useState(quote?.discount_pct ?? 0);
+  const [taxPct, setTaxPct] = useState(quote?.tax_pct ?? 11);
+  const [validUntil, setValidUntil] = useState(quote?.valid_until ?? "");
+  const [number, setNumber] = useState(editing ? (quote?.number ?? "") : "");  // blank = auto
+  const [notes, setNotes] = useState(quote?.notes ?? "");
+  const [items, setItems] = useState<LineItem[]>(
+    quote?.items?.length
+      ? quote.items.map((it: any) => ({
+          description: it.description ?? "",
+          qty: Number(it.qty) || 0,
+          uom: it.uom || "pcs",
+          unit_price: Number(it.unit_price) || 0,
+          source: (it.source as "product" | "custom") ?? "custom",
+        }))
+      : [{ description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" }]
+  );
   const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const customers = useQuery({
     queryKey: ["customers"],
@@ -88,15 +105,60 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
   }[tier];
 
   const create = useMutation({
-    mutationFn: (body: any) => api.post("/quotations", body).then((r) => r.data),
+    mutationFn: (body: any) =>
+      editing
+        ? api.patch(`/quotations/${quote.id}`, body).then((r) => r.data)
+        : api.post("/quotations", body).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["quotations"] });
+      if (editing) qc.invalidateQueries({ queryKey: ["quotation", quote.id] });
       onClose();
     },
     onError: (e: any) => {
-      setErr(e?.response?.data?.errors?.[0]?.message ?? "Failed to create quotation");
+      setErr(
+        e?.response?.data?.errors?.[0]?.message ??
+        (editing ? "Failed to save changes" : "Failed to create quotation")
+      );
     },
   });
+
+  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImporting(true);
+    setImportMsg(null);
+    setErr(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const { data } = await api.post("/quotations/parse-upload", fd);
+      const parsed: LineItem[] = (data.items ?? []).map((it: any) => ({
+        description: capLines(String(it.description ?? ""), maxLines),
+        qty: Number(it.qty) || 1,
+        uom: it.uom || "pcs",
+        unit_price: Number(it.unit_price) || 0,
+        source: "custom" as const,
+      }));
+      if (parsed.length) {
+        // If the user hasn't typed anything yet, replace the starter line;
+        // otherwise append the imported lines to what's there.
+        setItems((cur) => {
+          const hasContent = cur.some((c) => c.description.trim() || c.unit_price);
+          return hasContent ? [...cur, ...parsed] : parsed;
+        });
+      }
+      const warns: string[] = data.warnings ?? [];
+      setImportMsg(
+        `${parsed.length} line${parsed.length === 1 ? "" : "s"} imported` +
+        (warns.length ? ` · ${warns.join(" ")}` : ". Review and edit below.")
+      );
+    } catch (e: any) {
+      setErr(e?.response?.data?.errors?.[0]?.message ?? "Couldn't read that file.");
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -136,6 +198,8 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label="Customer *">
           <select className="input" value={customerId} required
+            disabled={editing}
+            title={editing ? "Customer can't be changed on an existing quotation" : undefined}
             onChange={(e) => {
               setCustomerId(e.target.value);
               setContactId("");  // reset PIC when switching customer
@@ -193,13 +257,40 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
 
       {/* Line items */}
       <div className="card p-3">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <div className="font-semibold text-sm">Line items</div>
-          <button type="button" className="btn-ghost"
-            onClick={() => setItems((cur) => [...cur, { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" }])}>
-            <Plus size={14} /> Add line
-          </button>
+          <div className="flex items-center gap-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.csv,.pdf,image/*,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={onFilePicked}
+            />
+            <button
+              type="button"
+              className="btn-ghost"
+              title="Import line items from an Excel (.xlsx) or CSV file"
+              onClick={() => fileRef.current?.click()}
+              disabled={importing}
+            >
+              {importing
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Upload size={14} />}
+              {importing ? "Reading…" : "Import Excel/CSV"}
+            </button>
+            <button type="button" className="btn-ghost"
+              onClick={() => setItems((cur) => [...cur, { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" }])}>
+              <Plus size={14} /> Add line
+            </button>
+          </div>
         </div>
+        {importMsg && (
+          <div className="mb-2 rounded-lg bg-brand-50 border border-brand-100 px-3 py-2 text-xs text-brand-800 flex items-start gap-2">
+            <FileSpreadsheet size={13} className="mt-0.5 shrink-0" />
+            <span>{importMsg}</span>
+          </div>
+        )}
         <div className="space-y-2">
           {items.map((it, i) => (
             <div key={i} className="grid grid-cols-12 gap-2 items-end">
@@ -295,7 +386,9 @@ export function NewQuotationForm({ onClose, preselectCustomerId }: Props) {
         <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
         <button type="submit" className="btn-primary" disabled={create.isPending}>
           {create.isPending && <Loader2 size={14} className="animate-spin" />}
-          {create.isPending ? "Creating…" : "Create draft"}
+          {create.isPending
+            ? (editing ? "Saving…" : "Creating…")
+            : (editing ? "Save changes" : "Create draft")}
         </button>
       </div>
     </form>

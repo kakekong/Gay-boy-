@@ -80,3 +80,16 @@ class QuotationAccountLinks(BaseModel):
 
 class QuotationDecide(BaseModel):
     notes: str | None = None
+
+
+class QuotationUpdate(BaseModel):
+    """Edit a draft/rejected quotation. All fields optional; when `items` is
+    provided it replaces the existing line items wholesale."""
+    contact_id: UUID | None = None
+    variant: str | None = Field(default=None, pattern="^(short|detailed)$")
+    items: list[QuotationItemIn] | None = None
+    discount_pct: float | None = None
+    tax_pct: float | None = None
+    valid_until: date | None = None
+    notes: str | None = None
+    number: str | None = None

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -27,8 +27,9 @@ from app.schemas.quotation import (
     QuotationCreate,
     QuotationDecide,
     QuotationOut,
+    QuotationUpdate,
 )
-from app.services import ledger
+from app.services import ledger, quote_import
 from app.services.numbering import next_quotation_number
 
 router = APIRouter()
@@ -93,6 +94,91 @@ async def create_quotation(
     db.add_all(items)
     _recalc(q, items)
     await db.flush()
+    return await _load(q.id, db)
+
+
+@router.post("/parse-upload")
+async def parse_upload(
+    file: UploadFile,
+    _user: User = Depends(get_current_user),
+):
+    """Parse an uploaded Excel/CSV (or PDF/image) into draft line items so the
+    new-quotation form can be auto-filled. Nothing is persisted — the caller
+    reviews and edits before creating the quotation."""
+    MAX_BYTES = 5 * 1024 * 1024
+    blob = await file.read()
+    if len(blob) > MAX_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large (max 5 MB)")
+    return await quote_import.parse_upload(
+        blob, filename=file.filename, content_type=file.content_type
+    )
+
+
+@router.patch("/{q_id}", response_model=QuotationOut)
+async def update_quotation(
+    q_id: UUID,
+    payload: QuotationUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Edit a quotation after creation. Only the owner (or director) may edit,
+    and only while it's still a draft or was rejected — once it's submitted /
+    approved / won the numbers are locked."""
+    q = await _load(q_id, db)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    if q.status not in ("draft", "rejected"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation can't be edited. Only drafts "
+            "(or rejected ones) are editable.",
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+
+    # A custom number must stay unique.
+    if data.get("number"):
+        new_number = data["number"].strip()
+        if new_number and new_number != q.number:
+            clash = await db.scalar(
+                select(func.count(Quotation.id)).where(
+                    Quotation.number == new_number, Quotation.id != q.id
+                )
+            )
+            if clash:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"Quotation number '{new_number}' already exists.",
+                )
+            q.number = new_number
+    data.pop("number", None)
+
+    new_items = data.pop("items", None)
+
+    for field in ("contact_id", "variant", "discount_pct", "tax_pct", "valid_until", "notes"):
+        if field in data:
+            setattr(q, field, data[field])
+
+    if new_items is not None:
+        # Replace the line items wholesale.
+        for it in list(q.items):
+            await db.delete(it)
+        await db.flush()
+        items = [
+            QuotationItem(quotation_id=q.id, **i.model_dump())
+            for i in new_items
+        ]
+        db.add_all(items)
+    else:
+        items = list(q.items)
+
+    q.updated_by = user.id
+    _recalc(q, items)
+    await db.flush()
+    await audit_record(db, actor=user, action="update", entity="quotation",
+                       entity_id=q.id)
     return await _load(q.id, db)
 
 
