@@ -29,15 +29,23 @@ MAX_FILE_SIZE_MB = 20
 
 
 def _attachment_visible_to(owner_type: str, role: Role) -> bool:
-    """Who may list/open files of a given owner type.
+    """Who may list/open files of a given owner type, inside the internal app.
 
-    Supplier-side files (supplier POs and the documents suppliers upload) are
-    commercially sensitive — restricted to director and purchasing. Everything
-    else stays visible to any authenticated internal user.
+    - External portal users (customer/supplier) keep access to their own
+      scoped files — their drawing/upload links resolve through here.
+    - Supplier-side files (supplier_po) stay limited to director + purchasing.
+    - Approval attachments stay viewable by the approval reviewers (manager +
+      director) so they can see what they're signing off.
+    - Every other internal file (customer/quotation/project drawings & uploads)
+      is director-only.
     """
+    if role in (Role.CUSTOMER, Role.SUPPLIER):
+        return True
     if owner_type == "supplier_po":
         return role in (Role.DIRECTOR, Role.PURCHASING)
-    return True
+    if owner_type == "approval_request":
+        return role in (Role.MANAGER, Role.DIRECTOR)
+    return role == Role.DIRECTOR
 
 
 def _safe_filename(name: str) -> str:

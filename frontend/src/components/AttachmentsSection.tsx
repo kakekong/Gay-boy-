@@ -58,7 +58,9 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
     queryFn: () => api.get("/attachments", {
       params: { owner_type: ownerType, owner_id: ownerId },
     }).then((r) => r.data as AttachmentRow[]),
+    retry: false,
   });
+  const forbidden = (q.error as any)?.response?.status === 403;
 
   const upload = useMutation({
     mutationFn: (file: File) => {
@@ -183,7 +185,11 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
             : "border-ink-200 bg-ink-50/40",
         )}
       >
-        {(q.data ?? []).length === 0 ? (
+        {forbidden ? (
+          <div className="p-8 text-center text-sm muted">
+            Uploaded files are visible to the director only.
+          </div>
+        ) : (q.data ?? []).length === 0 ? (
           <div className="p-8 text-center text-sm muted">
             {dragOver ? "Drop to upload" : "No files yet. Drop one here, or click Upload."}
           </div>
