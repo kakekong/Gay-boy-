@@ -213,6 +213,22 @@ async def apply_to_target(
         if pr:
             pr.status = "open" if approve else "cancelled"
             applied["new_status"] = pr.status
+    elif req.target_type == "project":
+        # Director-gated shipping/date edits: apply the stashed patch on
+        # approval (skipping nulls that would only clear a protected date).
+        from app.api.v1.endpoints.operation import (
+            DATE_FIELDS_PROTECTED,
+            _apply_project_changes,
+        )
+        from app.models.operation import Project
+        p = await db.get(Project, req.target_id)
+        if p and approve and (req.payload or {}).get("action") == "update":
+            changes = (req.payload or {}).get("changes") or {}
+            _apply_project_changes(p, changes)
+            applied["applied_changes"] = [
+                k for k in changes
+                if not (changes[k] is None and k in DATE_FIELDS_PROTECTED)
+            ]
     elif req.target_type == "inventory_item":
         # New inventory items don't exist until the director signs off — the
         # whole batch rides in the payload and is materialised on approval.

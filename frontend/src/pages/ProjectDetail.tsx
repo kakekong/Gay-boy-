@@ -85,8 +85,13 @@ export default function ProjectDetailPage() {
   // Inline edit for target / actual delivery dates.
   const patchProject = useMutation({
     mutationFn: (body: Record<string, string | null>) =>
-      api.patch(`/operation/projects/${id}`, body),
-    onSuccess: refresh,
+      api.patch(`/operation/projects/${id}`, body).then((r) => r.data),
+    onSuccess: (data: any) => {
+      refresh();
+      if (data?.pending_approval) {
+        alert("Shipping/delivery date change submitted to the director for approval.");
+      }
+    },
     onError: onErr,
   });
 

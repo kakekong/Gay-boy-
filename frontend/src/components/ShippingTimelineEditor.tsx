@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 
 const FIELDS: { key: string; label: string }[] = [
   { key: "est_ship_from_origin",      label: "Est. shipped from origin" },
@@ -14,6 +15,7 @@ const FIELDS: { key: string; label: string }[] = [
 
 export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
+  const isDirector = useAuthStore((s) => s.user?.role) === "director";
   const q = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => api.get(`/operation/projects/${projectId}`).then((r) => r.data),
@@ -44,12 +46,15 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
       for (const f of FIELDS) {
         if (form[f.key]) body[f.key] = form[f.key];
       }
-      return api.patch(`/operation/projects/${projectId}`, body);
+      return api.patch(`/operation/projects/${projectId}`, body).then((r) => r.data);
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["project-timeline", projectId] });
       qc.invalidateQueries({ queryKey: ["project", projectId] });
-      setFlash({
+      setFlash(data?.pending_approval ? {
+        kind: "ok",
+        text: "Submitted to the director for approval — the dates apply once approved.",
+      } : {
         kind: "ok",
         text: "Saved. The customer can see the new dates immediately.",
       });
@@ -73,6 +78,9 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
             Visible to internal staff. The customer sees the same dates on
             their portal — <b>you can save just the estimate</b>, no need to
             wait for the actual arrival.
+            {!isDirector && (
+              <> Changes to shipping dates are sent to the director for approval.</>
+            )}
           </div>
         </div>
         <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>

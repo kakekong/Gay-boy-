@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.approval import request_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
@@ -229,31 +230,63 @@ class ProjectPatch(BaseModel):
     is_import: bool | None = None
 
 
+DATE_FIELDS_PROTECTED = {
+    "start_date", "target_delivery", "actual_delivery",
+    "est_ship_from_origin", "act_ship_from_origin",
+    "est_arrive_our_warehouse", "act_arrive_our_warehouse",
+    "est_arrive_customer", "act_arrive_customer",
+}
+# Shipping / delivery dates that customers see — changes are director-gated.
+SHIPPING_FIELDS = {
+    "target_delivery", "actual_delivery",
+    "est_ship_from_origin", "act_ship_from_origin",
+    "est_arrive_our_warehouse", "act_arrive_our_warehouse",
+    "est_arrive_customer", "act_arrive_customer",
+}
+
+
+def _apply_project_changes(p: Project, data: dict) -> None:
+    # exclude_unset alone isn't enough: the frontend often sends an explicit
+    # null for the date fields it isn't editing. Drop those nulls for date
+    # columns so we never wipe an existing date by accident.
+    for k, v in data.items():
+        if v is None and k in DATE_FIELDS_PROTECTED:
+            continue
+        if hasattr(p, k):
+            setattr(p, k, v)
+
+
 @router.patch("/projects/{project_id}")
 async def update_project(project_id: UUID,
                          payload: ProjectPatch,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
+                         user: User = Depends(get_current_user)):
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    # exclude_unset alone isn't enough: the frontend often sends an explicit
-    # null for the date fields it isn't editing. Drop those nulls for date
-    # columns so we never wipe an existing date by accident. Setting
-    # is_import=False or origin_location=null is still respected (they're
-    # not in the protected set).
-    DATE_FIELDS_PROTECTED = {
-        "start_date", "target_delivery", "actual_delivery",
-        "est_ship_from_origin", "act_ship_from_origin",
-        "est_arrive_our_warehouse", "act_arrive_our_warehouse",
-        "est_arrive_customer", "act_arrive_customer",
-    }
     data = payload.model_dump(exclude_unset=True)
-    for k, v in data.items():
-        if v is None and k in DATE_FIELDS_PROTECTED:
-            continue
-        setattr(p, k, v)
-    return {"ok": True, "id": str(p.id)}
+
+    # Changing a shipping/delivery date is director-gated: a non-director's
+    # edit is filed for approval (with the whole patch) and applied only when
+    # the director signs off. Director edits apply immediately.
+    touches_shipping = any(k in SHIPPING_FIELDS for k in data)
+    if touches_shipping and Role(user.role) != Role.DIRECTOR:
+        # Don't queue a null that would only clear a protected date.
+        queued = {k: v for k, v in data.items()
+                  if not (v is None and k in DATE_FIELDS_PROTECTED)}
+        await request_approval(
+            db,
+            target_type="project",
+            target_id=p.id,
+            requested_by=user.id,
+            required_role=Role.DIRECTOR,
+            reason=f"Shipping update for {p.code}: {', '.join(sorted(queued))}",
+            payload={"action": "update", "changes": queued},
+        )
+        return {"ok": True, "id": str(p.id), "pending_approval": True}
+
+    _apply_project_changes(p, data)
+    return {"ok": True, "id": str(p.id), "pending_approval": False}
 
 
 class WorkOrderIn(BaseModel):

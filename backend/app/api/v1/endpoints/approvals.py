@@ -60,6 +60,16 @@ async def inbox(
         )).all()
         prs = {p.id: p for p in prrows}
 
+    # Project (shipping) approvals: resolve the project code for the label.
+    from app.models.operation import Project
+    proj_ids = {r.target_id for r in rows if r.target_type == "project"}
+    projects: dict[UUID, Project] = {}
+    if proj_ids:
+        projrows = (await db.scalars(
+            select(Project).where(Project.id.in_(proj_ids))
+        )).all()
+        projects = {p.id: p for p in projrows}
+
     # Bulk-load requester names
     requester_ids = {r.requested_by for r in rows}
     requesters: dict[UUID, User] = {}
@@ -111,6 +121,9 @@ async def inbox(
         elif r.target_type == "inventory_item":
             n = len((r.payload or {}).get("items") or [])
             target_label = f"{n} new item(s)"
+        elif r.target_type == "project":
+            pj = projects.get(r.target_id)
+            target_label = pj.code if pj else None
         elif r.target_type in ("customer", "followup"):
             c = customers.get(r.target_id)
             target_label = c.company_name if c else None
