@@ -67,10 +67,34 @@ class OrderIn(BaseModel):
     notes: str | None = None
 
 
+class FreeOrderLine(BaseModel):
+    name: str
+    qty: float
+    uom: str = "pcs"
+    supplier_hint: str | None = None
+
+
+class FreeOrderIn(BaseModel):
+    items: list[FreeOrderLine] = []
+    project_id: UUID | None = None
+    notes: str | None = None
+
+
 class ItemOut(ItemIn):
     id: UUID
     stock_status: str   # ok | low | out
     model_config = {"from_attributes": True}
+
+
+async def _next_pr_number(db: AsyncSession) -> str:
+    """Next PurchaseRequest number in the PR-YYYY-NNNN series."""
+    year = datetime.now(UTC).year
+    prefix = f"PR-{year}-"
+    seq = await db.scalar(
+        select(func.count(PurchaseRequest.id))
+        .where(PurchaseRequest.number.like(f"{prefix}%"))
+    ) or 0
+    return f"{prefix}{seq + 1:04d}"
 
 
 def _status(item: InventoryItem) -> str:
@@ -251,15 +275,8 @@ async def request_order(item_id: UUID,
     if qty <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Quantity required (set reorder_qty or pass qty).")
-    # PR number: PR-YYYY-NNNN
-    year = datetime.now(UTC).year
-    prefix = f"PR-{year}-"
-    seq = await db.scalar(
-        select(func.count(PurchaseRequest.id))
-        .where(PurchaseRequest.number.like(f"{prefix}%"))
-    ) or 0
     pr = PurchaseRequest(
-        number=f"{prefix}{seq + 1:04d}",
+        number=await _next_pr_number(db),
         requested_by=user.id,
         items=[{
             "sku": r.sku, "name": r.name, "qty": qty, "uom": r.uom,
@@ -273,3 +290,34 @@ async def request_order(item_id: UUID,
     db.add(pr)
     await db.flush()
     return {"purchase_request_id": str(pr.id), "number": pr.number, "qty": qty}
+
+
+@router.post("/request-order")
+async def request_order_freeform(payload: FreeOrderIn,
+                                 db: AsyncSession = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """Raise a Purchase Request not tied to a stocked item — the entry point
+    for 'we need to buy this' when it isn't in inventory yet. Any logged-in
+    employee can request; purchasing handles it via the PR flow."""
+    from app.models.operation import Project
+
+    lines = [i for i in payload.items if i.name.strip() and i.qty > 0]
+    if not lines:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Add at least one item with a name and a quantity.")
+    if payload.project_id and not await db.get(Project, payload.project_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
+    pr = PurchaseRequest(
+        number=await _next_pr_number(db),
+        requested_by=user.id,
+        project_id=payload.project_id,
+        items=[{
+            "name": ln.name.strip(), "qty": ln.qty, "uom": ln.uom,
+            "supplier_hint": ln.supplier_hint,
+        } for ln in lines],
+        status="open",
+        notes=payload.notes,
+    )
+    db.add(pr)
+    await db.flush()
+    return {"purchase_request_id": str(pr.id), "number": pr.number}

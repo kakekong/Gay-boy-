@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package, Plus, Search, AlertTriangle, CheckCircle2, ShoppingCart, Loader2,
-  Pencil, ArrowDownUp, Boxes, Wrench,
+  Pencil, ArrowDownUp, Boxes, Wrench, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -43,6 +43,7 @@ export default function InventoryPage() {
   const [q, setQ] = useState("");
   const [onlyLow, setOnlyLow] = useState(false);
   const [openNew, setOpenNew] = useState(false);
+  const [openRequest, setOpenRequest] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [adjusting, setAdjusting] = useState<Item | null>(null);
 
@@ -83,11 +84,16 @@ export default function InventoryPage() {
             and a Purchase Request is sent to purchasing.
           </p>
         </div>
-        {canEdit && (
-          <button className="btn-primary" onClick={() => { setEditing(null); setOpenNew(true); }}>
-            <Plus size={14} /> New item
+        <div className="flex gap-2">
+          <button className="btn-primary" onClick={() => setOpenRequest(true)}>
+            <ShoppingCart size={14} /> Request order
           </button>
-        )}
+          {canEdit && (
+            <button className="btn-ghost" onClick={() => { setEditing(null); setOpenNew(true); }}>
+              <Plus size={14} /> New item
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stat strip */}
@@ -226,7 +232,131 @@ export default function InventoryPage() {
       >
         {adjusting && <AdjustStockForm item={adjusting} onClose={() => setAdjusting(null)} />}
       </Modal>
+
+      <Modal
+        open={openRequest}
+        onClose={() => setOpenRequest(false)}
+        title="Request order"
+        subtitle="Raise a purchase request for materials — even ones not stocked yet. Purchasing picks it up."
+        size="lg"
+      >
+        <RequestOrderForm onClose={() => setOpenRequest(false)} />
+      </Modal>
     </div>
+  );
+}
+
+function RequestOrderForm({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const [projectId, setProjectId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState<{ name: string; qty: string; uom: string }[]>([
+    { name: "", qty: "", uom: "pcs" },
+  ]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const projects = useQuery({
+    queryKey: ["projects-min"],
+    queryFn: () => api.get("/operation/projects").then((r) => r.data as any[]),
+    retry: false,
+  });
+
+  const submit = useMutation({
+    mutationFn: () => api.post("/inventory/request-order", {
+      project_id: projectId || null,
+      notes: notes.trim() || null,
+      items: lines
+        .filter((l) => l.name.trim() && Number(l.qty) > 0)
+        .map((l) => ({ name: l.name.trim(), qty: Number(l.qty), uom: l.uom || "pcs" })),
+    }).then((r) => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["pr-list"] });
+      onClose();
+      alert(`Purchase Request created: ${data.number}`);
+    },
+    onError: (e: any) =>
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? "Could not create the request."),
+  });
+
+  const update = (i: number, k: "name" | "qty" | "uom", v: string) =>
+    setLines(lines.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)));
+
+  function attempt() {
+    setErr(null);
+    if (!lines.some((l) => l.name.trim() && Number(l.qty) > 0)) {
+      setErr("Add at least one item with a name and a quantity.");
+      return;
+    }
+    submit.mutate();
+  }
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); attempt(); }} className="space-y-4">
+      <label className="block">
+        <span className="block text-xs font-medium text-ink-600 mb-1">Project (optional)</span>
+        <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+          <option value="">No project</option>
+          {(projects.data ?? []).map((p: any) => (
+            <option key={p.id} value={p.id}>{p.code}{p.status ? ` · ${p.status}` : ""}</option>
+          ))}
+        </select>
+      </label>
+
+      <div>
+        <span className="block text-xs font-medium text-ink-600 mb-1">Items</span>
+        <div className="space-y-2">
+          {lines.map((l, i) => (
+            <div key={i} className="flex items-end gap-2">
+              <label className="flex-[3] block">
+                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Item</span>}
+                <input className="input" placeholder="Steel plate 10mm"
+                  value={l.name} onChange={(e) => update(i, "name", e.target.value)} />
+              </label>
+              <label className="flex-1 block">
+                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Qty</span>}
+                <input className="input" type="number" min={0} placeholder="0"
+                  value={l.qty} onChange={(e) => update(i, "qty", e.target.value)} />
+              </label>
+              <label className="flex-1 block">
+                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">UoM</span>}
+                <input className="input" placeholder="pcs"
+                  value={l.uom} onChange={(e) => update(i, "uom", e.target.value)} />
+              </label>
+              <button type="button" className="btn-ghost text-red-600 shrink-0 mb-0.5"
+                onClick={() => setLines(lines.filter((_, idx) => idx !== i))}
+                aria-label="Remove line" disabled={lines.length === 1}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          <button type="button" className="btn-ghost text-xs"
+            onClick={() => setLines([...lines, { name: "", qty: "", uom: "pcs" }])}>
+            <Plus size={13} /> Add line
+          </button>
+        </div>
+      </div>
+
+      <label className="block">
+        <span className="block text-xs font-medium text-ink-600 mb-1">Notes (optional)</span>
+        <textarea rows={2} className="input" value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </label>
+
+      {err && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {err}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={submit.isPending}>
+          {submit.isPending ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
+          Send request
+        </button>
+      </div>
+    </form>
   );
 }
 
