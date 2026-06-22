@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role
+from app.core.permissions import Role, require_min
 from app.models.crm import Customer
 from app.models.finance import Invoice
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
@@ -18,7 +18,11 @@ from app.models.purchasing import PurchaseRequest
 from app.models.quotation import Quotation
 from app.models.user import User
 
-router = APIRouter()
+# Operations data (projects, work orders, deliveries) is internal-only.
+# External portal users (customer/supplier) get their scoped views via the
+# portal router, never the raw operation endpoints. require_min(SALES) admits
+# every internal employee (sales tier and up) and blocks the tier-0 externals.
+router = APIRouter(dependencies=[Depends(require_min(Role.SALES))])
 
 
 def _can_see_project_money(user: User) -> bool:

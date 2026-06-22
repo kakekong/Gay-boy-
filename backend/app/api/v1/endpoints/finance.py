@@ -8,10 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import Role, require
 from app.models.finance import Invoice, Payment
 from app.models.user import User
 
-router = APIRouter()
+# Finance data (AR aging, tax, payments) is confidential — restrict the whole
+# router to the finance line and management. Sales/HR/purchasing/external roles
+# have no business here. Mirrors the /finance + payment-verification sidebar gate.
+router = APIRouter(
+    dependencies=[Depends(require(Role.FINANCE, Role.ADMIN, Role.MANAGER, Role.DIRECTOR))]
+)
 
 
 @router.get("/ar/aging")

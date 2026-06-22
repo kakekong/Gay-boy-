@@ -1,7 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { Shell, ROLE_PAGE_ALLOWLIST } from "@/layouts/Shell";
+import { Shell, ROLE_PAGE_ALLOWLIST, requiredRolesForPath } from "@/layouts/Shell";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuthStore } from "@/store/auth";
@@ -62,21 +62,32 @@ function RequireRole({ roles, children }: { roles: string[]; children: JSX.Eleme
   return <Navigate to="/" replace />;
 }
 
-// Enforce the built-in role page allowlist (e.g. finance) at the route level,
-// so a capped role can't reach a hidden page by typing the URL. A custom role
-// or per-user page override (custom_role_pages) wins and disables this cap.
+// Enforce role-based page access at the route level, so a page hidden from the
+// sidebar can't be reached by typing the URL. Three layers, in order:
+//   1. Custom role / per-user page override → bypass these built-in caps.
+//   2. Capped base roles (finance, purchasing) → restricted to their allowlist.
+//   3. Every other base role → enforce the per-page `roles` from NAV_GROUPS
+//      (the same list that gates the sidebar), so URL access matches the menu.
 function RoleRouteGuard({ children }: { children: JSX.Element }) {
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
   if (!user) return children;
   if (user.custom_role_pages && user.custom_role_pages.length) return children;
-  const allow = ROLE_PAGE_ALLOWLIST[user.role];
-  if (!allow) return children;
   const path = location.pathname;
-  const ok =
-    path === "/help" ||
-    allow.some((p) => path === p || path.startsWith(p + "/"));
-  return ok ? children : <Navigate to={allow[0]} replace />;
+
+  const allow = ROLE_PAGE_ALLOWLIST[user.role];
+  if (allow) {
+    const ok =
+      path === "/help" ||
+      allow.some((p) => path === p || path.startsWith(p + "/"));
+    return ok ? children : <Navigate to={allow[0]} replace />;
+  }
+
+  const required = requiredRolesForPath(path);
+  if (required && !required.includes(user.role)) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
 }
 
 function PageFallback() {

@@ -52,10 +52,12 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/purchasing", label: "Purchasing", label_id: "Pembelian", icon: ShoppingCart,
         roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/operation", label: "Operation", label_id: "Operasi", icon: Wrench },
-      { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote },
+      { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote,
+        roles: ["finance", "admin", "manager", "director"] },
       { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
         roles: ["admin", "finance", "manager", "director"] },
-      { to: "/inventory", label: "Inventory", label_id: "Inventaris", icon: Package },
+      { to: "/inventory", label: "Inventory", label_id: "Inventaris", icon: Package,
+        roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
         roles: ["admin", "director"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
@@ -94,6 +96,23 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
     ],
   },
 ];
+
+// Resolve the roles required to view a given path, using NAV_GROUPS as the
+// single source of truth. Picks the most specific (longest) matching nav `to`
+// so e.g. /finance/payment-verification wins over /finance. Returns undefined
+// when no nav item gates the path (open to any authenticated user). Detail
+// routes (/employees/:id) inherit their list page's gate via the prefix match.
+export function requiredRolesForPath(path: string): string[] | undefined {
+  let best: NavItem | undefined;
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      const matches =
+        path === item.to || (item.to !== "/" && path.startsWith(item.to + "/"));
+      if (matches && (!best || item.to.length > best.to.length)) best = item;
+    }
+  }
+  return best?.roles;
+}
 
 // Hard caps for built-in base roles: when a role appears here it sees ONLY
 // these pages in the sidebar (plus Help, always), regardless of the per-item

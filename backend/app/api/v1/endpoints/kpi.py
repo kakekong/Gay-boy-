@@ -9,14 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.models.crm import Customer
 from app.models.finance import Invoice
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
 
-router = APIRouter()
+# Company-wide KPI rollups (sales, finance, operation, purchasing) are
+# management insights. Gate the whole router to manager and up; the export
+# endpoints stay director-only via their own require() below.
+router = APIRouter(dependencies=[Depends(require_min(Role.MANAGER))])
 
 
 @router.get("/sales")
