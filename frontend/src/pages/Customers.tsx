@@ -7,6 +7,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
+import { UserLink } from "@/components/UserLink";
 import { PipelineView } from "@/components/PipelineView";
 import { Modal } from "@/components/Modal";
 import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
@@ -184,7 +185,7 @@ export default function CustomersPage() {
                     </td>
                     <td className="td capitalize muted">{c.industry}</td>
                     <td className="td">{c.pic_name ?? "—"}</td>
-                    <td className="td muted">{c.sales_pic_name ?? "—"}</td>
+                    <td className="td muted"><UserLink id={c.sales_pic_id} name={c.sales_pic_name} /></td>
                     <td className="td"><StageBadge stage={c.stage} /></td>
                     <td className="td text-right tabular-nums">{idr(c.lifetime_value ?? 0)}</td>
                   </tr>
