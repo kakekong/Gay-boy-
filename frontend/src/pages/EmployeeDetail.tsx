@@ -95,6 +95,11 @@ export default function EmployeeDetailPage() {
     queryFn: () => api.get(`/users/${id}/customers`).then((r) => r.data),
     enabled: !!id,
   });
+  const projects = useQuery({
+    queryKey: ["employee-projects", id],
+    queryFn: () => api.get(`/users/${id}/projects`).then((r) => r.data as any[]),
+    enabled: !!id,
+  });
   const activities = useQuery({
     queryKey: ["employee-activities", id],
     queryFn: () => api.get(`/users/${id}/activities`).then((r) => r.data),
@@ -208,6 +213,21 @@ export default function EmployeeDetailPage() {
           icon={CalendarX}
           accent={(attendanceSummary.data?.deductible_days ?? 0) >= 3 ? "red" : "amber"}
         />
+      )}
+
+      {/* All-time attendance tally */}
+      {canSeeAttendance && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <KpiCard label="Total attendance (days)"
+            value={stats.data?.attendance_present_total ?? "—"}
+            icon={CalendarCheck} accent="emerald" />
+          <KpiCard label="Total absences"
+            value={stats.data?.attendance_absent_total ?? "—"}
+            icon={CalendarX} accent="red" />
+          <KpiCard label="Leave / sick (days)"
+            value={stats.data?.attendance_leave_total ?? "—"}
+            icon={Clock} accent="amber" />
+        </div>
       )}
 
       {isSales && (
@@ -334,6 +354,53 @@ export default function EmployeeDetailPage() {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      {/* Projects / POs tied to this employee's customers */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-ink-100">
+          <div className="font-semibold flex items-center gap-2">
+            <Briefcase size={15} /> Projects / POs
+          </div>
+          <div className="text-xs muted">{(projects.data ?? []).length} project(s)</div>
+        </div>
+        {(projects.data ?? []).length === 0 ? (
+          <div className="p-8 text-center muted text-sm">No projects.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">Code</th>
+                  <th className="th">Customer</th>
+                  <th className="th">Status</th>
+                  <th className="th">Target delivery</th>
+                  <th className="th text-right">PO value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(projects.data ?? []).map((p: any) => (
+                  <tr
+                    key={p.id}
+                    className="tr-hover border-t border-ink-100 cursor-pointer"
+                    onClick={() => nav(`/projects/${p.id}`)}
+                  >
+                    <td className="td font-mono text-xs">
+                      <Link to={`/projects/${p.id}`} onClick={(ev) => ev.stopPropagation()}
+                        className="text-brand-700 hover:underline">{p.code}</Link>
+                    </td>
+                    <td className="td">{p.customer_name}</td>
+                    <td className="td capitalize">{p.status?.replace(/_/g, " ")}</td>
+                    <td className="td muted">{p.target_delivery ?? "—"}</td>
+                    <td className="td text-right tabular-nums">
+                      {p.po_value == null ? "—" : idr(p.po_value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

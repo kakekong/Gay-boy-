@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { UserLink } from "@/components/UserLink";
 
 interface SupplierLite {
   id: string;
@@ -309,7 +310,7 @@ export default function PurchaseOrdersPage() {
                         </a>
                       ) : "—"}
                     </td>
-                    <td className="td muted">{p.sales_pic_name ?? "—"}</td>
+                    <td className="td muted"><UserLink id={p.sales_pic_id} name={p.sales_pic_name} /></td>
                     <td className="td font-mono text-xs">
                       {p.project_id
                         ? (p.project_code ?? p.project_id.slice(0, 8))

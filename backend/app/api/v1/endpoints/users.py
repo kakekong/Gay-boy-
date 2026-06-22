@@ -1,13 +1,13 @@
 """Employee directory endpoints (HR + Director only)."""
 
-from datetime import UTC, date as date_t, datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import date as date_t
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from pydantic import BaseModel
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
@@ -213,6 +213,22 @@ async def employee_stats(
             Activity.occurred_at >= datetime.now(UTC) - timedelta(days=30),
         )
     ) or 0
+    # All-time attendance tally (present-like vs absent-like days)
+    att_present = await db.scalar(
+        select(func.count(Attendance.id)).where(
+            Attendance.user_id == user_id, Attendance.status.in_(["present", "wfh"])
+        )
+    ) or 0
+    att_absent = await db.scalar(
+        select(func.count(Attendance.id)).where(
+            Attendance.user_id == user_id, Attendance.status == "absent"
+        )
+    ) or 0
+    att_leave = await db.scalar(
+        select(func.count(Attendance.id)).where(
+            Attendance.user_id == user_id, Attendance.status.in_(["leave", "sick"])
+        )
+    ) or 0
     decided = won + lost
     return {
         "user_id": str(user_id),
@@ -226,7 +242,43 @@ async def employee_stats(
         "pipeline_value": float(pipeline_value or 0),
         "won_revenue": float(won_revenue or 0),
         "activities_30d": activities_30d,
+        "attendance_present_total": att_present,
+        "attendance_absent_total": att_absent,
+        "attendance_leave_total": att_leave,
     }
+
+
+@router.get("/{user_id}/projects")
+async def employee_projects(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(_hr_or_director),
+    limit: int = 200,
+):
+    """Projects tied to the employee's customers. Project values are shown to
+    the director only — HR sees the list without deal economics."""
+    from app.models.operation import Project
+
+    rows = (await db.execute(
+        select(Project, Customer)
+        .join(Customer, Project.customer_id == Customer.id)
+        .where(Customer.sales_pic_id == user_id)
+        .order_by(Project.created_at.desc())
+        .limit(limit)
+    )).all()
+    show_money = Role(me.role) == Role.DIRECTOR
+    return [
+        {
+            "id": str(p.id),
+            "code": p.code,
+            "status": p.status,
+            "customer_id": str(c.id),
+            "customer_name": c.company_name,
+            "po_value": float(p.po_value or 0) if show_money else None,
+            "target_delivery": p.target_delivery,
+        }
+        for p, c in rows
+    ]
 
 
 @router.get("/{user_id}/quotations")
