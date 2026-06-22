@@ -51,6 +51,8 @@ export default function EmployeeDetailPage() {
   const me = useAuthStore((s) => s.user);
   const canTag = me && (me.role === "hr" || me.role === "director");
   const canSeeAttendance = me && (me.role === "hr" || me.role === "director");
+  // HR administers people but must not see personal contact info.
+  const canSeeContact = me?.role !== "hr";
 
   const today = new Date();
   const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
@@ -153,8 +155,16 @@ export default function EmployeeDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-sm">
-          <Field icon={<Mail size={14} />} label="Email">{e.email}</Field>
-          <Field icon={<Phone size={14} />} label="Phone">{e.phone ?? "—"}</Field>
+          {canSeeContact ? (
+            <>
+              <Field icon={<Mail size={14} />} label="Email">{e.email}</Field>
+              <Field icon={<Phone size={14} />} label="Phone">{e.phone ?? "—"}</Field>
+            </>
+          ) : (
+            <Field icon={<Mail size={14} />} label="Contact">
+              <span className="muted">Hidden for HR</span>
+            </Field>
+          )}
           <Field icon={<Briefcase size={14} />} label="Status">
             {e.is_active ? "Active" : "Inactive"}
           </Field>

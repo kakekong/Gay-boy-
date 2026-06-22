@@ -69,7 +69,7 @@ _hr_or_director = require(Role.HR, Role.DIRECTOR)
 @router.get("")
 async def list_employees(
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_hr_or_director),
+    me: User = Depends(_hr_or_director),
     role: str | None = None,
     q: str | None = None,
     active_only: bool = True,
@@ -135,16 +135,18 @@ async def list_employees(
                 missed_map.get(str(uid), 0.0) + (n * (0.5 if st == "half_day" else 1.0))
             )
 
+    # HR sees the directory but not personal contact details (email/phone).
+    hide_contact = Role(me.role) == Role.HR
     return [
         {
             "id": str(r.id),
-            "email": r.email,
+            "email": "(hidden)" if hide_contact else r.email,
             "full_name": r.full_name,
             "role": r.role,
             "custom_role_id": str(r.custom_role_id) if r.custom_role_id else None,
             "custom_role_name": cr_names.get(r.custom_role_id) if r.custom_role_id else None,
             "pages": r.pages or [],
-            "phone": r.phone,
+            "phone": None if hide_contact else r.phone,
             "is_active": r.is_active,
             "tags": tag_map.get(str(r.id), []),
             "missed_days_this_month": round(missed_map.get(str(r.id), 0.0), 1),
@@ -165,6 +167,12 @@ async def get_employee(
     obj = await db.get(User, user_id)
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+    # HR administers people but must not see employees' personal contact info.
+    # Build a detached copy so we never mutate (and accidentally persist) the row.
+    if Role(me.role) == Role.HR and me.id != user_id:
+        return UserOut.model_validate(obj).model_copy(
+            update={"email": "(hidden)", "phone": None}
+        )
     return obj
 
 
