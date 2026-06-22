@@ -7,13 +7,14 @@ that purchasing handles via the existing flow.
 """
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.approval import request_approval, require_pr_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
@@ -23,6 +24,9 @@ from app.models.user import User
 
 router = APIRouter()
 _editor = require(Role.ADMIN, Role.DIRECTOR)
+# Who may initiate adding inventory. Non-directors' adds are queued for
+# director approval; the director's own add lands immediately.
+_can_add = require(Role.PURCHASING, Role.ADMIN, Role.MANAGER, Role.DIRECTOR)
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -40,6 +44,10 @@ class ItemIn(BaseModel):
     supplier_hint: str | None = None
     notes: str | None = None
     is_active: bool = True
+
+
+class BulkItemsIn(BaseModel):
+    items: list[ItemIn] = []
 
 
 class ItemPatch(BaseModel):
@@ -211,6 +219,49 @@ async def create_item(payload: ItemIn,
     return {"id": str(r.id), "ok": True}
 
 
+@router.post("/bulk", status_code=201)
+async def create_items_bulk(payload: BulkItemsIn,
+                            db: AsyncSession = Depends(get_db),
+                            user: User = Depends(_can_add)):
+    """Add one or more inventory items at once. Every add is director-gated:
+    a non-director's batch is filed as a single approval and only becomes
+    real stock when the director signs off. A director's batch lands now."""
+    rows = [i for i in payload.items if i.sku.strip() and i.name.strip()]
+    if not rows:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Add at least one item with a SKU and a name.")
+    # Reject duplicate SKUs inside the batch up front.
+    skus = [r.sku.strip() for r in rows]
+    if len(set(skus)) != len(skus):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Duplicate SKUs in the batch — each must be unique.")
+
+    if Role(user.role) == Role.DIRECTOR:
+        created, skipped = [], []
+        for r in rows:
+            sku = r.sku.strip()
+            clash = await db.scalar(select(InventoryItem).where(InventoryItem.sku == sku))
+            if clash:
+                skipped.append(sku)
+                continue
+            db.add(InventoryItem(**r.model_dump()))
+            created.append(sku)
+        await db.flush()
+        return {"pending_approval": False, "created_skus": created, "skipped_skus": skipped}
+
+    await request_approval(
+        db,
+        target_type="inventory_item",
+        target_id=uuid4(),   # synthetic — the items don't exist until approved
+        requested_by=user.id,
+        required_role=Role.DIRECTOR,
+        reason=f"Add {len(rows)} inventory item(s): {', '.join(skus[:5])}"
+               + ("…" if len(skus) > 5 else ""),
+        payload={"action": "create_bulk", "items": [r.model_dump() for r in rows]},
+    )
+    return {"pending_approval": True, "count": len(rows)}
+
+
 @router.patch("/{item_id}")
 async def update_item(item_id: UUID,
                       payload: ItemPatch,
@@ -289,7 +340,9 @@ async def request_order(item_id: UUID,
     )
     db.add(pr)
     await db.flush()
-    return {"purchase_request_id": str(pr.id), "number": pr.number, "qty": qty}
+    pending = await require_pr_approval(db, pr=pr, requester=user)
+    return {"purchase_request_id": str(pr.id), "number": pr.number, "qty": qty,
+            "pending_approval": pending}
 
 
 @router.post("/request-order")
@@ -320,4 +373,6 @@ async def request_order_freeform(payload: FreeOrderIn,
     )
     db.add(pr)
     await db.flush()
-    return {"purchase_request_id": str(pr.id), "number": pr.number}
+    pending = await require_pr_approval(db, pr=pr, requester=user)
+    return {"purchase_request_id": str(pr.id), "number": pr.number,
+            "pending_approval": pending}

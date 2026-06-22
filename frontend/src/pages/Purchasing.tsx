@@ -49,12 +49,12 @@ export default function PurchasingPage() {
   const [openPO, setOpenPO] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Tab persisted across sessions so the user lands back where they left off.
-  const [tab, setTab] = useState<"suppliers" | "pos">(() => {
+  const [tab, setTab] = useState<"suppliers" | "pos" | "requests">(() => {
     const stored = localStorage.getItem("purchasing-tab");
-    if (stored === "pos") return "pos";
+    if (stored === "pos" || stored === "requests") return stored;
     return "suppliers";
   });
-  function pickTab(t: "suppliers" | "pos") {
+  function pickTab(t: "suppliers" | "pos" | "requests") {
     setTab(t);
     localStorage.setItem("purchasing-tab", t);
   }
@@ -90,7 +90,7 @@ export default function PurchasingPage() {
 
   const stageCount = (key: string): number => {
     switch (key) {
-      case "PR":  return prList.data?.filter((p: any) => p.status === "open").length ?? 0;
+      case "PR":  return prList.data?.filter((p: any) => p.status === "open" || p.status === "pending_approval").length ?? 0;
       case "RFQ": return rfqList.data?.length ?? 0;
       case "PO":  return pos.data?.filter((p: any) => p.status === "open" || p.status === "pending_approval").length ?? 0;
       case "GR":  return grList.data?.length ?? 0;
@@ -147,6 +147,20 @@ export default function PurchasingPage() {
           {suppliers.data && (
             <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
               {suppliers.data.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => pickTab("requests")}
+          className={clsx(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+            tab === "requests" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
+          )}
+        >
+          <ClipboardList size={14} /> Requests
+          {prList.data && (
+            <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
+              {prList.data.length}
             </span>
           )}
         </button>
@@ -281,6 +295,63 @@ export default function PurchasingPage() {
                   </td>
                   <td className="td text-right tabular-nums">
                     {((s.qc_fail_rate ?? 0) * 100).toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      )}
+
+      {/* Purchase / inventory requests */}
+      {tab === "requests" && (
+      <div className="card overflow-hidden">
+        <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
+          <div>
+            <div className="font-semibold text-ink-900">Purchase requests</div>
+            <div className="text-xs muted">
+              Demand raised from Inventory or the board. Each one needs director
+              approval before purchasing sources it — pending requests show in
+              the director's Approvals inbox.
+            </div>
+          </div>
+          <Link to="/purchasing/stage/pr" className="text-xs text-brand-700 hover:underline">
+            Open PR workspace →
+          </Link>
+        </header>
+        {prList.isLoading ? (
+          <div className="px-5 py-10 text-center text-sm muted flex items-center justify-center gap-2">
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : !prList.data?.length ? (
+          <div className="px-5 py-12 text-center text-sm muted">No purchase requests yet.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Number</th>
+                <th className="th">Project</th>
+                <th className="th">Requested by</th>
+                <th className="th">Items</th>
+                <th className="th">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {prList.data.map((r: any) => (
+                <tr key={r.id} className="tr-hover border-t border-ink-100">
+                  <td className="td font-mono text-xs">{r.number}</td>
+                  <td className="td font-mono text-xs">{r.project_code ?? "—"}</td>
+                  <td className="td">{r.requested_by_name ?? "—"}</td>
+                  <td className="td muted">{(r.items ?? []).length} line(s)</td>
+                  <td className="td">
+                    <span className={clsx("chip capitalize",
+                      r.status === "open" ? "bg-emerald-50 text-emerald-700"
+                      : r.status === "pending_approval" ? "bg-amber-50 text-amber-700"
+                      : r.status === "cancelled" ? "bg-red-50 text-red-700"
+                      : "bg-ink-100 text-ink-700")}>
+                      {r.status?.replace(/_/g, " ")}
+                    </span>
                   </td>
                 </tr>
               ))}

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.approval import request_approval
+from app.core.approval import request_approval, require_pr_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
@@ -534,7 +534,11 @@ async def create_pr(
     )
     db.add(pr)
     await db.flush()
-    return {"id": str(pr.id), "number": pr.number, "status": pr.status}
+    # Every PR is director-gated: a non-director's request parks at
+    # pending_approval until the director opens it from /approvals.
+    pending = await require_pr_approval(db, pr=pr, requester=user)
+    return {"id": str(pr.id), "number": pr.number, "status": pr.status,
+            "pending_approval": pending}
 
 
 @router.patch("/pr/{pr_id}")

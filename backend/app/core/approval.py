@@ -67,6 +67,30 @@ async def request_approval(
     return req
 
 
+async def require_pr_approval(db: AsyncSession, *, pr, requester) -> bool:
+    """Gate a freshly-created PurchaseRequest on director approval.
+
+    A director's own PR opens immediately; everyone else's parks at
+    'pending_approval' with a director ApprovalRequest filed. The PR must
+    already be flushed (have an id). Returns True when an approval was filed.
+    """
+    if Role(requester.role) == Role.DIRECTOR:
+        pr.status = "open"
+        return False
+    pr.status = "pending_approval"
+    n = len(pr.items or [])
+    await request_approval(
+        db,
+        target_type="purchase_request",
+        target_id=pr.id,
+        requested_by=requester.id,
+        required_role=Role.DIRECTOR,
+        reason=f"Purchase request {pr.number}" + (f" ({n} item(s))" if n else ""),
+        payload={"action": "create"},
+    )
+    return True
+
+
 async def decide(
     db: AsyncSession,
     *,
@@ -130,7 +154,9 @@ async def apply_to_target(
         # Approving a customer PO spawns a Project; rejecting it parks
         # the PO at status='rejected' so the sales team can file a new
         # one if the paperwork changes.
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
+
         from app.api.v1.endpoints.customer_pos import _spawn_project
         from app.models.customer_po import CustomerPO
         po = await db.get(CustomerPO, req.target_id)
@@ -163,6 +189,7 @@ async def apply_to_target(
         # until the director flips it open; an update request stashes the
         # proposed field changes and we apply them now.
         from datetime import date as date_t
+
         from app.models.purchasing import SupplierPO
         po = await db.get(SupplierPO, req.target_id)
         if po:
@@ -178,6 +205,36 @@ async def apply_to_target(
                     elif hasattr(po, k):
                         setattr(po, k, v)
                 applied["applied_changes"] = list(changes.keys())
+    elif req.target_type == "purchase_request":
+        # A PR sits at pending_approval until the director opens it; rejecting
+        # cancels it so purchasing knows not to source against it.
+        from app.models.purchasing import PurchaseRequest
+        pr = await db.get(PurchaseRequest, req.target_id)
+        if pr:
+            pr.status = "open" if approve else "cancelled"
+            applied["new_status"] = pr.status
+    elif req.target_type == "inventory_item":
+        # New inventory items don't exist until the director signs off — the
+        # whole batch rides in the payload and is materialised on approval.
+        from app.models.inventory import InventoryItem
+        if approve and (req.payload or {}).get("action") == "create_bulk":
+            created: list[str] = []
+            skipped: list[str] = []
+            for data in (req.payload.get("items") or []):
+                sku = (data.get("sku") or "").strip()
+                if not sku:
+                    continue
+                clash = await db.scalar(
+                    select(InventoryItem).where(InventoryItem.sku == sku)
+                )
+                if clash:
+                    skipped.append(sku)
+                    continue
+                db.add(InventoryItem(**data))
+                created.append(sku)
+            await db.flush()
+            applied["created_skus"] = created
+            applied["skipped_skus"] = skipped
     elif req.target_type == "followup":
         # Sales-initiated follow-ups are deferred: on approval we materialise
         # the activity (and a reminder, for the quotation flow) using the

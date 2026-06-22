@@ -50,6 +50,16 @@ async def inbox(
         )).all()
         quotations = {q.id: q for q in qrows}
 
+    # Purchase-request approvals: resolve the PR number for the label.
+    from app.models.purchasing import PurchaseRequest
+    pr_ids = {r.target_id for r in rows if r.target_type == "purchase_request"}
+    prs: dict[UUID, PurchaseRequest] = {}
+    if pr_ids:
+        prrows = (await db.scalars(
+            select(PurchaseRequest).where(PurchaseRequest.id.in_(pr_ids))
+        )).all()
+        prs = {p.id: p for p in prrows}
+
     # Bulk-load requester names
     requester_ids = {r.requested_by for r in rows}
     requesters: dict[UUID, User] = {}
@@ -95,6 +105,12 @@ async def inbox(
         if r.target_type == "quotation_won":
             qq = quotations.get(r.target_id)
             target_label = qq.number if qq else None
+        elif r.target_type == "purchase_request":
+            pp = prs.get(r.target_id)
+            target_label = pp.number if pp else None
+        elif r.target_type == "inventory_item":
+            n = len((r.payload or {}).get("items") or [])
+            target_label = f"{n} new item(s)"
         elif r.target_type in ("customer", "followup"):
             c = customers.get(r.target_id)
             target_label = c.company_name if c else None

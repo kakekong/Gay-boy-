@@ -39,10 +39,13 @@ export default function InventoryPage() {
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const canEdit = user && (user.role === "admin" || user.role === "director");
+  const canAdd = user && ["purchasing", "admin", "manager", "director"].includes(user.role);
+  const isDirector = user?.role === "director";
 
   const [q, setQ] = useState("");
   const [onlyLow, setOnlyLow] = useState(false);
   const [openNew, setOpenNew] = useState(false);
+  const [openBulk, setOpenBulk] = useState(false);
   const [openRequest, setOpenRequest] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [adjusting, setAdjusting] = useState<Item | null>(null);
@@ -80,16 +83,16 @@ export default function InventoryPage() {
             <Package size={22} className="text-brand-600" /> Inventory
           </h1>
           <p className="text-sm muted">
-            Check what's in stock before promising delivery. Need more? Click "Request order"
-            and a Purchase Request is sent to purchasing.
+            Check what's in stock before promising delivery. Need more? Click
+            "Request order" to raise a purchase request.
           </p>
         </div>
         <div className="flex gap-2">
           <button className="btn-primary" onClick={() => setOpenRequest(true)}>
             <ShoppingCart size={14} /> Request order
           </button>
-          {canEdit && (
-            <button className="btn-ghost" onClick={() => { setEditing(null); setOpenNew(true); }}>
+          {canAdd && (
+            <button className="btn-ghost" onClick={() => setOpenBulk(true)}>
               <Plus size={14} /> New item
             </button>
           )}
@@ -234,6 +237,18 @@ export default function InventoryPage() {
       </Modal>
 
       <Modal
+        open={openBulk}
+        onClose={() => setOpenBulk(false)}
+        title="Add inventory items"
+        subtitle={isDirector
+          ? "Add one or more items. They're created immediately."
+          : "Add one or more items. Each batch is sent to the director for approval before it becomes stock."}
+        size="lg"
+      >
+        <BulkAddForm isDirector={!!isDirector} onClose={() => setOpenBulk(false)} />
+      </Modal>
+
+      <Modal
         open={openRequest}
         onClose={() => setOpenRequest(false)}
         title="Request order"
@@ -243,6 +258,123 @@ export default function InventoryPage() {
         <RequestOrderForm onClose={() => setOpenRequest(false)} />
       </Modal>
     </div>
+  );
+}
+
+function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  type Row = {
+    sku: string; name: string; category: string; uom: string;
+    unit_cost: string; current_stock: string; reorder_point: string; reorder_qty: string;
+  };
+  const blank = (): Row => ({
+    sku: "", name: "", category: "", uom: "pcs",
+    unit_cost: "", current_stock: "", reorder_point: "", reorder_qty: "",
+  });
+  const [rows, setRows] = useState<Row[]>([blank()]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const update = (i: number, k: keyof Row, v: string) =>
+    setRows(rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+
+  const save = useMutation({
+    mutationFn: () => api.post("/inventory/bulk", {
+      items: rows
+        .filter((r) => r.sku.trim() && r.name.trim())
+        .map((r) => ({
+          sku: r.sku.trim(), name: r.name.trim(),
+          category: r.category.trim() || null, uom: r.uom.trim() || "pcs",
+          unit_cost: parseFloat(r.unit_cost || "0"),
+          current_stock: parseFloat(r.current_stock || "0"),
+          reorder_point: parseFloat(r.reorder_point || "0"),
+          reorder_qty: parseFloat(r.reorder_qty || "0"),
+        })),
+    }).then((r) => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["inventory"] });
+      onClose();
+      if (data.pending_approval) {
+        alert(`Submitted ${data.count} item(s) for director approval.`);
+      } else {
+        const made = data.created_skus?.length ?? 0;
+        const skip = data.skipped_skus?.length ?? 0;
+        alert(`Added ${made} item(s).` + (skip ? ` Skipped ${skip} duplicate SKU(s).` : ""));
+      }
+    },
+    onError: (e: any) =>
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail ?? "Could not save items."),
+  });
+
+  function attempt() {
+    setErr(null);
+    if (!rows.some((r) => r.sku.trim() && r.name.trim())) {
+      setErr("Add at least one item with a SKU and a name.");
+      return;
+    }
+    save.mutate();
+  }
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); attempt(); }} className="space-y-3">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[680px]">
+          <thead>
+            <tr className="text-[10px] uppercase text-ink-500 text-left">
+              <th className="pb-1 pr-2">SKU *</th>
+              <th className="pb-1 pr-2">Name *</th>
+              <th className="pb-1 pr-2">Category</th>
+              <th className="pb-1 pr-2">UoM</th>
+              <th className="pb-1 pr-2">Unit cost</th>
+              <th className="pb-1 pr-2">Stock</th>
+              <th className="pb-1 pr-2">Reorder pt</th>
+              <th className="pb-1 pr-2">Reorder qty</th>
+              <th className="pb-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className="pr-2 pb-1.5"><input className="input" value={r.sku} onChange={(e) => update(i, "sku", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input" value={r.name} onChange={(e) => update(i, "name", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input" value={r.category} onChange={(e) => update(i, "category", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input w-16" value={r.uom} onChange={(e) => update(i, "uom", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input w-24" type="number" min={0} value={r.unit_cost} onChange={(e) => update(i, "unit_cost", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input w-20" type="number" min={0} value={r.current_stock} onChange={(e) => update(i, "current_stock", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input w-20" type="number" min={0} value={r.reorder_point} onChange={(e) => update(i, "reorder_point", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5"><input className="input w-20" type="number" min={0} value={r.reorder_qty} onChange={(e) => update(i, "reorder_qty", e.target.value)} /></td>
+                <td className="pb-1.5">
+                  <button type="button" className="btn-ghost text-red-600"
+                    onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
+                    disabled={rows.length === 1} aria-label="Remove row">
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" className="btn-ghost text-xs" onClick={() => setRows([...rows, blank()])}>
+        <Plus size={13} /> Add row
+      </button>
+
+      <div className="rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-xs text-ink-600">
+        Importing from a PDF, Excel or Word file is coming next — for now, enter rows manually or paste them in.
+      </div>
+
+      {err && (
+        <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">{err}</div>
+      )}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={save.isPending}>
+          {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          {isDirector ? "Add items" : "Submit for approval"}
+        </button>
+      </div>
+    </form>
   );
 }
 
