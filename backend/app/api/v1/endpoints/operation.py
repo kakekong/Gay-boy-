@@ -146,6 +146,13 @@ async def project_full(project_id: UUID,
     )).all()
 
     show_money = _can_see_project_money(user)
+    # Sales rep in charge (the customer's account owner) so the detail page can
+    # show who owns the deal.
+    sales_rep = None
+    if customer and customer.sales_pic_id:
+        rep = await db.get(User, customer.sales_pic_id)
+        if rep:
+            sales_rep = {"id": str(rep.id), "name": rep.full_name}
     return {
         "project": {
             "id": str(p.id), "code": p.code, "status": p.status,
@@ -158,6 +165,8 @@ async def project_full(project_id: UUID,
             "margin_actual": float(p.margin_actual or 0) if show_money else None,
             "created_at": p.created_at,
         },
+        "sales_pic_id": sales_rep["id"] if sales_rep else None,
+        "sales_pic_name": sales_rep["name"] if sales_rep else None,
         "customer": {
             "id": str(customer.id), "company_name": customer.company_name,
             "industry": customer.industry, "stage": customer.stage,

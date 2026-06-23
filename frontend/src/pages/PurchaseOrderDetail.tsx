@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
+import { UserLink } from "@/components/UserLink";
 import { useAuthStore } from "@/store/auth";
 
 interface POItem { description?: string; qty?: number }
@@ -19,6 +20,8 @@ interface PO {
   supplier_id: string;
   supplier_name: string | null;
   supplier_category: string | null;
+  sales_pic_id: string | null;
+  sales_pic_name: string | null;
   project_id: string | null;
   project_code: string | null;
   project_status: string | null;
@@ -309,6 +312,9 @@ export default function PurchaseOrderDetailPage() {
                 {p.project_status.replace(/_/g, " ")}
               </span>
             )}
+          </Meta>
+          <Meta label="Sales in charge">
+            {p.sales_pic_name ? <UserLink id={p.sales_pic_id} name={p.sales_pic_name} /> : "—"}
           </Meta>
           <Meta label="PO date" icon={<Calendar size={12} />}>
             <input

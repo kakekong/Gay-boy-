@@ -3,11 +3,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
-  ShoppingCart, Wrench, Plus, CheckCircle, Loader2, Hammer,
+  ShoppingCart, Wrench, Plus, CheckCircle, Loader2, Hammer, User as UserIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { UserLink } from "@/components/UserLink";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
@@ -126,6 +127,8 @@ export default function ProjectDetailPage() {
   const p   = data.data.project;
   const cu  = data.data.customer;
   const qt  = data.data.quotation;
+  const salesPicId   = data.data.sales_pic_id;
+  const salesPicName = data.data.sales_pic_name;
   const wos = data.data.work_orders ?? [];
   const dr  = data.data.drawings ?? [];
   const dos = data.data.deliveries ?? [];
@@ -168,6 +171,11 @@ export default function ProjectDetailPage() {
                     className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700">
                     <FileText size={13} /> {qt.number}
                   </Link>
+                )}
+                {salesPicName && (
+                  <span className="inline-flex items-center gap-1.5 text-ink-600">
+                    <UserIcon size={13} /> <UserLink id={salesPicId} name={salesPicName} />
+                  </span>
                 )}
               </div>
             </div>

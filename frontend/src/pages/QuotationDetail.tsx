@@ -5,8 +5,10 @@ import {
   FileText, Send, CheckCircle2, XCircle, Trophy, Frown,
   ArrowLeft, Building2, Calendar, Receipt, ShieldCheck, ShieldAlert, Crown, Loader2,
   MessageCircle, Plus, Bell, CheckCircle, Link2, BookOpen, Undo2, Save, Pencil,
+  User as UserIcon,
 } from "lucide-react";
 import clsx from "clsx";
+import { UserLink } from "@/components/UserLink";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
@@ -203,6 +205,11 @@ export default function QuotationDetailPage() {
                 >
                   <Building2 size={14} /> {customer.data.company_name}
                 </Link>
+              )}
+              {Q.sales_pic_name && (
+                <div className="mt-1 inline-flex items-center gap-1.5 text-sm text-ink-600">
+                  <UserIcon size={14} /> <UserLink id={Q.sales_pic_id} name={Q.sales_pic_name} />
+                </div>
               )}
             </div>
           </div>

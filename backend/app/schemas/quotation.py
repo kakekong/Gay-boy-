@@ -50,6 +50,7 @@ class QuotationOut(BaseModel):
     variant: str
     status: str
     sales_pic_id: UUID | None
+    sales_pic_name: str | None = None
     currency: str
     subtotal: float
     discount_pct: float

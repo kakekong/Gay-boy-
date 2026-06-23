@@ -790,6 +790,11 @@ async def get_quotation(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    # Surface the sales rep's name so the detail page can show who owns the deal.
+    if q.sales_pic_id:
+        rep = await db.get(User, q.sales_pic_id)
+        if rep:
+            q.sales_pic_name = rep.full_name
     return q
 
 
