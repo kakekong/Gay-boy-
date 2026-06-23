@@ -44,6 +44,8 @@ export default function ProjectDetailPage() {
   // drawings, deliveries) but not its deal economics — PO value, margins,
   // or invoice amounts. The backend nulls these for purchasing too.
   const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
+  // Drawing files are viewable by the director only (internal app).
+  const isDirector = useAuthStore((s) => s.user?.role) === "director";
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -414,10 +416,15 @@ export default function ProjectDetailPage() {
                   </td>
                   <td className="td muted">{d.customer_decision_at ? new Date(d.customer_decision_at).toLocaleDateString() : "—"}</td>
                   <td className="td">
-                    {d.file_url ? (
-                      <a href={d.file_url} target="_blank" rel="noreferrer"
-                         className="text-brand-700 hover:underline">View</a>
-                    ) : "—"}
+                    {!d.file_url ? "—"
+                      : isDirector ? (
+                        <a href={d.file_url} target="_blank" rel="noreferrer"
+                           className="text-brand-700 hover:underline">View</a>
+                      ) : (
+                        <span className="muted text-xs" title="Drawings are viewable by the director only">
+                          director only
+                        </span>
+                      )}
                   </td>
                   <td className="td muted">{d.notes ?? "—"}</td>
                 </tr>
