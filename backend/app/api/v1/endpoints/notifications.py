@@ -276,15 +276,17 @@ async def list_notifications(
                 "at": now,
             })
 
-    # 6c. Director: HR-started cross-department chats (silent oversight).
+    # 6c. Director: HR/manager-started cross-department chats (silent oversight).
     if role == Role.DIRECTOR:
-        hr_ids = (await db.scalars(
-            select(User.id).where(User.role == Role.HR.value)
+        overseers = (await db.execute(
+            select(User.id, User.role, User.full_name)
+            .where(User.role.in_([Role.HR.value, Role.MANAGER.value]))
         )).all()
-        if hr_ids:
+        if overseers:
+            by_id = {u[0]: (u[1], u[2]) for u in overseers}
             recent_chans = (await db.scalars(
                 select(ChatChannel).where(
-                    ChatChannel.created_by.in_(hr_ids),
+                    ChatChannel.created_by.in_(list(by_id.keys())),
                     ChatChannel.created_at >= now - timedelta(days=7),
                 ).order_by(ChatChannel.created_at.desc()).limit(30)
             )).all()
@@ -295,12 +297,14 @@ async def list_notifications(
                     .where(ChatChannelMember.channel_id == ch.id)
                 )).all()
                 if len({r[0] for r in roles}) > 1:  # cross-department
+                    crole, cname = by_id.get(ch.created_by, (None, None))
                     items.append({
-                        "id": f"hr-chat:{ch.id}",
+                        "id": f"xdept-chat:{ch.id}",
                         "kind": "chat_oversight",
                         "severity": "low",
-                        "title": "HR started a cross-department chat",
-                        "body": ch.name or "Direct message across teams",
+                        "title": f"{(crole or 'someone').upper()} started a cross-department chat",
+                        "body": (ch.name or "Direct message across teams")
+                                + (f" · by {cname}" if cname else ""),
                         "link": "/chat",
                         "at": ch.created_at,
                     })

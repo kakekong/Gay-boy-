@@ -43,7 +43,9 @@ def _is_cross_dept(roles) -> bool:
 
 
 def _may_start_cross_dept(role: str | None) -> bool:
-    return role in ("director", "hr")
+    # Director, HR and managers may start cross-department chats. When HR or a
+    # manager does, the director is notified and can view it silently.
+    return role in ("director", "hr", "manager")
 
 
 async def _channel_member_roles(db: AsyncSession, channel_id: UUID) -> list[str]:
@@ -240,7 +242,7 @@ async def get_or_create_dm(
     if _is_cross_dept([me.role, other.role]) and not _may_start_cross_dept(me.role):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Cross-department chats can only be started by a director.",
+            "Cross-department chats can only be started by a director, manager, or HR.",
         )
 
     # Find a DM channel where both are members
@@ -448,7 +450,7 @@ async def create_channel(
     if _is_cross_dept(roles) and not _may_start_cross_dept(me.role):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Cross-department channels can only be started by a director.",
+            "Cross-department channels can only be started by a director, manager, or HR.",
         )
 
     ch = ChatChannel(name=name, kind="channel", created_by=me.id)
@@ -512,7 +514,7 @@ async def add_member(
         if _is_cross_dept(roles) and not _may_start_cross_dept(me.role):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                "Only a director can add a member from another department.",
+                "Only a director, manager, or HR can add a member from another department.",
             )
     db.add(ChatChannelMember(channel_id=channel_id, user_id=payload.user_id))
     await db.flush()
