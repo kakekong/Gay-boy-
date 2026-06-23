@@ -7,6 +7,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { UserLink } from "@/components/UserLink";
 
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -370,7 +371,7 @@ function SPOTable({ rows }: { rows: SPO[] }) {
                 </Link>
               ) : "—"}
             </td>
-            <td className="td muted">{p.sales_pic_name ?? "—"}</td>
+            <td className="td muted"><UserLink id={p.sales_pic_id} name={p.sales_pic_name} /></td>
             <td className="td font-mono text-xs muted">{p.project_code ?? "—"}</td>
             <td className="td muted">{p.po_date ?? "—"}</td>
             <td className="td">

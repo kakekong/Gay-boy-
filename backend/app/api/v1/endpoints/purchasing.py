@@ -58,9 +58,12 @@ async def get_supplier(
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(get_current_user),
 ):
-    """Supplier detail with a recap of POs we've issued. Used by the
-    new supplier detail screen behind a click on the Purchasing board."""
-    from app.models.purchasing import Supplier, SupplierPO
+    """Supplier detail with a recap of POs we've issued, the projects we
+    source from them, incoming GR/QC history, and any files they've uploaded.
+    Used by the supplier detail screen."""
+    from app.models.attachment import Attachment
+    from app.models.operation import Project
+    from app.models.purchasing import GoodsReceipt, QCReport, Supplier, SupplierPO
 
     s = await db.get(Supplier, supplier_id)
     if not s:
@@ -71,6 +74,57 @@ async def get_supplier(
         .order_by(SupplierPO.created_at.desc())
     )).all()
     open_pos = [p for p in po_rows if p.status in ("open", "pending_approval")]
+    po_ids = [p.id for p in po_rows]
+    po_number = {p.id: p.number for p in po_rows}
+
+    # Projects this supplier feeds (distinct, via their POs)
+    project_ids = {p.project_id for p in po_rows if p.project_id}
+    projects = []
+    if project_ids:
+        for pr in (await db.scalars(
+            select(Project).where(Project.id.in_(project_ids))
+            .order_by(Project.created_at.desc())
+        )).all():
+            projects.append({
+                "id": str(pr.id), "code": pr.code, "status": pr.status,
+                "target_delivery": pr.target_delivery,
+            })
+
+    # Goods-receipt + QC history across this supplier's POs
+    goods_receipts, qc_reports, files = [], [], []
+    if po_ids:
+        for gr in (await db.scalars(
+            select(GoodsReceipt).where(GoodsReceipt.po_id.in_(po_ids))
+            .order_by(GoodsReceipt.created_at.desc()).limit(50)
+        )).all():
+            goods_receipts.append({
+                "id": str(gr.id), "po_number": po_number.get(gr.po_id),
+                "received_at": gr.received_at, "status": gr.status,
+                "items": gr.items,
+            })
+        for r in (await db.scalars(
+            select(QCReport).where(QCReport.po_id.in_(po_ids))
+            .order_by(QCReport.created_at.desc()).limit(50)
+        )).all():
+            qc_reports.append({
+                "id": str(r.id), "po_number": po_number.get(r.po_id),
+                "pass_qty": float(r.pass_qty or 0), "fail_qty": float(r.fail_qty or 0),
+                "decision": r.decision, "findings": r.findings,
+            })
+        for a in (await db.scalars(
+            select(Attachment).where(
+                Attachment.owner_type == "supplier_po",
+                Attachment.owner_id.in_(po_ids),
+            ).order_by(Attachment.created_at.desc())
+        )).all():
+            files.append({
+                "id": str(a.id), "filename": a.filename,
+                "content_type": a.content_type, "size": a.size,
+                "po_number": po_number.get(a.owner_id),
+                "uploaded_at": a.created_at,
+                "download_url": f"/api/v1/attachments/{a.id}/download",
+            })
+
     return {
         "id": str(s.id),
         "name": s.name,
@@ -94,6 +148,10 @@ async def get_supplier(
             }
             for p in po_rows
         ],
+        "projects": projects,
+        "goods_receipts": goods_receipts,
+        "qc_reports": qc_reports,
+        "files": files,
     }
 
 

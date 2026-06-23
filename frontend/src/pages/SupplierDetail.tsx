@@ -1,10 +1,14 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft, Building2, Star, Truck, Loader2, AlertCircle, Mail, Phone,
+  Briefcase, PackageCheck, CheckCircle2, Paperclip, Eye, Download,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { downloadFile } from "@/lib/download";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 interface Contact { name?: string; phone?: string; email?: string }
 
@@ -15,6 +19,15 @@ interface PO {
   po_date: string | null;
   total: number;
   project_id: string | null;
+}
+
+interface SupplierFile {
+  id: string;
+  filename: string;
+  content_type: string | null;
+  size: number;
+  po_number: string | null;
+  uploaded_at: string;
 }
 
 interface SupplierDetail {
@@ -30,6 +43,10 @@ interface SupplierDetail {
   open_po_count: number;
   lifetime_value: number;
   purchase_orders: PO[];
+  projects: { id: string; code: string; status: string; target_delivery: string | null }[];
+  goods_receipts: { id: string; po_number: string | null; received_at: string | null; status: string; items: any[] }[];
+  qc_reports: { id: string; po_number: string | null; pass_qty: number; fail_qty: number; decision: string; findings: string | null }[];
+  files: SupplierFile[];
 }
 
 const POSTATUS: Record<string, string> = {
@@ -46,6 +63,7 @@ const idr = (n: number) =>
 export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const [preview, setPreview] = useState<SupplierFile | null>(null);
 
   const q = useQuery({
     queryKey: ["supplier", id],
@@ -211,6 +229,137 @@ export default function SupplierDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Projects supplied */}
+      <div className="card overflow-hidden">
+        <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
+          <Briefcase size={15} className="text-brand-600" />
+          <span className="font-semibold">Projects supplied</span>
+          <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.projects.length}</span>
+        </header>
+        {!s.projects.length ? (
+          <div className="p-8 text-center text-sm muted">Not linked to any project yet.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr><th className="th">Code</th><th className="th">Status</th><th className="th">Target delivery</th></tr>
+            </thead>
+            <tbody>
+              {s.projects.map((p) => (
+                <tr key={p.id} className="border-t border-ink-100 tr-hover cursor-pointer"
+                  onClick={() => nav(`/projects/${p.id}`)}>
+                  <td className="td font-mono text-xs">
+                    <Link to={`/projects/${p.id}`} onClick={(e) => e.stopPropagation()}
+                      className="text-brand-700 hover:underline">{p.code}</Link>
+                  </td>
+                  <td className="td capitalize">{p.status?.replace(/_/g, " ")}</td>
+                  <td className="td muted">{p.target_delivery ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* GR + QC history */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="card overflow-hidden">
+          <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
+            <PackageCheck size={15} className="text-brand-600" />
+            <span className="font-semibold">Goods receipts</span>
+            <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.goods_receipts.length}</span>
+          </header>
+          {!s.goods_receipts.length ? (
+            <div className="p-6 text-center text-sm muted">No receipts yet.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr><th className="th">PO</th><th className="th">Received</th><th className="th">Items</th><th className="th">Status</th></tr>
+              </thead>
+              <tbody>
+                {s.goods_receipts.map((g) => (
+                  <tr key={g.id} className="border-t border-ink-100">
+                    <td className="td font-mono text-xs">{g.po_number ?? "—"}</td>
+                    <td className="td muted">{g.received_at ?? "—"}</td>
+                    <td className="td muted">{(g.items ?? []).length} line(s)</td>
+                    <td className="td capitalize">{g.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="card overflow-hidden">
+          <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
+            <CheckCircle2 size={15} className="text-brand-600" />
+            <span className="font-semibold">QC reports</span>
+            <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.qc_reports.length}</span>
+          </header>
+          {!s.qc_reports.length ? (
+            <div className="p-6 text-center text-sm muted">No inspections yet.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr><th className="th">PO</th><th className="th text-right">Pass</th><th className="th text-right">Fail</th><th className="th">Decision</th></tr>
+              </thead>
+              <tbody>
+                {s.qc_reports.map((r) => (
+                  <tr key={r.id} className="border-t border-ink-100">
+                    <td className="td font-mono text-xs">{r.po_number ?? "—"}</td>
+                    <td className="td text-right tabular-nums text-emerald-700">{r.pass_qty}</td>
+                    <td className="td text-right tabular-nums text-red-700">{r.fail_qty}</td>
+                    <td className="td capitalize">
+                      <span className={clsx("chip",
+                        r.decision === "accepted" ? "bg-emerald-50 text-emerald-700"
+                        : r.decision === "rejected" ? "bg-red-50 text-red-700"
+                        : "bg-amber-50 text-amber-700")}>{r.decision}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Files uploaded against this supplier's POs */}
+      <div className="card overflow-hidden">
+        <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
+          <Paperclip size={15} className="text-brand-600" />
+          <span className="font-semibold">Files</span>
+          <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.files.length}</span>
+        </header>
+        {!s.files.length ? (
+          <div className="p-8 text-center text-sm muted">No files uploaded for this supplier yet.</div>
+        ) : (
+          <ul className="divide-y divide-ink-100">
+            {s.files.map((f) => (
+              <li key={f.id} className="px-4 py-2.5 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{f.filename}</div>
+                  <div className="text-[11px] muted">
+                    {f.po_number ? `PO ${f.po_number} · ` : ""}{new Date(f.uploaded_at).toLocaleString()}
+                  </div>
+                </div>
+                <button className="btn-ghost" title="View" onClick={() => setPreview(f)}><Eye size={14} /></button>
+                <button className="btn-ghost" title="Download"
+                  onClick={() => downloadFile(`/attachments/${f.id}/download`, f.filename)}>
+                  <Download size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={preview.content_type}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }
