@@ -99,6 +99,11 @@ export default function SupplierDetailPage() {
 
   const s = q.data;
   const c = s.contact || {};
+  // Defensive: an older API build may not return these arrays yet — never crash.
+  const projects = s.projects ?? [];
+  const goodsReceipts = s.goods_receipts ?? [];
+  const qcReports = s.qc_reports ?? [];
+  const files = s.files ?? [];
 
   return (
     <div className="space-y-5">
@@ -235,9 +240,9 @@ export default function SupplierDetailPage() {
         <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
           <Briefcase size={15} className="text-brand-600" />
           <span className="font-semibold">Projects supplied</span>
-          <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.projects.length}</span>
+          <span className="text-[10px] uppercase tracking-wider muted ml-auto">{projects.length}</span>
         </header>
-        {!s.projects.length ? (
+        {!projects.length ? (
           <div className="p-8 text-center text-sm muted">Not linked to any project yet.</div>
         ) : (
           <table className="w-full text-sm">
@@ -245,7 +250,7 @@ export default function SupplierDetailPage() {
               <tr><th className="th">Code</th><th className="th">Status</th><th className="th">Target delivery</th></tr>
             </thead>
             <tbody>
-              {s.projects.map((p) => (
+              {projects.map((p) => (
                 <tr key={p.id} className="border-t border-ink-100 tr-hover cursor-pointer"
                   onClick={() => nav(`/projects/${p.id}`)}>
                   <td className="td font-mono text-xs">
@@ -267,9 +272,9 @@ export default function SupplierDetailPage() {
           <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
             <PackageCheck size={15} className="text-brand-600" />
             <span className="font-semibold">Goods receipts</span>
-            <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.goods_receipts.length}</span>
+            <span className="text-[10px] uppercase tracking-wider muted ml-auto">{goodsReceipts.length}</span>
           </header>
-          {!s.goods_receipts.length ? (
+          {!goodsReceipts.length ? (
             <div className="p-6 text-center text-sm muted">No receipts yet.</div>
           ) : (
             <table className="w-full text-sm">
@@ -277,7 +282,7 @@ export default function SupplierDetailPage() {
                 <tr><th className="th">PO</th><th className="th">Received</th><th className="th">Items</th><th className="th">Status</th></tr>
               </thead>
               <tbody>
-                {s.goods_receipts.map((g) => (
+                {goodsReceipts.map((g) => (
                   <tr key={g.id} className="border-t border-ink-100">
                     <td className="td font-mono text-xs">{g.po_number ?? "—"}</td>
                     <td className="td muted">{g.received_at ?? "—"}</td>
@@ -293,9 +298,9 @@ export default function SupplierDetailPage() {
           <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
             <CheckCircle2 size={15} className="text-brand-600" />
             <span className="font-semibold">QC reports</span>
-            <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.qc_reports.length}</span>
+            <span className="text-[10px] uppercase tracking-wider muted ml-auto">{qcReports.length}</span>
           </header>
-          {!s.qc_reports.length ? (
+          {!qcReports.length ? (
             <div className="p-6 text-center text-sm muted">No inspections yet.</div>
           ) : (
             <table className="w-full text-sm">
@@ -303,7 +308,7 @@ export default function SupplierDetailPage() {
                 <tr><th className="th">PO</th><th className="th text-right">Pass</th><th className="th text-right">Fail</th><th className="th">Decision</th></tr>
               </thead>
               <tbody>
-                {s.qc_reports.map((r) => (
+                {qcReports.map((r) => (
                   <tr key={r.id} className="border-t border-ink-100">
                     <td className="td font-mono text-xs">{r.po_number ?? "—"}</td>
                     <td className="td text-right tabular-nums text-emerald-700">{r.pass_qty}</td>
@@ -327,13 +332,13 @@ export default function SupplierDetailPage() {
         <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
           <Paperclip size={15} className="text-brand-600" />
           <span className="font-semibold">Files</span>
-          <span className="text-[10px] uppercase tracking-wider muted ml-auto">{s.files.length}</span>
+          <span className="text-[10px] uppercase tracking-wider muted ml-auto">{files.length}</span>
         </header>
-        {!s.files.length ? (
+        {!files.length ? (
           <div className="p-8 text-center text-sm muted">No files uploaded for this supplier yet.</div>
         ) : (
           <ul className="divide-y divide-ink-100">
-            {s.files.map((f) => (
+            {files.map((f) => (
               <li key={f.id} className="px-4 py-2.5 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{f.filename}</div>

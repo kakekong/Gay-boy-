@@ -1,10 +1,8 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Banknote, ShieldCheck, LineChart } from "lucide-react";
+import { Banknote, LineChart } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import PaymentVerificationPage from "@/pages/PaymentVerification";
 
 const BUCKETS = [
   { key: "current", label: "Current",    color: "bg-emerald-500" },
@@ -15,49 +13,22 @@ const BUCKETS = [
 ];
 
 export default function FinancePage() {
-  const [tab, setTab] = useState<"aging" | "verification">("aging");
-
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Banknote size={22} className="text-brand-600" /> Finance
+            <Banknote size={22} className="text-brand-600" /> Finance · AR Aging
           </h1>
-          <p className="text-sm muted">Receivables, payment verification, and estimates.</p>
+          <p className="text-sm muted">Outstanding receivables grouped by days past due.</p>
         </div>
         <Link to="/finance/estimated" className="btn-ghost">
           <LineChart size={15} /> Estimated finance
         </Link>
       </div>
 
-      <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
-        <TabButton active={tab === "aging"} onClick={() => setTab("aging")} icon={Banknote}>
-          AR Aging
-        </TabButton>
-        <TabButton active={tab === "verification"} onClick={() => setTab("verification")} icon={ShieldCheck}>
-          Payment verification
-        </TabButton>
-      </div>
-
-      {tab === "aging" ? <ArAging /> : <PaymentVerificationPage />}
+      <ArAging />
     </div>
-  );
-}
-
-function TabButton({ active, onClick, icon: Icon, children }: {
-  active: boolean; onClick: () => void; icon: typeof Banknote; children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
-        active ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
-      )}
-    >
-      <Icon size={14} /> {children}
-    </button>
   );
 }
 

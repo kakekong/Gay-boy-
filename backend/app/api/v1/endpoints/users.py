@@ -180,8 +180,10 @@ async def get_employee(
 async def employee_stats(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_hr_or_director),
+    me: User = Depends(_hr_or_director),
 ):
+    from app.models.operation import Project
+
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
@@ -238,10 +240,40 @@ async def employee_stats(
         )
     ) or 0
     decided = won + lost
-    return {
+
+    # Fulfillment counts (no names, no money) — these are what HR is allowed
+    # to see: how much of the person's work is done vs. overdue.
+    _FULFILLED = {"delivered", "invoiced", "paid", "closed"}
+    proj_rows = (await db.execute(
+        select(Project.status, Project.target_delivery, Project.actual_delivery)
+        .join(Customer, Project.customer_id == Customer.id)
+        .where(Customer.sales_pic_id == user_id)
+    )).all()
+    today = date_t.today()
+    projects_total = len(proj_rows)
+    projects_fulfilled = sum(1 for st, _t, _a in proj_rows if st in _FULFILLED)
+    projects_overdue = sum(
+        1 for st, td, ad in proj_rows
+        if td and td < today and not ad and st not in _FULFILLED
+    )
+
+    # Attendance + fulfillment only — the slice HR may see.
+    base = {
         "user_id": str(user_id),
         "full_name": user.full_name,
         "role": user.role,
+        "attendance_present_total": att_present,
+        "attendance_absent_total": att_absent,
+        "attendance_leave_total": att_leave,
+        "projects_total": projects_total,
+        "projects_fulfilled": projects_fulfilled,
+        "projects_overdue": projects_overdue,
+    }
+    if Role(me.role) == Role.HR:
+        # No sales performance, revenue, pipeline, or customer counts for HR.
+        return base
+    return {
+        **base,
         "customers": customers_count,
         "quotations": quotations_count,
         "won": won,
@@ -250,9 +282,6 @@ async def employee_stats(
         "pipeline_value": float(pipeline_value or 0),
         "won_revenue": float(won_revenue or 0),
         "activities_30d": activities_30d,
-        "attendance_present_total": att_present,
-        "attendance_absent_total": att_absent,
-        "attendance_leave_total": att_leave,
     }
 
 
@@ -274,14 +303,16 @@ async def employee_projects(
         .order_by(Project.created_at.desc())
         .limit(limit)
     )).all()
+    # HR sees fulfillment status only — no customer names, no deal value.
+    is_hr = Role(me.role) == Role.HR
     show_money = Role(me.role) == Role.DIRECTOR
     return [
         {
             "id": str(p.id),
             "code": p.code,
             "status": p.status,
-            "customer_id": str(c.id),
-            "customer_name": c.company_name,
+            "customer_id": None if is_hr else str(c.id),
+            "customer_name": None if is_hr else c.company_name,
             "po_value": float(p.po_value or 0) if show_money else None,
             "target_delivery": p.target_delivery,
         }
@@ -293,7 +324,7 @@ async def employee_projects(
 async def employee_quotations(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_hr_or_director),
+    _u: User = Depends(_director),
     status_eq: str | None = None,
     limit: int = 200,
 ):
@@ -327,7 +358,7 @@ async def employee_quotations(
 async def employee_customers(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_hr_or_director),
+    _u: User = Depends(_director),
     limit: int = 200,
 ):
     rows = (await db.scalars(
@@ -351,7 +382,7 @@ async def employee_customers(
 async def employee_activities(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_hr_or_director),
+    _u: User = Depends(_director),
     limit: int = 100,
 ):
     stmt = (

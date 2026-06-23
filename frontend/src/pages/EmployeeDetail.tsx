@@ -51,8 +51,10 @@ export default function EmployeeDetailPage() {
   const me = useAuthStore((s) => s.user);
   const canTag = me && (me.role === "hr" || me.role === "director");
   const canSeeAttendance = me && (me.role === "hr" || me.role === "director");
-  // HR administers people but must not see personal contact info.
+  // HR administers people but must not see personal contact info, sales
+  // performance, customers, or money — only attendance + fulfillment counts.
   const canSeeContact = me?.role !== "hr";
+  const isHR = me?.role === "hr";
 
   const today = new Date();
   const defaultPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
@@ -90,22 +92,22 @@ export default function EmployeeDetailPage() {
   const quotations = useQuery({
     queryKey: ["employee-quotations", id],
     queryFn: () => api.get(`/users/${id}/quotations`).then((r) => r.data),
-    enabled: !!id,
+    enabled: !!id && !isHR,
   });
   const customers = useQuery({
     queryKey: ["employee-customers", id],
     queryFn: () => api.get(`/users/${id}/customers`).then((r) => r.data),
-    enabled: !!id,
+    enabled: !!id && !isHR,
   });
   const projects = useQuery({
     queryKey: ["employee-projects", id],
     queryFn: () => api.get(`/users/${id}/projects`).then((r) => r.data as any[]),
-    enabled: !!id,
+    enabled: !!id && !isHR,
   });
   const activities = useQuery({
     queryKey: ["employee-activities", id],
     queryFn: () => api.get(`/users/${id}/activities`).then((r) => r.data),
-    enabled: !!id,
+    enabled: !!id && !isHR,
   });
 
   const attendanceSummary = useQuery({
@@ -198,7 +200,17 @@ export default function EmployeeDetailPage() {
         )}
       </div>
 
-      {/* KPIs */}
+      {/* HR work summary — counts only, no names or money */}
+      {isHR && (
+        <div className="grid grid-cols-3 gap-3">
+          <KpiCard label="Projects" value={stats.data?.projects_total ?? "—"} icon={Briefcase} accent="brand" />
+          <KpiCard label="Fulfilled" value={stats.data?.projects_fulfilled ?? "—"} icon={Trophy} accent="emerald" />
+          <KpiCard label="Overdue" value={stats.data?.projects_overdue ?? "—"} icon={Frown} accent="red" />
+        </div>
+      )}
+
+      {/* Sales KPIs — hidden from HR */}
+      {!isHR && (
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard label="Customers"     value={stats.data?.customers ?? "—"}      icon={Users}       accent="brand" />
         <KpiCard label="Quotations"    value={stats.data?.quotations ?? "—"}     icon={FileText}    accent="violet" />
@@ -215,6 +227,7 @@ export default function EmployeeDetailPage() {
           icon={Wallet} accent="emerald"
         />
       </div>
+      )}
 
       {canSeeAttendance && (attendanceSummary.data?.deductible_days ?? 0) > 0 && (
         <KpiCard
@@ -240,7 +253,7 @@ export default function EmployeeDetailPage() {
         </div>
       )}
 
-      {isSales && (
+      {isSales && !isHR && (
         <KpiCard
           label="Pipeline value (open quotations)"
           value={stats.data ? idr(stats.data.pipeline_value) : "—"}
@@ -249,7 +262,8 @@ export default function EmployeeDetailPage() {
         />
       )}
 
-      {/* Quotations */}
+      {/* Quotations — hidden from HR */}
+      {!isHR && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
           <div>
@@ -318,8 +332,10 @@ export default function EmployeeDetailPage() {
           </div>
         )}
       </div>
+      )}
 
-      {/* Customers */}
+      {/* Customers — hidden from HR */}
+      {!isHR && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -366,8 +382,11 @@ export default function EmployeeDetailPage() {
           </table>
         )}
       </div>
+      )}
 
-      {/* Projects / POs tied to this employee's customers */}
+      {/* Projects / POs tied to this employee's customers — hidden from HR
+          (HR sees the fulfillment counts above instead) */}
+      {!isHR && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -413,6 +432,7 @@ export default function EmployeeDetailPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Attendance — HR/Director only */}
       {canSeeAttendance && (
@@ -513,7 +533,8 @@ export default function EmployeeDetailPage() {
         </div>
       )}
 
-      {/* Activity */}
+      {/* Activity — hidden from HR (customer names) */}
+      {!isHR && (
       <div className="card p-5">
         <div className="flex items-center gap-2 font-semibold">
           <ActivityIcon size={15} /> Recent activity
@@ -551,6 +572,7 @@ export default function EmployeeDetailPage() {
           </ul>
         )}
       </div>
+      )}
     </div>
   );
 }

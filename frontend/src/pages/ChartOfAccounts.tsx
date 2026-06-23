@@ -64,6 +64,16 @@ export default function ChartOfAccountsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
   });
 
+  const seed = useMutation({
+    mutationFn: () => api.post("/accounts/seed"),
+    onSuccess: (r: any) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      alert(`Seeded ${r?.data?.created ?? 0} default accounts.`);
+    },
+    onError: (e: any) =>
+      alert(e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail ?? "Seed failed"),
+  });
+
   const filtersActive = type !== "All" || suspended !== "all" || !!debounced;
 
   // Sort: account_no ascending, but keep parent immediately before its children
@@ -336,7 +346,20 @@ export default function ChartOfAccountsPage() {
               {!rows.length && (
                 <tr>
                   <td colSpan={5} className="td text-center muted py-12">
-                    {accounts.isLoading ? "Loading…" : "No accounts match your filter."}
+                    {accounts.isLoading ? "Loading…"
+                      : filtersActive ? "No accounts match your filter."
+                      : (
+                        <div className="space-y-3">
+                          <div>No chart of accounts yet.</div>
+                          <button
+                            className="btn-primary"
+                            disabled={seed.isPending}
+                            onClick={() => seed.mutate()}
+                          >
+                            {seed.isPending ? "Seeding…" : "Seed default chart of accounts"}
+                          </button>
+                        </div>
+                      )}
                   </td>
                 </tr>
               )}
