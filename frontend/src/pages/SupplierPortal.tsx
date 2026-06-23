@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Factory, FileText, Download, Loader2, FileSpreadsheet, Hammer, Receipt,
+  Factory, FileText, Download, Loader2, FileSpreadsheet, Hammer, Receipt, Eye,
   Truck, Warehouse, AlertCircle, CheckCircle2, Save,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -106,6 +107,7 @@ function POCard({ po }: { po: PO }) {
   const [err, setErr] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
+  const [preview, setPreview] = useState<any | null>(null);
   const [estWh, setEstWh] = useState(po.est_arrive_our_warehouse ?? "");
   const [actShip, setActShip] = useState(po.act_ship_from_origin ?? "");
   const [actWh, setActWh] = useState(po.act_arrive_our_warehouse ?? "");
@@ -351,13 +353,25 @@ function POCard({ po }: { po: PO }) {
                     {f.description && <> · {f.description}</>}
                   </div>
                 </div>
-                <button className="btn-ghost" onClick={() => download(f.id, f.filename)}>
+                <button className="btn-ghost" title="View" onClick={() => setPreview(f)}>
+                  <Eye size={13} />
+                </button>
+                <button className="btn-ghost" title="Download" onClick={() => download(f.id, f.filename)}>
                   <Download size={13} />
                 </button>
               </li>
             ))}
           </ul>
         </div>
+      )}
+
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={preview.content_type ?? null}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   );
