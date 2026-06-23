@@ -466,5 +466,7 @@ async def project_timeline(
         "code": p.code,
         "is_import": bool(p.is_import),
         "origin_location": p.origin_location,
+        "target_delivery": p.target_delivery,
+        "actual_delivery": p.actual_delivery,
         "stages": stages,
     }

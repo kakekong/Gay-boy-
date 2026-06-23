@@ -361,6 +361,13 @@ export default function PurchaseOrderDetailPage() {
         </div>
       </div>
 
+      <ShippingPanel
+        poDate={p.po_date}
+        leadDays={p.quoted_lead_days}
+        targetDelivery={p.project_target_delivery}
+        actualDelivery={p.project_actual_delivery}
+      />
+
       {/* Items */}
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-2">
@@ -472,6 +479,57 @@ export default function PurchaseOrderDetailPage() {
       <AttachmentsSection ownerType="supplier_po" ownerId={p.id} />
 
       <CommentThread ownerType="supplier_po" ownerId={p.id} />
+    </div>
+  );
+}
+
+function ShippingPanel({ poDate, leadDays, targetDelivery, actualDelivery }: {
+  poDate: string | null;
+  leadDays: number | null;
+  targetDelivery: string | null;
+  actualDelivery: string | null;
+}) {
+  const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
+  // Expected supplier delivery = PO date + quoted lead time.
+  let expected: Date | null = null;
+  if (poDate && leadDays != null) {
+    expected = new Date(poDate);
+    expected.setDate(expected.getDate() + leadDays);
+  }
+  const day = 86_400_000;
+  // Will the materials land in time for the customer-promised delivery?
+  let risk: { cls: string; label: string } | null = null;
+  if (expected && targetDelivery && !actualDelivery) {
+    const slack = Math.round((new Date(targetDelivery).getTime() - expected.getTime()) / day);
+    risk = slack < 0
+      ? { cls: "bg-red-100 text-red-800", label: `Arrives ${-slack}d after target` }
+      : slack <= 7
+        ? { cls: "bg-amber-100 text-amber-800", label: `Only ${slack}d slack` }
+        : { cls: "bg-emerald-100 text-emerald-800", label: `${slack}d slack` };
+  }
+  return (
+    <div className="card p-5">
+      <div className="font-semibold flex items-center gap-2 mb-3">
+        <Truck size={15} className="text-brand-600" /> Shipping &amp; ETA
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <Meta label="PO date" icon={<Calendar size={12} />}>{fmt(poDate)}</Meta>
+        <Meta label="Lead time">{leadDays != null ? `${leadDays} days` : "—"}</Meta>
+        <Meta label="Expected arrival">
+          {expected ? expected.toLocaleDateString() : <span className="muted">set a lead time</span>}
+        </Meta>
+        <Meta label="Customer target">
+          <span className="inline-flex items-center gap-2">
+            {fmt(targetDelivery)}
+            {risk && <span className={clsx("chip text-[10px] uppercase", risk.cls)}>{risk.label}</span>}
+          </span>
+        </Meta>
+      </div>
+      {actualDelivery && (
+        <div className="mt-2 text-xs muted">
+          Delivered to customer: <b className="text-emerald-700">{fmt(actualDelivery)}</b>
+        </div>
+      )}
     </div>
   );
 }

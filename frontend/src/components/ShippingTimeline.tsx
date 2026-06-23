@@ -16,6 +16,34 @@ function fmt(d: string | null) {
   return new Date(d).toLocaleDateString();
 }
 
+function daysBetween(a: Date, b: Date) {
+  return Math.round((a.getTime() - b.getTime()) / 86_400_000);
+}
+
+/** Overall delivery status chip: delivered / overdue / due-in-N-days. */
+function DeliveryStatus({ target, actual }: { target: string | null; actual: string | null }) {
+  if (!target && !actual) return null;
+  if (actual) {
+    let cls = "bg-emerald-100 text-emerald-800";
+    let label = "Delivered";
+    if (target) {
+      const late = daysBetween(new Date(actual), new Date(target));
+      if (late > 0) { cls = "bg-red-100 text-red-800"; label = `Delivered ${late}d late`; }
+      else label = "Delivered on time";
+    }
+    return <span className={clsx("chip text-[10px] uppercase", cls)}>{label}</span>;
+  }
+  // Not delivered yet — compare target to today.
+  const left = daysBetween(new Date(target!), new Date());
+  const cls = left < 0 ? "bg-red-100 text-red-800"
+    : left <= 7 ? "bg-amber-100 text-amber-800"
+    : "bg-brand-100 text-brand-800";
+  const label = left < 0 ? `${-left}d overdue`
+    : left === 0 ? "Due today"
+    : `Due in ${left}d`;
+  return <span className={clsx("chip text-[10px] uppercase", cls)}>{label}</span>;
+}
+
 const ICON: Record<string, any> = {
   ship_from_origin:     Truck,
   arrive_our_warehouse: Warehouse,
@@ -42,7 +70,7 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
 
   return (
     <div className="card p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
             <Truck size={15} className="text-brand-600" /> Shipping timeline
@@ -51,6 +79,14 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
             {q.data.is_import ? "International import" : "Local shipment"}
             {q.data.origin_location && ` · from ${q.data.origin_location}`}
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {q.data.target_delivery && (
+            <span className="text-[11px] muted">
+              Target <b className="text-ink-800">{fmt(q.data.target_delivery)}</b>
+            </span>
+          )}
+          <DeliveryStatus target={q.data.target_delivery ?? null} actual={q.data.actual_delivery ?? null} />
         </div>
       </div>
 
