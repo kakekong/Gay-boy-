@@ -394,6 +394,12 @@ export default function ProjectDetailPage() {
             <Hammer size={15} className="text-brand-600" /> Drawings
           </div>
           <div className="text-xs muted">{dr.length} revision(s)</div>
+          <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
+            The review is the customer's call — they approve or request a
+            revision from their portal. Staff can't change it here; the
+            director alone may open the file. An approval advances the
+            project to "drawing approved" automatically.
+          </div>
         </div>
         {dr.length === 0 ? (
           <div className="p-8 text-center muted text-sm">No drawings uploaded.</div>

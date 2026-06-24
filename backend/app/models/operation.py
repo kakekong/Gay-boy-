@@ -42,6 +42,36 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
 
+# Project lifecycle stages, in order. The project status is read-only in the
+# UI — nobody sets it from a dropdown. It reflects where the project actually
+# is, advanced forward by real events (e.g. the customer approving a drawing
+# moves it to `drawing_approved`). It never moves backward on its own.
+PROJECT_STATUS_ORDER: list[str] = [
+    "new", "drawing", "drawing_approved", "purchasing",
+    "production", "qc", "packaging", "delivered", "invoiced", "paid", "closed",
+]
+
+
+def advance_project_status(project: "Project", to_status: str) -> bool:
+    """Move `project` forward to `to_status` only if that's later in the
+    pipeline than where it already is. Returns True when the status changed.
+
+    Never regresses (a project already in production won't drop back to
+    drawing_approved), and a status outside PROJECT_STATUS_ORDER is left
+    untouched — so this is always safe to call on a real event.
+    """
+    order = PROJECT_STATUS_ORDER
+    try:
+        cur = order.index(project.status)
+        nxt = order.index(to_status)
+    except ValueError:
+        return False
+    if nxt > cur:
+        project.status = to_status
+        return True
+    return False
+
+
 class WorkOrder(Base, UUIDPK, TimestampMixin):
     __tablename__ = "work_orders"
 

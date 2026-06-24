@@ -25,7 +25,12 @@ from app.core.permissions import Role
 from app.models.attachment import Attachment
 from app.models.crm import Customer
 from app.models.finance import Invoice
-from app.models.operation import DeliveryOrder, Drawing, Project
+from app.models.operation import (
+    DeliveryOrder,
+    Drawing,
+    Project,
+    advance_project_status,
+)
 from app.models.purchasing import PurchaseRequest, RFQ, SupplierPO
 from app.models.quotation import Quotation
 from app.models.user import User
@@ -153,6 +158,10 @@ async def customer_decide_drawing(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your drawing")
     if decision == "approve":
         d.status = "approved"
+        # The customer's sign-off is the source of truth for the drawing
+        # review — staff (director included) can't change it. Reflect it in
+        # the project's read-only status by advancing it to drawing_approved.
+        advance_project_status(project, "drawing_approved")
     elif decision == "request_revision":
         d.status = "revision_requested"
     else:
