@@ -121,8 +121,25 @@ async def _bump(db: AsyncSession, account_no: str | None, delta: float) -> dict 
     if not acc:
         return None
     acc.balance = float(acc.balance or 0) + delta
-    return {"account_no": account_no, "name": acc.name, "delta": delta,
+    return {"account_no": account_no, "name": acc.name,
+            "account_type": acc.account_type, "delta": delta,
             "new_balance": float(acc.balance)}
+
+
+async def _journal_salary_moves(
+    db: AsyncSession, s: Salary, movements: list[dict], verb: str,
+) -> None:
+    """Mirror salary CoA movements into the transaction journal so payroll
+    shows up in period P&L (expense) and cash flow (bank)."""
+    from app.services.ledger import journal_post
+    for m in movements:
+        await journal_post(
+            db, entry_date=datetime.now(UTC).date(),
+            account_no=m["account_no"], account_type=m.get("account_type", ""),
+            account_name=m.get("name"), amount=float(m.get("delta") or 0),
+            source_type="salary", source_id=s.id, source_ref=s.period,
+            memo=f"Payroll {s.period} {verb} ({m.get('role')})",
+        )
 
 
 async def _user_name(db: AsyncSession, user_id: UUID) -> str | None:
@@ -252,6 +269,7 @@ async def post_to_ledger(salary_id: UUID,
     m1 = await _bump(db, s.account_expense_no,   float(s.gross_salary));  m1 and movements.append({**m1, "role": "expense"})
     m2 = await _bump(db, s.account_tax_no,       float(s.pph21));         m2 and movements.append({**m2, "role": "tax"})
     m3 = await _bump(db, s.account_liability_no, float(s.net_pay));       m3 and movements.append({**m3, "role": "liability"})
+    await _journal_salary_moves(db, s, movements, "posted")
     s.is_posted = True
     s.status = "posted"
     s.posted_at = datetime.now(UTC)
@@ -276,8 +294,12 @@ async def reverse_ledger(salary_id: UUID,
     if s.status == "paid":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Cannot reverse a salary that has already been paid.")
+    reversed_moves = []
     for m in (s.posted_snapshot or {}).get("movements", []):
-        await _bump(db, m.get("account_no"), -float(m.get("delta") or 0))
+        rev = await _bump(db, m.get("account_no"), -float(m.get("delta") or 0))
+        if rev:
+            reversed_moves.append({**rev, "role": m.get("role")})
+    await _journal_salary_moves(db, s, reversed_moves, "reversed")
     s.is_posted = False
     s.status = "draft"
     s.posted_at = None
@@ -303,8 +325,14 @@ async def mark_paid(salary_id: UUID,
     movements = list((s.posted_snapshot or {}).get("movements", []))
     m_liab = await _bump(db, s.account_liability_no, -float(s.net_pay))
     m_bank = await _bump(db, s.account_bank_no,      -float(s.net_pay))
-    if m_liab: movements.append({**m_liab, "role": "liability_clear"})
-    if m_bank: movements.append({**m_bank, "role": "bank_paid"})
+    pay_moves = []
+    if m_liab:
+        movements.append({**m_liab, "role": "liability_clear"})
+        pay_moves.append({**m_liab, "role": "liability_clear"})
+    if m_bank:
+        movements.append({**m_bank, "role": "bank_paid"})
+        pay_moves.append({**m_bank, "role": "bank_paid"})
+    await _journal_salary_moves(db, s, pay_moves, "paid")
     s.status = "paid"
     s.paid_at = datetime.now(UTC)
     s.posted_snapshot = {

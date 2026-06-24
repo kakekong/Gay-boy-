@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Banknote, LineChart } from "lucide-react";
+import { Banknote, LineChart, BarChart3 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 
@@ -22,9 +22,14 @@ export default function FinancePage() {
           </h1>
           <p className="text-sm muted">Outstanding receivables grouped by days past due.</p>
         </div>
-        <Link to="/finance/estimated" className="btn-ghost">
-          <LineChart size={15} /> Estimated finance
-        </Link>
+        <div className="flex gap-2">
+          <Link to="/finance/reports" className="btn-ghost">
+            <BarChart3 size={15} /> Financial reports
+          </Link>
+          <Link to="/finance/estimated" className="btn-ghost">
+            <LineChart size={15} /> Estimated finance
+          </Link>
+        </div>
       </div>
 
       <ArAging />

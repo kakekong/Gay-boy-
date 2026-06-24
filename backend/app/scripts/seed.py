@@ -132,6 +132,36 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS nppkp_no    VARCHAR(64)',
     'ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_notes   TEXT',
 
+    # ledger_entries — the company transaction journal (created lazily for
+    # installs upgrading from before the model existed; create_all() handles
+    # fresh installs).
+    """
+    CREATE TABLE IF NOT EXISTS ledger_entries (
+        id UUID PRIMARY KEY,
+        entry_date DATE NOT NULL,
+        account_no VARCHAR(40) NOT NULL,
+        account_type VARCHAR(40) NOT NULL,
+        account_name VARCHAR(255),
+        amount NUMERIC(18,2) NOT NULL DEFAULT 0,
+        cash_delta NUMERIC(18,2) NOT NULL DEFAULT 0,
+        source_type VARCHAR(30) NOT NULL,
+        source_id UUID,
+        source_ref VARCHAR(120),
+        memo TEXT,
+        customer_id UUID,
+        sales_pic_id UUID,
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_ledger_entries_entry_date ON ledger_entries (entry_date)",
+    "CREATE INDEX IF NOT EXISTS ix_ledger_entries_account_no ON ledger_entries (account_no)",
+    "CREATE INDEX IF NOT EXISTS ix_ledger_entries_account_type ON ledger_entries (account_type)",
+    "CREATE INDEX IF NOT EXISTS ix_ledger_entries_source ON ledger_entries (source_type, source_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ledger_entries_sales_pic_id ON ledger_entries (sales_pic_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ledger_entries_customer_id ON ledger_entries (customer_id)",
+
     # Project gained a shipping timeline + import flag
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_ship_from_origin DATE',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_ship_from_origin DATE',

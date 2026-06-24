@@ -10,7 +10,7 @@ from app.models.comment import EntityComment  # noqa: F401
 from app.models.custom_role import CustomRole  # noqa: F401
 from app.models.crm import Activity, Customer, Reminder  # noqa: F401
 from app.models.customer_po import CustomerPO  # noqa: F401
-from app.models.finance import Invoice, Payment  # noqa: F401
+from app.models.finance import Invoice, LedgerEntry, Payment  # noqa: F401
 from app.models.inventory import InventoryItem, InventoryMovement  # noqa: F401
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder  # noqa: F401
 from app.models.payment_claim import PaymentClaim  # noqa: F401

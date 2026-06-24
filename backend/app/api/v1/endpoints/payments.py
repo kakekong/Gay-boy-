@@ -180,6 +180,26 @@ async def verify_claim(
     db.add(payment)
     await db.flush()
 
+    # Post the receipt to the ledger: cash up, receivable down. Attribute it
+    # to the customer's sales rep so it lands on their financial report.
+    inv = await db.get(Invoice, c.invoice_id)
+    sales_pic_id = None
+    if inv:
+        from app.models.crm import Customer
+        cust = await db.get(Customer, inv.customer_id)
+        sales_pic_id = cust.sales_pic_id if cust else None
+    from app.services.ledger import post_payment
+    await post_payment(
+        db,
+        amount=float(c.amount),
+        entry_date=c.paid_at or datetime.now(UTC).date(),
+        invoice_number=inv.number if inv else None,
+        customer_id=inv.customer_id if inv else None,
+        sales_pic_id=sales_pic_id,
+        payment_id=payment.id,
+        created_by=me.id,
+    )
+
     c.status = "verified"
     c.verified_by = me.id
     c.verified_at = datetime.now(UTC)
