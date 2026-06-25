@@ -28,6 +28,13 @@ class Invoice(Base, UUIDPK, TimestampMixin):
     tax_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False, index=True)
+    # Faktur Pajak (Indonesian tax invoice) travels on the invoice. Admin
+    # fills the number; finance approves the invoice (FP included).
+    faktur_pajak_no: Mapped[str | None] = mapped_column(String(40))
+    faktur_pajak_status: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    issued_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    approved_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pdf_url: Mapped[str | None] = mapped_column(String(500))
     notes: Mapped[str | None] = mapped_column(Text)
 

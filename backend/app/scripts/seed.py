@@ -214,6 +214,18 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_delivery_date DATE',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS delivery_confirmed_at TIMESTAMPTZ',
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS import_docs JSONB NOT NULL DEFAULT '{}'::jsonb",
+
+    # Operations QC + customer handover.
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS qc_decision VARCHAR(20)',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS qc_passed_at TIMESTAMPTZ',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS customer_received_at TIMESTAMPTZ',
+
+    # Faktur Pajak + invoice approval (admin issues, finance approves).
+    'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS faktur_pajak_no VARCHAR(40)',
+    "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS faktur_pajak_status VARCHAR(20) NOT NULL DEFAULT 'none'",
+    'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by UUID',
+    'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_by UUID',
+    'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ',
 ]
 
 

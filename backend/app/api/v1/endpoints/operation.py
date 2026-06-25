@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval
@@ -182,10 +182,26 @@ async def project_full(project_id: UUID,
             "actual_delivery": p.actual_delivery,
             "margin_estimate": float(p.margin_estimate or 0) if show_money else None,
             "margin_actual": float(p.margin_actual or 0) if show_money else None,
+            "qc_decision": p.qc_decision,
+            "qc_passed_at": p.qc_passed_at,
+            "qc_findings": (p.meta or {}).get("qc_findings"),
+            "customer_received_at": p.customer_received_at,
             "created_at": p.created_at,
         },
         "price_request": price_request,
         "logistics": _logistics_payload(p),
+        "invoices": [
+            {
+                "id": str(inv.id), "number": inv.number, "status": inv.status,
+                "issue_date": inv.issue_date, "due_date": inv.due_date,
+                "amount": float(inv.amount or 0) if show_money else None,
+                "tax_amount": float(inv.tax_amount or 0) if show_money else None,
+                "total": float(inv.total or 0) if show_money else None,
+                "faktur_pajak_no": inv.faktur_pajak_no,
+                "faktur_pajak_status": inv.faktur_pajak_status,
+                "approved_at": inv.approved_at,
+            } for inv in invoices
+        ],
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
         "sales_pic_name": sales_rep["name"] if sales_rep else None,
         "customer": {
@@ -470,6 +486,153 @@ async def confirm_delivery(project_id: UUID,
     return {"ok": True, "delivery_confirmed_at": p.delivery_confirmed_at,
             "receiving_work_order": created_wo,
             "logistics": _logistics_payload(p)}
+
+
+# Operations (the ops board) — manager/admin/director.
+_OPS_ROLES = {Role.MANAGER, Role.DIRECTOR, Role.ADMIN}
+# Admin desk — issues the delivery order + invoice, confirms customer receipt.
+_ADMIN_ROLES = {Role.ADMIN, Role.DIRECTOR}
+
+
+async def _next_doc_number(db: AsyncSession, model, prefix: str) -> str:
+    from datetime import datetime as _dt
+    year = _dt.utcnow().year
+    pre = f"{prefix}-{year}-"
+    n = await db.scalar(
+        select(func.count(model.id)).where(model.number.like(f"{pre}%"))
+    ) or 0
+    return f"{pre}{n + 1:04d}"
+
+
+class IssueInvoiceIn(BaseModel):
+    amount: float | None = None
+    tax_amount: float | None = None
+    faktur_pajak_no: str | None = None
+    due_date: date | None = None
+    courier: str | None = None
+    create_delivery_order: bool = True
+
+
+@router.post("/projects/{project_id}/issue-invoice", status_code=201)
+async def issue_invoice(project_id: UUID, payload: IssueInvoiceIn,
+                        db: AsyncSession = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """Admin issues the delivery order + invoice (with faktur pajak) once
+    operations have passed QC. The invoice parks at `pending_finance` for the
+    finance team to approve."""
+    if Role(user.role) not in _ADMIN_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not p.qc_passed_at:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Issue the invoice only after QC has passed.")
+    if not p.customer_id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Project has no customer.")
+
+    # Default the amount from the linked quotation when not supplied.
+    quotation = await db.get(Quotation, p.quotation_id) if p.quotation_id else None
+    amount = payload.amount if payload.amount is not None else float(
+        (quotation.total if quotation else None) or p.po_value or 0
+    )
+    tax_amount = payload.tax_amount or 0.0
+    total = amount + tax_amount
+
+    inv = Invoice(
+        number=await _next_doc_number(db, Invoice, "INV"),
+        project_id=project_id, customer_id=p.customer_id,
+        issue_date=date.today(), due_date=payload.due_date,
+        amount=amount, tax_amount=tax_amount, total=total,
+        status="pending_finance",
+        faktur_pajak_no=payload.faktur_pajak_no,
+        faktur_pajak_status="pending" if payload.faktur_pajak_no else "none",
+        issued_by=user.id,
+    )
+    db.add(inv)
+
+    do = None
+    if payload.create_delivery_order:
+        do = DeliveryOrder(
+            project_id=project_id,
+            number=await _next_doc_number(db, DeliveryOrder, "DO"),
+            courier=payload.courier, status="pending",
+        )
+        db.add(do)
+    await db.flush()
+    return {
+        "invoice": {"id": str(inv.id), "number": inv.number, "status": inv.status,
+                    "total": float(inv.total or 0),
+                    "faktur_pajak_no": inv.faktur_pajak_no},
+        "delivery_order": {"id": str(do.id), "number": do.number} if do else None,
+    }
+
+
+@router.post("/projects/{project_id}/customer-received")
+async def mark_customer_received(project_id: UUID,
+                                 db: AsyncSession = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """Admin confirms the customer received the goods — the final step."""
+    if Role(user.role) not in _ADMIN_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    p.customer_received_at = datetime.now(UTC)
+    # Mark any outstanding delivery orders delivered.
+    for do in (await db.scalars(
+        select(DeliveryOrder).where(
+            DeliveryOrder.project_id == project_id,
+            DeliveryOrder.status != "delivered",
+        )
+    )).all():
+        do.status = "delivered"
+        if not do.delivered_at:
+            do.delivered_at = datetime.now(UTC)
+    await db.flush()
+    return {"ok": True, "customer_received_at": p.customer_received_at}
+
+
+class QCDecision(BaseModel):
+    decision: str  # "pass" | "fail"
+    findings: str | None = None
+
+
+@router.post("/projects/{project_id}/qc")
+async def record_qc(project_id: UUID, payload: QCDecision,
+                    db: AsyncSession = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Operations records the final QC check. Passing hands the project to
+    admin (status → qc) to issue the delivery order + invoice; failing parks
+    it with findings."""
+    if Role(user.role) not in _OPS_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Operations only")
+    if payload.decision not in ("pass", "fail"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "decision must be pass|fail")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    p.qc_decision = payload.decision
+    meta = dict(p.meta or {})
+    if payload.findings is not None:
+        meta["qc_findings"] = payload.findings
+    p.meta = meta
+    if payload.decision == "pass":
+        p.qc_passed_at = datetime.now(UTC)
+        advance_project_status(p, "qc")
+        # Close any still-open work orders — operations is done with the goods.
+        for wo in (await db.scalars(
+            select(WorkOrder).where(
+                WorkOrder.project_id == project_id,
+                WorkOrder.completed_at.is_(None),
+            )
+        )).all():
+            wo.completed_at = datetime.now(UTC)
+    else:
+        p.qc_passed_at = None
+    await db.flush()
+    return {"ok": True, "qc_decision": p.qc_decision,
+            "qc_passed_at": p.qc_passed_at, "status": p.status}
 
 
 class WorkOrderIn(BaseModel):

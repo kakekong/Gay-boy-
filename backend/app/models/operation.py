@@ -52,6 +52,13 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     delivery_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Import-document checklist: {key: {collected: bool, attachment_id, note}}
     import_docs:          Mapped[dict]            = mapped_column(JSONB, default=dict, nullable=False)
+    # ── Operations QC + customer handover ──────────────────────────────────
+    # Operations runs a final check; passing QC hands the project to admin to
+    # issue the delivery order + invoice. Failing parks it with findings.
+    qc_decision:          Mapped[str | None]      = mapped_column(String(20))
+    qc_passed_at:         Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Stamped by admin once the customer confirms they received the goods.
+    customer_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
 

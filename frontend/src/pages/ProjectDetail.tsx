@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
-  ShoppingCart, Wrench, Plus, CheckCircle, Loader2, Hammer, User as UserIcon,
+  ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
+  Loader2, Hammer, User as UserIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -49,6 +50,9 @@ export default function ProjectDetailPage() {
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const isDirector = role === "director";
   const canLogistics = ["purchasing", "director", "manager", "admin"].includes(role);
+  const isOps = ["manager", "director", "admin"].includes(role);
+  const isAdmin = ["admin", "director"].includes(role);
+  const isFinance = ["finance", "admin", "manager", "director"].includes(role);
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -102,6 +106,29 @@ export default function ProjectDetailPage() {
     mutationFn: () => api.post(`/operation/projects/${id}/confirm-delivery`),
     onSuccess: refresh, onError: onErr,
   });
+
+  // Operations QC + admin/finance close-out
+  const recordQC = useMutation({
+    mutationFn: (body: { decision: string; findings?: string }) =>
+      api.post(`/operation/projects/${id}/qc`, body),
+    onSuccess: refresh, onError: onErr,
+  });
+  const issueInvoice = useMutation({
+    mutationFn: (body: Record<string, any>) =>
+      api.post(`/operation/projects/${id}/issue-invoice`, body),
+    onSuccess: refresh, onError: onErr,
+  });
+  const approveInvoice = useMutation({
+    mutationFn: (invoiceId: string) => api.post(`/finance/invoices/${invoiceId}/approve`),
+    onSuccess: refresh, onError: onErr,
+  });
+  const customerReceived = useMutation({
+    mutationFn: () => api.post(`/operation/projects/${id}/customer-received`),
+    onSuccess: refresh, onError: onErr,
+  });
+  const [qcFindings, setQcFindings] = useState("");
+  const [fpNo, setFpNo] = useState("");
+  const [invAmount, setInvAmount] = useState("");
 
   // Inline edit for target / actual delivery dates.
   const patchProject = useMutation({
@@ -588,6 +615,121 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Operations QC */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+          <div className="font-semibold flex items-center gap-2">
+            <ShieldCheck size={15} className="text-brand-600" /> Quality control
+          </div>
+          {p.qc_decision && (
+            <span className={clsx("chip", p.qc_decision === "pass"
+              ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
+              {p.qc_decision === "pass" ? "QC passed" : "QC failed"}
+            </span>
+          )}
+        </div>
+        <div className="p-5 space-y-3">
+          {p.qc_passed_at ? (
+            <div className="text-sm text-emerald-700">
+              Passed {new Date(p.qc_passed_at).toLocaleString()} — handed to admin to issue
+              the delivery order &amp; invoice.
+            </div>
+          ) : (
+            <div className="text-sm muted">
+              Operations checks the goods. Passing QC hands the project to admin for the
+              delivery order + invoice.
+            </div>
+          )}
+          {p.qc_findings && (
+            <div className="text-xs text-amber-700">Findings: {p.qc_findings}</div>
+          )}
+          {isOps && !p.qc_passed_at && (
+            <div className="space-y-2">
+              <textarea className="input" rows={2} placeholder="Findings (optional)"
+                value={qcFindings} onChange={(e) => setQcFindings(e.target.value)} />
+              <div className="flex gap-2">
+                <button className="btn-primary" disabled={recordQC.isPending}
+                  onClick={() => recordQC.mutate({ decision: "pass", findings: qcFindings || undefined })}>
+                  <CheckCircle size={14} /> Pass QC
+                </button>
+                <button className="btn-ghost text-red-600" disabled={recordQC.isPending}
+                  onClick={() => recordQC.mutate({ decision: "fail", findings: qcFindings || undefined })}>
+                  <XCircle size={14} /> Fail
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Admin & finance close-out: invoice + faktur pajak */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+          <div className="font-semibold flex items-center gap-2">
+            <Receipt size={15} className="text-brand-600" /> Invoice &amp; faktur pajak
+          </div>
+          {p.customer_received_at && (
+            <span className="chip bg-emerald-50 text-emerald-700">
+              Customer received {new Date(p.customer_received_at).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+        <div className="p-5 space-y-4">
+          {inv.length === 0 && <div className="text-sm muted">No invoice issued yet.</div>}
+          {inv.map((iv: any) => (
+            <div key={iv.id} className="flex items-center justify-between gap-3 flex-wrap border-b border-ink-50 pb-2">
+              <div className="text-sm">
+                <span className="font-medium">{iv.number}</span>
+                {showMoney && iv.total != null && (
+                  <span className="muted"> · {iv.total.toLocaleString()}</span>
+                )}
+                <div className="text-[11px] muted">
+                  FP: {iv.faktur_pajak_no || "—"} ({iv.faktur_pajak_status})
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={clsx("chip text-[11px]",
+                  iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                  : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
+                  : "bg-ink-50 text-ink-600")}>{iv.status}</span>
+                {isFinance && iv.status === "pending_finance" && (
+                  <button className="btn-primary" disabled={approveInvoice.isPending}
+                    onClick={() => approveInvoice.mutate(iv.id)}>
+                    <CheckCircle size={14} /> Approve (finance)
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {isAdmin && p.qc_passed_at && (
+            <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
+              <div className="text-[11px] uppercase tracking-wider muted">Issue invoice + delivery order</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input className="input" placeholder="Amount (blank = quotation total)"
+                  value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
+                <input className="input" placeholder="Faktur pajak no."
+                  value={fpNo} onChange={(e) => setFpNo(e.target.value)} />
+              </div>
+              <button className="btn-primary" disabled={issueInvoice.isPending}
+                onClick={() => issueInvoice.mutate({
+                  amount: invAmount ? Number(invAmount) : undefined,
+                  faktur_pajak_no: fpNo || undefined,
+                })}>
+                <FileText size={14} /> Issue invoice + DO
+              </button>
+            </div>
+          )}
+
+          {isAdmin && !p.customer_received_at && inv.some((iv: any) => iv.status === "approved") && (
+            <button className="btn-ghost" disabled={customerReceived.isPending}
+              onClick={() => customerReceived.mutate()}>
+              <CheckCircle size={14} /> Confirm customer received
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Deliveries */}
       <div className="card overflow-hidden">

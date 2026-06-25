@@ -1,8 +1,9 @@
 """Finance: invoice, payment, AR/AP, tax."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
+from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,70 @@ from app.models.user import User
 router = APIRouter(
     dependencies=[Depends(require(Role.FINANCE, Role.ADMIN, Role.MANAGER, Role.DIRECTOR))]
 )
+
+
+@router.post("/invoices/{invoice_id}/approve")
+async def approve_invoice(invoice_id: UUID,
+                          db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """Finance approves an admin-issued invoice (faktur pajak included).
+
+    Recognising the sale: if the project's quotation was already posted to
+    the ledger when it was won, the revenue/AR is already on the books and we
+    don't post again. Otherwise we post AR + revenue (+ tax) here, so the
+    finance reports always reflect the sale exactly once.
+    """
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    if inv.status == "approved":
+        return {"ok": True, "status": inv.status, "already": True}
+
+    from app.models.operation import Project, advance_project_status
+    from app.models.quotation import Quotation
+    from app.services.ledger import DEFAULTS, _bump, journal_post
+
+    inv.status = "approved"
+    inv.approved_by = user.id
+    inv.approved_at = datetime.now(UTC)
+    if inv.faktur_pajak_no:
+        inv.faktur_pajak_status = "issued"
+
+    project = await db.get(Project, inv.project_id) if inv.project_id else None
+    quotation = (
+        await db.get(Quotation, project.quotation_id)
+        if project and project.quotation_id else None
+    )
+    already_recognized = bool(quotation and quotation.is_posted)
+
+    ledger_posted = False
+    if not already_recognized and float(inv.total or 0) > 0:
+        entry_date = inv.issue_date or date.today()
+        plan = [
+            (DEFAULTS["receivable"], "receivable", float(inv.total or 0)),
+            (DEFAULTS["revenue"], "revenue", float(inv.amount or 0)),
+        ]
+        if float(inv.tax_amount or 0) > 0:
+            plan.append((DEFAULTS["tax"], "tax", float(inv.tax_amount or 0)))
+        for account_no, role, amt in plan:
+            m = await _bump(db, account_no, amt)
+            if m:
+                await journal_post(
+                    db, entry_date=entry_date, account_no=m["account_no"],
+                    account_type=m["account_type"], account_name=m["name"],
+                    amount=m["delta"], source_type="invoice", source_id=inv.id,
+                    source_ref=inv.number, memo=f"Invoice {inv.number} ({role})",
+                    customer_id=inv.customer_id, created_by=user.id,
+                )
+        ledger_posted = True
+
+    if project:
+        advance_project_status(project, "invoiced")
+    await db.flush()
+    return {"ok": True, "status": inv.status,
+            "faktur_pajak_status": inv.faktur_pajak_status,
+            "ledger_posted": ledger_posted,
+            "already_recognized_via_quotation": already_recognized}
 
 
 @router.get("/ar/aging")
