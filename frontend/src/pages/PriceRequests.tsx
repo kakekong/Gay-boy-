@@ -198,7 +198,9 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     onSuccess: (d) => nav(`/quotations/${d.id}`),
     onError: onErr,
   });
-  const [draft, setDraft] = useState<Record<number, { cost?: number; sell?: number }>>({});
+  const [draft, setDraft] = useState<
+    Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string }>
+  >({});
   const [notes, setNotes] = useState("");
 
   const refresh = () => { qc.invalidateQueries({ queryKey: ["price-request", id] }); qc.invalidateQueries({ queryKey: ["price-requests"] }); };
@@ -206,14 +208,62 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
 
   const submit = useMutation(mut(() => api.post(`/price-requests/${id}/submit`)));
   const price = useMutation(mut(() => api.post(`/price-requests/${id}/price`, {
-    items: Object.entries(draft).map(([ln, v]) => ({ line_no: Number(ln), cost_price: v.cost ?? 0 })),
+    items: Object.entries(draft).map(([ln, v]) => ({
+      line_no: Number(ln), cost_price: v.cost ?? 0, basis: v.costBasis ?? "unit",
+    })),
     notes: notes || undefined,
   })));
   const approve = useMutation(mut(() => api.post(`/price-requests/${id}/approve`, {
-    items: Object.entries(draft).map(([ln, v]) => ({ line_no: Number(ln), sell_price: v.sell ?? 0, cost_price: v.cost })),
+    items: Object.entries(draft).map(([ln, v]) => ({
+      line_no: Number(ln), sell_price: v.sell ?? 0, basis: v.sellBasis ?? "unit",
+      cost_price: v.cost, cost_basis: v.costBasis ?? "unit",
+    })),
     notes: notes || undefined,
   })));
   const reject = useMutation(mut(() => api.post(`/price-requests/${id}/reject`, { notes: notes || undefined })));
+
+  // Editable price cell with a per-line "/unit" vs "total" basis selector.
+  // Storage is always per-unit; "total" just means the entered figure covers
+  // the whole line, and we show the implied unit price (or vice-versa) live.
+  const editCell = (it: any, kind: "cost" | "sell") => {
+    const v = draft[it.line_no] ?? {};
+    const amount = kind === "cost" ? v.cost : v.sell;
+    const basis = (kind === "cost" ? v.costBasis : v.sellBasis) ?? "unit";
+    const qty = Number(it.qty) || 0;
+    const unit = basis === "total" ? (qty ? Number(amount || 0) / qty : 0) : Number(amount || 0);
+    const total = basis === "total" ? Number(amount || 0) : Number(amount || 0) * qty;
+    const setVal = (patch: any) =>
+      setDraft((d) => ({ ...d, [it.line_no]: { ...d[it.line_no], ...patch } }));
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-1">
+          <input type="number" className="input w-28 text-right"
+            defaultValue={(kind === "cost" ? it.cost_price : it.sell_price) ?? ""}
+            onChange={(e) =>
+              setVal(kind === "cost" ? { cost: Number(e.target.value) } : { sell: Number(e.target.value) })} />
+          <select className="input w-[68px] px-1 text-xs" value={basis}
+            onChange={(e) =>
+              setVal(kind === "cost" ? { costBasis: e.target.value } : { sellBasis: e.target.value })}>
+            <option value="unit">/unit</option>
+            <option value="total">total</option>
+          </select>
+        </div>
+        {amount != null && qty > 0 && (
+          <span className="text-[10px] muted tabular-nums">
+            {basis === "total" ? `${idr(unit)} /unit` : `= ${idr(total)} total`}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const readCell = (unitPrice: any, lineTotal: any, qty: any) =>
+    unitPrice == null ? "—" : (
+      <div className="flex flex-col items-end leading-tight">
+        <span className="tabular-nums">{idr(unitPrice)} <span className="muted text-[10px]">/unit</span></span>
+        {Number(qty) > 1 && <span className="text-[10px] muted tabular-nums">{idr(lineTotal)} total</span>}
+      </div>
+    );
 
   if (q.isLoading) return <div className="muted text-sm">Loading…</div>;
   const pr = q.data;
@@ -274,20 +324,16 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 <td className="td muted text-xs">{it.spec || "—"}</td>
                 {"cost_price" in it && (
                   <td className="td text-right">
-                    {canCost && (isPurchasing || isDirector) ? (
-                      <input type="number" className="input w-28 text-right"
-                        defaultValue={it.cost_price ?? ""}
-                        onChange={(e) => setDraft((d) => ({ ...d, [it.line_no]: { ...d[it.line_no], cost: Number(e.target.value) } }))} />
-                    ) : (it.cost_price != null ? idr(it.cost_price) : "—")}
+                    {canCost && (isPurchasing || isDirector)
+                      ? editCell(it, "cost")
+                      : readCell(it.cost_price, it.cost_total, it.qty)}
                   </td>
                 )}
                 {"sell_price" in it && (
                   <td className="td text-right">
-                    {canApprove ? (
-                      <input type="number" className="input w-28 text-right"
-                        defaultValue={it.sell_price ?? ""}
-                        onChange={(e) => setDraft((d) => ({ ...d, [it.line_no]: { ...d[it.line_no], sell: Number(e.target.value) } }))} />
-                    ) : (it.sell_price != null ? idr(it.sell_price) : "—")}
+                    {canApprove
+                      ? editCell(it, "sell")
+                      : readCell(it.sell_price, it.line_total, it.qty)}
                   </td>
                 )}
               </tr>

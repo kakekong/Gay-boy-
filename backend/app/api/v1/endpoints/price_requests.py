@@ -55,6 +55,8 @@ class PRUpdate(BaseModel):
 class CostLine(BaseModel):
     line_no: int
     cost_price: float = 0
+    # Whether cost_price is entered "per unit" or as the line "total".
+    basis: str = "unit"
 
 
 class PricingIn(BaseModel):
@@ -65,7 +67,9 @@ class PricingIn(BaseModel):
 class SellLine(BaseModel):
     line_no: int
     sell_price: float = 0
+    basis: str = "unit"               # basis for sell_price ("unit" | "total")
     cost_price: float | None = None   # director may also correct the cost
+    cost_basis: str = "unit"          # basis for the optional cost correction
 
 
 class ApproveIn(BaseModel):
@@ -78,6 +82,18 @@ class DecisionIn(BaseModel):
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+def _to_unit(amount: float | None, basis: str | None, qty: float) -> float:
+    """Normalise an entered price to a per-unit value.
+
+    Prices are always stored per-unit (the quotation multiplies by qty). If the
+    user entered a line *total* instead, divide it back out by the quantity.
+    """
+    amt = float(amount or 0)
+    if (basis or "unit") == "total" and qty:
+        return amt / float(qty)
+    return amt
+
+
 def _can_see_cost(role: Role) -> bool:
     return role in (Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.FINANCE)
 
@@ -105,8 +121,11 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
         }
         if see_cost:
             row["cost_price"] = it.get("cost_price")
+            row["cost_basis"] = it.get("cost_basis") or "unit"
+            row["cost_total"] = float(it.get("cost_price") or 0) * float(it.get("qty") or 0)
         if see_sell:
             row["sell_price"] = it.get("sell_price")
+            row["sell_basis"] = it.get("sell_basis") or "unit"
             row["line_total"] = float(it.get("sell_price") or 0) * float(it.get("qty") or 0)
         items.append(row)
     out = {
@@ -275,11 +294,14 @@ async def fill_pricing(
     if pr.status not in ("pending_purchasing", "pending_director"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Can't cost a request in status '{pr.status}'")
-    costs = {c.line_no: float(c.cost_price or 0) for c in payload.items}
+    costs = {c.line_no: c for c in payload.items}
     items = [dict(it) for it in (pr.items or [])]
     for it in items:
-        if it.get("line_no") in costs:
-            it["cost_price"] = costs[it["line_no"]]
+        c = costs.get(it.get("line_no"))
+        if c is not None:
+            qty = float(it.get("qty") or 0)
+            it["cost_price"] = _to_unit(c.cost_price, c.basis, qty)
+            it["cost_basis"] = c.basis or "unit"
     pr.items = items
     pr.priced_by = user.id
     pr.priced_at = datetime.now(UTC)
@@ -313,9 +335,12 @@ async def approve_price_request(
     for it in items:
         s = sells.get(it.get("line_no"))
         if s is not None:
-            it["sell_price"] = float(s.sell_price or 0)
+            qty = float(it.get("qty") or 0)
+            it["sell_price"] = _to_unit(s.sell_price, s.basis, qty)
+            it["sell_basis"] = s.basis or "unit"
             if s.cost_price is not None:
-                it["cost_price"] = float(s.cost_price)
+                it["cost_price"] = _to_unit(s.cost_price, s.cost_basis, qty)
+                it["cost_basis"] = s.cost_basis or "unit"
     pr.items = items
     pr.approved_by = user.id
     pr.approved_at = datetime.now(UTC)
