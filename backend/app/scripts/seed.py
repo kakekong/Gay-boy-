@@ -208,6 +208,12 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_arrive_customer DATE',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS origin_location VARCHAR(120)',
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_import BOOLEAN NOT NULL DEFAULT false",
+
+    # Post-drawing logistics (purchasing): delivery mode, ETA, import docs.
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS delivery_mode VARCHAR(20) NOT NULL DEFAULT 'local'",
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_delivery_date DATE',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS delivery_confirmed_at TIMESTAMPTZ',
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS import_docs JSONB NOT NULL DEFAULT '{}'::jsonb",
 ]
 
 

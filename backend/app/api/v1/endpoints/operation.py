@@ -1,6 +1,6 @@
 """Operation: projects, work orders, drawings, deliveries."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -185,6 +185,7 @@ async def project_full(project_id: UUID,
             "created_at": p.created_at,
         },
         "price_request": price_request,
+        "logistics": _logistics_payload(p),
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
         "sales_pic_name": sales_rep["name"] if sales_rep else None,
         "customer": {
@@ -316,6 +317,159 @@ async def update_project(project_id: UUID,
 
     _apply_project_changes(p, data)
     return {"ok": True, "id": str(p.id), "pending_approval": False}
+
+
+# ─── Post-drawing logistics (purchasing) ─────────────────────────────────────
+# Which import documents each delivery mode requires. Two weeks before the
+# estimated delivery, purchasing must have these collected.
+DOC_LABELS = {
+    "invoice": "Invoice",
+    "packing_list": "Packing list",
+    "form_e": "Form E",
+    "bill_of_lading": "Bill of Lading",
+    "agent": "Agent details",
+}
+REQUIRED_DOCS = {
+    "local":         ["invoice", "packing_list"],
+    "direct_import": ["invoice", "packing_list", "form_e", "bill_of_lading"],
+    "agent":         ["invoice", "packing_list", "agent"],
+}
+_LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+DOCS_DUE_WINDOW_DAYS = 14
+
+
+def _logistics_payload(p: Project) -> dict:
+    mode = p.delivery_mode or "local"
+    required = REQUIRED_DOCS.get(mode, REQUIRED_DOCS["local"])
+    docs = p.import_docs or {}
+    rows = []
+    for key in required:
+        d = docs.get(key) or {}
+        rows.append({
+            "key": key,
+            "label": DOC_LABELS.get(key, key),
+            "collected": bool(d.get("collected")),
+            "attachment_id": d.get("attachment_id"),
+            "note": d.get("note"),
+        })
+    all_collected = all(r["collected"] for r in rows) if rows else True
+    days_to = (p.est_delivery_date - date.today()).days if p.est_delivery_date else None
+    return {
+        "delivery_mode": mode,
+        "est_delivery_date": p.est_delivery_date,
+        "delivery_confirmed_at": p.delivery_confirmed_at,
+        "required_docs": rows,
+        "docs_complete": all_collected,
+        "days_to_delivery": days_to,
+        # Documents are "due" once we're within the window and not yet complete.
+        "docs_due": (
+            days_to is not None and days_to <= DOCS_DUE_WINDOW_DAYS and not all_collected
+        ),
+    }
+
+
+async def _has_approved_drawing(db: AsyncSession, project_id: UUID) -> bool:
+    d = await db.scalar(
+        select(Drawing).where(
+            Drawing.project_id == project_id, Drawing.status == "approved"
+        ).limit(1)
+    )
+    return d is not None
+
+
+class LogisticsPatch(BaseModel):
+    delivery_mode: str | None = None
+    est_delivery_date: date | None = None
+
+
+@router.patch("/projects/{project_id}/logistics")
+async def update_logistics(project_id: UUID, payload: LogisticsPatch,
+                           db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """Purchasing sets the delivery mode + estimated delivery date once the
+    drawing is approved."""
+    if Role(user.role) not in _LOGISTICS_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/management only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not await _has_approved_drawing(db, project_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Set logistics only after the drawing is approved.",
+        )
+    if payload.delivery_mode is not None:
+        if payload.delivery_mode not in REQUIRED_DOCS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"delivery_mode must be one of {list(REQUIRED_DOCS)}")
+        p.delivery_mode = payload.delivery_mode
+    if payload.est_delivery_date is not None:
+        p.est_delivery_date = payload.est_delivery_date
+    await db.flush()
+    return _logistics_payload(p)
+
+
+class ImportDocPatch(BaseModel):
+    key: str
+    collected: bool = True
+    attachment_id: str | None = None
+    note: str | None = None
+
+
+@router.patch("/projects/{project_id}/import-docs")
+async def update_import_doc(project_id: UUID, payload: ImportDocPatch,
+                            db: AsyncSession = Depends(get_db),
+                            user: User = Depends(get_current_user)):
+    """Mark an import document collected (optionally attach the file)."""
+    if Role(user.role) not in _LOGISTICS_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/management only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if payload.key not in DOC_LABELS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown document '{payload.key}'")
+    docs = dict(p.import_docs or {})
+    docs[payload.key] = {
+        "collected": payload.collected,
+        "attachment_id": payload.attachment_id,
+        "note": payload.note,
+    }
+    p.import_docs = docs
+    await db.flush()
+    return _logistics_payload(p)
+
+
+@router.post("/projects/{project_id}/confirm-delivery")
+async def confirm_delivery(project_id: UUID,
+                           db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """Confirm the delivery date — this spawns the receiving work order on the
+    operations board (idempotent)."""
+    if Role(user.role) not in _LOGISTICS_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/management only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not p.est_delivery_date:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Set the estimated delivery date first.")
+    p.delivery_confirmed_at = datetime.now(UTC)
+    # Spawn the receiving WO if the operations board doesn't have one yet.
+    existing = await db.scalar(
+        select(WorkOrder).where(
+            WorkOrder.project_id == project_id, WorkOrder.stage == "receiving"
+        ).limit(1)
+    )
+    created_wo = None
+    if not existing:
+        wo = WorkOrder(project_id=project_id, code=f"WO-{p.code}-RCV", stage="receiving")
+        db.add(wo)
+        await db.flush()
+        created_wo = {"id": str(wo.id), "code": wo.code}
+    return {"ok": True, "delivery_confirmed_at": p.delivery_confirmed_at,
+            "receiving_work_order": created_wo,
+            "logistics": _logistics_payload(p)}
 
 
 class WorkOrderIn(BaseModel):

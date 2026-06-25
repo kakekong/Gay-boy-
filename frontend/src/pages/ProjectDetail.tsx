@@ -46,7 +46,9 @@ export default function ProjectDetailPage() {
   // or invoice amounts. The backend nulls these for purchasing too.
   const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
   // Drawing files are viewable by the director only (internal app).
-  const isDirector = useAuthStore((s) => s.user?.role) === "director";
+  const role = useAuthStore((s) => s.user?.role) ?? "";
+  const isDirector = role === "director";
+  const canLogistics = ["purchasing", "director", "manager", "admin"].includes(role);
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -83,6 +85,22 @@ export default function ProjectDetailPage() {
     mutationFn: (doId: string) => api.patch(`/operation/deliveries/${doId}/delivered`),
     onSuccess: refresh,
     onError: onErr,
+  });
+
+  // Post-drawing logistics (purchasing)
+  const setLogistics = useMutation({
+    mutationFn: (body: Record<string, any>) =>
+      api.patch(`/operation/projects/${id}/logistics`, body),
+    onSuccess: refresh, onError: onErr,
+  });
+  const setDoc = useMutation({
+    mutationFn: (body: Record<string, any>) =>
+      api.patch(`/operation/projects/${id}/import-docs`, body),
+    onSuccess: refresh, onError: onErr,
+  });
+  const confirmDelivery = useMutation({
+    mutationFn: () => api.post(`/operation/projects/${id}/confirm-delivery`),
+    onSuccess: refresh, onError: onErr,
   });
 
   // Inline edit for target / actual delivery dates.
@@ -135,6 +153,7 @@ export default function ProjectDetailPage() {
   const inv = data.data.invoices ?? [];
   const prs = data.data.purchase_requests ?? [];
   const priceReq = data.data.price_request ?? null;
+  const logistics = data.data.logistics ?? null;
 
   const marginDelta = (p.margin_actual || 0) - (p.margin_estimate || 0);
   const stageIdx = PIPELINE_STAGES.indexOf(p.status);
@@ -490,6 +509,85 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Logistics & import documents (post-drawing, purchasing) */}
+      {logistics && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-semibold flex items-center gap-2">
+                <Truck size={15} className="text-brand-600" /> Logistics &amp; import documents
+              </div>
+              <div className="text-xs muted">
+                Set after the drawing is approved. Documents are due two weeks before delivery.
+              </div>
+            </div>
+            {logistics.docs_due && (
+              <span className="chip bg-red-50 text-red-700">Documents due</span>
+            )}
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider muted mb-1">Delivery mode</div>
+                {canLogistics ? (
+                  <select className="input" value={logistics.delivery_mode}
+                    onChange={(e) => setLogistics.mutate({ delivery_mode: e.target.value })}>
+                    <option value="local">Local</option>
+                    <option value="direct_import">Direct import</option>
+                    <option value="agent">Via agent</option>
+                  </select>
+                ) : <div className="capitalize">{logistics.delivery_mode.replace(/_/g, " ")}</div>}
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider muted mb-1">Estimated delivery</div>
+                {canLogistics ? (
+                  <input type="date" className="input"
+                    defaultValue={logistics.est_delivery_date ?? ""}
+                    onChange={(e) => e.target.value && setLogistics.mutate({ est_delivery_date: e.target.value })} />
+                ) : <div>{logistics.est_delivery_date ?? "—"}</div>}
+                {logistics.days_to_delivery != null && (
+                  <div className="text-[11px] muted mt-0.5">{logistics.days_to_delivery} day(s) to go</div>
+                )}
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider muted mb-1">Delivery date</div>
+                {logistics.delivery_confirmed_at ? (
+                  <div className="text-emerald-700 text-sm">
+                    Confirmed {new Date(logistics.delivery_confirmed_at).toLocaleDateString()}
+                  </div>
+                ) : canLogistics ? (
+                  <button className="btn-primary" disabled={!logistics.est_delivery_date || confirmDelivery.isPending}
+                    onClick={() => confirmDelivery.mutate()}>
+                    <CheckCircle size={14} /> Confirm → receiving WO
+                  </button>
+                ) : <div className="muted">Not confirmed</div>}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] uppercase tracking-wider muted mb-2">
+                Required documents ({logistics.delivery_mode.replace(/_/g, " ")})
+              </div>
+              <div className="space-y-1.5">
+                {(logistics.required_docs ?? []).map((d: any) => (
+                  <label key={d.key} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={d.collected} disabled={!canLogistics}
+                      onChange={(e) => setDoc.mutate({ key: d.key, collected: e.target.checked })} />
+                    <span className={clsx(d.collected ? "text-ink-900" : "text-ink-500")}>{d.label}</span>
+                    {d.collected && <CheckCircle size={12} className="text-emerald-600" />}
+                  </label>
+                ))}
+              </div>
+              {!logistics.docs_complete && (
+                <div className="text-[11px] text-amber-700 mt-2">
+                  {logistics.required_docs.filter((d: any) => !d.collected).length} document(s) still outstanding.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Deliveries */}
       <div className="card overflow-hidden">

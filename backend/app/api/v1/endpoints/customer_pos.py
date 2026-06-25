@@ -346,7 +346,6 @@ async def _spawn_project(
     from datetime import datetime
     from sqlalchemy import func
     from app.ai.orchestrator import emit
-    from app.models.operation import WorkOrder
 
     year = datetime.utcnow().year
     prefix = f"PRJ-{year}-"
@@ -372,11 +371,9 @@ async def _spawn_project(
     )
     db.add(project)
     await db.flush()
-    db.add(WorkOrder(
-        project_id=project.id,
-        code=f"WO-{project.code}-01",
-        stage="receiving",
-    ))
+    # The receiving work order is no longer created here — purchasing spawns
+    # it by confirming the delivery date (see operation.confirm_delivery),
+    # which matches the post-drawing logistics flow.
     await emit(db, "customer_po.approved", {
         "customer_po_id": str(po.id),
         "project_id": str(project.id),

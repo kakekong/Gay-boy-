@@ -42,6 +42,16 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     act_arrive_customer:      Mapped[date | None] = mapped_column(Date)
     origin_location:          Mapped[str | None]  = mapped_column(String(120))
     is_import:                Mapped[bool]        = mapped_column(Boolean, default=False, nullable=False)
+    # ── Post-drawing logistics (set by purchasing) ─────────────────────────
+    # How the goods arrive — drives which import documents are required.
+    #   local | direct_import | agent
+    delivery_mode:        Mapped[str]             = mapped_column(String(20), default="local", nullable=False)
+    # Purchasing's estimated delivery date, set after the drawing is approved.
+    est_delivery_date:    Mapped[date | None]     = mapped_column(Date)
+    # Stamped when purchasing confirms the date (spawns the receiving WO).
+    delivery_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Import-document checklist: {key: {collected: bool, attachment_id, note}}
+    import_docs:          Mapped[dict]            = mapped_column(JSONB, default=dict, nullable=False)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
 
