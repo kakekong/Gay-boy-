@@ -232,6 +232,11 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS price_request_id UUID',
     "CREATE INDEX IF NOT EXISTS ix_supplier_pos_price_request_id ON supplier_pos (price_request_id)",
 
+    # Drawings gained an internal director sign-off (who/when), distinct from
+    # the legacy customer_decision_at.
+    'ALTER TABLE drawings ADD COLUMN IF NOT EXISTS decided_by UUID',
+    'ALTER TABLE drawings ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ',
+
     # Backfill: link projects to the price request behind their quotation where
     # the direct link was never recorded (projects created before Phase C).
     """

@@ -166,7 +166,10 @@ async def customer_decide_drawing(
         d.status = "revision_requested"
     else:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "decision must be approve|request_revision")
-    d.customer_decision_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    d.customer_decision_at = now
+    d.decided_by = me.id
+    d.decided_at = now
     if notes:
         d.notes = ((d.notes or "") + f"\n[{me.full_name}] {notes}").strip()
     return {"ok": True, "drawing_id": str(d.id), "status": d.status}

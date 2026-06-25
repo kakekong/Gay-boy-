@@ -48,11 +48,15 @@ export default function ProjectDetailPage() {
   const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
   // Drawing files are viewable by the director only (internal app).
   const role = useAuthStore((s) => s.user?.role) ?? "";
-  const isDirector = role === "director";
   const canLogistics = ["purchasing", "director", "manager", "admin"].includes(role);
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
   const isFinance = ["finance", "admin", "manager", "director"].includes(role);
+  // Internal staff upload the drawing (on behalf of the supplier); the director
+  // signs it off. The drawing file is viewable by either of those.
+  const canUploadDrawing = ["purchasing", "sales", "manager", "director", "admin"].includes(role);
+  const canApproveDrawing = ["director", "manager", "admin"].includes(role);
+  const canViewDrawing = canUploadDrawing || canApproveDrawing;
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -65,6 +69,8 @@ export default function ProjectDetailPage() {
   const [newWoCode, setNewWoCode] = useState("");
   const [newWoStage, setNewWoStage] = useState("receiving");
   const [flashErr, setFlashErr] = useState<string | null>(null);
+  const [drawingFile, setDrawingFile] = useState<File | null>(null);
+  const [drawingNotes, setDrawingNotes] = useState("");
 
   const onErr = (e: any) => alert(
     e?.response?.data?.errors?.[0]?.message
@@ -89,6 +95,24 @@ export default function ProjectDetailPage() {
     mutationFn: (doId: string) => api.patch(`/operation/deliveries/${doId}/delivered`),
     onSuccess: refresh,
     onError: onErr,
+  });
+
+  // Drawings: internal upload + director sign-off.
+  const uploadDrawing = useMutation({
+    mutationFn: (body: { file: File; notes: string }) => {
+      const fd = new FormData();
+      fd.append("file", body.file);
+      if (body.notes) fd.append("notes", body.notes);
+      return api.post(`/operation/projects/${id}/drawings`, fd);
+    },
+    onSuccess: refresh, onError: onErr,
+  });
+  const decideDrawing = useMutation({
+    mutationFn: (body: { drawingId: string; decision: string; notes?: string }) =>
+      api.post(`/operation/drawings/${body.drawingId}/decide`, {
+        decision: body.decision, notes: body.notes,
+      }),
+    onSuccess: refresh, onError: onErr,
   });
 
   // Post-drawing logistics (purchasing)
@@ -484,12 +508,37 @@ export default function ProjectDetailPage() {
           </div>
           <div className="text-xs muted">{dr.length} revision(s)</div>
           <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
-            The review is the customer's call — they approve or request a
-            revision from their portal. Staff can't change it here; the
-            director alone may open the file. An approval advances the
-            project to "drawing approved" automatically.
+            Staff upload the supplier's drawing here; the director reviews and
+            approves (or requests a revision). An approval advances the project
+            to "drawing approved" automatically so logistics can begin.
           </div>
         </div>
+
+        {canUploadDrawing && (
+          <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-[11px] uppercase muted mb-1">Drawing file</label>
+              <input type="file"
+                className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
+                onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-[11px] uppercase muted mb-1">Notes (optional)</label>
+              <input className="input" value={drawingNotes}
+                onChange={(e) => setDrawingNotes(e.target.value)} placeholder="e.g. rev from supplier" />
+            </div>
+            <button className="btn-primary"
+              disabled={!drawingFile || uploadDrawing.isPending}
+              onClick={() => drawingFile && uploadDrawing.mutate(
+                { file: drawingFile, notes: drawingNotes },
+                { onSuccess: () => { setDrawingFile(null); setDrawingNotes(""); } },
+              )}>
+              {uploadDrawing.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              Upload drawing
+            </button>
+          </div>
+        )}
+
         {dr.length === 0 ? (
           <div className="p-8 text-center muted text-sm">No drawings uploaded.</div>
         ) : (
@@ -498,9 +547,10 @@ export default function ProjectDetailPage() {
               <tr>
                 <th className="th">Rev</th>
                 <th className="th">Status</th>
-                <th className="th">Customer decision</th>
+                <th className="th">Decision</th>
                 <th className="th">File</th>
                 <th className="th">Notes</th>
+                {canApproveDrawing && <th className="th text-right">Sign-off</th>}
               </tr>
             </thead>
             <tbody>
@@ -517,19 +567,49 @@ export default function ProjectDetailPage() {
                       {d.status.replace(/_/g, " ")}
                     </span>
                   </td>
-                  <td className="td muted">{d.customer_decision_at ? new Date(d.customer_decision_at).toLocaleDateString() : "—"}</td>
+                  <td className="td muted">
+                    {(d.decided_at || d.customer_decision_at) ? (
+                      <span>
+                        {new Date(d.decided_at ?? d.customer_decision_at).toLocaleDateString()}
+                        {d.decided_by_name && <span className="block text-[11px]">by {d.decided_by_name}</span>}
+                      </span>
+                    ) : "—"}
+                  </td>
                   <td className="td">
                     {!d.file_url ? "—"
-                      : isDirector ? (
+                      : canViewDrawing ? (
                         <a href={d.file_url} target="_blank" rel="noreferrer"
                            className="text-brand-700 hover:underline">View</a>
                       ) : (
-                        <span className="muted text-xs" title="Drawings are viewable by the director only">
-                          director only
-                        </span>
+                        <span className="muted text-xs">internal only</span>
                       )}
                   </td>
                   <td className="td muted">{d.notes ?? "—"}</td>
+                  {canApproveDrawing && (
+                    <td className="td text-right">
+                      {d.status === "approved" ? (
+                        <span className="text-emerald-700 text-xs inline-flex items-center gap-1">
+                          <CheckCircle size={13} /> Approved
+                        </span>
+                      ) : (
+                        <div className="inline-flex gap-1.5">
+                          <button className="btn-primary py-1 px-2 text-xs"
+                            disabled={decideDrawing.isPending}
+                            onClick={() => decideDrawing.mutate({ drawingId: d.id, decision: "approve" })}>
+                            <CheckCircle size={13} /> Approve
+                          </button>
+                          <button className="btn-ghost py-1 px-2 text-xs text-red-600"
+                            disabled={decideDrawing.isPending}
+                            onClick={() => {
+                              const notes = window.prompt("What needs revising? (optional)") ?? undefined;
+                              decideDrawing.mutate({ drawingId: d.id, decision: "request_revision", notes });
+                            }}>
+                            <XCircle size={13} /> Revise
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -1,20 +1,27 @@
 """Operation: projects, work orders, drawings, deliveries."""
 
 from datetime import UTC, date, datetime, timedelta
-from uuid import UUID
+from pathlib import Path
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter, Depends, File, Form, HTTPException, UploadFile, status,
+)
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval
+from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
+from app.models.attachment import Attachment
 from app.models.crm import Customer
 from app.models.finance import Invoice
-from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
+from app.models.operation import (
+    DeliveryOrder, Drawing, Project, WorkOrder, advance_project_status,
+)
 from app.models.purchasing import PurchaseRequest
 from app.models.quotation import Quotation
 from app.models.user import User
@@ -132,6 +139,11 @@ async def project_full(project_id: UUID,
         select(Drawing).where(Drawing.project_id == project_id)
         .order_by(Drawing.revision.desc())
     )).all()
+    decider_ids = {d.decided_by for d in drawings if d.decided_by}
+    deciders: dict[UUID, str] = {}
+    if decider_ids:
+        for u in (await db.scalars(select(User).where(User.id.in_(decider_ids)))).all():
+            deciders[u.id] = u.full_name
     deliveries = (await db.scalars(
         select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
         .order_by(DeliveryOrder.split_index.asc())
@@ -224,6 +236,9 @@ async def project_full(project_id: UUID,
                 "id": str(d.id), "revision": d.revision, "file_url": d.file_url,
                 "status": d.status, "notes": d.notes,
                 "customer_decision_at": d.customer_decision_at,
+                "decided_at": d.decided_at,
+                "decided_by": str(d.decided_by) if d.decided_by else None,
+                "decided_by_name": deciders.get(d.decided_by) if d.decided_by else None,
                 "created_at": d.created_at,
             } for d in drawings
         ],
@@ -353,6 +368,13 @@ REQUIRED_DOCS = {
 _LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
 DOCS_DUE_WINDOW_DAYS = 14
 
+# Drawings: internal staff upload the file (on behalf of the supplier), and the
+# director signs it off. The customer-portal approval still works as a fallback.
+_DRAWING_UPLOAD_ROLES = {
+    Role.PURCHASING, Role.SALES, Role.MANAGER, Role.DIRECTOR, Role.ADMIN,
+}
+_DRAWING_APPROVE_ROLES = {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+
 
 def _logistics_payload(p: Project) -> dict:
     mode = p.delivery_mode or "local"
@@ -391,6 +413,106 @@ async def _has_approved_drawing(db: AsyncSession, project_id: UUID) -> bool:
         ).limit(1)
     )
     return d is not None
+
+
+@router.post("/projects/{project_id}/drawings", status_code=201)
+async def upload_drawing(
+    project_id: UUID,
+    notes: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Internal staff upload a drawing on behalf of the supplier. It lands as
+    'submitted', awaiting the director's sign-off — no supplier login needed."""
+    if Role(user.role) not in _DRAWING_UPLOAD_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to upload drawings")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
+
+    now = datetime.now(UTC)
+    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
+    root.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
+                   for ch in (file.filename or "file"))[:200]
+    path = root / f"{uuid4().hex}_drawing_{safe}"
+    path.write_bytes(data)
+
+    a = Attachment(
+        owner_type="project", owner_id=p.id,
+        filename=safe, content_type=file.content_type, size=len(data),
+        storage_path=str(path),
+        description=f"[drawing] {notes or ''}".strip(),
+        uploaded_by=user.id,
+    )
+    db.add(a)
+    await db.flush()
+
+    prior = (await db.scalars(
+        select(Drawing).where(Drawing.project_id == p.id)
+    )).all()
+    next_rev = (max((d.revision for d in prior), default=0) or 0) + 1
+    drw = Drawing(
+        project_id=p.id,
+        revision=next_rev,
+        file_url=f"/api/v1/attachments/{a.id}/download",
+        status="submitted",
+        notes=notes,
+    )
+    db.add(drw)
+    # Reflect that a drawing is now in review (never moves the status backward).
+    advance_project_status(p, "drawing")
+    await db.flush()
+    return {
+        "id": str(drw.id), "revision": drw.revision, "status": drw.status,
+        "file_url": drw.file_url,
+    }
+
+
+class DrawingDecision(BaseModel):
+    decision: str                  # 'approve' | 'request_revision'
+    notes: str | None = None
+
+
+@router.post("/drawings/{drawing_id}/decide")
+async def decide_drawing(
+    drawing_id: UUID,
+    payload: DrawingDecision,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The director signs off (or sends back) a submitted drawing. Approving
+    advances the project to 'drawing_approved' so logistics can begin."""
+    if Role(user.role) not in _DRAWING_APPROVE_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the director can approve drawings")
+    d = await db.get(Drawing, drawing_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Drawing not found")
+    project = await db.get(Project, d.project_id)
+    if not project:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+
+    if payload.decision == "approve":
+        d.status = "approved"
+        advance_project_status(project, "drawing_approved")
+    elif payload.decision == "request_revision":
+        d.status = "revision_requested"
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "decision must be approve|request_revision")
+    d.decided_by = user.id
+    d.decided_at = datetime.now(UTC)
+    if payload.notes:
+        d.notes = ((d.notes or "") + f"\n[{user.full_name}] {payload.notes}").strip()
+    await db.flush()
+    return {"ok": True, "drawing_id": str(d.id), "status": d.status}
 
 
 class LogisticsPatch(BaseModel):

@@ -117,6 +117,10 @@ class Drawing(Base, UUIDPK, TimestampMixin):
     file_url: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
     customer_decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Who signed off (director, internally) and when. Distinct from the legacy
+    # customer_decision_at so both the internal and customer paths are tracked.
+    decided_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
 
 
