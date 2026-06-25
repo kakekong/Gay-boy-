@@ -353,10 +353,17 @@ async def _spawn_project(
     seq = await db.scalar(
         select(func.count(Project.id)).where(Project.code.like(f"{prefix}%"))
     ) or 0
+    # Carry the approved price request through to the project (via the linked
+    # quotation) so purchasing knows exactly what order it's sourcing.
+    price_request_id = None
+    if po.quotation_id:
+        quote = await db.get(Quotation, po.quotation_id)
+        price_request_id = quote.price_request_id if quote else None
     project = Project(
         code=f"{prefix}{seq + 1:04d}",
         customer_id=po.customer_id,
         quotation_id=po.quotation_id,
+        price_request_id=price_request_id,
         po_number=po.number,
         po_date=po.po_date,
         po_value=po.total,

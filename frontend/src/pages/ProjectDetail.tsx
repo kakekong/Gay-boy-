@@ -134,6 +134,7 @@ export default function ProjectDetailPage() {
   const dos = data.data.deliveries ?? [];
   const inv = data.data.invoices ?? [];
   const prs = data.data.purchase_requests ?? [];
+  const priceReq = data.data.price_request ?? null;
 
   const marginDelta = (p.margin_actual || 0) - (p.margin_estimate || 0);
   const stageIdx = PIPELINE_STAGES.indexOf(p.status);
@@ -292,6 +293,48 @@ export default function ProjectDetailPage() {
       {/* Shipping timeline */}
       <ShippingTimeline projectId={p.id} />
       <ShippingTimelineEditor projectId={p.id} />
+
+      {/* Price request (the approved order behind this project) */}
+      {priceReq && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <FileText size={15} className="text-brand-600" /> Order — {priceReq.number}
+            </div>
+            <div className="text-xs muted">The approved price request this project fulfils.</div>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">#</th>
+                <th className="th">Description</th>
+                <th className="th text-right">Qty</th>
+                <th className="th">UoM</th>
+                <th className="th">Spec</th>
+                <th className="th text-right">Cost</th>
+                {priceReq.items?.[0] && "sell_price" in priceReq.items[0] && (
+                  <th className="th text-right">Sell</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {(priceReq.items ?? []).map((it: any) => (
+                <tr key={it.line_no} className="border-t border-ink-100">
+                  <td className="td muted">{it.line_no}</td>
+                  <td className="td">{it.description}</td>
+                  <td className="td text-right tabular-nums">{it.qty}</td>
+                  <td className="td muted">{it.uom || "—"}</td>
+                  <td className="td muted text-xs">{it.spec || "—"}</td>
+                  <td className="td text-right tabular-nums">{it.cost_price != null ? idr(it.cost_price) : "—"}</td>
+                  {"sell_price" in it && (
+                    <td className="td text-right tabular-nums">{it.sell_price != null ? idr(it.sell_price) : "—"}</td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Work orders */}
       <div className="card overflow-hidden">

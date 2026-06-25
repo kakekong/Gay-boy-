@@ -146,6 +146,25 @@ async def project_full(project_id: UUID,
     )).all()
 
     show_money = _can_see_project_money(user)
+    # The approved price request behind this project — so purchasing can see
+    # exactly what to source. Costs are always shown (purchasing needs them);
+    # the selling price is gated to money-viewers (hidden from purchasing).
+    price_request = None
+    if p.price_request_id:
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, p.price_request_id)
+        if pr:
+            pr_items = []
+            for it in (pr.items or []):
+                row = {
+                    "line_no": it.get("line_no"), "description": it.get("description"),
+                    "qty": it.get("qty"), "uom": it.get("uom"), "spec": it.get("spec"),
+                    "cost_price": it.get("cost_price"),
+                }
+                if show_money:
+                    row["sell_price"] = it.get("sell_price")
+                pr_items.append(row)
+            price_request = {"id": str(pr.id), "number": pr.number, "items": pr_items}
     # Sales rep in charge (the customer's account owner) so the detail page can
     # show who owns the deal.
     sales_rep = None
@@ -165,6 +184,7 @@ async def project_full(project_id: UUID,
             "margin_actual": float(p.margin_actual or 0) if show_money else None,
             "created_at": p.created_at,
         },
+        "price_request": price_request,
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
         "sales_pic_name": sales_rep["name"] if sales_rep else None,
         "customer": {
