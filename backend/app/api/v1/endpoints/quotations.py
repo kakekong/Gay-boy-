@@ -97,6 +97,66 @@ async def create_quotation(
     return await _load(q.id, db)
 
 
+@router.post("/from-price-request/{pr_id}", response_model=QuotationOut, status_code=201)
+async def create_from_price_request(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Build a quotation straight from an approved Price Request.
+
+    Sales never types a price here — every line's unit price is the selling
+    price the director set on the approved form, and the resulting quotation
+    is locked to those prices.
+    """
+    from app.models.price_request import PriceRequest
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
+    if Role(user.role) == Role.SALES and pr.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    if pr.status != "approved":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Only an approved price request can become a quotation")
+    if pr.quotation_id:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "This price request already has a quotation")
+
+    q = Quotation(
+        number=await next_quotation_number(db),
+        customer_id=pr.customer_id,
+        sales_pic_id=pr.sales_pic_id or user.id,
+        price_request_id=pr.id,
+        discount_pct=0, tax_pct=11,
+        notes=pr.notes,
+        status="draft",
+        created_by=user.id, updated_by=user.id,
+    )
+    db.add(q)
+    await db.flush()
+    items = [
+        QuotationItem(
+            quotation_id=q.id,
+            line_no=it.get("line_no") or (i + 1),
+            source="custom",
+            description=it.get("description") or "",
+            qty=float(it.get("qty") or 0),
+            uom=it.get("uom") or "pcs",
+            unit_price=float(it.get("sell_price") or 0),
+            cost_estimate=float(it.get("cost_price") or 0),
+        )
+        for i, it in enumerate(pr.items or [])
+    ]
+    db.add_all(items)
+    _recalc(q, items)
+    pr.quotation_id = q.id
+    await db.flush()
+    await audit_record(db, actor=user, action="create_from_price_request",
+                       entity="quotation", entity_id=q.id,
+                       after={"price_request_id": str(pr.id)})
+    return await _load(q.id, db)
+
+
 @router.post("/parse-upload")
 async def parse_upload(
     file: UploadFile,
@@ -137,6 +197,14 @@ async def update_quotation(
         )
 
     data = payload.model_dump(exclude_unset=True)
+
+    # Prices on a price-request-backed quotation are fixed by the director's
+    # approved form — sales can adjust meta (validity, notes) but not the lines.
+    if q.price_request_id and Role(user.role) == Role.SALES and data.get("items") is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Line prices are fixed by the approved price request and can't be edited.",
+        )
 
     # A custom number must stay unique.
     if data.get("number"):

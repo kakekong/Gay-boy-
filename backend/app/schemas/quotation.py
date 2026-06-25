@@ -46,6 +46,7 @@ class QuotationOut(BaseModel):
     number: str
     customer_id: UUID
     contact_id: UUID | None = None
+    price_request_id: UUID | None = None
     version: int
     variant: str
     status: str

@@ -31,6 +31,9 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
         nullable=False, index=True,
     )
     project_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
+    # The approved price request this quotation was generated from. When set,
+    # line prices are fixed by the director's approved form — sales can't edit them.
+    price_request_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     parent_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("quotations.id", ondelete="SET NULL")

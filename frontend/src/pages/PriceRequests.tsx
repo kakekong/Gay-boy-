@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft } from "lucide-react";
+import { Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
@@ -181,9 +182,15 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (i
 
 function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; onBack: () => void }) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const q = useQuery({
     queryKey: ["price-request", id],
     queryFn: () => api.get(`/price-requests/${id}`).then((r) => r.data),
+  });
+  const makeQuote = useMutation({
+    mutationFn: () => api.post(`/quotations/from-price-request/${id}`).then((r) => r.data),
+    onSuccess: (d) => nav(`/quotations/${d.id}`),
+    onError: onErr,
   });
   const [draft, setDraft] = useState<Record<number, { cost?: number; sell?: number }>>({});
   const [notes, setNotes] = useState("");
@@ -227,6 +234,18 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             </div>
             <div className="text-sm muted mt-1">{pr.customer_name}</div>
           </div>
+          {pr.status === "approved" && (
+            pr.quotation_id ? (
+              <button className="btn-ghost" onClick={() => nav(`/quotations/${pr.quotation_id}`)}>
+                <FileText size={14} /> View quotation
+              </button>
+            ) : (role === "sales" || role === "director" || role === "manager" || role === "admin") ? (
+              <button className="btn-primary" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate()}>
+                {makeQuote.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                Create quotation
+              </button>
+            ) : null
+          )}
         </div>
 
         <table className="w-full text-sm mt-4">
