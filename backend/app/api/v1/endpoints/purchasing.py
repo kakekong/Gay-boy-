@@ -187,9 +187,58 @@ class PoCreate(BaseModel):
     items: list[dict] = []
     total: float = 0
     number: str | None = None  # auto-generated if missing
+    price_request_id: UUID | None = None  # source the buying price from this PR
 
 
 _purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.ADMIN)
+
+
+@router.get("/po/prefill")
+async def po_prefill(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    """PO line items + total pre-filled from a project's approved price request.
+
+    Purchasing already entered the buying (cost) price per line on the price
+    request, so a PO for that project shouldn't make them retype it. We return
+    PO-ready lines using the *cost* price as the unit price — never the selling
+    price or the customer (purchasing stays blind to the customer side).
+    """
+    from app.models.operation import Project
+    from app.models.price_request import PriceRequest
+
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if not project.price_request_id:
+        return {"price_request_id": None, "items": [], "total": 0}
+    pr = await db.get(PriceRequest, project.price_request_id)
+    if not pr:
+        return {"price_request_id": None, "items": [], "total": 0}
+
+    items, total = [], 0.0
+    for it in (pr.items or []):
+        qty = float(it.get("qty") or 0)
+        unit_cost = float(it.get("cost_price") or 0)
+        amount = unit_cost * qty
+        total += amount
+        items.append({
+            "line_no": it.get("line_no"),
+            "description": it.get("description"),
+            "qty": qty,
+            "uom": it.get("uom"),
+            "spec": it.get("spec"),
+            "unit_price": unit_cost,   # buying price per unit
+            "amount": amount,
+        })
+    return {
+        "price_request_id": str(pr.id),
+        "price_request_number": pr.number,
+        "items": items,
+        "total": total,
+    }
 
 
 @router.get("/po")
@@ -329,11 +378,16 @@ async def create_po(
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
 
+    # Link the PO to the project's price request (falls back to the project's
+    # own price_request_id) so the buying price stays traceable to its source.
+    price_request_id = payload.price_request_id or project.price_request_id
+
     is_director = Role(user.role) == Role.DIRECTOR
     po = SupplierPO(
         number=number,
         supplier_id=payload.supplier_id,
         project_id=payload.project_id,
+        price_request_id=price_request_id,
         po_date=po_date_parsed,
         quoted_lead_days=payload.quoted_lead_days,
         total=payload.total,
@@ -379,6 +433,12 @@ async def get_po(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
     supplier = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
     project = await db.get(Project, po.project_id) if po.project_id else None
+    price_request = None
+    if po.price_request_id:
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, po.price_request_id)
+        if pr:
+            price_request = {"id": str(pr.id), "number": pr.number}
     # Sales rep in charge (via the project's customer) for the detail page —
     # hidden from purchasing, who must stay blind to the customer side.
     sales_rep = None
@@ -397,6 +457,8 @@ async def get_po(
         "supplier_category": supplier.category if supplier else None,
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
         "sales_pic_name": sales_rep["name"] if sales_rep else None,
+        "price_request_id": price_request["id"] if price_request else None,
+        "price_request_number": price_request["number"] if price_request else None,
         "project_id": str(po.project_id) if po.project_id else None,
         "project_code": project.code if project else None,
         "project_status": project.status if project else None,

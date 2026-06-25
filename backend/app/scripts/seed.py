@@ -226,6 +226,11 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by UUID',
     'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_by UUID',
     'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ',
+
+    # Supplier PO can be linked to the price request it sources against, so the
+    # PO auto-fills the buying (cost) price purchasing already entered.
+    'ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS price_request_id UUID',
+    "CREATE INDEX IF NOT EXISTS ix_supplier_pos_price_request_id ON supplier_pos (price_request_id)",
 ]
 
 

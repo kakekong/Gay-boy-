@@ -67,6 +67,9 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     project_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), index=True
     )
+    # The approved price request this PO sources against. Lets the PO pull in
+    # the buying (cost) price purchasing already entered, instead of re-typing.
+    price_request_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     po_date: Mapped[date | None] = mapped_column(Date)
     quoted_lead_days: Mapped[int | None] = mapped_column()
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)

@@ -22,6 +22,8 @@ interface PO {
   supplier_category: string | null;
   sales_pic_id: string | null;
   sales_pic_name: string | null;
+  price_request_id: string | null;
+  price_request_number: string | null;
   project_id: string | null;
   project_code: string | null;
   project_status: string | null;
@@ -316,6 +318,12 @@ export default function PurchaseOrderDetailPage() {
           <Meta label="Sales in charge">
             {p.sales_pic_name ? <UserLink id={p.sales_pic_id} name={p.sales_pic_name} /> : "—"}
           </Meta>
+          {p.price_request_number && (
+            <Meta label="Price request">
+              <span className="font-mono text-xs">{p.price_request_number}</span>
+              <span className="block text-[11px] muted">buying price sourced from here</span>
+            </Meta>
+          )}
           <Meta label="PO date" icon={<Calendar size={12} />}>
             <input
               type="date"

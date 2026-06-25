@@ -377,8 +377,29 @@ function NewPOModal({
   const [poDate, setPoDate] = useState(today);
   const [leadDays, setLeadDays] = useState("");
   const [total, setTotal] = useState("");
+  const [totalEdited, setTotalEdited] = useState(false);
   const [description, setDescription] = useState("");
   const [localErr, setLocalErr] = useState<string | null>(null);
+
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+
+  // Once a project is chosen, pull its approved price request so the PO can
+  // auto-fill the buying (cost) price purchasing already entered — no retyping.
+  const prefill = useQuery({
+    queryKey: ["po-prefill", projectId],
+    queryFn: () => api.get("/purchasing/po/prefill", { params: { project_id: projectId } })
+      .then((r) => r.data),
+    enabled: !!projectId,
+  });
+  const linkedPR: string | null = prefill.data?.price_request_id ?? null;
+  const prItems: any[] = prefill.data?.items ?? [];
+  const prTotal: number = Number(prefill.data?.total ?? 0);
+
+  // When the price request loads, seed the total from it (unless the user has
+  // already typed their own — purchasing may negotiate a different figure).
+  if (linkedPR && !totalEdited && total === "" && prTotal > 0) {
+    setTotal(String(prTotal));
+  }
 
   const create = useMutation({
     mutationFn: () => api.post("/purchasing/po", {
@@ -388,7 +409,10 @@ function NewPOModal({
       po_date: poDate || null,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
       total: total ? Number(total) : 0,
-      items: description ? [{ description, qty: 1 }] : [],
+      price_request_id: linkedPR,
+      // Prefer the price-request lines (with buying prices); fall back to the
+      // free-text description if there's no linked price request.
+      items: prItems.length ? prItems : (description ? [{ description, qty: 1 }] : []),
     }).then((r) => r.data),
     onSuccess: (r) => onCreated(r.number, !!r.pending_approval),
     onError: (e: any) => {
@@ -468,7 +492,12 @@ function NewPOModal({
                 required
                 className="input"
                 value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
+                onChange={(e) => {
+                  setProjectId(e.target.value);
+                  // New project → re-seed the total from its price request.
+                  setTotal("");
+                  setTotalEdited(false);
+                }}
               >
                 <option value="">Choose a project…</option>
                 {projects.map((p: any) => (
@@ -479,6 +508,59 @@ function NewPOModal({
               </select>
             )}
           </Field>
+
+          {projectId && (
+            prefill.isLoading ? (
+              <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" /> Checking the price request…
+              </div>
+            ) : linkedPR ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm">
+                <div className="flex items-center gap-2 text-emerald-800 font-medium">
+                  <Check size={14} className="shrink-0" />
+                  Linked to price request {prefill.data?.price_request_number ?? ""}
+                </div>
+                <p className="text-[11px] text-emerald-700/90 mt-0.5">
+                  Buying prices below are pulled from purchasing's costing — no need to retype.
+                </p>
+                {prItems.length > 0 && (
+                  <table className="w-full text-xs mt-2">
+                    <thead className="text-ink-500">
+                      <tr>
+                        <th className="text-left font-medium py-1">Item</th>
+                        <th className="text-right font-medium py-1">Qty</th>
+                        <th className="text-right font-medium py-1">Unit cost</th>
+                        <th className="text-right font-medium py-1">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {prItems.map((it, i) => (
+                        <tr key={i} className="border-t border-emerald-100">
+                          <td className="py-1 pr-2">{it.description || "—"}</td>
+                          <td className="py-1 text-right tabular-nums">
+                            {it.qty}{it.uom ? ` ${it.uom}` : ""}
+                          </td>
+                          <td className="py-1 text-right tabular-nums">{idr(it.unit_price)}</td>
+                          <td className="py-1 text-right tabular-nums">{idr(it.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-emerald-200 font-medium">
+                        <td className="py-1" colSpan={3}>Total buying price</td>
+                        <td className="py-1 text-right tabular-nums">{idr(prTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-[11px] muted">
+                This project has no linked price request, so there's no buying price to pull in.
+                Enter the line and total manually below.
+              </div>
+            )
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="PO number">
@@ -523,20 +605,27 @@ function NewPOModal({
                 step="0.01"
                 className="input"
                 value={total}
-                onChange={(e) => setTotal(e.target.value)}
+                onChange={(e) => { setTotal(e.target.value); setTotalEdited(true); }}
               />
+              {linkedPR && (
+                <span className="block text-[10px] text-ink-400 mt-1">
+                  Pre-filled from the price request — override if you negotiated a different price.
+                </span>
+              )}
             </Field>
           </div>
 
-          <Field label="Description (optional)">
-            <textarea
-              rows={2}
-              className="input"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What's being purchased…"
-            />
-          </Field>
+          {!(linkedPR && prItems.length > 0) && (
+            <Field label="Description (optional)">
+              <textarea
+                rows={2}
+                className="input"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What's being purchased…"
+              />
+            </Field>
+          )}
 
           {localErr && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
