@@ -257,6 +257,10 @@ async def list_pos(
         )).all():
             sales_users[u.id] = u
 
+    # Purchasing works suppliers + parts; the customer behind a project is
+    # deliberately hidden from them (they see the project code as the order
+    # reference instead).
+    hide_customer = Role(_u.role) == Role.PURCHASING
     out = []
     for r in rows:
         proj = projects.get(r.project_id) if r.project_id else None
@@ -269,10 +273,13 @@ async def list_pos(
             "supplier_name": sup.name if sup else None,
             "project_id": str(r.project_id) if r.project_id else None,
             "project_code": proj.code if proj else None,
-            "customer_id": str(cust.id) if cust else None,
-            "customer_name": cust.company_name if cust else None,
-            "sales_pic_id": str(sales.id) if sales else None,
-            "sales_pic_name": sales.full_name if sales else None,
+            "customer_id": None if hide_customer else (str(cust.id) if cust else None),
+            "customer_name": (
+                (proj.code if proj else "—") if hide_customer
+                else (cust.company_name if cust else None)
+            ),
+            "sales_pic_id": None if hide_customer else (str(sales.id) if sales else None),
+            "sales_pic_name": None if hide_customer else (sales.full_name if sales else None),
             "po_date": r.po_date, "total": float(r.total or 0),
             "quoted_lead_days": r.quoted_lead_days,
             "items": r.items, "created_at": r.created_at,
@@ -372,9 +379,10 @@ async def get_po(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
     supplier = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
     project = await db.get(Project, po.project_id) if po.project_id else None
-    # Sales rep in charge (via the project's customer) for the detail page.
+    # Sales rep in charge (via the project's customer) for the detail page —
+    # hidden from purchasing, who must stay blind to the customer side.
     sales_rep = None
-    if project and project.customer_id:
+    if project and project.customer_id and Role(_u.role) != Role.PURCHASING:
         cust = await db.get(Customer, project.customer_id)
         if cust and cust.sales_pic_id:
             rep = await db.get(User, cust.sales_pic_id)
