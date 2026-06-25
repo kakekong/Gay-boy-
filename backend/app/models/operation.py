@@ -21,6 +21,9 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     quotation_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("quotations.id", ondelete="SET NULL")
     )
+    # The approved price request this project fulfils, so purchasing knows
+    # exactly what order it is working without seeing the deal economics.
+    price_request_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     po_number: Mapped[str | None] = mapped_column(String(80))
     po_date: Mapped[date | None] = mapped_column(Date)
     po_value: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)

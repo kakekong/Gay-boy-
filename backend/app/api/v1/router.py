@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     notifications,
     operation,
     payments,
+    price_requests,
     purchasing,
     quotations,
     reports,
@@ -60,6 +61,7 @@ api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
 api_router.include_router(portal.router, prefix="/portal", tags=["portal"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
+api_router.include_router(price_requests.router, prefix="/price-requests", tags=["price-requests"])
 api_router.include_router(kpi.router, prefix="/kpi", tags=["kpi"])
 api_router.include_router(dashboards.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(calendar.router, prefix="/calendar", tags=["calendar"])

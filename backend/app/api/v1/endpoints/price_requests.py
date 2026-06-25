@@ -1,0 +1,372 @@
+"""Price requests — the pre-quotation pricing workflow.
+
+    sales lists goods → purchasing fills cost → director sets sell + approves
+    → quotation is generated from the approved form (sales never types a price)
+
+Margin protection is baked into serialization:
+  • purchasing never sees the customer name or the selling price
+  • sales never sees the procurement cost
+  • director / manager / admin / finance see everything
+"""
+
+from datetime import UTC, datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.audit import record as audit_record
+from app.core.db import get_db
+from app.core.deps import get_current_user
+from app.core.permissions import Role, require_min
+from app.models.crm import Customer
+from app.models.price_request import PriceRequest
+from app.models.user import User
+from app.services.numbering import next_price_request_number
+
+# Internal-only (sales tier and up); tier-0 externals (customer/supplier) blocked.
+router = APIRouter(dependencies=[Depends(require_min(Role.SALES))])
+
+_PURCHASING = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+_MANAGEMENT = {Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.FINANCE}
+
+
+# ─── Schemas ─────────────────────────────────────────────────────────────────
+class ItemIn(BaseModel):
+    description: str
+    qty: float = 1
+    uom: str | None = None
+    spec: str | None = None
+
+
+class PRCreate(BaseModel):
+    customer_id: UUID
+    items: list[ItemIn] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class PRUpdate(BaseModel):
+    items: list[ItemIn] | None = None
+    notes: str | None = None
+
+
+class CostLine(BaseModel):
+    line_no: int
+    cost_price: float = 0
+
+
+class PricingIn(BaseModel):
+    items: list[CostLine] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class SellLine(BaseModel):
+    line_no: int
+    sell_price: float = 0
+    cost_price: float | None = None   # director may also correct the cost
+
+
+class ApproveIn(BaseModel):
+    items: list[SellLine] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class DecisionIn(BaseModel):
+    notes: str | None = None
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+def _can_see_cost(role: Role) -> bool:
+    return role in (Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.FINANCE)
+
+
+def _can_see_sell(role: Role) -> bool:
+    # Everyone except purchasing (margin is none of their business).
+    return role != Role.PURCHASING
+
+
+def _can_see_customer(role: Role) -> bool:
+    return role != Role.PURCHASING
+
+
+async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
+    cust = await db.get(Customer, pr.customer_id) if pr.customer_id else None
+    see_cost, see_sell = _can_see_cost(role), _can_see_sell(role)
+    items = []
+    for it in (pr.items or []):
+        row = {
+            "line_no": it.get("line_no"),
+            "description": it.get("description"),
+            "qty": it.get("qty"),
+            "uom": it.get("uom"),
+            "spec": it.get("spec"),
+        }
+        if see_cost:
+            row["cost_price"] = it.get("cost_price")
+        if see_sell:
+            row["sell_price"] = it.get("sell_price")
+            row["line_total"] = float(it.get("sell_price") or 0) * float(it.get("qty") or 0)
+        items.append(row)
+    out = {
+        "id": str(pr.id),
+        "number": pr.number,
+        "status": pr.status,
+        "items": items,
+        "notes": pr.notes,
+        "sales_pic_id": str(pr.sales_pic_id) if pr.sales_pic_id else None,
+        "quotation_id": str(pr.quotation_id) if pr.quotation_id else None,
+        "priced_at": pr.priced_at,
+        "approved_at": pr.approved_at,
+        "decision_notes": pr.decision_notes,
+        "created_at": pr.created_at,
+    }
+    # Customer identity is hidden from purchasing — they see a neutral code.
+    if _can_see_customer(role):
+        out["customer_id"] = str(pr.customer_id) if pr.customer_id else None
+        out["customer_name"] = cust.company_name if cust else None
+    else:
+        out["customer_name"] = f"Order {pr.number}"
+    if see_sell:
+        out["sell_total"] = sum(
+            float(i.get("sell_price") or 0) * float(i.get("qty") or 0)
+            for i in (pr.items or [])
+        )
+    return out
+
+
+def _norm_items(items: list[ItemIn]) -> list[dict]:
+    return [
+        {
+            "line_no": i + 1,
+            "description": it.description,
+            "qty": float(it.qty or 0),
+            "uom": it.uom,
+            "spec": it.spec,
+            "cost_price": None,
+            "sell_price": None,
+        }
+        for i, it in enumerate(items)
+    ]
+
+
+# ─── CRUD + workflow ─────────────────────────────────────────────────────────
+@router.post("", status_code=201)
+async def create_price_request(
+    payload: PRCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if Role(user.role) not in (Role.SALES, Role.DIRECTOR, Role.MANAGER, Role.ADMIN):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only sales can raise a price request")
+    cust = await db.get(Customer, payload.customer_id)
+    if not cust:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Customer not found")
+    if Role(user.role) == Role.SALES and cust.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
+    pr = PriceRequest(
+        number=await next_price_request_number(db),
+        customer_id=payload.customer_id,
+        sales_pic_id=user.id,
+        status="draft",
+        items=_norm_items(payload.items),
+        notes=payload.notes,
+        created_by=user.id, updated_by=user.id,
+    )
+    db.add(pr)
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+async def _scoped(pr_id: UUID, db: AsyncSession, user: User) -> PriceRequest:
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
+    if Role(user.role) == Role.SALES and pr.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    return pr
+
+
+@router.get("")
+async def list_price_requests(
+    status_eq: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    role = Role(user.role)
+    stmt = select(PriceRequest).where(PriceRequest.is_deleted.is_(False)).order_by(
+        PriceRequest.created_at.desc()
+    )
+    if role == Role.SALES:
+        stmt = stmt.where(PriceRequest.sales_pic_id == user.id)
+    elif role == Role.PURCHASING:
+        # Purchasing works the costing queue — never sees sales' raw drafts.
+        stmt = stmt.where(PriceRequest.status != "draft")
+    if status_eq:
+        stmt = stmt.where(PriceRequest.status == status_eq)
+    rows = (await db.scalars(stmt)).all()
+    return [await _serialize(db, pr, role) for pr in rows]
+
+
+@router.get("/{pr_id}")
+async def get_price_request(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    pr = await _scoped(pr_id, db, user)
+    if Role(user.role) == Role.PURCHASING and pr.status == "draft":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.patch("/{pr_id}")
+async def update_price_request(
+    pr_id: UUID,
+    payload: PRUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    pr = await _scoped(pr_id, db, user)
+    if pr.status not in ("draft", "rejected"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Only a draft or rejected request can be edited")
+    if payload.items is not None:
+        pr.items = _norm_items(payload.items)
+    if payload.notes is not None:
+        pr.notes = payload.notes
+    pr.updated_by = user.id
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.post("/{pr_id}/submit")
+async def submit_price_request(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    pr = await _scoped(pr_id, db, user)
+    if pr.status not in ("draft", "rejected"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Already submitted")
+    if not (pr.items or []):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Add at least one line item")
+    pr.status = "pending_purchasing"
+    await audit_record(db, actor=user, action="submit", entity="price_request",
+                       entity_id=pr.id, after={"status": pr.status})
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.post("/{pr_id}/price")
+async def fill_pricing(
+    pr_id: UUID,
+    payload: PricingIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Purchasing fills the procurement cost per line, then it goes to the director."""
+    if Role(user.role) not in _PURCHASING:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only purchasing may fill costs")
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if pr.status not in ("pending_purchasing", "pending_director"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Can't cost a request in status '{pr.status}'")
+    costs = {c.line_no: float(c.cost_price or 0) for c in payload.items}
+    items = [dict(it) for it in (pr.items or [])]
+    for it in items:
+        if it.get("line_no") in costs:
+            it["cost_price"] = costs[it["line_no"]]
+    pr.items = items
+    pr.priced_by = user.id
+    pr.priced_at = datetime.now(UTC)
+    if payload.notes:
+        pr.notes = ((pr.notes or "") + f"\n[purchasing] {payload.notes}").strip()
+    pr.status = "pending_director"
+    await audit_record(db, actor=user, action="price", entity="price_request",
+                       entity_id=pr.id, after={"status": pr.status})
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.post("/{pr_id}/approve")
+async def approve_price_request(
+    pr_id: UUID,
+    payload: ApproveIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Director sets the selling price per line (and may correct costs), then approves."""
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the director can approve pricing")
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if pr.status not in ("pending_director", "pending_purchasing"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Can't approve a request in status '{pr.status}'")
+    sells = {s.line_no: s for s in payload.items}
+    items = [dict(it) for it in (pr.items or [])]
+    for it in items:
+        s = sells.get(it.get("line_no"))
+        if s is not None:
+            it["sell_price"] = float(s.sell_price or 0)
+            if s.cost_price is not None:
+                it["cost_price"] = float(s.cost_price)
+    pr.items = items
+    pr.approved_by = user.id
+    pr.approved_at = datetime.now(UTC)
+    pr.decision_notes = payload.notes
+    pr.status = "approved"
+    await audit_record(db, actor=user, action="approve", entity="price_request",
+                       entity_id=pr.id, after={"status": "approved"})
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.post("/{pr_id}/reject")
+async def reject_price_request(
+    pr_id: UUID,
+    payload: DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Send a request back to sales (director or purchasing)."""
+    if Role(user.role) not in (Role.DIRECTOR, Role.PURCHASING, Role.MANAGER):
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if pr.status == "approved":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Already approved")
+    pr.status = "rejected"
+    pr.decision_notes = payload.notes
+    await audit_record(db, actor=user, action="reject", entity="price_request",
+                       entity_id=pr.id, after={"status": "rejected", "notes": payload.notes})
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.get("/counts/pending")
+async def pending_counts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Badge counts for the role: what's waiting on me."""
+    from sqlalchemy import func
+    role = Role(user.role)
+    out = {"pending_purchasing": 0, "pending_director": 0}
+    if role in _PURCHASING:
+        out["pending_purchasing"] = await db.scalar(
+            select(func.count(PriceRequest.id)).where(
+                PriceRequest.status == "pending_purchasing",
+                PriceRequest.is_deleted.is_(False))) or 0
+    if role in (Role.DIRECTOR, Role.MANAGER, Role.ADMIN):
+        out["pending_director"] = await db.scalar(
+            select(func.count(PriceRequest.id)).where(
+                PriceRequest.status == "pending_director",
+                PriceRequest.is_deleted.is_(False))) or 0
+    return out

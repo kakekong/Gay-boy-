@@ -40,3 +40,14 @@ async def next_quotation_number(
         select(func.count(Quotation.id)).where(Quotation.number.like(f"{prefix}%"))
     ) or 0
     return f"{prefix}{existing + 1:04d}"
+
+
+async def next_price_request_number(db: AsyncSession) -> str:
+    """Issue the next price-request number in the form  PR-<YYYY>-<NNNN>."""
+    from app.models.price_request import PriceRequest
+    year = datetime.utcnow().year
+    prefix = f"PR-{year}-"
+    existing = await db.scalar(
+        select(func.count(PriceRequest.id)).where(PriceRequest.number.like(f"{prefix}%"))
+    ) or 0
+    return f"{prefix}{existing + 1:04d}"

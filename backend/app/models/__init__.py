@@ -14,6 +14,7 @@ from app.models.finance import Invoice, LedgerEntry, Payment  # noqa: F401
 from app.models.inventory import InventoryItem, InventoryMovement  # noqa: F401
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder  # noqa: F401
 from app.models.payment_claim import PaymentClaim  # noqa: F401
+from app.models.price_request import PriceRequest  # noqa: F401
 from app.models.purchasing import (  # noqa: F401
     GoodsReceipt,
     PurchaseRequest,

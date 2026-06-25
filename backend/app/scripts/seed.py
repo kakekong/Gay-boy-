@@ -162,6 +162,43 @@ COLUMN_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS ix_ledger_entries_sales_pic_id ON ledger_entries (sales_pic_id)",
     "CREATE INDEX IF NOT EXISTS ix_ledger_entries_customer_id ON ledger_entries (customer_id)",
 
+    # price_requests — pre-quotation pricing workflow (sales lists goods →
+    # purchasing costs → director sets selling price + approves).
+    """
+    CREATE TABLE IF NOT EXISTS price_requests (
+        id UUID PRIMARY KEY,
+        number VARCHAR(40) NOT NULL,
+        customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+        sales_pic_id UUID,
+        status VARCHAR(30) NOT NULL DEFAULT 'draft',
+        items JSONB NOT NULL DEFAULT '[]'::jsonb,
+        notes TEXT,
+        priced_by UUID,
+        priced_at TIMESTAMPTZ,
+        approved_by UUID,
+        approved_at TIMESTAMPTZ,
+        decision_notes TEXT,
+        quotation_id UUID,
+        is_deleted BOOLEAN NOT NULL DEFAULT false,
+        deleted_at TIMESTAMPTZ,
+        created_by UUID,
+        updated_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_price_requests_number ON price_requests (number)",
+    "CREATE INDEX IF NOT EXISTS ix_price_requests_customer_id ON price_requests (customer_id)",
+    "CREATE INDEX IF NOT EXISTS ix_price_requests_sales_pic_id ON price_requests (sales_pic_id)",
+    "CREATE INDEX IF NOT EXISTS ix_price_requests_status ON price_requests (status)",
+    "CREATE INDEX IF NOT EXISTS ix_price_requests_quotation_id ON price_requests (quotation_id)",
+    # Quotation can be generated from an approved price request.
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS price_request_id UUID",
+    "CREATE INDEX IF NOT EXISTS ix_quotations_price_request_id ON quotations (price_request_id)",
+    # Project records which price request it fulfils (so purchasing knows the order).
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS price_request_id UUID",
+    "CREATE INDEX IF NOT EXISTS ix_projects_price_request_id ON projects (price_request_id)",
+
     # Project gained a shipping timeline + import flag
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_ship_from_origin DATE',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS act_ship_from_origin DATE',

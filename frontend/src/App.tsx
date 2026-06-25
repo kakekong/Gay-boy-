@@ -46,6 +46,7 @@ const OperationPage        = lazy(() => import("@/pages/Operation"));
 const FinancePage          = lazy(() => import("@/pages/Finance"));
 const EstimatedFinancePage = lazy(() => import("@/pages/EstimatedFinance"));
 const FinancialReportsPage = lazy(() => import("@/pages/FinancialReports"));
+const PriceRequestsPage    = lazy(() => import("@/pages/PriceRequests"));
 const KpiPage              = lazy(() => import("@/pages/Kpi"));
 const ExecutivePage        = lazy(() => import("@/pages/Executive"));
 const AICommandCenter      = lazy(() => import("@/pages/AICommandCenter"));
@@ -168,6 +169,10 @@ function MainApp() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
+          <Route path="/price-requests" element={
+            <RequireRole roles={["sales", "purchasing", "admin", "manager", "director"]}>
+              <PriceRequestsPage />
+            </RequireRole>} />
           <Route path="/quotations" element={<QuotationsPage />} />
           <Route path="/quotations/:id" element={<QuotationDetailPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />

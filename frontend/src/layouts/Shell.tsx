@@ -6,7 +6,7 @@ import {
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList, Eye,
+  Receipt, ClipboardList, Eye, Tag,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -33,6 +33,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
     items: [
       { to: "/", label: "Dashboard", label_id: "Dasbor", icon: LayoutDashboard },
       { to: "/customers", label: "CRM", label_id: "Pelanggan", icon: Users },
+      { to: "/price-requests", label: "Price requests", label_id: "Permintaan harga", icon: Tag,
+        roles: ["sales", "purchasing", "admin", "manager", "director"] },
       { to: "/quotations", label: "Quotations", label_id: "Penawaran", icon: FileText },
       { to: "/customer-pos", label: "Customer PO", label_id: "PO Pelanggan", icon: Receipt },
       { to: "/purchase-orders", label: "Purchasing PO", label_id: "PO Pembelian", icon: Truck,
@@ -134,6 +136,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/role-guide",
   ],
   purchasing: [
+    "/price-requests",   // costing queue (customer identity hidden)
     "/purchasing",       // supplier directory + procurement board (+ /stage)
     "/suppliers",        // supplier detail pages (route guard; not a nav item)
     "/purchase-orders",  // view supplier-PO list + history
