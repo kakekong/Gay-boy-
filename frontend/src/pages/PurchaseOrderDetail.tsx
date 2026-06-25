@@ -94,9 +94,21 @@ export default function PurchaseOrderDetailPage() {
   const patch = useMutation({
     mutationFn: (body: Record<string, any>) =>
       api.patch(`/purchasing/po/${id}`, body),
-    onSuccess: () => {
+    onSuccess: (resp: any) => {
       refresh();
-      setFlash({ kind: "ok", text: "Saved." });
+      // A non-director edit comes back as pending_approval — the change is
+      // queued for the director, not applied. Say so instead of "Saved."
+      if (resp?.data?.pending_approval) {
+        setFlash({
+          kind: "ok",
+          text: resp.data.detail
+            ?? "Submitted for director approval; changes will apply once approved.",
+        });
+      } else {
+        setFlash({ kind: "ok", text: "Saved." });
+      }
+      setEditingNumber(false);
+      setEditingItems(false);
     },
     onError: onErr,
   });

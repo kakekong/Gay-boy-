@@ -70,6 +70,16 @@ async def inbox(
         )).all()
         projects = {p.id: p for p in projrows}
 
+    # Supplier-PO approvals (create/update): resolve the PO number for the label.
+    from app.models.purchasing import SupplierPO
+    spo_ids = {r.target_id for r in rows if r.target_type == "supplier_po"}
+    supplier_pos: dict[UUID, SupplierPO] = {}
+    if spo_ids:
+        sporows = (await db.scalars(
+            select(SupplierPO).where(SupplierPO.id.in_(spo_ids))
+        )).all()
+        supplier_pos = {p.id: p for p in sporows}
+
     # Bulk-load requester names
     requester_ids = {r.requested_by for r in rows}
     requesters: dict[UUID, User] = {}
@@ -124,6 +134,9 @@ async def inbox(
         elif r.target_type == "project":
             pj = projects.get(r.target_id)
             target_label = pj.code if pj else None
+        elif r.target_type == "supplier_po":
+            sp = supplier_pos.get(r.target_id)
+            target_label = sp.number if sp else None
         elif r.target_type in ("customer", "followup"):
             c = customers.get(r.target_id)
             target_label = c.company_name if c else None

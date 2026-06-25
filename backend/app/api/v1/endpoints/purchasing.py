@@ -594,10 +594,19 @@ async def update_po(
             reason=f"Update PO {po.number}: {', '.join(sorted(data.keys())) or 'no fields'}",
             payload={"action": "update", "changes": data},
         )
-        raise HTTPException(
-            status.HTTP_202_ACCEPTED,
-            "Submitted for director approval; changes will apply once approved.",
-        )
+        # IMPORTANT: return (don't raise) — raising rolls back the session via
+        # get_db's exception handler, which would discard the approval we just
+        # filed. The PO is intentionally left unchanged until the director signs
+        # off; the changes ride in the approval payload.
+        return {
+            "id": str(po.id), "number": po.number, "status": po.status,
+            "supplier_id": str(po.supplier_id),
+            "project_id": str(po.project_id) if po.project_id else None,
+            "po_date": po.po_date, "total": float(po.total or 0),
+            "quoted_lead_days": po.quoted_lead_days, "items": po.items,
+            "pending_approval": True,
+            "detail": "Submitted for director approval; changes will apply once approved.",
+        }
 
     # Director path: apply immediately.
     if "number" in data:

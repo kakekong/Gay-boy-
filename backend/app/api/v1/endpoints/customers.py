@@ -181,7 +181,13 @@ async def update_customer(
         reason=reason,
         payload={"changes": changes},
     )
-    raise HTTPException(status.HTTP_202_ACCEPTED, "Change requested; awaiting approval")
+    # Return (don't raise) — raising would roll back the session in get_db's
+    # exception handler and discard the approval request we just filed.
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"status": "pending_approval",
+                 "message": "Change requested; awaiting approval"},
+    )
 
 
 # ─── Activities ──────────────────────────────────────────────────────────────
