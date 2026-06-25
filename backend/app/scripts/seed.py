@@ -231,6 +231,17 @@ COLUMN_MIGRATIONS: list[str] = [
     # PO auto-fills the buying (cost) price purchasing already entered.
     'ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS price_request_id UUID',
     "CREATE INDEX IF NOT EXISTS ix_supplier_pos_price_request_id ON supplier_pos (price_request_id)",
+
+    # Backfill: link projects to the price request behind their quotation where
+    # the direct link was never recorded (projects created before Phase C).
+    """
+    UPDATE projects p
+       SET price_request_id = q.price_request_id
+      FROM quotations q
+     WHERE p.quotation_id = q.id
+       AND p.price_request_id IS NULL
+       AND q.price_request_id IS NOT NULL
+    """,
 ]
 
 

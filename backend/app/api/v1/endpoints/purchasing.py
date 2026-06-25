@@ -195,26 +195,39 @@ _purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, 
 
 @router.get("/po/prefill")
 async def po_prefill(
-    project_id: UUID,
+    project_id: UUID | None = None,
+    price_request_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(_purchasing_or_director),
 ):
-    """PO line items + total pre-filled from a project's approved price request.
+    """PO line items + total pre-filled from a price request.
 
     Purchasing already entered the buying (cost) price per line on the price
-    request, so a PO for that project shouldn't make them retype it. We return
-    PO-ready lines using the *cost* price as the unit price — never the selling
-    price or the customer (purchasing stays blind to the customer side).
+    request, so a PO shouldn't make them retype it. Pass ``price_request_id``
+    to use a specific request, or ``project_id`` to resolve the request the
+    project sources from (its direct link, falling back to its quotation's).
+    Returns PO-ready lines using the *cost* price as the unit price — never
+    the selling price or the customer (purchasing stays blind to that side).
     """
     from app.models.operation import Project
     from app.models.price_request import PriceRequest
+    from app.models.quotation import Quotation
 
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
-    if not project.price_request_id:
-        return {"price_request_id": None, "items": [], "total": 0}
-    pr = await db.get(PriceRequest, project.price_request_id)
+    pr = None
+    if price_request_id:
+        pr = await db.get(PriceRequest, price_request_id)
+    elif project_id:
+        project = await db.get(Project, project_id)
+        if not project:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+        pr_id = project.price_request_id
+        # Fall back to the price request behind the project's quotation — covers
+        # projects created before the direct link was recorded.
+        if not pr_id and project.quotation_id:
+            quote = await db.get(Quotation, project.quotation_id)
+            pr_id = quote.price_request_id if quote else None
+        if pr_id:
+            pr = await db.get(PriceRequest, pr_id)
     if not pr:
         return {"price_request_id": None, "items": [], "total": 0}
 
@@ -239,6 +252,35 @@ async def po_prefill(
         "items": items,
         "total": total,
     }
+
+
+@router.get("/po/price-request-options")
+async def po_price_request_options(
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    """Approved price requests purchasing can link a PO to manually, when a
+    project isn't auto-linked. Cost-only — no customer, no selling price."""
+    from app.models.price_request import PriceRequest
+
+    rows = (await db.scalars(
+        select(PriceRequest)
+        .where(PriceRequest.status == "approved", PriceRequest.is_deleted.is_(False))
+        .order_by(PriceRequest.created_at.desc())
+    )).all()
+    out = []
+    for pr in rows:
+        total = sum(
+            float(it.get("cost_price") or 0) * float(it.get("qty") or 0)
+            for it in (pr.items or [])
+        )
+        out.append({
+            "id": str(pr.id),
+            "number": pr.number,
+            "line_count": len(pr.items or []),
+            "total_cost": total,
+        })
+    return out
 
 
 @router.get("/po")
@@ -378,9 +420,13 @@ async def create_po(
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
 
-    # Link the PO to the project's price request (falls back to the project's
-    # own price_request_id) so the buying price stays traceable to its source.
+    # Link the PO to the price request it sources against: an explicit choice
+    # wins, else the project's direct link, else the project's quotation's link.
     price_request_id = payload.price_request_id or project.price_request_id
+    if not price_request_id and project.quotation_id:
+        from app.models.quotation import Quotation
+        quote = await db.get(Quotation, project.quotation_id)
+        price_request_id = quote.price_request_id if quote else None
 
     is_director = Role(user.role) == Role.DIRECTOR
     po = SupplierPO(

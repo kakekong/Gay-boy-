@@ -381,14 +381,25 @@ function NewPOModal({
   const [description, setDescription] = useState("");
   const [localErr, setLocalErr] = useState<string | null>(null);
 
+  const [manualPrId, setManualPrId] = useState("");
+
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
   // Once a project is chosen, pull its approved price request so the PO can
   // auto-fill the buying (cost) price purchasing already entered — no retyping.
+  // If a project isn't auto-linked, the user can pick a price request manually
+  // (manualPrId), which takes precedence.
   const prefill = useQuery({
-    queryKey: ["po-prefill", projectId],
-    queryFn: () => api.get("/purchasing/po/prefill", { params: { project_id: projectId } })
-      .then((r) => r.data),
+    queryKey: ["po-prefill", projectId, manualPrId],
+    queryFn: () => api.get("/purchasing/po/prefill", {
+      params: manualPrId ? { price_request_id: manualPrId } : { project_id: projectId },
+    }).then((r) => r.data),
+    enabled: !!projectId,
+  });
+  // Approved price requests, offered as a manual fallback link.
+  const prOptions = useQuery({
+    queryKey: ["pr-options"],
+    queryFn: () => api.get("/purchasing/po/price-request-options").then((r) => r.data),
     enabled: !!projectId,
   });
   const linkedPR: string | null = prefill.data?.price_request_id ?? null;
@@ -497,6 +508,7 @@ function NewPOModal({
                   // New project → re-seed the total from its price request.
                   setTotal("");
                   setTotalEdited(false);
+                  setManualPrId("");
                 }}
               >
                 <option value="">Choose a project…</option>
@@ -555,9 +567,23 @@ function NewPOModal({
                 )}
               </div>
             ) : (
-              <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-[11px] muted">
-                This project has no linked price request, so there's no buying price to pull in.
-                Enter the line and total manually below.
+              <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2.5 space-y-1.5">
+                <p className="text-[11px] muted">
+                  This project isn't auto-linked to a price request. Pick one to pull in its
+                  buying prices, or enter the total manually below.
+                </p>
+                <select
+                  className="input text-sm"
+                  value={manualPrId}
+                  onChange={(e) => { setManualPrId(e.target.value); setTotal(""); setTotalEdited(false); }}
+                >
+                  <option value="">No price request — enter manually</option>
+                  {(prOptions.data ?? []).map((o: any) => (
+                    <option key={o.id} value={o.id}>
+                      {o.number} · {o.line_count} line{o.line_count === 1 ? "" : "s"} · {idr(o.total_cost)}
+                    </option>
+                  ))}
+                </select>
               </div>
             )
           )}
