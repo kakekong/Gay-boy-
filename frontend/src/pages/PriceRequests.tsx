@@ -107,7 +107,13 @@ function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (i
 
   const customers = useQuery({
     queryKey: ["customers"],
-    queryFn: () => api.get("/customers", { params: { page_size: 200 } }).then((r) => r.data),
+    queryFn: () => api.get("/customers", { params: { page_size: 200 } }).then((r) => {
+      // /customers returns a paginated envelope {data:[...]}; tolerate a bare array too.
+      const body = r.data;
+      if (Array.isArray(body)) return body;
+      if (body && Array.isArray(body.data)) return body.data;
+      return [];
+    }),
   });
 
   const create = useMutation({
