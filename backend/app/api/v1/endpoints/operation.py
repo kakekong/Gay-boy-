@@ -539,12 +539,14 @@ async def reupload_drawing(
     if d.status != "revision_requested":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Only a drawing with a requested revision can be re-uploaded")
-    # Strictly the account that posted the drawing may revise it. (Drawings with
-    # no recorded uploader — legacy / supplier-portal mirrors — can't be revised
-    # here; post a fresh revision instead.)
-    if d.uploaded_by != user.id:
+    # The account that posted the drawing may revise it; management (director /
+    # manager / admin) may also revise on their behalf. A non-owner staffer
+    # (e.g. sales) still can't touch someone else's drawing.
+    is_owner = d.uploaded_by == user.id
+    is_mgmt = Role(user.role) in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+    if not (is_owner or is_mgmt):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the account that posted this drawing can revise it")
+                            "Only the account that posted this drawing (or management) can revise it")
     p = await db.get(Project, d.project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
@@ -586,6 +588,43 @@ async def reupload_drawing(
     await db.flush()
     return {"ok": True, "drawing_id": str(d.id), "status": d.status,
             "revision": d.revision, "file_url": d.file_url}
+
+
+@router.delete("/drawings/{drawing_id}")
+async def delete_drawing(
+    drawing_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete a drawing revision. Allowed for the account that posted it or for
+    management. Best-effort removes the underlying file too."""
+    import os
+    import re
+
+    d = await db.get(Drawing, drawing_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Drawing not found")
+    is_owner = d.uploaded_by == user.id
+    is_mgmt = Role(user.role) in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+    if not (is_owner or is_mgmt):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the account that posted this drawing (or management) can delete it")
+
+    # Best-effort: drop the underlying attachment + file so we don't orphan it.
+    m = re.search(r"/attachments/([0-9a-fA-F-]+)/download", d.file_url or "")
+    if m:
+        att = await db.get(Attachment, UUID(m.group(1)))
+        if att:
+            try:
+                if att.storage_path and os.path.exists(att.storage_path):
+                    os.remove(att.storage_path)
+            except OSError:
+                pass
+            await db.delete(att)
+
+    await db.delete(d)
+    await db.flush()
+    return {"ok": True, "deleted": str(drawing_id)}
 
 
 class LogisticsPatch(BaseModel):

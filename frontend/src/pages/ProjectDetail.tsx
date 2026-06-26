@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
-  Loader2, Hammer, User as UserIcon,
+  Loader2, Hammer, User as UserIcon, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -138,6 +138,10 @@ export default function ProjectDetailPage() {
       fd.append("file", body.file);
       return api.post(`/operation/drawings/${body.drawingId}/reupload`, fd);
     },
+    onSuccess: refresh, onError: onErr,
+  });
+  const deleteDrawing = useMutation({
+    mutationFn: (drawingId: string) => api.delete(`/operation/drawings/${drawingId}`),
     onSuccess: refresh, onError: onErr,
   });
 
@@ -592,10 +596,10 @@ export default function ProjectDetailPage() {
                     )}>
                       {d.status.replace(/_/g, " ")}
                     </span>
-                    {/* After a revision is requested, only the account that
-                        posted the drawing can upload a corrected file. */}
+                    {/* After a revision is requested, the account that posted
+                        the drawing — or management — can upload a corrected file. */}
                     {d.status === "revision_requested"
-                      && d.uploaded_by != null && d.uploaded_by === userId && (
+                      && ((d.uploaded_by != null && d.uploaded_by === userId) || canApproveDrawing) && (
                       <div className="mt-1.5 flex items-center gap-1.5">
                         <input type="file"
                           className="block text-[11px] file:mr-1.5 file:rounded file:border-0 file:bg-ink-100 file:px-1.5 file:py-0.5 file:text-[11px]"
@@ -631,7 +635,22 @@ export default function ProjectDetailPage() {
                         <span className="muted text-xs">internal only</span>
                       )}
                   </td>
-                  <td className="td muted">{d.notes ?? "—"}</td>
+                  <td className="td muted">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{d.notes ?? "—"}</span>
+                      {((d.uploaded_by != null && d.uploaded_by === userId) || canApproveDrawing) && (
+                        <button className="btn-ghost p-1 text-red-600 shrink-0"
+                          title="Delete this revision"
+                          disabled={deleteDrawing.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Delete revision v${d.revision}? This can't be undone.`))
+                              deleteDrawing.mutate(d.id);
+                          }}>
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
                   {canApproveDrawing && (
                     <td className="td text-right">
                       {d.status === "approved" ? (
