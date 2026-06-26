@@ -139,10 +139,12 @@ async def project_full(project_id: UUID,
         select(Drawing).where(Drawing.project_id == project_id)
         .order_by(Drawing.revision.desc())
     )).all()
-    decider_ids = {d.decided_by for d in drawings if d.decided_by}
+    drawing_user_ids = {d.decided_by for d in drawings if d.decided_by} | {
+        d.uploaded_by for d in drawings if d.uploaded_by
+    }
     deciders: dict[UUID, str] = {}
-    if decider_ids:
-        for u in (await db.scalars(select(User).where(User.id.in_(decider_ids)))).all():
+    if drawing_user_ids:
+        for u in (await db.scalars(select(User).where(User.id.in_(drawing_user_ids)))).all():
             deciders[u.id] = u.full_name
     deliveries = (await db.scalars(
         select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
@@ -239,6 +241,8 @@ async def project_full(project_id: UUID,
                 "decided_at": d.decided_at,
                 "decided_by": str(d.decided_by) if d.decided_by else None,
                 "decided_by_name": deciders.get(d.decided_by) if d.decided_by else None,
+                "uploaded_by": str(d.uploaded_by) if d.uploaded_by else None,
+                "uploaded_by_name": deciders.get(d.uploaded_by) if d.uploaded_by else None,
                 "created_at": d.created_at,
             } for d in drawings
         ],
@@ -465,6 +469,7 @@ async def upload_drawing(
         file_url=f"/api/v1/attachments/{a.id}/download",
         status="submitted",
         notes=notes,
+        uploaded_by=user.id,
     )
     db.add(drw)
     # Reflect that a drawing is now in review (never moves the status backward).
@@ -513,6 +518,75 @@ async def decide_drawing(
         d.notes = ((d.notes or "") + f"\n[{user.full_name}] {payload.notes}").strip()
     await db.flush()
     return {"ok": True, "drawing_id": str(d.id), "status": d.status}
+
+
+@router.post("/drawings/{drawing_id}/reupload")
+async def reupload_drawing(
+    drawing_id: UUID,
+    notes: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Re-upload a revised file after the director requested a revision.
+
+    Allowed for the account that posted the drawing (or management). Replaces
+    the file in place and sends it back to the director as 'submitted'.
+    """
+    d = await db.get(Drawing, drawing_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Drawing not found")
+    if d.status != "revision_requested":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Only a drawing with a requested revision can be re-uploaded")
+    is_owner = d.uploaded_by == user.id
+    is_mgmt = Role(user.role) in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+    # Legacy rows have no uploaded_by — fall back to the upload roles.
+    legacy_ok = d.uploaded_by is None and Role(user.role) in _DRAWING_UPLOAD_ROLES
+    if not (is_owner or is_mgmt or legacy_ok):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the person who posted this drawing can revise it")
+    p = await db.get(Project, d.project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
+
+    now = datetime.now(UTC)
+    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
+    root.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
+                   for ch in (file.filename or "file"))[:200]
+    path = root / f"{uuid4().hex}_drawing_{safe}"
+    path.write_bytes(data)
+
+    a = Attachment(
+        owner_type="project", owner_id=p.id,
+        filename=safe, content_type=file.content_type, size=len(data),
+        storage_path=str(path),
+        description=f"[drawing] {notes or 'revised'}".strip(),
+        uploaded_by=user.id,
+    )
+    db.add(a)
+    await db.flush()
+
+    # Replace the file in place and send it back for review. Clear the prior
+    # decision so the director sees a fresh "submitted" drawing.
+    d.file_url = f"/api/v1/attachments/{a.id}/download"
+    d.status = "submitted"
+    d.uploaded_by = user.id
+    d.decided_by = None
+    d.decided_at = None
+    d.customer_decision_at = None
+    if notes:
+        d.notes = ((d.notes or "") + f"\n[revised by {user.full_name}] {notes}").strip()
+    await db.flush()
+    return {"ok": True, "drawing_id": str(d.id), "status": d.status,
+            "revision": d.revision, "file_url": d.file_url}
 
 
 class LogisticsPatch(BaseModel):

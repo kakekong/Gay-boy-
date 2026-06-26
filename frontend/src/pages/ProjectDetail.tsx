@@ -48,6 +48,7 @@ export default function ProjectDetailPage() {
   const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
   // Drawing files are viewable by the director only (internal app).
   const role = useAuthStore((s) => s.user?.role) ?? "";
+  const userId = useAuthStore((s) => s.user?.id) ?? "";
   const canLogistics = ["purchasing", "director", "manager", "admin"].includes(role);
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
@@ -71,6 +72,7 @@ export default function ProjectDetailPage() {
   const [flashErr, setFlashErr] = useState<string | null>(null);
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
   const [drawingNotes, setDrawingNotes] = useState("");
+  const [revFiles, setRevFiles] = useState<Record<string, File | null>>({});
 
   const onErr = (e: any) => alert(
     e?.response?.data?.errors?.[0]?.message
@@ -128,6 +130,14 @@ export default function ProjectDetailPage() {
       api.post(`/operation/drawings/${body.drawingId}/decide`, {
         decision: body.decision, notes: body.notes,
       }),
+    onSuccess: refresh, onError: onErr,
+  });
+  const reuploadDrawing = useMutation({
+    mutationFn: (body: { drawingId: string; file: File }) => {
+      const fd = new FormData();
+      fd.append("file", body.file);
+      return api.post(`/operation/drawings/${body.drawingId}/reupload`, fd);
+    },
     onSuccess: refresh, onError: onErr,
   });
 
@@ -582,6 +592,29 @@ export default function ProjectDetailPage() {
                     )}>
                       {d.status.replace(/_/g, " ")}
                     </span>
+                    {/* After a revision is requested, the poster (or management)
+                        can upload a corrected file, which re-submits it. */}
+                    {d.status === "revision_requested"
+                      && (d.uploaded_by === userId
+                          || ["director", "manager", "admin"].includes(role)
+                          || (!d.uploaded_by && canUploadDrawing)) && (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <input type="file"
+                          className="block text-[11px] file:mr-1.5 file:rounded file:border-0 file:bg-ink-100 file:px-1.5 file:py-0.5 file:text-[11px]"
+                          onChange={(e) => setRevFiles((f) => ({ ...f, [d.id]: e.target.files?.[0] ?? null }))} />
+                        <button className="btn-primary py-0.5 px-2 text-[11px] whitespace-nowrap"
+                          disabled={!revFiles[d.id] || reuploadDrawing.isPending}
+                          onClick={() => {
+                            const f = revFiles[d.id];
+                            if (f) reuploadDrawing.mutate(
+                              { drawingId: d.id, file: f },
+                              { onSuccess: () => setRevFiles((m) => ({ ...m, [d.id]: null })) },
+                            );
+                          }}>
+                          Re-upload
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td className="td muted">
                     {(d.decided_at || d.customer_decision_at) ? (

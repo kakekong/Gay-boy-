@@ -116,6 +116,9 @@ class Drawing(Base, UUIDPK, TimestampMixin):
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     file_url: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
+    # Who posted the drawing — so they can re-upload a revised file after the
+    # director requests a revision.
+    uploaded_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     customer_decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Who signed off (director, internally) and when. Distinct from the legacy
     # customer_decision_at so both the internal and customer paths are tracked.

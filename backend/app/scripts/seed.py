@@ -236,6 +236,8 @@ COLUMN_MIGRATIONS: list[str] = [
     # the legacy customer_decision_at.
     'ALTER TABLE drawings ADD COLUMN IF NOT EXISTS decided_by UUID',
     'ALTER TABLE drawings ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ',
+    # Who posted the drawing — lets them re-upload after a revision request.
+    'ALTER TABLE drawings ADD COLUMN IF NOT EXISTS uploaded_by UUID',
 
     # Backfill: link projects to the price request behind their quotation where
     # the direct link was never recorded (projects created before Phase C).
