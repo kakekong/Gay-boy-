@@ -26,6 +26,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# Cache-bust: re-fetch the branch HEAD metadata every build. When the latest
+# commit changes, this layer's content changes and invalidates the cache for the
+# git clone below — so a normal rebuild always pulls the newest code (no
+# "Factory rebuild" needed). Without it, Docker reuses a stale clone layer.
+ADD "https://api.github.com/repos/kakekong/Gay-boy-/commits/${GIT_BRANCH}" /tmp/_head.json
 RUN git clone --branch ${GIT_BRANCH} --depth 1 ${GIT_REPO} repo
 WORKDIR /app/repo/backend
 

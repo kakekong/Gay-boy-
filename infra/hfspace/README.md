@@ -35,5 +35,14 @@ Set these in **Settings → Variables and secrets**:
 | `STORAGE_LOCAL_DIR` | `/tmp/storage` |
 
 ## Updating
-When you push new code to GitHub on the tracked branch, click
-**Restart Space** in the HF UI to rebuild and pick it up.
+The Dockerfile cache-busts the `git clone` against the branch HEAD, so after
+you push to GitHub on the tracked branch, a normal **Rebuild** picks up the new
+code (the clone layer invalidates when the latest commit changes).
+
+If the API ever looks stuck on old code, use **Settings → Factory rebuild** to
+force a no-cache build. Startup runs `python -m app.scripts.seed`, which applies
+the idempotent DB migrations, so schema changes land automatically.
+
+> ⚠️ The Space repo keeps only this `Dockerfile` + `README.md`. If you update
+> the Dockerfile in the GitHub repo (`infra/hfspace/Dockerfile`), copy the
+> change into the Space repo for it to take effect.
