@@ -539,14 +539,12 @@ async def reupload_drawing(
     if d.status != "revision_requested":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Only a drawing with a requested revision can be re-uploaded")
-    # The account that posted the drawing may revise it; management (director /
-    # manager / admin) may also revise on their behalf. A non-owner staffer
-    # (e.g. sales) still can't touch someone else's drawing.
-    is_owner = d.uploaded_by == user.id
-    is_mgmt = Role(user.role) in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
-    if not (is_owner or is_mgmt):
+    # A rejected drawing may be re-uploaded ONLY by the account that posted it —
+    # uploads are tied to their owner. (Legacy rows with no recorded uploader
+    # can't be revised; delete them and post a fresh drawing instead.)
+    if d.uploaded_by != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the account that posted this drawing (or management) can revise it")
+                            "Only the account that uploaded this drawing can re-upload it")
     p = await db.get(Project, d.project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")

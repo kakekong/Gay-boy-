@@ -596,10 +596,10 @@ export default function ProjectDetailPage() {
                     )}>
                       {d.status.replace(/_/g, " ")}
                     </span>
-                    {/* After a revision is requested, the account that posted
-                        the drawing — or management — can upload a corrected file. */}
+                    {/* After a revision is requested, only the account that
+                        uploaded the drawing can post a corrected file. */}
                     {d.status === "revision_requested"
-                      && ((d.uploaded_by != null && d.uploaded_by === userId) || canApproveDrawing) && (
+                      && d.uploaded_by != null && d.uploaded_by === userId && (
                       <div className="mt-1.5 flex items-center gap-1.5">
                         <input type="file"
                           className="block text-[11px] file:mr-1.5 file:rounded file:border-0 file:bg-ink-100 file:px-1.5 file:py-0.5 file:text-[11px]"
