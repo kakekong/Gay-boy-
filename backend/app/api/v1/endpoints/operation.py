@@ -392,9 +392,13 @@ def _logistics_payload(p: Project) -> dict:
             "label": DOC_LABELS.get(key, key),
             "collected": bool(d.get("collected")),
             "attachment_id": d.get("attachment_id"),
+            "filename": d.get("filename"),
             "note": d.get("note"),
+            "status": d.get("status"),          # None | pending | approved | rejected
+            "decided_at": d.get("decided_at"),
         })
     all_collected = all(r["collected"] for r in rows) if rows else True
+    all_approved = all(r["status"] == "approved" for r in rows) if rows else True
     days_to = (p.est_delivery_date - date.today()).days if p.est_delivery_date else None
     return {
         "delivery_mode": mode,
@@ -402,6 +406,7 @@ def _logistics_payload(p: Project) -> dict:
         "delivery_confirmed_at": p.delivery_confirmed_at,
         "required_docs": rows,
         "docs_complete": all_collected,
+        "docs_approved": all_approved,
         "days_to_delivery": days_to,
         # Documents are "due" once we're within the window and not yet complete.
         "docs_due": (
@@ -668,7 +673,8 @@ class ImportDocPatch(BaseModel):
 async def update_import_doc(project_id: UUID, payload: ImportDocPatch,
                             db: AsyncSession = Depends(get_db),
                             user: User = Depends(get_current_user)):
-    """Mark an import document collected (optionally attach the file)."""
+    """Update an import document's collected flag / note, preserving any
+    uploaded file + approval state already on it."""
     if Role(user.role) not in _LOGISTICS_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/management only")
     p = await db.get(Project, project_id)
@@ -678,11 +684,111 @@ async def update_import_doc(project_id: UUID, payload: ImportDocPatch,
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Unknown document '{payload.key}'")
     docs = dict(p.import_docs or {})
-    docs[payload.key] = {
-        "collected": payload.collected,
-        "attachment_id": payload.attachment_id,
-        "note": payload.note,
+    entry = dict(docs.get(payload.key) or {})
+    entry["collected"] = payload.collected
+    if payload.attachment_id is not None:
+        entry["attachment_id"] = payload.attachment_id
+    if payload.note is not None:
+        entry["note"] = payload.note
+    docs[payload.key] = entry
+    p.import_docs = docs
+    await db.flush()
+    return _logistics_payload(p)
+
+
+@router.post("/projects/{project_id}/import-docs/{key}/upload")
+async def upload_import_doc(
+    project_id: UUID,
+    key: str,
+    note: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Purchasing uploads the actual file for a required import document. It
+    lands as 'pending', awaiting the director's approval."""
+    if Role(user.role) not in _LOGISTICS_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/management only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if key not in DOC_LABELS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown document '{key}'")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
+
+    now = datetime.now(UTC)
+    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
+    root.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
+                   for ch in (file.filename or "file"))[:200]
+    path = root / f"{uuid4().hex}_{key}_{safe}"
+    path.write_bytes(data)
+
+    a = Attachment(
+        owner_type="project", owner_id=p.id,
+        filename=safe, content_type=file.content_type, size=len(data),
+        storage_path=str(path),
+        description=f"[import-doc:{key}] {note or ''}".strip(),
+        uploaded_by=user.id,
+    )
+    db.add(a)
+    await db.flush()
+
+    docs = dict(p.import_docs or {})
+    docs[key] = {
+        "collected": True,
+        "attachment_id": str(a.id),
+        "filename": safe,
+        "note": note,
+        "status": "pending",          # awaiting director approval
+        "uploaded_by": str(user.id),
+        "decided_by": None,
+        "decided_at": None,
     }
+    p.import_docs = docs
+    await db.flush()
+    return _logistics_payload(p)
+
+
+class ImportDocDecision(BaseModel):
+    decision: str          # 'approve' | 'reject'
+    note: str | None = None
+
+
+@router.post("/projects/{project_id}/import-docs/{key}/decide")
+async def decide_import_doc(
+    project_id: UUID,
+    key: str,
+    payload: ImportDocDecision,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Director approves (or rejects) an uploaded import document."""
+    if Role(user.role) not in _DRAWING_APPROVE_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the director can approve documents")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    docs = dict(p.import_docs or {})
+    entry = dict(docs.get(key) or {})
+    if not entry.get("attachment_id"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "No file uploaded for this document yet")
+    if payload.decision == "approve":
+        entry["status"] = "approved"
+    elif payload.decision == "reject":
+        entry["status"] = "rejected"
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "decision must be approve|reject")
+    entry["decided_by"] = str(user.id)
+    entry["decided_at"] = datetime.now(UTC).isoformat()
+    if payload.note:
+        entry["note"] = ((entry.get("note") or "") + f"\n[{user.full_name}] {payload.note}").strip()
+    docs[key] = entry
     p.import_docs = docs
     await db.flush()
     return _logistics_payload(p)
@@ -702,6 +808,12 @@ async def confirm_delivery(project_id: UUID,
     if not p.est_delivery_date:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Set the estimated delivery date first.")
+    # Every required import document must be director-approved first.
+    if not _logistics_payload(p)["docs_approved"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "All required documents must be approved by the director first.",
+        )
     p.delivery_confirmed_at = datetime.now(UTC)
     # Spawn the receiving WO if the operations board doesn't have one yet.
     existing = await db.scalar(

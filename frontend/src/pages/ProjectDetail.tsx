@@ -151,9 +151,19 @@ export default function ProjectDetailPage() {
       api.patch(`/operation/projects/${id}/logistics`, body),
     onSuccess: refresh, onError: onErr,
   });
-  const setDoc = useMutation({
-    mutationFn: (body: Record<string, any>) =>
-      api.patch(`/operation/projects/${id}/import-docs`, body),
+  const uploadDoc = useMutation({
+    mutationFn: (body: { key: string; file: File }) => {
+      const fd = new FormData();
+      fd.append("file", body.file);
+      return api.post(`/operation/projects/${id}/import-docs/${body.key}/upload`, fd);
+    },
+    onSuccess: refresh, onError: onErr,
+  });
+  const decideDoc = useMutation({
+    mutationFn: (body: { key: string; decision: string; note?: string }) =>
+      api.post(`/operation/projects/${id}/import-docs/${body.key}/decide`, {
+        decision: body.decision, note: body.note,
+      }),
     onSuccess: refresh, onError: onErr,
   });
   const confirmDelivery = useMutation({
@@ -730,10 +740,18 @@ export default function ProjectDetailPage() {
                     Confirmed {new Date(logistics.delivery_confirmed_at).toLocaleDateString()}
                   </div>
                 ) : canLogistics ? (
-                  <button className="btn-primary" disabled={!logistics.est_delivery_date || confirmDelivery.isPending}
-                    onClick={() => confirmDelivery.mutate()}>
-                    <CheckCircle size={14} /> Confirm → receiving WO
-                  </button>
+                  <>
+                    <button className="btn-primary"
+                      disabled={!logistics.est_delivery_date || !logistics.docs_approved || confirmDelivery.isPending}
+                      onClick={() => confirmDelivery.mutate()}>
+                      <CheckCircle size={14} /> Confirm → receiving WO
+                    </button>
+                    {!logistics.docs_approved && (
+                      <div className="text-[11px] text-amber-700 mt-1">
+                        All documents must be director-approved first.
+                      </div>
+                    )}
+                  </>
                 ) : <div className="muted">Not confirmed</div>}
               </div>
             </div>
@@ -742,19 +760,63 @@ export default function ProjectDetailPage() {
               <div className="text-[11px] uppercase tracking-wider muted mb-2">
                 Required documents ({logistics.delivery_mode.replace(/_/g, " ")})
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {(logistics.required_docs ?? []).map((d: any) => (
-                  <label key={d.key} className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={d.collected} disabled={!canLogistics}
-                      onChange={(e) => setDoc.mutate({ key: d.key, collected: e.target.checked })} />
-                    <span className={clsx(d.collected ? "text-ink-900" : "text-ink-500")}>{d.label}</span>
-                    {d.collected && <CheckCircle size={12} className="text-emerald-600" />}
-                  </label>
+                  <div key={d.key} className="flex items-center gap-3 flex-wrap text-sm border-b border-ink-50 pb-2">
+                    <span className="w-32 shrink-0 font-medium">{d.label}</span>
+
+                    {/* Status chip */}
+                    <span className={clsx("chip text-xs",
+                      d.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                      : d.status === "rejected" ? "bg-red-50 text-red-700"
+                      : d.status === "pending" ? "bg-amber-50 text-amber-700"
+                      : "bg-ink-100 text-ink-500")}>
+                      {d.status ? d.status : "missing"}
+                    </span>
+
+                    {/* File: view if uploaded */}
+                    {d.attachment_id && (
+                      <button type="button"
+                        className="text-brand-700 hover:underline text-xs"
+                        onClick={() => viewFile(`/api/v1/attachments/${d.attachment_id}/download`)}>
+                        {d.filename ? `View (${d.filename})` : "View"}
+                      </button>
+                    )}
+
+                    {/* Upload / replace (purchasing/management) */}
+                    {canLogistics && (
+                      <label className="text-xs text-brand-700 hover:underline cursor-pointer">
+                        {d.attachment_id ? "Replace file" : "Upload file"}
+                        <input type="file" className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) uploadDoc.mutate({ key: d.key, file: f });
+                            e.target.value = "";
+                          }} />
+                      </label>
+                    )}
+
+                    {/* Director approve / reject */}
+                    {canApproveDrawing && d.status === "pending" && (
+                      <span className="inline-flex gap-1.5 ml-auto">
+                        <button className="btn-primary py-0.5 px-2 text-xs"
+                          disabled={decideDoc.isPending}
+                          onClick={() => decideDoc.mutate({ key: d.key, decision: "approve" })}>
+                          <CheckCircle size={12} /> Approve
+                        </button>
+                        <button className="btn-ghost py-0.5 px-2 text-xs text-red-600"
+                          disabled={decideDoc.isPending}
+                          onClick={() => decideDoc.mutate({ key: d.key, decision: "reject" })}>
+                          <XCircle size={12} /> Reject
+                        </button>
+                      </span>
+                    )}
+                  </div>
                 ))}
               </div>
-              {!logistics.docs_complete && (
+              {!logistics.docs_approved && (
                 <div className="text-[11px] text-amber-700 mt-2">
-                  {logistics.required_docs.filter((d: any) => !d.collected).length} document(s) still outstanding.
+                  {logistics.required_docs.filter((d: any) => d.status !== "approved").length} document(s) not yet approved.
                 </div>
               )}
             </div>
