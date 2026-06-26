@@ -383,6 +383,7 @@ async def supplier_upload(
             revision=next_rev,
             file_url=f"/api/v1/attachments/{a.id}/download",
             status="submitted",
+            uploaded_by=me.id,
         )
         db.add(drw)
         await db.flush()
