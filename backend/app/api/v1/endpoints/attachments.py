@@ -45,6 +45,12 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         return role in (Role.DIRECTOR, Role.PURCHASING)
     if owner_type == "approval_request":
         return role in (Role.MANAGER, Role.DIRECTOR)
+    if owner_type == "project":
+        # Project drawings are uploaded/reviewed by internal staff, so the same
+        # internal set that can see the Drawings card may open the files.
+        return role in (
+            Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.PURCHASING, Role.SALES,
+        )
     return role == Role.DIRECTOR
 
 

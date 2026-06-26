@@ -46,6 +46,19 @@ export default function CustomerPortalPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-customer-projects"] }),
   });
 
+  // Files sit behind the authenticated API — a plain <a href> opens a tab with
+  // no auth token and bounces to login. Fetch via the API client and open the blob.
+  const viewFile = async (fileUrl: string) => {
+    try {
+      const resp = await api.get(fileUrl.replace(/^\/api\/v1/, ""), { responseType: "blob" });
+      const url = URL.createObjectURL(resp.data as Blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      alert(e?.response?.data?.detail ?? e?.message ?? "Could not open file");
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Hero */}
@@ -154,8 +167,8 @@ export default function CustomerPortalPage() {
                         {d.status.replace(/_/g, " ")}
                       </span>
                       {d.file_url && (
-                        <a href={d.file_url} target="_blank" rel="noreferrer"
-                           className="text-brand-700 hover:underline text-sm">View file</a>
+                        <button type="button" onClick={() => viewFile(d.file_url)}
+                           className="text-brand-700 hover:underline text-sm">View file</button>
                       )}
                       {d.status === "submitted" && (
                         <div className="ml-auto flex gap-2">

@@ -78,6 +78,22 @@ export default function ProjectDetailPage() {
       ?? e?.message
       ?? "Operation failed"
   );
+
+  // Drawing files live behind the authenticated API. A plain <a href> opens a
+  // new tab with no auth token (and, in prod, hits the frontend origin instead
+  // of the API), which bounces to login. Fetch it through the API client (token
+  // + correct base URL) and open the blob instead.
+  const viewFile = async (fileUrl: string) => {
+    try {
+      const path = fileUrl.replace(/^\/api\/v1/, "");
+      const resp = await api.get(path, { responseType: "blob" });
+      const url = URL.createObjectURL(resp.data as Blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      onErr(e);
+    }
+  };
   const addWO = useMutation({
     mutationFn: () => api.post(`/operation/projects/${id}/work-orders`, {
       code: newWoCode, stage: newWoStage,
@@ -578,8 +594,8 @@ export default function ProjectDetailPage() {
                   <td className="td">
                     {!d.file_url ? "—"
                       : canViewDrawing ? (
-                        <a href={d.file_url} target="_blank" rel="noreferrer"
-                           className="text-brand-700 hover:underline">View</a>
+                        <button type="button" onClick={() => viewFile(d.file_url)}
+                           className="text-brand-700 hover:underline">View</button>
                       ) : (
                         <span className="muted text-xs">internal only</span>
                       )}
