@@ -918,7 +918,7 @@ export default function ProjectDetailPage() {
             </div>
           ))}
 
-          {isAdmin && p.qc_passed_at && (
+          {isAdmin && (p.qc_passed_at || PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("qc")) && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider muted">Issue invoice + delivery order</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

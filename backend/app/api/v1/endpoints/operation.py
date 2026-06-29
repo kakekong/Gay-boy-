@@ -1091,6 +1091,12 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
             p = await db.get(Project, w.project_id)
             if p:
                 advance_project_status(p, bump)
+                # Completing a QC work order also counts as "QC passed" so
+                # admin can issue the invoice — issue_invoice gates on this.
+                if bump == "qc" and completed and not p.qc_passed_at:
+                    p.qc_passed_at = datetime.now(UTC)
+                    if not p.qc_decision:
+                        p.qc_decision = "pass"
     return {"ok": True, "id": str(w.id), "stage": w.stage,
             "completed_at": w.completed_at}
 
