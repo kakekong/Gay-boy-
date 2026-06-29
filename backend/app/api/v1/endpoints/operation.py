@@ -1034,6 +1034,12 @@ class WorkOrderIn(BaseModel):
     notes: str | None = None
 
 
+# Work-order stages that map to a project status. When a WO of one of these
+# stages is created / staged-into / completed, the project advances to the
+# matching status (forward-only via advance_project_status).
+_WO_STAGE_TO_PROJECT_STATUS = {"qc": "qc", "packaging": "packaging"}
+
+
 @router.post("/projects/{project_id}/work-orders", status_code=201)
 async def add_work_order(project_id: UUID, payload: WorkOrderIn,
                          db: AsyncSession = Depends(get_db),
@@ -1045,11 +1051,12 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
                   stage=payload.stage, notes=payload.notes)
     db.add(w)
     # A work order means ops is actively running the project — advance to
-    # 'production'. A packaging-stage WO jumps straight to 'packaging' so the
-    # board reflects what's happening. Forward-only.
+    # 'production'. A qc- or packaging-stage WO jumps straight to that status
+    # so the board reflects what's happening. Forward-only.
     advance_project_status(p, "production")
-    if (payload.stage or "").lower() == "packaging":
-        advance_project_status(p, "packaging")
+    bump = _WO_STAGE_TO_PROJECT_STATUS.get((payload.stage or "").lower())
+    if bump:
+        advance_project_status(p, bump)
     await db.flush()
     return {"id": str(w.id), "code": w.code, "stage": w.stage}
 
@@ -1074,14 +1081,16 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
     if notes is not None:  w.notes = notes
     if completed and not w.completed_at:
         w.completed_at = datetime.now(UTC)
-    # Updating to (or completing) a packaging stage advances the project.
-    if w.project_id and (
-        (stage or "").lower() == "packaging"
-        or (completed and (w.stage or "").lower() == "packaging")
-    ):
-        p = await db.get(Project, w.project_id)
-        if p:
-            advance_project_status(p, "packaging")
+    # Changing a WO into (or completing one already at) a project-mapped
+    # stage advances the project — covers QC and packaging symmetrically.
+    if w.project_id:
+        bump = _WO_STAGE_TO_PROJECT_STATUS.get((stage or "").lower())
+        if not bump and completed:
+            bump = _WO_STAGE_TO_PROJECT_STATUS.get((w.stage or "").lower())
+        if bump:
+            p = await db.get(Project, w.project_id)
+            if p:
+                advance_project_status(p, bump)
     return {"ok": True, "id": str(w.id), "stage": w.stage,
             "completed_at": w.completed_at}
 
