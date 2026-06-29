@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,34 +23,53 @@ router = APIRouter(
 
 
 @router.post("/invoices/{invoice_id}/approve")
-async def approve_invoice(invoice_id: UUID,
-                          db: AsyncSession = Depends(get_db),
-                          user: User = Depends(get_current_user)):
-    """Finance approves an admin-issued invoice (faktur pajak included).
+async def approve_invoice(
+    invoice_id: UUID,
+    faktur_pajak_no: str = Form(..., description="Faktur pajak number (entered by finance)"),
+    faktur_pajak_file: UploadFile | None = File(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Finance approves an admin-issued invoice. Finance is the one who enters
+    the faktur pajak number and uploads the FP file — admin doesn't touch it at
+    issue time, so a misclick on admin's part can't corrupt the tax record.
 
     This is a document approval only — it does NOT post to the transaction
     journal. Revenue/AR recognition stays driven by the quotation posting and
     payment flows, so invoicing and the ledger remain decoupled.
     """
+    fp_no = (faktur_pajak_no or "").strip()
+    if not fp_no:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Faktur pajak number is required to approve.")
+
     inv = await db.get(Invoice, invoice_id)
     if not inv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
     if inv.status == "approved":
         return {"ok": True, "status": inv.status, "already": True}
 
+    from app.api.v1.endpoints.operation import _save_attachment
     from app.models.operation import Project, advance_project_status
 
+    inv.faktur_pajak_no = fp_no
+    inv.faktur_pajak_status = "issued"
     inv.status = "approved"
     inv.approved_by = user.id
     inv.approved_at = datetime.now(UTC)
-    if inv.faktur_pajak_no:
-        inv.faktur_pajak_status = "issued"
+
+    if faktur_pajak_file is not None:
+        await _save_attachment(
+            db, file=faktur_pajak_file, owner_type="invoice",
+            owner_id=inv.id, user=user, label="faktur_pajak",
+        )
 
     project = await db.get(Project, inv.project_id) if inv.project_id else None
     if project:
         advance_project_status(project, "invoiced")
     await db.flush()
     return {"ok": True, "status": inv.status,
+            "faktur_pajak_no": inv.faktur_pajak_no,
             "faktur_pajak_status": inv.faktur_pajak_status}
 
 

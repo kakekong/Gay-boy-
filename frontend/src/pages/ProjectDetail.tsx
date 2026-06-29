@@ -178,12 +178,24 @@ export default function ProjectDetailPage() {
     onSuccess: refresh, onError: onErr,
   });
   const issueInvoice = useMutation({
-    mutationFn: (body: Record<string, any>) =>
-      api.post(`/operation/projects/${id}/issue-invoice`, body),
+    mutationFn: (body: {
+      amount?: number; invoiceFile?: File | null; doFile?: File | null;
+    }) => {
+      const fd = new FormData();
+      if (body.amount != null) fd.append("amount", String(body.amount));
+      if (body.invoiceFile) fd.append("invoice_file", body.invoiceFile);
+      if (body.doFile) fd.append("delivery_order_file", body.doFile);
+      return api.post(`/operation/projects/${id}/issue-invoice`, fd);
+    },
     onSuccess: refresh, onError: onErr,
   });
   const approveInvoice = useMutation({
-    mutationFn: (invoiceId: string) => api.post(`/finance/invoices/${invoiceId}/approve`),
+    mutationFn: (body: { invoiceId: string; fpNo: string; fpFile?: File | null }) => {
+      const fd = new FormData();
+      fd.append("faktur_pajak_no", body.fpNo);
+      if (body.fpFile) fd.append("faktur_pajak_file", body.fpFile);
+      return api.post(`/finance/invoices/${body.invoiceId}/approve`, fd);
+    },
     onSuccess: refresh, onError: onErr,
   });
   const customerReceived = useMutation({
@@ -191,8 +203,11 @@ export default function ProjectDetailPage() {
     onSuccess: refresh, onError: onErr,
   });
   const [qcFindings, setQcFindings] = useState("");
-  const [fpNo, setFpNo] = useState("");
   const [invAmount, setInvAmount] = useState("");
+  const [invFile, setInvFile] = useState<File | null>(null);
+  const [doFile, setDoFile] = useState<File | null>(null);
+  // Per-invoice finance-approval form state (FP number + FP file).
+  const [fpForm, setFpForm] = useState<Record<string, { no: string; file?: File | null }>>({});
 
   // Inline edit for target / actual delivery dates.
   const patchProject = useMutation({
@@ -892,46 +907,97 @@ export default function ProjectDetailPage() {
         </div>
         <div className="p-5 space-y-4">
           {inv.length === 0 && <div className="text-sm muted">No invoice issued yet.</div>}
-          {inv.map((iv: any) => (
-            <div key={iv.id} className="flex items-center justify-between gap-3 flex-wrap border-b border-ink-50 pb-2">
-              <div className="text-sm">
-                <span className="font-medium">{iv.number}</span>
-                {showMoney && iv.total != null && (
-                  <span className="muted"> · {iv.total.toLocaleString()}</span>
-                )}
-                <div className="text-[11px] muted">
-                  FP: {iv.faktur_pajak_no || "—"} ({iv.faktur_pajak_status})
+          {inv.map((iv: any) => {
+            const fp = fpForm[iv.id] ?? { no: "", file: null };
+            return (
+              <div key={iv.id} className="border-b border-ink-50 pb-3 space-y-2">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="text-sm">
+                    <span className="font-medium">{iv.number}</span>
+                    {showMoney && iv.total != null && (
+                      <span className="muted"> · {iv.total.toLocaleString()}</span>
+                    )}
+                    <div className="text-[11px] muted">
+                      FP: {iv.faktur_pajak_no || "—"} ({iv.faktur_pajak_status})
+                    </div>
+                  </div>
+                  <span className={clsx("chip text-[11px]",
+                    iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                    : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
+                    : "bg-ink-50 text-ink-600")}>{iv.status}</span>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={clsx("chip text-[11px]",
-                  iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
-                  : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
-                  : "bg-ink-50 text-ink-600")}>{iv.status}</span>
+                {(iv.files ?? []).length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {iv.files.map((f: any) => (
+                      <button key={f.id} type="button"
+                        className="text-brand-700 hover:underline inline-flex items-center gap-1"
+                        onClick={() => viewFile(f.download_url)}>
+                        <FileText size={11} />
+                        {f.kind ? `${f.kind}: ` : ""}{f.filename}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {isFinance && iv.status === "pending_finance" && (
-                  <button className="btn-primary" disabled={approveInvoice.isPending}
-                    onClick={() => approveInvoice.mutate(iv.id)}>
-                    <CheckCircle size={14} /> Approve (finance)
-                  </button>
+                  <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider muted">
+                      Finance approval — enter the faktur pajak yourself (admin doesn't set it)
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input className="input" placeholder="Faktur pajak no. *"
+                        value={fp.no}
+                        onChange={(e) => setFpForm((m) => ({
+                          ...m, [iv.id]: { ...fp, no: e.target.value },
+                        }))} />
+                      <input type="file"
+                        className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
+                        onChange={(e) => setFpForm((m) => ({
+                          ...m, [iv.id]: { ...fp, file: e.target.files?.[0] ?? null },
+                        }))} />
+                    </div>
+                    <button className="btn-primary"
+                      disabled={!fp.no.trim() || approveInvoice.isPending}
+                      onClick={() => approveInvoice.mutate({
+                        invoiceId: iv.id, fpNo: fp.no.trim(), fpFile: fp.file,
+                      })}>
+                      <CheckCircle size={14} /> Approve (finance)
+                    </button>
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {isAdmin && (p.qc_passed_at || PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("qc")) && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider muted">Issue invoice + delivery order</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input className="input" placeholder="Amount (blank = quotation total)"
                   value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
-                <input className="input" placeholder="Faktur pajak no."
-                  value={fpNo} onChange={(e) => setFpNo(e.target.value)} />
+                <label className="block">
+                  <span className="block text-[10px] muted mb-1">Invoice file</span>
+                  <input type="file"
+                    className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
+                    onChange={(e) => setInvFile(e.target.files?.[0] ?? null)} />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] muted mb-1">Delivery-order file</span>
+                  <input type="file"
+                    className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
+                    onChange={(e) => setDoFile(e.target.files?.[0] ?? null)} />
+                </label>
               </div>
+              <p className="text-[11px] muted">
+                Faktur pajak is entered by finance during approval — not here.
+              </p>
               <button className="btn-primary" disabled={issueInvoice.isPending}
-                onClick={() => issueInvoice.mutate({
-                  amount: invAmount ? Number(invAmount) : undefined,
-                  faktur_pajak_no: fpNo || undefined,
-                })}>
+                onClick={() => issueInvoice.mutate(
+                  {
+                    amount: invAmount ? Number(invAmount) : undefined,
+                    invoiceFile: invFile, doFile,
+                  },
+                  { onSuccess: () => { setInvAmount(""); setInvFile(null); setDoFile(null); } },
+                )}>
                 <FileText size={14} /> Issue invoice + DO
               </button>
             </div>

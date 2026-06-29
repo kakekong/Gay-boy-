@@ -23,7 +23,7 @@ router = APIRouter()
 
 ALLOWED_OWNERS = {
     "customer", "quotation", "project", "approval_request",
-    "supplier_po", "customer_po",
+    "supplier_po", "customer_po", "invoice", "delivery_order",
 }
 MAX_FILE_SIZE_MB = 20
 
@@ -50,6 +50,12 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         # internal set that can see the Drawings card may open the files.
         return role in (
             Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.PURCHASING, Role.SALES,
+        )
+    if owner_type in ("invoice", "delivery_order"):
+        # Invoice + DO + faktur pajak files: admin issues, finance approves;
+        # management can see. Sales of the customer's deal can see too.
+        return role in (
+            Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR, Role.SALES,
         )
     return role == Role.DIRECTOR
 

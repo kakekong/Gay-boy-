@@ -145,6 +145,36 @@ async def project_full(project_id: UUID,
         select(WorkOrder).where(WorkOrder.project_id == project_id)
         .order_by(WorkOrder.created_at.asc())
     )).all()
+    # Batch-load invoice + delivery-order attachments so we can surface View
+    # links on the project page without N+1 lookups.
+    inv_files: dict[UUID, list[dict]] = {}
+    do_files: dict[UUID, list[dict]] = {}
+    inv_ids = [i.id for i in invoices]
+    do_ids = [d.id for d in deliveries]
+    if inv_ids:
+        for a in (await db.scalars(
+            select(Attachment).where(
+                Attachment.owner_type == "invoice",
+                Attachment.owner_id.in_(inv_ids),
+            ).order_by(Attachment.created_at.asc())
+        )).all():
+            inv_files.setdefault(a.owner_id, []).append({
+                "id": str(a.id), "filename": a.filename,
+                "kind": (a.description or "").strip("[]").split("]")[0] or None,
+                "download_url": f"/api/v1/attachments/{a.id}/download",
+            })
+    if do_ids:
+        for a in (await db.scalars(
+            select(Attachment).where(
+                Attachment.owner_type == "delivery_order",
+                Attachment.owner_id.in_(do_ids),
+            ).order_by(Attachment.created_at.asc())
+        )).all():
+            do_files.setdefault(a.owner_id, []).append({
+                "id": str(a.id), "filename": a.filename,
+                "download_url": f"/api/v1/attachments/{a.id}/download",
+            })
+
     drawings = (await db.scalars(
         select(Drawing).where(Drawing.project_id == project_id)
         .order_by(Drawing.revision.desc())
@@ -237,6 +267,7 @@ async def project_full(project_id: UUID,
                 "faktur_pajak_no": inv.faktur_pajak_no,
                 "faktur_pajak_status": inv.faktur_pajak_status,
                 "approved_at": inv.approved_at,
+                "files": inv_files.get(inv.id, []),
             } for inv in invoices
         ],
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
@@ -275,6 +306,7 @@ async def project_full(project_id: UUID,
                 "courier": do.courier, "tracking_no": do.tracking_no,
                 "delivered_at": do.delivered_at, "status": do.status,
                 "items": do.items,
+                "files": do_files.get(do.id, []),
             } for do in deliveries
         ],
         "invoices": [
@@ -895,22 +927,54 @@ async def _next_doc_number(db: AsyncSession, model, prefix: str) -> str:
     return f"{pre}{n + 1:04d}"
 
 
-class IssueInvoiceIn(BaseModel):
-    amount: float | None = None
-    tax_amount: float | None = None
-    faktur_pajak_no: str | None = None
-    due_date: date | None = None
-    courier: str | None = None
-    create_delivery_order: bool = True
+async def _save_attachment(
+    db: AsyncSession, *, file: UploadFile, owner_type: str, owner_id: UUID,
+    user: User, label: str,
+) -> Attachment | None:
+    data = await file.read()
+    if not data:
+        return None
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            f"{label}: max 20 MB")
+    now = datetime.now(UTC)
+    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
+    root.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
+                   for ch in (file.filename or "file"))[:200]
+    path = root / f"{uuid4().hex}_{label}_{safe}"
+    path.write_bytes(data)
+    a = Attachment(
+        owner_type=owner_type, owner_id=owner_id,
+        filename=safe, content_type=file.content_type, size=len(data),
+        storage_path=str(path),
+        description=f"[{label}]",
+        uploaded_by=user.id,
+    )
+    db.add(a)
+    await db.flush()
+    return a
 
 
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)
-async def issue_invoice(project_id: UUID, payload: IssueInvoiceIn,
-                        db: AsyncSession = Depends(get_db),
-                        user: User = Depends(get_current_user)):
-    """Admin issues the delivery order + invoice (with faktur pajak) once
-    operations have passed QC. The invoice parks at `pending_finance` for the
-    finance team to approve."""
+async def issue_invoice(
+    project_id: UUID,
+    amount: float | None = Form(None),
+    tax_amount: float | None = Form(None),
+    due_date: str | None = Form(None),
+    courier: str | None = Form(None),
+    create_delivery_order: bool = Form(True),
+    invoice_file: UploadFile | None = File(None),
+    delivery_order_file: UploadFile | None = File(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Admin issues the delivery order + invoice once operations have passed QC.
+
+    Admin only uploads the documents and sets the amount — the faktur pajak
+    number is entered by finance during approval (so it can't be misclicked or
+    miskeyed at issue time). The invoice parks at `pending_finance`.
+    """
     if Role(user.role) not in _ADMIN_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
     p = await db.get(Project, project_id)
@@ -922,35 +986,53 @@ async def issue_invoice(project_id: UUID, payload: IssueInvoiceIn,
     if not p.customer_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project has no customer.")
 
-    # Default the amount from the linked quotation when not supplied.
+    parsed_due: date | None = None
+    if due_date:
+        try:
+            parsed_due = date.fromisoformat(due_date)
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "due_date must be YYYY-MM-DD") from e
+
     quotation = await db.get(Quotation, p.quotation_id) if p.quotation_id else None
-    amount = payload.amount if payload.amount is not None else float(
+    inv_amount = amount if amount is not None else float(
         (quotation.total if quotation else None) or p.po_value or 0
     )
-    tax_amount = payload.tax_amount or 0.0
-    total = amount + tax_amount
+    inv_tax = tax_amount or 0.0
+    total = inv_amount + inv_tax
 
     inv = Invoice(
         number=await _next_doc_number(db, Invoice, "INV"),
         project_id=project_id, customer_id=p.customer_id,
-        issue_date=date.today(), due_date=payload.due_date,
-        amount=amount, tax_amount=tax_amount, total=total,
+        issue_date=date.today(), due_date=parsed_due,
+        amount=inv_amount, tax_amount=inv_tax, total=total,
         status="pending_finance",
-        faktur_pajak_no=payload.faktur_pajak_no,
-        faktur_pajak_status="pending" if payload.faktur_pajak_no else "none",
+        # Faktur pajak is set by finance on approval, not by admin here.
+        faktur_pajak_no=None,
+        faktur_pajak_status="none",
         issued_by=user.id,
     )
     db.add(inv)
+    await db.flush()
+
+    if invoice_file is not None:
+        await _save_attachment(db, file=invoice_file, owner_type="invoice",
+                               owner_id=inv.id, user=user, label="invoice")
 
     do = None
-    if payload.create_delivery_order:
+    if create_delivery_order:
         do = DeliveryOrder(
             project_id=project_id,
             number=await _next_doc_number(db, DeliveryOrder, "DO"),
-            courier=payload.courier, status="pending",
+            courier=courier, status="pending",
         )
         db.add(do)
-    await db.flush()
+        await db.flush()
+        if delivery_order_file is not None:
+            await _save_attachment(db, file=delivery_order_file,
+                                   owner_type="delivery_order",
+                                   owner_id=do.id, user=user,
+                                   label="delivery_order")
     return {
         "invoice": {"id": str(inv.id), "number": inv.number, "status": inv.status,
                     "total": float(inv.total or 0),
