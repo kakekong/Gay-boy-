@@ -160,8 +160,36 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
 
   const isFollowup = r.target_type === "followup";
   const isWon = r.target_type === "quotation_won";
+  const isProjectUpdate =
+    r.target_type === "project" && r.payload?.action === "update";
   const fmtIdr = (n: number) =>
     "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+
+  // Friendly labels for project-shipping fields so the director sees
+  // "Estimated ship from origin", not "est_ship_from_origin".
+  const PROJECT_FIELD_LABELS: Record<string, string> = {
+    target_delivery: "Target delivery",
+    actual_delivery: "Actual delivery",
+    est_ship_from_origin: "Est. ship from origin",
+    act_ship_from_origin: "Actual ship from origin",
+    est_arrive_our_warehouse: "Est. arrive our warehouse",
+    act_arrive_our_warehouse: "Actual arrive our warehouse",
+    est_arrive_customer: "Est. arrive customer",
+    act_arrive_customer: "Actual arrive customer",
+    is_import: "Import shipment",
+    origin_location: "Origin location",
+    start_date: "Start date",
+  };
+  const fmtFieldValue = (v: any) => {
+    if (v === null || v === undefined || v === "") return "—";
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    // YYYY-MM-DD dates → locale date
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString();
+    }
+    return String(v);
+  };
 
   function download(id: string, filename: string) {
     api.get(`/attachments/${id}/download`, { responseType: "blob" })
@@ -201,6 +229,10 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             ) : isWon ? (
               <span className="chip bg-emerald-50 text-emerald-700 inline-flex items-center gap-1">
                 <Trophy size={11} /> Mark won
+              </span>
+            ) : isProjectUpdate ? (
+              <span className="chip bg-indigo-50 text-indigo-700 inline-flex items-center gap-1">
+                <FileText size={11} /> Shipping update
               </span>
             ) : (
               <span className="chip bg-brand-50 text-brand-700 capitalize">
@@ -306,6 +338,33 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                 )}
               </div>
               {r.reason && <div className="text-xs muted italic">{r.reason}</div>}
+            </div>
+          ) : isProjectUpdate ? (
+            <div className="mt-3 space-y-2">
+              {r.target_label && (
+                <Link
+                  to={`/projects/${r.target_id}`}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-900 hover:text-brand-700 font-mono"
+                >
+                  <FileText size={14} />
+                  {r.target_label}
+                </Link>
+              )}
+              <div className="text-xs muted">Proposed shipping update:</div>
+              <table className="w-full text-sm border border-ink-100 rounded-lg overflow-hidden">
+                <tbody>
+                  {Object.entries(r.payload?.changes ?? {}).map(([k, v]) => (
+                    <tr key={k} className="border-t border-ink-100 first:border-t-0">
+                      <td className="px-3 py-1.5 bg-ink-50/60 text-ink-700 w-1/2">
+                        {PROJECT_FIELD_LABELS[k] ?? k.replace(/_/g, " ")}
+                      </td>
+                      <td className="px-3 py-1.5 text-ink-900 tabular-nums">
+                        {fmtFieldValue(v)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
             <div className="mt-2 text-sm font-medium text-ink-900">{r.reason}</div>
