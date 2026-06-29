@@ -65,7 +65,7 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/inventory", label: "Inventory", label_id: "Inventaris", icon: Package,
         roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
-        roles: ["admin", "director"] },
+        roles: ["admin", "director", "finance", "manager"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
         roles: ["finance", "director"] },
     ],

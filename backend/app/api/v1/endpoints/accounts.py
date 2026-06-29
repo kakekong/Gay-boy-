@@ -18,7 +18,14 @@ from app.models.user import User
 
 router = APIRouter()
 
+# Writes (create / edit / delete / seed) stay restricted to admin and the
+# director — they shape the books. Reads (list / detail / types / export) are
+# also visible to finance and management, who need the CoA to do their job
+# without being able to change it.
 _admin_or_director = require(Role.ADMIN, Role.DIRECTOR)
+_coa_viewer = require(
+    Role.ADMIN, Role.DIRECTOR, Role.FINANCE, Role.MANAGER,
+)
 
 
 ACCOUNT_TYPES = [
@@ -83,14 +90,14 @@ def _validate_type(value: str) -> None:
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/types")
-async def types(_user: User = Depends(_admin_or_director)):
+async def types(_user: User = Depends(_coa_viewer)):
     return ACCOUNT_TYPES
 
 
 @router.get("", response_model=list[AccountOut])
 async def list_accounts(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(_admin_or_director),
+    _user: User = Depends(_coa_viewer),
     account_type: str | None = None,
     suspended: str | None = Query(None, description="all | active | suspended"),
     q: str | None = None,
@@ -125,7 +132,7 @@ async def _coa_sections(db: AsyncSession) -> list[dict]:
 
 @router.get("/export.pdf")
 async def export_coa_pdf(db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(_admin_or_director)):
+                         _user: User = Depends(_coa_viewer)):
     from app.services.tabular_export import render_pdf
     data = render_pdf("Chart of Accounts", await _coa_sections(db))
     return Response(content=data, media_type="application/pdf",
@@ -134,7 +141,7 @@ async def export_coa_pdf(db: AsyncSession = Depends(get_db),
 
 @router.get("/export.xlsx")
 async def export_coa_xlsx(db: AsyncSession = Depends(get_db),
-                          _user: User = Depends(_admin_or_director)):
+                          _user: User = Depends(_coa_viewer)):
     from app.services.tabular_export import render_xlsx
     data = render_xlsx("Chart of Accounts", await _coa_sections(db))
     return Response(
@@ -147,7 +154,7 @@ async def export_coa_xlsx(db: AsyncSession = Depends(get_db),
 @router.get("/{account_id}", response_model=AccountOut)
 async def get_account(account_id: UUID,
                       db: AsyncSession = Depends(get_db),
-                      _user: User = Depends(_admin_or_director)):
+                      _user: User = Depends(_coa_viewer)):
     obj = await db.get(Account, account_id)
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
