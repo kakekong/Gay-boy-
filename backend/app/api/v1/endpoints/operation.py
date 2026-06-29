@@ -317,8 +317,20 @@ def _apply_project_changes(p: Project, data: dict) -> None:
     for k, v in data.items():
         if v is None and k in DATE_FIELDS_PROTECTED:
             continue
-        if hasattr(p, k):
-            setattr(p, k, v)
+        if not hasattr(p, k):
+            continue
+        # Date columns need real date objects under asyncpg — coerce ISO
+        # strings (which arrive from the approval payload as JSON strings,
+        # and from the PATCH schema as `str | None`).
+        if k in DATE_FIELDS_PROTECTED and isinstance(v, str):
+            try:
+                v = date.fromisoformat(v)
+            except ValueError as e:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"{k} must be a YYYY-MM-DD date",
+                ) from e
+        setattr(p, k, v)
 
 
 @router.patch("/projects/{project_id}")
