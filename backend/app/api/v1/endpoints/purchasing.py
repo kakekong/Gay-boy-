@@ -454,6 +454,16 @@ async def create_po(
             payload={"action": "create"},
         )
 
+    # The supplier PO is now the trigger that moves the project to the
+    # purchasing stage (we dropped the separate purchase-request gate as
+    # redundant: the cost decision already happened on the price request,
+    # the director approves the PO itself, and there's no RFQ comparison
+    # in this workflow). Only advance forward — never regress a project
+    # already past purchasing.
+    from app.models.operation import advance_project_status
+    advance_project_status(project, "purchasing")
+    await db.flush()
+
     return {
         "id": str(po.id), "number": po.number,
         "supplier_id": str(po.supplier_id),
