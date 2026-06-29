@@ -197,6 +197,16 @@ async def apply_to_target(
             if action == "create":
                 po.status = "open" if approve else "cancelled"
                 applied["new_status"] = po.status
+                # An approved supplier PO is the trigger that moves the project
+                # to the purchasing stage (matches the direct-director path in
+                # purchasing.create_po). Forward-only.
+                if approve and po.project_id:
+                    from app.models.operation import (
+                        Project, advance_project_status,
+                    )
+                    project = await db.get(Project, po.project_id)
+                    if project:
+                        advance_project_status(project, "purchasing")
             elif action == "update" and approve:
                 changes = (req.payload or {}).get("changes") or {}
                 for k, v in changes.items():

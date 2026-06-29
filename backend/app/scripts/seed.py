@@ -249,6 +249,20 @@ COLUMN_MIGRATIONS: list[str] = [
        AND p.price_request_id IS NULL
        AND q.price_request_id IS NOT NULL
     """,
+
+    # Backfill: advance projects to 'purchasing' if a supplier PO already
+    # exists for them but the status is still upstream (drawing_approved or
+    # earlier). Matches the new rule that "supplier PO triggers purchasing".
+    # Idempotent: only nudges projects that are at the listed pre-purchasing
+    # statuses, never regresses anything past purchasing.
+    """
+    UPDATE projects p
+       SET status = 'purchasing'
+     WHERE p.status IN ('new', 'drawing', 'drawing_approved')
+       AND EXISTS (
+         SELECT 1 FROM supplier_pos sp WHERE sp.project_id = p.id
+       )
+    """,
 ]
 
 
