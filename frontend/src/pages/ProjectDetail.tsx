@@ -528,10 +528,16 @@ export default function ProjectDetailPage() {
                   </td>
                   <td className="td text-right">
                     {!w.completed_at && (
-                      <button className="btn-ghost text-emerald-700"
-                        onClick={() => completeWO.mutate(w.id)}>
-                        <CheckCircle size={13} /> Complete
-                      </button>
+                      isAdmin ? (
+                        <button className="btn-ghost text-emerald-700"
+                          onClick={() => completeWO.mutate(w.id)}>
+                          <CheckCircle size={13} /> Complete
+                        </button>
+                      ) : (
+                        <span className="muted text-xs" title="Only admin or director can confirm a work order">
+                          admin/director only
+                        </span>
+                      )
                     )}
                   </td>
                 </tr>

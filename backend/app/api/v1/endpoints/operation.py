@@ -1058,10 +1058,18 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
 async def update_work_order(wo_id: UUID, stage: str | None = None,
                             notes: str | None = None, completed: bool = False,
                             db: AsyncSession = Depends(get_db),
-                            _user: User = Depends(get_current_user)):
+                            user: User = Depends(get_current_user)):
     w = await db.get(WorkOrder, wo_id)
     if not w:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    # Confirming a work order (marking it complete) is restricted to admin
+    # and director — it's a sign-off that the work actually happened, and
+    # downstream stages (packaging → invoiced …) trigger off it.
+    if completed and Role(user.role) not in {Role.ADMIN, Role.DIRECTOR}:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only admin or the director can confirm a work order.",
+        )
     if stage is not None:  w.stage = stage
     if notes is not None:  w.notes = notes
     if completed and not w.completed_at:
