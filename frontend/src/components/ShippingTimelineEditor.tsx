@@ -29,7 +29,12 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (!q.data) return;
     const next: Record<string, string> = {};
-    for (const f of FIELDS) next[f.key] = q.data[f.key] ?? "";
+    for (const f of FIELDS) {
+      // `<input type="date">` only accepts a YYYY-MM-DD value. The API may
+      // send the full ISO string — slice it down so the field pre-fills.
+      const raw = q.data[f.key];
+      next[f.key] = typeof raw === "string" ? raw.slice(0, 10) : "";
+    }
     setForm(next);
     setIsImport(!!q.data.is_import);
     setOrigin(q.data.origin_location ?? "");

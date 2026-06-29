@@ -106,6 +106,16 @@ async def get_project(project_id: UUID,
         "actual_delivery": p.actual_delivery,
         "margin_estimate": float(p.margin_estimate or 0) if show_money else None,
         "margin_actual": float(p.margin_actual or 0) if show_money else None,
+        # Shipping timeline + import flags — exposed so the timeline editor
+        # can pre-fill the form instead of making purchasing retype every save.
+        "is_import": bool(p.is_import),
+        "origin_location": p.origin_location,
+        "est_ship_from_origin": p.est_ship_from_origin,
+        "act_ship_from_origin": p.act_ship_from_origin,
+        "est_arrive_our_warehouse": p.est_arrive_our_warehouse,
+        "act_arrive_our_warehouse": p.act_arrive_our_warehouse,
+        "est_arrive_customer": p.est_arrive_customer,
+        "act_arrive_customer": p.act_arrive_customer,
         "customer": {
             "id": str(customer.id), "company_name": customer.company_name,
             "industry": customer.industry, "stage": customer.stage,
