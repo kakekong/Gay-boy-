@@ -206,6 +206,15 @@ async def verify_claim(
     c.decision_notes = payload.notes
     new_inv_status = await _recompute_invoice_status(db, c.invoice_id)
 
+    # When the invoice is fully paid, advance the project to 'paid', then
+    # auto-close it — payment is the last real-world signal in the pipeline.
+    if new_inv_status == "paid" and inv and inv.project_id:
+        from app.models.operation import Project, advance_project_status
+        project = await db.get(Project, inv.project_id)
+        if project:
+            advance_project_status(project, "paid")
+            advance_project_status(project, "closed")
+
     await audit_record(
         db, actor=me, action="verify_payment", entity="invoice",
         entity_id=c.invoice_id,

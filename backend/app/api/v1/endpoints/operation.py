@@ -970,6 +970,8 @@ async def mark_customer_received(project_id: UUID,
         do.status = "delivered"
         if not do.delivered_at:
             do.delivered_at = datetime.now(UTC)
+    # Customer-received is the trigger for the 'delivered' project status.
+    advance_project_status(p, "delivered")
     await db.flush()
     return {"ok": True, "customer_received_at": p.customer_received_at}
 
@@ -1032,6 +1034,12 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
     w = WorkOrder(project_id=project_id, code=payload.code,
                   stage=payload.stage, notes=payload.notes)
     db.add(w)
+    # A work order means ops is actively running the project — advance to
+    # 'production'. A packaging-stage WO jumps straight to 'packaging' so the
+    # board reflects what's happening. Forward-only.
+    advance_project_status(p, "production")
+    if (payload.stage or "").lower() == "packaging":
+        advance_project_status(p, "packaging")
     await db.flush()
     return {"id": str(w.id), "code": w.code, "stage": w.stage}
 
@@ -1048,6 +1056,14 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
     if notes is not None:  w.notes = notes
     if completed and not w.completed_at:
         w.completed_at = datetime.now(UTC)
+    # Updating to (or completing) a packaging stage advances the project.
+    if w.project_id and (
+        (stage or "").lower() == "packaging"
+        or (completed and (w.stage or "").lower() == "packaging")
+    ):
+        p = await db.get(Project, w.project_id)
+        if p:
+            advance_project_status(p, "packaging")
     return {"ok": True, "id": str(w.id), "stage": w.stage,
             "completed_at": w.completed_at}
 

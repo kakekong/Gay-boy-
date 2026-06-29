@@ -30,7 +30,7 @@ const STATUS_CHIP: Record<string, string> = {
 
 const PIPELINE_STAGES = [
   "new", "drawing", "drawing_approved", "purchasing",
-  "production", "qc", "packaging", "delivered", "invoiced", "paid", "closed",
+  "production", "packaging", "qc", "invoiced", "delivered", "paid", "closed",
 ];
 
 const WO_STAGES = ["receiving", "warehousing", "qc", "packaging", "delivery"];
