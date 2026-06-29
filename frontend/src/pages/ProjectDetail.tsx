@@ -243,6 +243,7 @@ export default function ProjectDetailPage() {
   const dos = data.data.deliveries ?? [];
   const inv = data.data.invoices ?? [];
   const prs = data.data.purchase_requests ?? [];
+  const supplierPOs: any[] = data.data.supplier_pos ?? [];
   const priceReq = data.data.price_request ?? null;
   const logistics = data.data.logistics ?? null;
 
@@ -1030,33 +1031,89 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* Purchase Requests */}
+      {/* Supplier POs */}
       <div className="card overflow-hidden">
-        <div className="px-5 py-3 border-b border-ink-100">
-          <div className="font-semibold flex items-center gap-2">
-            <ShoppingCart size={15} className="text-brand-600" /> Purchase requests
+        <div className="px-5 py-3 border-b border-ink-100 flex items-end justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-semibold flex items-center gap-2">
+              <Truck size={15} className="text-brand-600" /> Supplier purchase orders
+            </div>
+            <div className="text-xs muted">{supplierPOs.length} PO(s) for this project</div>
           </div>
-          <div className="text-xs muted">{prs.length} PR(s)</div>
+          <Link to="/purchase-orders" className="text-xs text-brand-700 hover:underline">
+            Open Purchasing PO →
+          </Link>
         </div>
-        {prs.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No purchase requests linked.</div>
+        {supplierPOs.length === 0 ? (
+          <div className="p-8 text-center muted text-sm">No supplier POs yet for this project.</div>
         ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Number</th>
+                <th className="th">Supplier</th>
+                <th className="th">PO date</th>
+                <th className="th">Lead</th>
+                <th className="th">Status</th>
+                {showMoney && <th className="th text-right">Total</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {supplierPOs.map((po: any) => (
+                <tr key={po.id} className="border-t border-ink-100">
+                  <td className="td font-mono text-xs">
+                    <Link to={`/purchase-orders/${po.id}`} className="text-brand-700 hover:underline">
+                      {po.number}
+                    </Link>
+                  </td>
+                  <td className="td">{po.supplier_name ?? "—"}</td>
+                  <td className="td muted">{po.po_date ? new Date(po.po_date).toLocaleDateString() : "—"}</td>
+                  <td className="td muted">{po.quoted_lead_days != null ? `${po.quoted_lead_days}d` : "—"}</td>
+                  <td className="td">
+                    <span className={clsx("chip capitalize",
+                      po.status === "open" ? "bg-emerald-50 text-emerald-700"
+                      : po.status === "received" ? "bg-cyan-50 text-cyan-700"
+                      : po.status === "pending_approval" ? "bg-amber-50 text-amber-700"
+                      : po.status === "cancelled" ? "bg-red-50 text-red-700"
+                      : "bg-ink-100 text-ink-700")}>
+                      {(po.status ?? "").replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  {showMoney && (
+                    <td className="td text-right tabular-nums">
+                      {po.total != null ? "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(po.total)) : "—"}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Legacy purchase requests (only when present — inventory-side flow) */}
+      {prs.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <ShoppingCart size={15} className="text-brand-600" /> Purchase requests
+            </div>
+            <div className="text-xs muted">{prs.length} PR(s) (legacy / inventory-raised)</div>
+          </div>
           <ul className="divide-y divide-ink-100">
             {prs.map((pr: any) => (
               <li key={pr.id} className="p-3 flex items-center gap-3">
                 <span className="font-mono text-xs">{pr.number}</span>
                 <span className="chip bg-ink-100 text-ink-700">{pr.status}</span>
-                <span className="text-xs muted">
-                  {(pr.items ?? []).length} item(s)
-                </span>
+                <span className="text-xs muted">{(pr.items ?? []).length} item(s)</span>
                 <span className="ml-auto text-[11px] text-ink-400">
                   {new Date(pr.created_at).toLocaleDateString()}
                 </span>
               </li>
             ))}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Attachments */}
       <AttachmentsSection ownerType="project" ownerId={p.id} />

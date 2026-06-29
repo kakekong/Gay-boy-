@@ -158,6 +158,19 @@ async def project_full(project_id: UUID,
         select(PurchaseRequest).where(PurchaseRequest.project_id == project_id)
         .order_by(PurchaseRequest.created_at.desc())
     )).all()
+    from app.models.purchasing import Supplier, SupplierPO
+    supplier_pos = (await db.scalars(
+        select(SupplierPO).where(SupplierPO.project_id == project_id)
+        .order_by(SupplierPO.created_at.desc())
+    )).all()
+    supplier_name_by_id: dict[UUID, str] = {}
+    if supplier_pos:
+        sup_ids = {p.supplier_id for p in supplier_pos if p.supplier_id}
+        if sup_ids:
+            for s in (await db.scalars(
+                select(Supplier).where(Supplier.id.in_(sup_ids))
+            )).all():
+                supplier_name_by_id[s.id] = s.name
 
     show_money = _can_see_project_money(user)
     # The approved price request behind this project — so purchasing can see
@@ -270,6 +283,18 @@ async def project_full(project_id: UUID,
                 "id": str(pr.id), "number": pr.number, "status": pr.status,
                 "items": pr.items, "created_at": pr.created_at,
             } for pr in purchase_requests
+        ],
+        "supplier_pos": [
+            {
+                "id": str(p.id), "number": p.number, "status": p.status,
+                "supplier_id": str(p.supplier_id) if p.supplier_id else None,
+                "supplier_name": supplier_name_by_id.get(p.supplier_id),
+                "po_date": p.po_date,
+                "quoted_lead_days": p.quoted_lead_days,
+                "total": float(p.total or 0) if show_money else None,
+                "items": p.items,
+                "created_at": p.created_at,
+            } for p in supplier_pos
         ],
     }
 
