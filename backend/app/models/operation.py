@@ -145,3 +145,7 @@ class DeliveryOrder(Base, UUIDPK, TimestampMixin):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
     items: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # Director-side proof verification: admin uploads the proof, director
+    # verifies it. Marking a DO delivered requires verification first.
+    verified_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -151,6 +151,8 @@ async def project_full(project_id: UUID,
     )).all()
     drawing_user_ids = {d.decided_by for d in drawings if d.decided_by} | {
         d.uploaded_by for d in drawings if d.uploaded_by
+    } | {
+        do.verified_by for do in deliveries if do.verified_by
     }
     deciders: dict[UUID, str] = {}
     if drawing_user_ids:
@@ -308,6 +310,9 @@ async def project_full(project_id: UUID,
                 "delivered_at": do.delivered_at, "status": do.status,
                 "items": do.items,
                 "files": do_files.get(do.id, []),
+                "verified_at": do.verified_at,
+                "verified_by": str(do.verified_by) if do.verified_by else None,
+                "verified_by_name": deciders.get(do.verified_by) if do.verified_by else None,
             } for do in deliveries
         ],
         "invoices": [
@@ -1273,13 +1278,78 @@ async def create_delivery(project_id: UUID, payload: DeliveryIn,
 @router.patch("/deliveries/{do_id}/delivered")
 async def mark_delivered(do_id: UUID,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
+                         user: User = Depends(get_current_user)):
+    """Mark a DO delivered. Requires director verification of the shipping
+    proof first — director's own click verifies + marks in one step."""
     d = await db.get(DeliveryOrder, do_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    is_director = Role(user.role) == Role.DIRECTOR
+    if not d.verified_at and not is_director:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Director must verify the shipping proof first.",
+        )
+    if not d.verified_at and is_director:
+        d.verified_by = user.id
+        d.verified_at = datetime.now(UTC)
     d.status = "delivered"
     d.delivered_at = datetime.now(UTC)
-    return {"ok": True, "delivered_at": d.delivered_at}
+    return {"ok": True, "delivered_at": d.delivered_at,
+            "verified_at": d.verified_at}
+
+
+@router.post("/deliveries/{do_id}/proof")
+async def upload_delivery_proof(
+    do_id: UUID,
+    courier: str | None = Form(None),
+    tracking_no: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Admin uploads the shipping/delivery proof (POD, courier slip, …) so the
+    director can verify it. Optional courier + tracking number fields update
+    the DO at the same time. Clears any prior verification so the director
+    has to re-confirm the new proof."""
+    if Role(user.role) not in _ADMIN_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+
+    await _save_attachment(db, file=file, owner_type="delivery_order",
+                           owner_id=d.id, user=user, label="proof")
+    if courier is not None:
+        d.courier = courier or None
+    if tracking_no is not None:
+        d.tracking_no = tracking_no or None
+    # New proof → invalidate any prior verification.
+    d.verified_by = None
+    d.verified_at = None
+    await db.flush()
+    return {"ok": True, "id": str(d.id),
+            "courier": d.courier, "tracking_no": d.tracking_no}
+
+
+@router.post("/deliveries/{do_id}/verify")
+async def verify_delivery(
+    do_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Director verifies the uploaded shipping proof. After this, anyone can
+    Mark delivered (or the director can do both in one click)."""
+    if Role(user.role) not in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director (or management) can verify.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    d.verified_by = user.id
+    d.verified_at = datetime.now(UTC)
+    await db.flush()
+    return {"ok": True, "verified_at": d.verified_at}
 
 
 @router.get("/projects/{project_id}/timeline")

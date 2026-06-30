@@ -94,6 +94,10 @@ export default function ProjectDetailPage() {
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
   const [drawingNotes, setDrawingNotes] = useState("");
   const [revFiles, setRevFiles] = useState<Record<string, File | null>>({});
+  // Per-DO proof upload form (file + optional courier/tracking).
+  const [doProof, setDoProof] = useState<Record<string, {
+    file?: File | null; courier?: string; tracking?: string;
+  }>>({});
 
   const onErr = (e: any) => alert(
     e?.response?.data?.errors?.[0]?.message
@@ -131,6 +135,20 @@ export default function ProjectDetailPage() {
       api.patch(`/operation/work-orders/${woId}`, null, { params: { completed: true } }),
     onSuccess: refresh,
     onError: onErr,
+  });
+  const uploadDeliveryProof = useMutation({
+    mutationFn: (body: { doId: string; file: File; courier?: string; tracking?: string }) => {
+      const fd = new FormData();
+      fd.append("file", body.file);
+      if (body.courier != null) fd.append("courier", body.courier);
+      if (body.tracking != null) fd.append("tracking_no", body.tracking);
+      return api.post(`/operation/deliveries/${body.doId}/proof`, fd);
+    },
+    onSuccess: refresh, onError: onErr,
+  });
+  const verifyDelivery = useMutation({
+    mutationFn: (doId: string) => api.post(`/operation/deliveries/${doId}/verify`),
+    onSuccess: refresh, onError: onErr,
   });
   const markDelivered = useMutation({
     mutationFn: (doId: string) => api.patch(`/operation/deliveries/${doId}/delivered`),
@@ -1058,31 +1076,106 @@ export default function ProjectDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {dos.map((d: any) => (
-                <tr key={d.id} className="border-t border-ink-100">
-                  <td className="td font-mono text-xs">{d.number}</td>
-                  <td className="td muted">#{d.split_index}</td>
-                  <td className="td">{d.courier ?? "—"}</td>
-                  <td className="td font-mono text-xs">{d.tracking_no ?? "—"}</td>
-                  <td className="td">
-                    <span className={clsx("chip capitalize",
-                      d.status === "delivered" ? "bg-emerald-50 text-emerald-700"
-                      : d.status === "in_transit" ? "bg-amber-50 text-amber-700"
-                      : "bg-ink-100 text-ink-700"
-                    )}>
-                      {d.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                  <td className="td text-right">
-                    {d.status !== "delivered" && (
-                      <button className="btn-ghost text-emerald-700"
-                        onClick={() => markDelivered.mutate(d.id)}>
-                        <CheckCircle size={13} /> Mark delivered
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {dos.map((d: any) => {
+                const proof = doProof[d.id] ?? {};
+                const isDirector = role === "director";
+                const isVerified = !!d.verified_at;
+                const isDelivered = d.status === "delivered";
+                return (
+                  <tr key={d.id} className="border-t border-ink-100 align-top">
+                    <td className="td font-mono text-xs">{d.number}</td>
+                    <td className="td muted">#{d.split_index}</td>
+                    <td className="td">{d.courier ?? "—"}</td>
+                    <td className="td font-mono text-xs">{d.tracking_no ?? "—"}</td>
+                    <td className="td space-y-1">
+                      <span className={clsx("chip capitalize",
+                        isDelivered ? "bg-emerald-50 text-emerald-700"
+                        : isVerified ? "bg-cyan-50 text-cyan-700"
+                        : (d.files ?? []).length > 0 ? "bg-amber-50 text-amber-700"
+                        : "bg-ink-100 text-ink-700"
+                      )}>
+                        {isDelivered ? "delivered"
+                          : isVerified ? "verified"
+                          : (d.files ?? []).length > 0 ? "awaiting verify"
+                          : "pending"}
+                      </span>
+                      {isVerified && (
+                        <div className="text-[10px] muted">
+                          verified {new Date(d.verified_at).toLocaleDateString()}
+                          {d.verified_by_name && <> by {d.verified_by_name}</>}
+                        </div>
+                      )}
+                      {(d.files ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 text-[11px]">
+                          {d.files.map((f: any) => (
+                            <button key={f.id} type="button"
+                              className="text-brand-700 hover:underline inline-flex items-center gap-0.5"
+                              onClick={() => viewFile(f.download_url)}>
+                              <FileText size={10} /> {f.filename}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {isAdmin && !isDelivered && (
+                        <details className="text-[11px]">
+                          <summary className="cursor-pointer text-brand-700 hover:underline">
+                            {(d.files ?? []).length > 0 ? "Replace proof" : "Upload proof"}
+                          </summary>
+                          <div className="mt-1.5 space-y-1.5 bg-ink-50/60 p-2 rounded">
+                            <input type="file"
+                              className="block w-full text-[11px] file:mr-1.5 file:rounded file:border-0 file:bg-ink-100 file:px-1.5 file:py-0.5 file:text-[11px]"
+                              onChange={(e) => setDoProof((m) => ({
+                                ...m, [d.id]: { ...proof, file: e.target.files?.[0] ?? null },
+                              }))} />
+                            <input className="input text-[11px] py-1"
+                              placeholder="Courier (optional)"
+                              defaultValue={d.courier ?? ""}
+                              onChange={(e) => setDoProof((m) => ({
+                                ...m, [d.id]: { ...proof, courier: e.target.value },
+                              }))} />
+                            <input className="input text-[11px] py-1"
+                              placeholder="Tracking no. (optional)"
+                              defaultValue={d.tracking_no ?? ""}
+                              onChange={(e) => setDoProof((m) => ({
+                                ...m, [d.id]: { ...proof, tracking: e.target.value },
+                              }))} />
+                            <button className="btn-primary py-0.5 px-2 text-[11px]"
+                              disabled={!proof.file || uploadDeliveryProof.isPending}
+                              onClick={() => proof.file && uploadDeliveryProof.mutate(
+                                { doId: d.id, file: proof.file,
+                                  courier: proof.courier, tracking: proof.tracking },
+                                { onSuccess: () => setDoProof((m) => ({ ...m, [d.id]: {} })) },
+                              )}>
+                              Upload — director will verify
+                            </button>
+                          </div>
+                        </details>
+                      )}
+                    </td>
+                    <td className="td text-right">
+                      {!isDelivered && (
+                        <div className="inline-flex flex-col items-end gap-1">
+                          {isDirector && !isVerified && (d.files ?? []).length > 0 && (
+                            <button className="btn-primary py-1 px-2 text-xs"
+                              disabled={verifyDelivery.isPending}
+                              onClick={() => verifyDelivery.mutate(d.id)}>
+                              <CheckCircle size={13} /> Verify proof
+                            </button>
+                          )}
+                          <button className="btn-ghost text-emerald-700"
+                            disabled={!isVerified && !isDirector}
+                            title={!isVerified && !isDirector
+                              ? "Director must verify the shipping proof first" : ""}
+                            onClick={() => markDelivered.mutate(d.id)}>
+                            <CheckCircle size={13} />
+                            {isDirector && !isVerified ? "Verify & mark delivered" : "Mark delivered"}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
