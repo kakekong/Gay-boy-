@@ -1153,25 +1153,31 @@ export default function ProjectDetailPage() {
                       )}
                     </td>
                     <td className="td text-right">
-                      {!isDelivered && (
-                        <div className="inline-flex flex-col items-end gap-1">
-                          {isDirector && !isVerified && (d.files ?? []).length > 0 && (
-                            <button className="btn-primary py-1 px-2 text-xs"
-                              disabled={verifyDelivery.isPending}
-                              onClick={() => verifyDelivery.mutate(d.id)}>
-                              <CheckCircle size={13} /> Verify proof
-                            </button>
-                          )}
-                          <button className="btn-ghost text-emerald-700"
-                            disabled={!isVerified && !isDirector}
-                            title={!isVerified && !isDirector
-                              ? "Director must verify the shipping proof first" : ""}
+                      {isDelivered ? null
+                        : isDirector ? (
+                          // Director can both verify and mark delivered. Their
+                          // single click does both when no verification exists yet.
+                          <button className="btn-primary py-1 px-2 text-xs"
+                            disabled={markDelivered.isPending || verifyDelivery.isPending}
                             onClick={() => markDelivered.mutate(d.id)}>
                             <CheckCircle size={13} />
-                            {isDirector && !isVerified ? "Verify & mark delivered" : "Mark delivered"}
+                            {isVerified ? "Mark delivered" : "Verify & mark delivered"}
                           </button>
-                        </div>
-                      )}
+                        ) : isVerified ? (
+                          <button className="btn-ghost text-emerald-700"
+                            disabled={markDelivered.isPending}
+                            onClick={() => markDelivered.mutate(d.id)}>
+                            <CheckCircle size={13} /> Mark delivered
+                          </button>
+                        ) : (d.files ?? []).length === 0 ? (
+                          // No proof uploaded yet — admin's next step is upload.
+                          <span className="muted text-xs">Upload proof to proceed</span>
+                        ) : (
+                          // Proof is in; just waiting on director to verify.
+                          <span className="chip bg-amber-50 text-amber-700 text-[11px]">
+                            Awaiting director verification
+                          </span>
+                        )}
                     </td>
                   </tr>
                 );
