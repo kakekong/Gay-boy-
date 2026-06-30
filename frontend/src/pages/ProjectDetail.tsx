@@ -34,6 +34,12 @@ const PIPELINE_STAGES = [
 ];
 
 const WO_STAGES = ["receiving", "warehousing", "qc", "packaging", "delivery"];
+// Short suffixes used to auto-generate the WO code per stage, e.g.
+// WO-PRJ-2026-0006-PKG for a packaging work order.
+const WO_STAGE_SUFFIX: Record<string, string> = {
+  receiving: "RCV", warehousing: "WRS", qc: "QC",
+  packaging: "PKG", delivery: "DLY",
+};
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -74,6 +80,17 @@ export default function ProjectDetailPage() {
   const [newWoCode, setNewWoCode] = useState("");
   const [newWoStage, setNewWoStage] = useState("receiving");
   const [flashErr, setFlashErr] = useState<string | null>(null);
+
+  // Auto-fill the WO code field as WO-{project}-{stage-suffix} so ops doesn't
+  // have to type it. Re-syncs whenever stage changes or the project data
+  // arrives; user can still type over it for a custom code.
+  const projectCode: string | undefined = data.data?.project?.code;
+  const defaultWoCode = projectCode
+    ? `WO-${projectCode}-${WO_STAGE_SUFFIX[newWoStage] ?? newWoStage.toUpperCase()}`
+    : "";
+  useEffect(() => {
+    if (defaultWoCode) setNewWoCode(defaultWoCode);
+  }, [defaultWoCode]);
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
   const [drawingNotes, setDrawingNotes] = useState("");
   const [revFiles, setRevFiles] = useState<Record<string, File | null>>({});
@@ -104,7 +121,9 @@ export default function ProjectDetailPage() {
     mutationFn: () => api.post(`/operation/projects/${id}/work-orders`, {
       code: newWoCode, stage: newWoStage,
     }),
-    onSuccess: () => { refresh(); setNewWoCode(""); },
+    // Don't blank the code after submit — leave the auto-default visible
+    // so the user can switch stage and submit again without re-typing.
+    onSuccess: () => { refresh(); },
     onError: onErr,
   });
   const completeWO = useMutation({
@@ -504,7 +523,7 @@ export default function ProjectDetailPage() {
             disabled={addWO.isPending}
             onClick={() => {
               if (!newWoCode.trim()) {
-                setFlashErr("Please type a work-order code first (any identifier you want, e.g. WO-PRJ-2026-0042-02).");
+                setFlashErr("Work-order code is required (the default is auto-generated from project + stage).");
                 return;
               }
               setFlashErr(null);
