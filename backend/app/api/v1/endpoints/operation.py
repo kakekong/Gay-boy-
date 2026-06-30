@@ -145,8 +145,29 @@ async def project_full(project_id: UUID,
         select(WorkOrder).where(WorkOrder.project_id == project_id)
         .order_by(WorkOrder.created_at.asc())
     )).all()
+    drawings = (await db.scalars(
+        select(Drawing).where(Drawing.project_id == project_id)
+        .order_by(Drawing.revision.desc())
+    )).all()
+    drawing_user_ids = {d.decided_by for d in drawings if d.decided_by} | {
+        d.uploaded_by for d in drawings if d.uploaded_by
+    }
+    deciders: dict[UUID, str] = {}
+    if drawing_user_ids:
+        for u in (await db.scalars(select(User).where(User.id.in_(drawing_user_ids)))).all():
+            deciders[u.id] = u.full_name
+    deliveries = (await db.scalars(
+        select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
+        .order_by(DeliveryOrder.split_index.asc())
+    )).all()
+    invoices = (await db.scalars(
+        select(Invoice).where(Invoice.project_id == project_id)
+        .order_by(Invoice.issue_date.asc().nullslast())
+    )).all()
+
     # Batch-load invoice + delivery-order attachments so we can surface View
-    # links on the project page without N+1 lookups.
+    # links on the project page without N+1 lookups. Must run AFTER invoices +
+    # deliveries are loaded.
     inv_files: dict[UUID, list[dict]] = {}
     do_files: dict[UUID, list[dict]] = {}
     inv_ids = [i.id for i in invoices]
@@ -174,26 +195,6 @@ async def project_full(project_id: UUID,
                 "id": str(a.id), "filename": a.filename,
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
-
-    drawings = (await db.scalars(
-        select(Drawing).where(Drawing.project_id == project_id)
-        .order_by(Drawing.revision.desc())
-    )).all()
-    drawing_user_ids = {d.decided_by for d in drawings if d.decided_by} | {
-        d.uploaded_by for d in drawings if d.uploaded_by
-    }
-    deciders: dict[UUID, str] = {}
-    if drawing_user_ids:
-        for u in (await db.scalars(select(User).where(User.id.in_(drawing_user_ids)))).all():
-            deciders[u.id] = u.full_name
-    deliveries = (await db.scalars(
-        select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
-        .order_by(DeliveryOrder.split_index.asc())
-    )).all()
-    invoices = (await db.scalars(
-        select(Invoice).where(Invoice.project_id == project_id)
-        .order_by(Invoice.issue_date.asc().nullslast())
-    )).all()
     purchase_requests = (await db.scalars(
         select(PurchaseRequest).where(PurchaseRequest.project_id == project_id)
         .order_by(PurchaseRequest.created_at.desc())
