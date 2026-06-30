@@ -145,10 +145,20 @@ async def project_full(project_id: UUID,
         select(WorkOrder).where(WorkOrder.project_id == project_id)
         .order_by(WorkOrder.created_at.asc())
     )).all()
+    deliveries = (await db.scalars(
+        select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
+        .order_by(DeliveryOrder.split_index.asc())
+    )).all()
+    invoices = (await db.scalars(
+        select(Invoice).where(Invoice.project_id == project_id)
+        .order_by(Invoice.issue_date.asc().nullslast())
+    )).all()
     drawings = (await db.scalars(
         select(Drawing).where(Drawing.project_id == project_id)
         .order_by(Drawing.revision.desc())
     )).all()
+    # User-id set for any name we render alongside a drawing/delivery action.
+    # Must run AFTER drawings + deliveries are loaded.
     drawing_user_ids = {d.decided_by for d in drawings if d.decided_by} | {
         d.uploaded_by for d in drawings if d.uploaded_by
     } | {
@@ -158,14 +168,6 @@ async def project_full(project_id: UUID,
     if drawing_user_ids:
         for u in (await db.scalars(select(User).where(User.id.in_(drawing_user_ids)))).all():
             deciders[u.id] = u.full_name
-    deliveries = (await db.scalars(
-        select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
-        .order_by(DeliveryOrder.split_index.asc())
-    )).all()
-    invoices = (await db.scalars(
-        select(Invoice).where(Invoice.project_id == project_id)
-        .order_by(Invoice.issue_date.asc().nullslast())
-    )).all()
 
     # Batch-load invoice + delivery-order attachments so we can surface View
     # links on the project page without N+1 lookups. Must run AFTER invoices +
