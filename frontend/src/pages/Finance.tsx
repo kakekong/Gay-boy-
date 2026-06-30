@@ -1,8 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Banknote, LineChart, BarChart3 } from "lucide-react";
+import {
+  Banknote, LineChart, BarChart3, CheckCircle, FileText, Loader2,
+} from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 
 const BUCKETS = [
   { key: "current", label: "Current",    color: "bg-emerald-500" },
@@ -32,7 +36,141 @@ export default function FinancePage() {
         </div>
       </div>
 
+      <PendingInvoiceApprovals />
       <ArAging />
+    </div>
+  );
+}
+
+function PendingInvoiceApprovals() {
+  const qc = useQueryClient();
+  const role = useAuthStore((s) => s.user?.role) ?? "";
+  // Only finance + director see the approval action. Manager/admin can view
+  // the queue (read-only) so they know what's pending.
+  const canApprove = role === "finance" || role === "director";
+  const pending = useQuery({
+    queryKey: ["pending-invoices"],
+    queryFn: () => api.get("/finance/invoices/pending").then((r) => r.data as any[]),
+  });
+  const [forms, setForms] = useState<Record<string, { no: string; file?: File | null }>>({});
+  const [err, setErr] = useState<string | null>(null);
+
+  const approve = useMutation({
+    mutationFn: (body: { invoiceId: string; fpNo: string; fpFile?: File | null }) => {
+      const fd = new FormData();
+      fd.append("faktur_pajak_no", body.fpNo);
+      if (body.fpFile) fd.append("faktur_pajak_file", body.fpFile);
+      return api.post(`/finance/invoices/${body.invoiceId}/approve`, fd);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pending-invoices"] });
+      qc.invalidateQueries({ queryKey: ["ar-aging"] });
+      setErr(null);
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.detail ?? e?.response?.data?.errors?.[0]?.message
+      ?? e?.message ?? "Approval failed",
+    ),
+  });
+
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+  const rows = pending.data ?? [];
+
+  // The approvals queue is the headline thing this page should show — render
+  // even an empty state so finance knows it's empty (not broken).
+  const viewFile = async (url: string) => {
+    try {
+      const resp = await api.get(url.replace(/^\/api\/v1/, ""), { responseType: "blob" });
+      const blob = URL.createObjectURL(resp.data as Blob);
+      window.open(blob, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(blob), 60_000);
+    } catch (e: any) {
+      alert(e?.response?.data?.detail ?? "Could not open file");
+    }
+  };
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <FileText size={15} className="text-brand-600" /> Pending invoice approvals
+          </div>
+          <div className="text-xs muted">
+            {canApprove
+              ? "Enter the faktur pajak number (and optionally upload the FP file), then approve."
+              : "Invoices waiting on finance to enter the faktur pajak and approve."}
+          </div>
+        </div>
+        <span className="chip bg-amber-50 text-amber-700">{rows.length} pending</span>
+      </div>
+
+      {err && (
+        <div className="mx-5 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {err}
+        </div>
+      )}
+
+      {pending.isLoading ? (
+        <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="p-8 text-center text-sm muted">No invoices waiting for finance approval.</div>
+      ) : (
+        <ul className="divide-y divide-ink-100">
+          {rows.map((iv: any) => {
+            const f = forms[iv.id] ?? { no: "", file: null };
+            return (
+              <li key={iv.id} className="p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="text-sm">
+                    <span className="font-mono font-medium">{iv.number}</span>
+                    <span className="muted"> · {iv.customer_name ?? "—"}</span>
+                    {iv.project_code && (
+                      <Link to={`/projects/${iv.project_id}`} className="ml-2 text-brand-700 hover:underline font-mono text-xs">
+                        {iv.project_code}
+                      </Link>
+                    )}
+                  </div>
+                  <div className="text-sm font-semibold tabular-nums">{idr(iv.total)}</div>
+                </div>
+                {(iv.files ?? []).length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {iv.files.map((file: any) => (
+                      <button key={file.id} type="button"
+                        className="text-brand-700 hover:underline inline-flex items-center gap-1"
+                        onClick={() => viewFile(file.download_url)}>
+                        <FileText size={11} /> {file.filename}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {canApprove && (
+                  <div className="grid grid-cols-1 sm:grid-cols-[2fr_2fr_auto] gap-2 items-end pt-1">
+                    <label className="block">
+                      <span className="block text-[10px] uppercase tracking-wider muted mb-1">Faktur pajak no. *</span>
+                      <input className="input" value={f.no}
+                        onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, no: e.target.value } }))} />
+                    </label>
+                    <label className="block">
+                      <span className="block text-[10px] uppercase tracking-wider muted mb-1">FP file (optional)</span>
+                      <input type="file"
+                        className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
+                        onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, file: e.target.files?.[0] ?? null } }))} />
+                    </label>
+                    <button className="btn-primary"
+                      disabled={!f.no.trim() || approve.isPending}
+                      onClick={() => approve.mutate({ invoiceId: iv.id, fpNo: f.no.trim(), fpFile: f.file })}>
+                      <CheckCircle size={14} /> Approve
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

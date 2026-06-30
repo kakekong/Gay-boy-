@@ -22,6 +22,74 @@ router = APIRouter(
 )
 
 
+@router.get("/invoices/pending")
+async def list_pending_invoices(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Finance's approval queue: every invoice waiting for finance sign-off,
+    with the customer + project context they need to act on it. Includes any
+    files already attached so finance can preview before approving."""
+    from app.api.v1.endpoints.attachments import _attachment_visible_to
+    from app.models.attachment import Attachment
+    from app.models.crm import Customer
+    from app.models.operation import Project
+
+    rows = (await db.scalars(
+        select(Invoice).where(Invoice.status == "pending_finance")
+        .order_by(Invoice.issue_date.asc().nullslast(), Invoice.created_at.asc())
+    )).all()
+    if not rows:
+        return []
+
+    cust_ids = {r.customer_id for r in rows if r.customer_id}
+    proj_ids = {r.project_id for r in rows if r.project_id}
+    inv_ids = [r.id for r in rows]
+
+    customers = {
+        c.id: c for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(cust_ids))
+        )).all()
+    } if cust_ids else {}
+    projects = {
+        p.id: p for p in (await db.scalars(
+            select(Project).where(Project.id.in_(proj_ids))
+        )).all()
+    } if proj_ids else {}
+
+    files_by_inv: dict = {}
+    can_see_files = _attachment_visible_to("invoice", Role(_user.role))
+    if can_see_files and inv_ids:
+        for a in (await db.scalars(
+            select(Attachment).where(
+                Attachment.owner_type == "invoice",
+                Attachment.owner_id.in_(inv_ids),
+            ).order_by(Attachment.created_at.asc())
+        )).all():
+            files_by_inv.setdefault(a.owner_id, []).append({
+                "id": str(a.id), "filename": a.filename,
+                "download_url": f"/api/v1/attachments/{a.id}/download",
+            })
+
+    out = []
+    for inv in rows:
+        cust = customers.get(inv.customer_id)
+        proj = projects.get(inv.project_id)
+        out.append({
+            "id": str(inv.id), "number": inv.number,
+            "issue_date": inv.issue_date, "due_date": inv.due_date,
+            "amount": float(inv.amount or 0),
+            "tax_amount": float(inv.tax_amount or 0),
+            "total": float(inv.total or 0),
+            "customer_id": str(inv.customer_id) if inv.customer_id else None,
+            "customer_name": cust.company_name if cust else None,
+            "project_id": str(inv.project_id) if inv.project_id else None,
+            "project_code": proj.code if proj else None,
+            "files": files_by_inv.get(inv.id, []),
+        })
+    return out
+
+
 @router.post("/invoices/{invoice_id}/approve")
 async def approve_invoice(
     invoice_id: UUID,

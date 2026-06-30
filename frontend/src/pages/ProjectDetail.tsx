@@ -52,7 +52,11 @@ export default function ProjectDetailPage() {
   const canLogistics = ["purchasing", "director", "manager", "admin"].includes(role);
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
+  // "Money viewer" — who may see amounts/totals. NOT who may act on finance forms.
   const isFinance = ["finance", "admin", "manager", "director"].includes(role);
+  // Strict finance approval role — only finance (plus director as backstop)
+  // gets the "Approve invoice + enter faktur pajak" form on the project page.
+  const canFinanceApprove = role === "finance" || role === "director";
   // Internal staff upload the drawing (on behalf of the supplier); the director
   // signs it off. The drawing file is viewable by either of those.
   const canUploadDrawing = ["purchasing", "sales", "manager", "director", "admin"].includes(role);
@@ -938,7 +942,7 @@ export default function ProjectDetailPage() {
                     ))}
                   </div>
                 )}
-                {isFinance && iv.status === "pending_finance" && (
+                {canFinanceApprove && iv.status === "pending_finance" && (
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="text-[11px] uppercase tracking-wider muted">
                       Finance approval — enter the faktur pajak yourself (admin doesn't set it)
