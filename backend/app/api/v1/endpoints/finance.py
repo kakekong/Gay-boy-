@@ -141,6 +141,33 @@ async def approve_invoice(
             "faktur_pajak_status": inv.faktur_pajak_status}
 
 
+@router.post("/invoices/{invoice_id}/reject")
+async def reject_invoice(
+    invoice_id: UUID,
+    reason: str = Form(..., description="Why the invoice is being rejected (shown to admin)"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Finance rejects a pending invoice — sends it back to admin with a
+    reason. Admin can then re-issue with corrections. No ledger effect."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Rejection reason is required.")
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    if inv.status not in ("pending_finance", "draft"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Can't reject an invoice in status '{inv.status}'.")
+    inv.status = "rejected"
+    inv.approved_by = user.id            # who acted
+    inv.approved_at = datetime.now(UTC)  # when
+    inv.notes = ((inv.notes or "") + f"\n[rejected by {user.full_name}] {reason}").strip()
+    await db.flush()
+    return {"ok": True, "status": inv.status, "reason": reason}
+
+
 @router.get("/ar/aging")
 async def ar_aging(db: AsyncSession = Depends(get_db),
                    _user: User = Depends(get_current_user)):

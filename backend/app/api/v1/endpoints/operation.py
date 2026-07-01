@@ -272,6 +272,7 @@ async def project_full(project_id: UUID,
                 "faktur_pajak_no": inv.faktur_pajak_no,
                 "faktur_pajak_status": inv.faktur_pajak_status,
                 "approved_at": inv.approved_at,
+                "notes": inv.notes,
                 "files": inv_files.get(inv.id, []),
             } for inv in invoices
         ],

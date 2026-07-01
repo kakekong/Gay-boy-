@@ -965,8 +965,14 @@ export default function ProjectDetailPage() {
                   <span className={clsx("chip text-[11px]",
                     iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
                     : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
+                    : iv.status === "rejected" ? "bg-red-50 text-red-700"
                     : "bg-ink-50 text-ink-600")}>{iv.status}</span>
                 </div>
+                {iv.status === "rejected" && iv.notes && (
+                  <div className="rounded-lg border border-red-200 bg-red-50/70 px-3 py-2 text-[11px] text-red-800 whitespace-pre-wrap">
+                    {iv.notes}
+                  </div>
+                )}
                 {(iv.files ?? []).length > 0 && (
                   <div className="flex flex-wrap gap-2 text-xs">
                     {iv.files.map((f: any) => (

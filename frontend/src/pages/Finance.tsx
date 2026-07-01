@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Banknote, LineChart, BarChart3, CheckCircle, FileText, Loader2,
+  Banknote, LineChart, BarChart3, CheckCircle, FileText, Loader2, XCircle,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -52,7 +52,9 @@ function PendingInvoiceApprovals() {
     queryKey: ["pending-invoices"],
     queryFn: () => api.get("/finance/invoices/pending").then((r) => r.data as any[]),
   });
-  const [forms, setForms] = useState<Record<string, { no: string; file?: File | null }>>({});
+  const [forms, setForms] = useState<Record<string, {
+    no: string; file?: File | null; reason?: string;
+  }>>({});
   const [err, setErr] = useState<string | null>(null);
 
   const approve = useMutation({
@@ -70,6 +72,22 @@ function PendingInvoiceApprovals() {
     onError: (e: any) => setErr(
       e?.response?.data?.detail ?? e?.response?.data?.errors?.[0]?.message
       ?? e?.message ?? "Approval failed",
+    ),
+  });
+
+  const reject = useMutation({
+    mutationFn: (body: { invoiceId: string; reason: string }) => {
+      const fd = new FormData();
+      fd.append("reason", body.reason);
+      return api.post(`/finance/invoices/${body.invoiceId}/reject`, fd);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pending-invoices"] });
+      setErr(null);
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.detail ?? e?.response?.data?.errors?.[0]?.message
+      ?? e?.message ?? "Reject failed",
     ),
   });
 
@@ -147,23 +165,45 @@ function PendingInvoiceApprovals() {
                   </div>
                 )}
                 {canApprove && (
-                  <div className="grid grid-cols-1 sm:grid-cols-[2fr_2fr_auto] gap-2 items-end pt-1">
-                    <label className="block">
-                      <span className="block text-[10px] uppercase tracking-wider muted mb-1">Faktur pajak no. *</span>
-                      <input className="input" value={f.no}
-                        onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, no: e.target.value } }))} />
-                    </label>
-                    <label className="block">
-                      <span className="block text-[10px] uppercase tracking-wider muted mb-1">FP file (optional)</span>
-                      <input type="file"
-                        className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
-                        onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, file: e.target.files?.[0] ?? null } }))} />
-                    </label>
-                    <button className="btn-primary"
-                      disabled={!f.no.trim() || approve.isPending}
-                      onClick={() => approve.mutate({ invoiceId: iv.id, fpNo: f.no.trim(), fpFile: f.file })}>
-                      <CheckCircle size={14} /> Approve
-                    </button>
+                  <div className="space-y-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-[2fr_2fr_auto] gap-2 items-end">
+                      <label className="block">
+                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">Faktur pajak no. *</span>
+                        <input className="input" value={f.no}
+                          onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, no: e.target.value } }))} />
+                      </label>
+                      <label className="block">
+                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">FP file (optional)</span>
+                        <input type="file"
+                          className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
+                          onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, file: e.target.files?.[0] ?? null } }))} />
+                      </label>
+                      <button className="btn-primary"
+                        disabled={!f.no.trim() || approve.isPending}
+                        onClick={() => approve.mutate({ invoiceId: iv.id, fpNo: f.no.trim(), fpFile: f.file })}>
+                        <CheckCircle size={14} /> Approve
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+                      <label className="block">
+                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">
+                          Rejection reason (required if rejecting)
+                        </span>
+                        <input className="input" value={f.reason ?? ""}
+                          placeholder="e.g. wrong amount, invoice PDF unreadable, missing DO…"
+                          onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, reason: e.target.value } }))} />
+                      </label>
+                      <button className="btn-ghost text-red-600 border border-red-200 hover:bg-red-50"
+                        disabled={!(f.reason ?? "").trim() || reject.isPending}
+                        onClick={() => {
+                          if (!window.confirm(
+                            `Reject ${iv.number}? Admin will need to re-issue with corrections.`,
+                          )) return;
+                          reject.mutate({ invoiceId: iv.id, reason: (f.reason ?? "").trim() });
+                        }}>
+                        <XCircle size={14} /> Reject
+                      </button>
+                    </div>
                   </div>
                 )}
               </li>
