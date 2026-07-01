@@ -101,3 +101,48 @@ def is_forward_skip(from_stage: str, to_stage: str) -> bool:
     if fi < 0 or ti < 0:
         return False
     return ti > fi + 1
+
+
+# ─── Project → customer stage mirror ─────────────────────────────────────────
+# The customer's deal pipeline mirrors what's happening on the project, so we
+# don't have two sources of truth. Map project statuses to the customer stage
+# they should imply — always advance forward, never regress.
+PROJECT_TO_CUSTOMER_STAGE: dict[str, str] = {
+    "drawing": "drawing",
+    "drawing_approved": "drawing",
+    "purchasing": "purchasing",
+    "production": "purchasing",
+    "qc": "purchasing",
+    "packaging": "purchasing",
+    "invoiced": "invoicing",
+    "delivered": "invoicing",
+    "paid": "payment",
+    "closed": "closed_won",
+}
+
+
+def customer_stage_for_project(project_status: str) -> str | None:
+    """Return the customer deal-pipeline stage implied by a project status,
+    or None if the project status doesn't map (e.g. 'new')."""
+    return PROJECT_TO_CUSTOMER_STAGE.get(project_status)
+
+
+def sync_customer_stage_from_projects(customer, project_statuses: list[str]) -> bool:
+    """Bump `customer.stage` forward to the furthest stage implied by any of
+    the given project statuses. Never regresses. Returns True if changed."""
+    if not project_statuses:
+        return False
+    best = customer.stage
+    best_i = stage_index(best)
+    for s in project_statuses:
+        mapped = PROJECT_TO_CUSTOMER_STAGE.get(s)
+        if not mapped:
+            continue
+        i = stage_index(mapped)
+        if i > best_i:
+            best_i = i
+            best = mapped
+    if best != customer.stage:
+        customer.stage = best
+        return True
+    return False

@@ -153,6 +153,15 @@ function PnLReport() {
           <tbody>
             <Row label="Revenue" value={t.revenue} />
             <Row label="Cost of goods sold" value={-(t.cogs ?? 0)} />
+            {(t.cogs_committed ?? 0) > 0 && (
+              <>
+                <Row label="  · from price-request buying prices"
+                     value={-(t.cogs_committed ?? 0)} sub />
+                {(t.cogs_ledger ?? 0) !== 0 && (
+                  <Row label="  · from the ledger" value={-(t.cogs_ledger ?? 0)} sub />
+                )}
+              </>
+            )}
             <Row label="Gross profit" value={t.gross_profit} bold sep />
             <Row label="Operating expense" value={-(t.expense ?? 0)} />
             <Row label="Operating income" value={t.operating_income} bold sep />
@@ -530,17 +539,18 @@ function Stat({ label, value, tone }: {
   );
 }
 
-function Row({ label, value, bold, sep, big }: {
-  label: string; value: number; bold?: boolean; sep?: boolean; big?: boolean;
+function Row({ label, value, bold, sep, big, sub }: {
+  label: string; value: number; bold?: boolean; sep?: boolean; big?: boolean; sub?: boolean;
 }) {
   const neg = value < 0;
   return (
     <tr className={clsx(sep && "border-t border-ink-200", bold && "bg-ink-50/60")}>
-      <td className={clsx("td", bold && "font-semibold")}>{label}</td>
+      <td className={clsx("td", bold && "font-semibold", sub && "text-xs muted pl-6")}>{label}</td>
       <td className={clsx(
         "td text-right tabular-nums",
         bold && "font-semibold",
         big && "text-lg",
+        sub && "text-xs muted",
         neg && "text-red-600"
       )}>
         {neg ? `(${idrFull(Math.abs(value))})` : idrFull(value)}

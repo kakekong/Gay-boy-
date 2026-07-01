@@ -32,7 +32,18 @@ async def pnl(
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(get_current_user),
 ):
-    """Simple Profit & Loss derived from CoA balances by category."""
+    """Profit & Loss derived from CoA balances + committed COGS from price
+    requests.
+
+    The ledger's Cost Of Good Sold account only fills up when we post COGS
+    journal entries — which we don't yet automate on purchase — so gross
+    profit would otherwise look inflated. Layer on a "committed COGS" line
+    computed from the buying prices purchasing entered on the price requests
+    that back projects already in the purchasing pipeline (production → paid).
+    """
+    from app.models.operation import Project
+    from app.models.price_request import PriceRequest
+
     rows = (await db.scalars(select(Account))).all()
     totals: dict[str, float] = defaultdict(float)
     by_type: dict[str, list[dict]] = defaultdict(list)
@@ -46,7 +57,32 @@ async def pnl(
         })
 
     revenue = totals.get("Revenue", 0)
-    cogs = totals.get("Cost Of Good Sold", 0)
+    ledger_cogs = totals.get("Cost Of Good Sold", 0)
+
+    # Committed COGS: sum(cost_price * qty) across price requests linked to
+    # projects that have reached purchasing or beyond. That's real money
+    # committed to buying goods, even if the journal hasn't caught up.
+    COMMITTED_PROJECT_STATUSES = (
+        "purchasing", "production", "qc", "packaging",
+        "invoiced", "delivered", "paid", "closed",
+    )
+    committed_projects = (await db.scalars(
+        select(Project).where(
+            Project.status.in_(COMMITTED_PROJECT_STATUSES),
+            Project.price_request_id.is_not(None),
+        )
+    )).all()
+    committed_cogs = 0.0
+    if committed_projects:
+        pr_ids = {p.price_request_id for p in committed_projects}
+        prs = (await db.scalars(
+            select(PriceRequest).where(PriceRequest.id.in_(pr_ids))
+        )).all()
+        for pr in prs:
+            for it in (pr.items or []):
+                committed_cogs += float(it.get("cost_price") or 0) * float(it.get("qty") or 0)
+
+    cogs = ledger_cogs + committed_cogs
     other_income = totals.get("Other Income", 0)
     expense = totals.get("Expense", 0)
     other_expense = totals.get("Other Expense", 0)
@@ -59,6 +95,8 @@ async def pnl(
         "totals": {
             "revenue": revenue,
             "cogs": cogs,
+            "cogs_ledger": ledger_cogs,
+            "cogs_committed": committed_cogs,
             "gross_profit": gross_profit,
             "expense": expense,
             "operating_income": operating_income,
@@ -160,23 +198,63 @@ async def pipeline_by_stage(
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(get_current_user),
 ):
-    """Customer counts and quotation values bucketed by stage."""
+    """Customer counts + values bucketed by stage. A customer's effective
+    stage is the furthest of (their own customer.stage) and (the stage
+    implied by any of their projects) — so a customer whose project is in
+    'invoiced' shows up in the 'invoicing' bucket even if the CRM stage was
+    never manually moved past 'po'."""
+    from app.core.stage_playbook import (
+        PROJECT_TO_CUSTOMER_STAGE, stage_index,
+    )
+    from app.models.operation import Project
+
     customers = (await db.scalars(
         select(Customer).where(Customer.is_deleted.is_(False))
     )).all()
+
+    # Batch-load projects to derive the "furthest project stage" per customer.
+    project_rows = (await db.scalars(
+        select(Project).where(Project.customer_id.is_not(None))
+    )).all()
+    projects_by_cust: dict = defaultdict(list)
+    for p in project_rows:
+        projects_by_cust[p.customer_id].append(p)
+
     by_stage: dict[str, dict[str, Any]] = defaultdict(lambda: {"count": 0, "value": 0.0})
     for c in customers:
-        by_stage[c.stage]["count"] += 1
-        by_stage[c.stage]["value"] += float(c.lifetime_value or 0)
+        eff = c.stage
+        eff_i = stage_index(eff)
+        for p in projects_by_cust.get(c.id, []):
+            mapped = PROJECT_TO_CUSTOMER_STAGE.get(p.status)
+            if not mapped:
+                continue
+            mi = stage_index(mapped)
+            if mi > eff_i:
+                eff_i, eff = mi, mapped
+        by_stage[eff]["count"] += 1
+        by_stage[eff]["value"] += float(c.lifetime_value or 0)
+        # In-flight project PO values count as real pipeline value.
+        for p in projects_by_cust.get(c.id, []):
+            if p.status not in ("paid", "closed"):
+                by_stage[eff]["value"] += float(p.po_value or 0)
 
-    # Add quotation values by stage of their customer
-    rows = (await db.execute(
+    # Add open-quotation values by stage of their customer's *effective* stage.
+    q_rows = (await db.execute(
         select(Quotation, Customer)
         .join(Customer, Quotation.customer_id == Customer.id)
         .where(Quotation.status.in_(["draft", "pending_approval", "approved", "sent"]))
     )).all()
-    for q, c in rows:
-        by_stage[c.stage]["value"] += float(q.total or 0)
+    for q, c in q_rows:
+        eff = c.stage
+        eff_i = stage_index(eff)
+        for p in projects_by_cust.get(c.id, []):
+            mapped = PROJECT_TO_CUSTOMER_STAGE.get(p.status)
+            if not mapped:
+                continue
+            mi = stage_index(mapped)
+            if mi > eff_i:
+                eff_i, eff = mi, mapped
+        by_stage[eff]["value"] += float(q.total or 0)
 
     STAGES = [
         "lead", "presentation", "engineering", "quotation", "negotiation",

@@ -119,6 +119,17 @@ async def get_customer(customer_id: UUID,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if not can_view_customer(user, obj.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+
+    # Lazy sync: bump the customer's deal-pipeline stage forward to whatever
+    # their projects imply (post-PO stages mirror the project's status). Keeps
+    # the pipeline card on the customer page from going stale as work happens.
+    from app.core.stage_playbook import sync_customer_stage_from_projects
+    from app.models.operation import Project
+    proj_statuses = (await db.scalars(
+        select(Project.status).where(Project.customer_id == customer_id)
+    )).all()
+    if sync_customer_stage_from_projects(obj, list(proj_statuses)):
+        await db.flush()
     return obj
 
 
