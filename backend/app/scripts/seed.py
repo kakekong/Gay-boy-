@@ -242,6 +242,22 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS verified_by UUID',
     'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ',
 
+    # One-off: for projects whose every delivery order is already delivered but
+    # the project's own status is still upstream (someone marked DOs delivered
+    # before the mark-delivered → project-advance wire was in place), bump the
+    # project to 'delivered'. Idempotent: never regresses (paid/closed unchanged).
+    """
+    UPDATE projects p
+       SET status = 'delivered'
+     WHERE p.status IN ('new', 'drawing', 'drawing_approved', 'purchasing',
+                         'production', 'qc', 'packaging', 'invoiced')
+       AND EXISTS (SELECT 1 FROM delivery_orders do1 WHERE do1.project_id = p.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM delivery_orders do2
+          WHERE do2.project_id = p.id AND do2.status <> 'delivered'
+       )
+    """,
+
     # Backfill: link projects to the price request behind their quotation where
     # the direct link was never recorded (projects created before Phase C).
     """

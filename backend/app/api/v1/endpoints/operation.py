@@ -1297,6 +1297,22 @@ async def mark_delivered(do_id: UUID,
         d.verified_at = datetime.now(UTC)
     d.status = "delivered"
     d.delivered_at = datetime.now(UTC)
+    await db.flush()
+
+    # When every delivery order on the project is delivered, nudge the project
+    # forward one stage (advance is now one-step-at-a-time, so a project at
+    # 'invoiced' → 'delivered', while 'qc' or earlier would walk one step only).
+    if d.project_id:
+        remaining = await db.scalar(
+            select(func.count(DeliveryOrder.id)).where(
+                DeliveryOrder.project_id == d.project_id,
+                DeliveryOrder.status != "delivered",
+            )
+        ) or 0
+        if remaining == 0:
+            project = await db.get(Project, d.project_id)
+            if project:
+                advance_project_status(project, "delivered")
     return {"ok": True, "delivered_at": d.delivered_at,
             "verified_at": d.verified_at}
 

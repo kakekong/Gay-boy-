@@ -77,12 +77,17 @@ PROJECT_STATUS_ORDER: list[str] = [
 
 
 def advance_project_status(project: "Project", to_status: str) -> bool:
-    """Move `project` forward to `to_status` only if that's later in the
-    pipeline than where it already is. Returns True when the status changed.
+    """Move `project` forward by one stage toward `to_status`.
 
-    Never regresses (a project already in production won't drop back to
-    drawing_approved), and a status outside PROJECT_STATUS_ORDER is left
-    untouched — so this is always safe to call on a real event.
+    One-stage-at-a-time rule: an event can only advance the project by a
+    single step. If the target is further ahead, we only walk the project
+    to the immediate next stage — the next real event bumps the one after,
+    and so on. This keeps the pipeline strictly sequential and stops any
+    single action from jumping multiple stages.
+
+    Never regresses (already-past-target is a no-op). A status outside
+    PROJECT_STATUS_ORDER is left untouched — safe on unknown / legacy
+    values.
     """
     order = PROJECT_STATUS_ORDER
     try:
@@ -90,10 +95,12 @@ def advance_project_status(project: "Project", to_status: str) -> bool:
         nxt = order.index(to_status)
     except ValueError:
         return False
-    if nxt > cur:
-        project.status = to_status
-        return True
-    return False
+    if nxt <= cur:
+        return False
+    # Cap advance to one step so the pipeline walks stage-by-stage.
+    target = order[cur + 1] if nxt > cur + 1 else to_status
+    project.status = target
+    return True
 
 
 class WorkOrder(Base, UUIDPK, TimestampMixin):
