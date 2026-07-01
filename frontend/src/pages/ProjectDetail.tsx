@@ -243,6 +243,24 @@ export default function ProjectDetailPage() {
     mutationFn: () => api.post(`/operation/projects/${id}/customer-received`),
     onSuccess: refresh, onError: onErr,
   });
+  const submitClaim = useMutation({
+    mutationFn: (body: {
+      invoiceId: string; amount: number; paidAt?: string;
+      method?: string; reference?: string; notes?: string;
+    }) => api.post("/payments/claims", {
+      invoice_id: body.invoiceId,
+      amount: body.amount,
+      paid_at: body.paidAt || null,
+      method: body.method || null,
+      reference: body.reference || null,
+      notes: body.notes || null,
+    }),
+    onSuccess: refresh, onError: onErr,
+  });
+  // Per-invoice payment-claim form state.
+  const [payForm, setPayForm] = useState<Record<string, {
+    amount?: string; paidAt?: string; method?: string; reference?: string; notes?: string;
+  }>>({});
   const [qcFindings, setQcFindings] = useState("");
   const [invAmount, setInvAmount] = useState("");
   const [invFile, setInvFile] = useState<File | null>(null);
@@ -1009,6 +1027,105 @@ export default function ProjectDetailPage() {
                       })}>
                       <CheckCircle size={14} /> Approve (finance)
                     </button>
+                  </div>
+                )}
+
+                {/* Payments — record what the customer paid and see how much
+                    is left. When cumulative verified ≥ invoice total, finance
+                    verify auto-advances the project delivered → paid → closed. */}
+                {iv.status === "approved" && (isAdmin || isFinance) && (
+                  <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-[11px] uppercase tracking-wider muted">
+                        Payments · {iv.claims?.length ?? 0} claim(s)
+                      </div>
+                      {showMoney && iv.total != null && (
+                        <div className="text-[11px] muted tabular-nums">
+                          Paid Rp {new Intl.NumberFormat("id-ID").format(Math.round(iv.paid_amount ?? 0))}
+                          {" / "}
+                          <span className={clsx(
+                            (iv.outstanding ?? 0) === 0 ? "text-emerald-700 font-medium" : ""
+                          )}>
+                            {(iv.outstanding ?? 0) === 0
+                              ? "fully paid"
+                              : "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0)) + " left"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {(iv.claims ?? []).length > 0 && (
+                      <ul className="text-[11px] space-y-1">
+                        {iv.claims.map((c: any) => (
+                          <li key={c.id} className="flex items-center gap-2 flex-wrap">
+                            <span className={clsx("chip text-[10px]",
+                              c.status === "verified" ? "bg-emerald-50 text-emerald-700"
+                              : c.status === "rejected" ? "bg-red-50 text-red-700"
+                              : "bg-amber-50 text-amber-700")}>{c.status}</span>
+                            <span className="tabular-nums font-medium">
+                              Rp {new Intl.NumberFormat("id-ID").format(Math.round(c.amount || 0))}
+                            </span>
+                            {c.method && <span className="muted">· {c.method}</span>}
+                            {c.reference && <span className="muted">· ref {c.reference}</span>}
+                            {c.paid_at && <span className="muted">· {new Date(c.paid_at).toLocaleDateString()}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* Record a claim — admin can enter what the customer told
+                        them (transfer amount, ref, etc.) since the customer
+                        portal isn't the only way in. Finance then verifies it. */}
+                    {(iv.outstanding ?? 0) > 0 && (
+                      <details>
+                        <summary className="cursor-pointer text-brand-700 hover:underline text-[11px]">
+                          Record customer payment
+                        </summary>
+                        {(() => {
+                          const pf = payForm[iv.id] ?? {};
+                          const today = new Date().toISOString().slice(0, 10);
+                          return (
+                            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input className="input" type="number"
+                                placeholder={`Amount (outstanding: Rp ${new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0))})`}
+                                value={pf.amount ?? ""}
+                                onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, amount: e.target.value } }))} />
+                              <input className="input" type="date"
+                                value={pf.paidAt ?? today}
+                                onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, paidAt: e.target.value } }))} />
+                              <select className="input" value={pf.method ?? "bank_transfer"}
+                                onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, method: e.target.value } }))}>
+                                <option value="bank_transfer">Bank transfer</option>
+                                <option value="cash">Cash</option>
+                                <option value="cheque">Cheque</option>
+                                <option value="other">Other</option>
+                              </select>
+                              <input className="input"
+                                placeholder="Reference (transfer no., cheque no., etc.)"
+                                value={pf.reference ?? ""}
+                                onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, reference: e.target.value } }))} />
+                              <input className="input sm:col-span-2"
+                                placeholder="Notes (optional)"
+                                value={pf.notes ?? ""}
+                                onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, notes: e.target.value } }))} />
+                              <button className="btn-primary sm:col-span-2"
+                                disabled={!pf.amount || Number(pf.amount) <= 0 || submitClaim.isPending}
+                                onClick={() => submitClaim.mutate(
+                                  {
+                                    invoiceId: iv.id,
+                                    amount: Number(pf.amount),
+                                    paidAt: pf.paidAt || today,
+                                    method: pf.method || "bank_transfer",
+                                    reference: pf.reference,
+                                    notes: pf.notes,
+                                  },
+                                  { onSuccess: () => setPayForm((m) => ({ ...m, [iv.id]: {} })) },
+                                )}>
+                                Submit payment claim → finance will verify
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </details>
+                    )}
                   </div>
                 )}
               </div>

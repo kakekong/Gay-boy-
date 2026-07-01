@@ -172,8 +172,13 @@ async def project_full(project_id: UUID,
     # Batch-load invoice + delivery-order attachments so we can surface View
     # links on the project page without N+1 lookups. Must run AFTER invoices +
     # deliveries are loaded.
+    from app.models.finance import Payment, PaymentClaim
     inv_files: dict[UUID, list[dict]] = {}
     do_files: dict[UUID, list[dict]] = {}
+    # Payment claims + verified payments for each invoice — lets admin see
+    # progress toward 'paid' on the project page and record new ones inline.
+    claims_by_inv: dict[UUID, list[dict]] = {}
+    paid_by_inv: dict[UUID, float] = {}
     inv_ids = [i.id for i in invoices]
     do_ids = [d.id for d in deliveries]
     if inv_ids:
@@ -199,6 +204,24 @@ async def project_full(project_id: UUID,
                 "id": str(a.id), "filename": a.filename,
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
+
+    if inv_ids:
+        for c in (await db.scalars(
+            select(PaymentClaim).where(PaymentClaim.invoice_id.in_(inv_ids))
+            .order_by(PaymentClaim.created_at.asc())
+        )).all():
+            claims_by_inv.setdefault(c.invoice_id, []).append({
+                "id": str(c.id), "amount": float(c.amount or 0),
+                "paid_at": c.paid_at, "method": c.method,
+                "reference": c.reference, "notes": c.notes,
+                "status": c.status,
+            })
+        for row in (await db.execute(
+            select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+            .where(Payment.invoice_id.in_(inv_ids))
+            .group_by(Payment.invoice_id)
+        )).all():
+            paid_by_inv[row[0]] = float(row[1] or 0)
     purchase_requests = (await db.scalars(
         select(PurchaseRequest).where(PurchaseRequest.project_id == project_id)
         .order_by(PurchaseRequest.created_at.desc())
@@ -274,6 +297,12 @@ async def project_full(project_id: UUID,
                 "approved_at": inv.approved_at,
                 "notes": inv.notes,
                 "files": inv_files.get(inv.id, []),
+                "paid_amount": paid_by_inv.get(inv.id, 0.0) if show_money else None,
+                "outstanding": (
+                    max(0.0, float(inv.total or 0) - paid_by_inv.get(inv.id, 0.0))
+                    if show_money else None
+                ),
+                "claims": claims_by_inv.get(inv.id, []),
             } for inv in invoices
         ],
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
