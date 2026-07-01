@@ -172,7 +172,8 @@ async def project_full(project_id: UUID,
     # Batch-load invoice + delivery-order attachments so we can surface View
     # links on the project page without N+1 lookups. Must run AFTER invoices +
     # deliveries are loaded.
-    from app.models.finance import Payment, PaymentClaim
+    from app.models.finance import Payment
+    from app.models.payment_claim import PaymentClaim
     inv_files: dict[UUID, list[dict]] = {}
     do_files: dict[UUID, list[dict]] = {}
     # Payment claims + verified payments for each invoice — lets admin see
