@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Briefcase } from "lucide-react";
+import { Briefcase, User as UserIcon } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { UserLink } from "@/components/UserLink";
 import { useAuthStore } from "@/store/auth";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -48,7 +49,7 @@ export default function ProjectsPage() {
               <th className="th">Status</th>
               {showMoney && <th className="th text-right">PO Value</th>}
               <th className="th">Customer</th>
-              <th className="th">Target delivery</th>
+              <th className="th">Sales rep</th>
             </tr>
           </thead>
           <tbody>
@@ -87,7 +88,14 @@ export default function ProjectsPage() {
                     </Link>
                   ) : <span className="muted">—</span>}
                 </td>
-                <td className="td muted">{p.target_delivery ?? "—"}</td>
+                <td className="td">
+                  {p.sales_pic_name ? (
+                    <span className="inline-flex items-center gap-1 text-sm">
+                      <UserIcon size={11} className="text-ink-400" />
+                      <UserLink id={p.sales_pic_id} name={p.sales_pic_name} />
+                    </span>
+                  ) : <span className="muted">—</span>}
+                </td>
               </tr>
             ))}
             {!q.data?.length && (

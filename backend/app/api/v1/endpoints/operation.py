@@ -60,27 +60,42 @@ async def list_projects(db: AsyncSession = Depends(get_db),
             Customer.sales_pic_id == user.id
         )
     rows = (await db.scalars(stmt)).all()
-    # Batch-load customer names so the Projects list can show "Customer"
-    # column without an N+1 fetch per row.
+    # Batch-load customer records so the list can show the customer name and
+    # the customer's sales rep in a single trip (the previous version had to
+    # N+1 to render the sales-rep column and just skipped it).
     cust_ids = {p.customer_id for p in rows if p.customer_id}
-    customer_names: dict = {}
+    customers_by_id: dict = {}
     if cust_ids:
         for c in (await db.scalars(
             select(Customer).where(Customer.id.in_(cust_ids))
         )).all():
-            customer_names[c.id] = c.company_name
+            customers_by_id[c.id] = c
+    sales_ids = {
+        c.sales_pic_id for c in customers_by_id.values() if c.sales_pic_id
+    }
+    sales_by_id: dict = {}
+    if sales_ids:
+        for u in (await db.scalars(
+            select(User).where(User.id.in_(sales_ids))
+        )).all():
+            sales_by_id[u.id] = u.full_name
     show_money = _can_see_project_money(user)
-    return [
-        {
+    out = []
+    for p in rows:
+        cust = customers_by_id.get(p.customer_id)
+        rep_id = cust.sales_pic_id if cust else None
+        out.append({
             "id": str(p.id), "code": p.code, "customer_id": str(p.customer_id),
-            "customer_name": customer_names.get(p.customer_id),
+            "customer_name": cust.company_name if cust else None,
+            "sales_pic_id": str(rep_id) if rep_id else None,
+            "sales_pic_name": sales_by_id.get(rep_id) if rep_id else None,
             "status": p.status,
             "po_value": float(p.po_value) if show_money else None,
             "target_delivery": p.target_delivery, "actual_delivery": p.actual_delivery,
             "margin_estimate": float(p.margin_estimate) if show_money else None,
             "margin_actual": float(p.margin_actual) if show_money else None,
-        } for p in rows
-    ]
+        })
+    return out
 
 
 @router.get("/projects/{project_id}")
@@ -230,6 +245,40 @@ async def project_full(project_id: UUID,
         select(CustomerPO).where(CustomerPO.project_id == project_id)
         .order_by(CustomerPO.created_at.desc()).limit(1)
     )).first()
+
+    # ── "People involved" — collect every user who did something on this
+    # project (sales rep, drawing uploader/decider, DO verifier, invoice
+    # issuer/approver, DP finance-approver, DP sales-confirm actor, PO
+    # decider, project creator) into a role-grouped dict so the detail
+    # page can render one 'People involved' card without N+1 lookups.
+    people_ids: set[UUID] = set()
+    def _add(uid):
+        if uid:
+            people_ids.add(uid)
+    # Direct project authorship
+    _add(p.created_by)
+    _add(p.updated_by)
+    # Drawings + deliveries — already collected above into drawing_user_ids
+    people_ids |= drawing_user_ids
+    # Invoices
+    for iv in invoices:
+        _add(iv.issued_by)
+        _add(iv.approved_by)
+    # Customer PO (regular + DP audit fields)
+    if customer_po:
+        _add(customer_po.created_by)
+        _add(customer_po.decided_by)
+        _add(customer_po.dp_finance_approved_by)
+        _add(customer_po.dp_sales_confirmed_by)
+    # Sales rep (customer's account owner) — added later after we resolve it
+    people_names: dict[UUID, str] = {}
+    people_roles: dict[UUID, str] = {}
+    if people_ids:
+        for u in (await db.scalars(
+            select(User).where(User.id.in_(people_ids))
+        )).all():
+            people_names[u.id] = u.full_name
+            people_roles[u.id] = u.role
     purchase_requests = (await db.scalars(
         select(PurchaseRequest).where(PurchaseRequest.project_id == project_id)
         .order_by(PurchaseRequest.created_at.desc())
@@ -275,6 +324,57 @@ async def project_full(project_id: UUID,
         rep = await db.get(User, customer.sales_pic_id)
         if rep:
             sales_rep = {"id": str(rep.id), "name": rep.full_name}
+            people_names.setdefault(rep.id, rep.full_name)
+            people_roles.setdefault(rep.id, rep.role)
+
+    # Assemble the flat 'people involved' list with a short 'contribution'
+    # label per role so the UI can render "Kakekong · Director · approved
+    # the PO" without another round-trip.
+    people_out: list[dict] = []
+    def _add_person(uid, contribution: str):
+        if not uid or uid not in people_names:
+            return
+        people_out.append({
+            "id": str(uid),
+            "name": people_names.get(uid),
+            "role": people_roles.get(uid),
+            "contribution": contribution,
+        })
+    if sales_rep:
+        _add_person(customer.sales_pic_id, "Sales rep on the account")
+    _add_person(p.created_by, "Created the project record")
+    if customer_po:
+        _add_person(customer_po.created_by, f"Filed customer PO {customer_po.number}")
+        if customer_po.decided_by and customer_po.status == "approved":
+            _add_person(customer_po.decided_by,
+                        f"Approved customer PO {customer_po.number}")
+        if customer_po.dp_finance_approved_by:
+            _add_person(customer_po.dp_finance_approved_by,
+                        f"Finance-approved DP on PO {customer_po.number}")
+        if customer_po.dp_sales_confirmed_by:
+            _add_person(customer_po.dp_sales_confirmed_by,
+                        f"Confirmed DP receipt on PO {customer_po.number}")
+    # Drawings — dedupe uploader + decider by user
+    for d in drawings:
+        if d.uploaded_by:
+            _add_person(d.uploaded_by,
+                        f"Uploaded drawing revision {d.revision}")
+        if d.decided_by:
+            _add_person(d.decided_by,
+                        f"Decided on drawing revision {d.revision}")
+    # Deliveries
+    for do in deliveries:
+        if do.verified_by:
+            _add_person(do.verified_by,
+                        f"Verified delivery {do.number}")
+    # Invoices
+    for iv in invoices:
+        if iv.issued_by:
+            kind = iv.type if iv.type and iv.type != "single" else "invoice"
+            _add_person(iv.issued_by, f"Issued {kind} {iv.number}")
+        if iv.approved_by and iv.status == "approved":
+            _add_person(iv.approved_by,
+                        f"Approved invoice {iv.number} (FP {iv.faktur_pajak_no or '—'})")
     return {
         "project": {
             "id": str(p.id), "code": p.code, "status": p.status,
@@ -316,6 +416,7 @@ async def project_full(project_id: UUID,
         ],
         "sales_pic_id": sales_rep["id"] if sales_rep else None,
         "sales_pic_name": sales_rep["name"] if sales_rep else None,
+        "people": people_out,
         "customer": {
             "id": str(customer.id), "company_name": customer.company_name,
             "industry": customer.industry, "stage": customer.stage,
