@@ -263,6 +263,15 @@ export default function ProjectDetailPage() {
     },
     onSuccess: refresh, onError: onErr,
   });
+  const deleteInvoice = useMutation({
+    // Finance-only escape hatch — used for duplicates and re-tests. The
+    // backend refuses if the invoice has any verified payments (would
+    // orphan a ledger entry). Pending claims + file rows are cleaned up
+    // alongside the invoice.
+    mutationFn: (invoiceId: string) =>
+      api.delete(`/finance/invoices/${invoiceId}`),
+    onSuccess: refresh, onError: onErr,
+  });
   const customerReceived = useMutation({
     mutationFn: () => api.post(`/operation/projects/${id}/customer-received`),
     onSuccess: refresh, onError: onErr,
@@ -1060,11 +1069,33 @@ export default function ProjectDetailPage() {
                       FP: {iv.faktur_pajak_no || "—"} ({iv.faktur_pajak_status})
                     </div>
                   </div>
-                  <span className={clsx("chip text-[11px]",
-                    iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
-                    : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
-                    : iv.status === "rejected" ? "bg-red-50 text-red-700"
-                    : "bg-ink-50 text-ink-600")}>{iv.status}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={clsx("chip text-[11px]",
+                      iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                      : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
+                      : iv.status === "rejected" ? "bg-red-50 text-red-700"
+                      : "bg-ink-50 text-ink-600")}>{iv.status}</span>
+                    {canFinanceApprove && (iv.paid_amount ?? 0) === 0 && (
+                      <button
+                        type="button"
+                        className="btn-ghost text-red-600 text-[11px] px-2 py-0.5"
+                        title="Delete this invoice + its faktur pajak record. Blocked if a payment has been verified."
+                        disabled={deleteInvoice.isPending}
+                        onClick={() => {
+                          const label = iv.faktur_pajak_no
+                            ? `${iv.number} (FP ${iv.faktur_pajak_no})`
+                            : iv.number;
+                          if (window.confirm(
+                            `Delete ${label}? This also drops any pending payment claims and file rows tied to it. Verified payments block deletion. This can't be undone.`,
+                          )) {
+                            deleteInvoice.mutate(iv.id);
+                          }
+                        }}
+                      >
+                        <Trash2 size={12} /> Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {iv.status === "rejected" && iv.notes && (
                   <div className="rounded-lg border border-red-200 bg-red-50/70 px-3 py-2 text-[11px] text-red-800 whitespace-pre-wrap">

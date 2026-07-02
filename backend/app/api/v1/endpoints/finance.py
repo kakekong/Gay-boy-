@@ -168,6 +168,74 @@ async def reject_invoice(
     return {"ok": True, "status": inv.status, "reason": reason}
 
 
+@router.delete("/invoices/{invoice_id}", status_code=204)
+async def delete_invoice(
+    invoice_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete an invoice + its faktur-pajak record entirely.
+
+    Finance's escape hatch for duplicates and test data — the button lives
+    on the project page. Blocked when the invoice already has verified
+    payments (would corrupt the ledger). Attachments and pending payment
+    claims tied to the invoice are cleaned up alongside it.
+    """
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only finance or the director can delete an invoice.",
+        )
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+
+    # Guard rail: refuse if there's any actual verified payment on it —
+    # otherwise deleting the invoice orphans a ledger entry.
+    paid = await db.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id == invoice_id)
+    ) or 0
+    if float(paid) > 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This invoice already has verified payments — reverse the "
+            "payment first (or reject it) before deleting the invoice, "
+            "otherwise the ledger will be left unbalanced.",
+        )
+
+    # Remove pending / rejected payment claims — cascading through DB would
+    # miss them because PaymentClaim doesn't cascade-delete on invoice.
+    from app.models.attachment import Attachment
+    from app.models.payment_claim import PaymentClaim
+    for c in (await db.scalars(
+        select(PaymentClaim).where(PaymentClaim.invoice_id == invoice_id)
+    )).all():
+        await db.delete(c)
+
+    # Drop the file rows too. The blobs on disk stay behind; delete via the
+    # /attachments endpoint if the physical files need cleaning as well.
+    for a in (await db.scalars(
+        select(Attachment).where(
+            Attachment.owner_type == "invoice",
+            Attachment.owner_id == invoice_id,
+        )
+    )).all():
+        await db.delete(a)
+
+    await db.delete(inv)
+    await db.flush()
+    from app.core.audit import record as audit_record
+    await audit_record(
+        db, actor=user, action="delete", entity="invoice",
+        entity_id=invoice_id,
+        before={"number": inv.number, "status": inv.status,
+                "faktur_pajak_no": inv.faktur_pajak_no,
+                "total": float(inv.total or 0)},
+    )
+    return None
+
+
 @router.get("/ar/aging")
 async def ar_aging(db: AsyncSession = Depends(get_db),
                    _user: User = Depends(get_current_user)):

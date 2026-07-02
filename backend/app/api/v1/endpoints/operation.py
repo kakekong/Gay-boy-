@@ -296,6 +296,7 @@ async def project_full(project_id: UUID,
         "invoices": [
             {
                 "id": str(inv.id), "number": inv.number, "status": inv.status,
+                "type": inv.type, "termin_index": inv.termin_index,
                 "issue_date": inv.issue_date, "due_date": inv.due_date,
                 "amount": float(inv.amount or 0) if show_money else None,
                 "tax_amount": float(inv.tax_amount or 0) if show_money else None,
@@ -359,17 +360,6 @@ async def project_full(project_id: UUID,
                 "verified_by": str(do.verified_by) if do.verified_by else None,
                 "verified_by_name": deciders.get(do.verified_by) if do.verified_by else None,
             } for do in deliveries
-        ],
-        "invoices": [
-            {
-                "id": str(i.id), "number": i.number, "type": i.type,
-                "termin_index": i.termin_index, "issue_date": i.issue_date,
-                "due_date": i.due_date,
-                "amount": float(i.amount or 0) if show_money else None,
-                "tax_amount": float(i.tax_amount or 0) if show_money else None,
-                "total": float(i.total or 0) if show_money else None,
-                "status": i.status,
-            } for i in invoices
         ],
         "purchase_requests": [
             {
