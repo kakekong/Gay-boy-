@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Wrench, ChevronRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 
 interface StageMeta {
   key: string;
@@ -27,6 +28,11 @@ interface WO {
 }
 
 export default function OperationPage() {
+  const me = useAuthStore((s) => s.user);
+  // Sales gets a stripped-down view — the ops board is production's
+  // territory, sales only needs the "is my customer's order moving?"
+  // signal, not the internal work-order codes or per-stage detail.
+  const isSales = me?.role === "sales";
   const q = useQuery({
     queryKey: ["wo-open-all"],
     queryFn: () =>
@@ -47,8 +53,9 @@ export default function OperationPage() {
           <Wrench size={22} className="text-brand-600" /> Operation board
         </h1>
         <p className="text-sm muted">
-          Work orders move left → right. Click a stage to open its full
-          list, where you can mark items done or advance them along the pipeline.
+          {isSales
+            ? "Read-only view of where your customers' orders are in production. Click a stage to see the customer list."
+            : "Work orders move left → right. Click a stage to open its full list, where you can mark items done or advance them along the pipeline."}
         </p>
       </div>
 
@@ -88,11 +95,19 @@ export default function OperationPage() {
                       key={w.id}
                       className="rounded-lg border border-ink-100 bg-white px-3 py-2 text-xs hover:border-brand-200"
                     >
-                      <div className="font-mono font-medium truncate">{w.code}</div>
-                      {(w.customer_name || w.project_code) && (
-                        <div className="muted truncate">
-                          {w.customer_name ?? w.project_code}
+                      {isSales ? (
+                        <div className="font-medium truncate">
+                          {w.customer_name ?? w.project_code ?? "—"}
                         </div>
+                      ) : (
+                        <>
+                          <div className="font-mono font-medium truncate">{w.code}</div>
+                          {(w.customer_name || w.project_code) && (
+                            <div className="muted truncate">
+                              {w.customer_name ?? w.project_code}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   ))

@@ -3,10 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Wrench, CheckCircle2, Loader2, AlertCircle, Briefcase,
-  ChevronRight, ArrowRight,
+  ArrowRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useAuthStore } from "@/store/auth";
 
 const STAGES: Record<string, {
   label: string; tone: string; description: string; nextStage: string | null;
@@ -64,6 +65,10 @@ export default function OperationStagePage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const meta = STAGES[stage ?? ""];
+  const me = useAuthStore((s) => s.user);
+  // Sales sees the stage list but not the internal WO code, notes,
+  // or advance/complete controls — those belong to production.
+  const isSales = me?.role === "sales";
 
   const [tab, setTab] = useState<"open" | "done">("open");
 
@@ -178,20 +183,20 @@ export default function OperationStagePage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Code</th>
+                {!isSales && <th className="th">Code</th>}
                 <th className="th">Project</th>
                 <th className="th">Customer</th>
                 <th className="th">Target delivery</th>
-                <th className="th">Notes</th>
+                {!isSales && <th className="th">Notes</th>}
                 <th className="th">Created</th>
-                {tab === "open" && <th className="th text-right">Actions</th>}
+                {tab === "open" && !isSales && <th className="th text-right">Actions</th>}
                 {tab === "done" && <th className="th">Completed</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((w) => (
                 <tr key={w.id} className="border-t border-ink-100 tr-hover">
-                  <td className="td font-mono text-xs">{w.code}</td>
+                  {!isSales && <td className="td font-mono text-xs">{w.code}</td>}
                   <td className="td">
                     {w.project_id ? (
                       <Link
@@ -211,11 +216,13 @@ export default function OperationStagePage() {
                     ) : "—"}
                   </td>
                   <td className="td muted">{w.project_target_delivery ?? "—"}</td>
-                  <td className="td text-xs">{w.notes ?? <span className="muted">—</span>}</td>
+                  {!isSales && (
+                    <td className="td text-xs">{w.notes ?? <span className="muted">—</span>}</td>
+                  )}
                   <td className="td muted text-xs">
                     {w.created_at ? new Date(w.created_at).toLocaleDateString() : "—"}
                   </td>
-                  {tab === "open" && (
+                  {tab === "open" && !isSales && (
                     <td className="td">
                       <div className="flex gap-1 justify-end flex-wrap">
                         {meta.nextStage && (
