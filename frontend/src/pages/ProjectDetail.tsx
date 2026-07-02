@@ -34,6 +34,19 @@ const PIPELINE_STAGES = [
 ];
 
 const WO_STAGES = ["receiving", "warehousing", "qc", "packaging", "delivery"];
+
+// Mirror of the backend's _WO_STAGE_MIN_PROJECT_STATUS. The WO board can't
+// get ahead of the project: a 'packaging' WO can only be filed once the
+// project itself has reached qc, etc. Keep this in lockstep with the
+// server-side check in operation.py so the UI never offers a stage the
+// backend will reject.
+const WO_STAGE_MIN_PROJECT_STATUS: Record<string, string> = {
+  receiving:   "production",
+  warehousing: "production",
+  qc:          "production",   // creating a QC WO bumps project 'production' → 'qc'
+  packaging:   "qc",           // creating a packaging WO bumps 'qc' → 'packaging'
+  delivery:    "packaging",    // delivery WO ships out after packaging
+};
 // Short suffixes used to auto-generate the WO code per stage, e.g.
 // WO-PRJ-2026-0006-PKG for a packaging work order.
 const WO_STAGE_SUFFIX: Record<string, string> = {
@@ -68,6 +81,9 @@ export default function ProjectDetailPage() {
   const canUploadDrawing = ["purchasing", "sales", "manager", "director", "admin"].includes(role);
   const canApproveDrawing = ["director", "manager", "admin"].includes(role);
   const canViewDrawing = canUploadDrawing || canApproveDrawing;
+  // Only purchasing / admin / director may file or move work orders — the
+  // backend enforces the same set. Sales/finance/hr never touch WOs.
+  const canManageWO = ["purchasing", "admin", "director"].includes(role);
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -122,9 +138,10 @@ export default function ProjectDetailPage() {
     }
   };
   const addWO = useMutation({
-    mutationFn: () => api.post(`/operation/projects/${id}/work-orders`, {
-      code: newWoCode, stage: newWoStage,
-    }),
+    mutationFn: (vars: { stage: string }) =>
+      api.post(`/operation/projects/${id}/work-orders`, {
+        code: newWoCode, stage: vars.stage,
+      }),
     // Don't blank the code after submit — leave the auto-default visible
     // so the user can switch stage and submit again without re-typing.
     onSuccess: () => { refresh(); },
@@ -555,36 +572,76 @@ export default function ProjectDetailPage() {
             {wos.length} step{wos.length === 1 ? "" : "s"}
           </div>
         </div>
-        <div className="p-3 flex flex-wrap items-end gap-2 border-b border-ink-100 bg-ink-50/40">
-          <div className="flex-1 min-w-[180px]">
-            <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Code *</span>
-            <input className="input" value={newWoCode}
-              onChange={(e) => setNewWoCode(e.target.value)}
-              placeholder="e.g. WO-PRJ-2026-0042-02" />
-          </div>
-          <div>
-            <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Stage</span>
-            <select className="input" value={newWoStage}
-              onChange={(e) => setNewWoStage(e.target.value)}>
-              {WO_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          {/* Only disable on in-flight submits. Clicking without a code
-              now flashes an inline hint instead of looking broken. */}
-          <button className="btn-primary"
-            disabled={addWO.isPending}
-            onClick={() => {
-              if (!newWoCode.trim()) {
-                setFlashErr("Work-order code is required (the default is auto-generated from project + stage).");
-                return;
-              }
-              setFlashErr(null);
-              addWO.mutate();
-            }}>
-            {addWO.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Add work order
-          </button>
-        </div>
+        {(() => {
+          // Only stages the project has legitimately reached can be filed.
+          // Mirrors the backend guard exactly so the UI never offers a stage
+          // the server will 409 on.
+          const curIdx = PIPELINE_STAGES.indexOf(p.status);
+          const allowedStages = WO_STAGES.filter((s) => {
+            const min = WO_STAGE_MIN_PROJECT_STATUS[s];
+            return curIdx >= PIPELINE_STAGES.indexOf(min);
+          });
+          const canFileAny = canManageWO && allowedStages.length > 0;
+          // If the currently-selected stage isn't allowed anymore, snap
+          // back to the first allowed one so the button submits a valid
+          // value rather than a stale one.
+          const effectiveStage = allowedStages.includes(newWoStage)
+            ? newWoStage
+            : (allowedStages[0] ?? newWoStage);
+          const blockedReason = !canManageWO
+            ? "Only purchasing, admin or director can file work orders."
+            : allowedStages.length === 0
+              ? `The project is still at '${p.status.replace(/_/g, " ")}'. Work orders will unlock once it reaches production — advance the earlier stages (drawing → drawing_approved → purchasing → production) first.`
+              : null;
+          return (
+            <div className="p-3 space-y-2 border-b border-ink-100 bg-ink-50/40">
+              {blockedReason && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  {blockedReason}
+                </div>
+              )}
+              <div className={clsx(
+                "flex flex-wrap items-end gap-2",
+                !canFileAny && "opacity-60 pointer-events-none",
+              )}>
+                <div className="flex-1 min-w-[180px]">
+                  <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Code *</span>
+                  <input className="input" value={newWoCode}
+                    disabled={!canFileAny}
+                    onChange={(e) => setNewWoCode(e.target.value)}
+                    placeholder="e.g. WO-PRJ-2026-0042-02" />
+                </div>
+                <div>
+                  <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Stage</span>
+                  <select
+                    className="input"
+                    value={effectiveStage}
+                    disabled={!canFileAny}
+                    onChange={(e) => setNewWoStage(e.target.value)}
+                  >
+                    {allowedStages.length === 0
+                      ? <option value="">— locked —</option>
+                      : allowedStages.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <button className="btn-primary"
+                  disabled={addWO.isPending || !canFileAny}
+                  onClick={() => {
+                    if (!newWoCode.trim()) {
+                      setFlashErr("Work-order code is required (the default is auto-generated from project + stage).");
+                      return;
+                    }
+                    setFlashErr(null);
+                    if (newWoStage !== effectiveStage) setNewWoStage(effectiveStage);
+                    addWO.mutate({ stage: effectiveStage });
+                  }}>
+                  {addWO.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Add work order
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         {flashErr && (
           <div className="mx-3 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             {flashErr}

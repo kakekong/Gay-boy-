@@ -1204,21 +1204,88 @@ class WorkOrderIn(BaseModel):
 # matching status (forward-only via advance_project_status).
 _WO_STAGE_TO_PROJECT_STATUS = {"qc": "qc", "packaging": "packaging"}
 
+_ALLOWED_WO_STAGES = {"receiving", "warehousing", "qc", "packaging", "delivery"}
+
+# Who may create / mutate work orders. Purchasing handles the material-side
+# stages, admin runs the ops board, director oversees. Sales/HR/finance don't
+# touch WOs — the endpoint used to let anyone with a session file one, which
+# is what let production stages be created out of step with the project.
+_WO_MUTATOR_ROLES = {Role.PURCHASING, Role.ADMIN, Role.DIRECTOR}
+
+# The minimum project stage required before a WO of the given kind can exist.
+# The rule enforced below is stricter — the WO can move the project by AT MOST
+# one status forward (via advance_project_status), so trying to file a
+# packaging WO on a project that's still at 'drawing' is rejected outright
+# rather than silently creating a mismatched record.
+_WO_STAGE_MIN_PROJECT_STATUS = {
+    "receiving":   "production",
+    "warehousing": "production",
+    "qc":          "production",   # creating the QC WO bumps project 'production' → 'qc'
+    "packaging":   "qc",           # creating the packaging WO bumps 'qc' → 'packaging'
+    "delivery":    "packaging",    # delivery WO ships out after packaging
+}
+
+
+def _project_stage_idx(status: str) -> int:
+    from app.models.operation import PROJECT_STATUS_ORDER as _order
+    try:
+        return _order.index(status)
+    except ValueError:
+        return -1
+
+
+def _assert_wo_allowed_for_project(p: "Project", stage: str) -> None:
+    """Raise if the WO's stage isn't consistent with the project's current
+    position on the pipeline. The rule is 'at most one project-stage ahead'
+    so the WO board can't get decoupled from the project status."""
+    stage = (stage or "").lower()
+    if stage not in _ALLOWED_WO_STAGES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown work-order stage '{stage}'. "
+            f"Use one of: {', '.join(sorted(_ALLOWED_WO_STAGES))}.",
+        )
+    min_required = _WO_STAGE_MIN_PROJECT_STATUS[stage]
+    cur_idx = _project_stage_idx(p.status)
+    min_idx = _project_stage_idx(min_required)
+    if cur_idx < 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Project status '{p.status}' isn't part of the operations pipeline.",
+        )
+    if cur_idx < min_idx:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Can't file a '{stage}' work order while the project is still "
+            f"at '{p.status}'. The project has to reach '{min_required}' "
+            "first — advance the previous stages (drawing → drawing_approved "
+            "→ purchasing → production …) before jumping ahead.",
+        )
+
 
 @router.post("/projects/{project_id}/work-orders", status_code=201)
 async def add_work_order(project_id: UUID, payload: WorkOrderIn,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
+                         user: User = Depends(get_current_user)):
+    if Role(user.role) not in _WO_MUTATOR_ROLES:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only purchasing, admin or director can file a work order.",
+        )
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    # Refuse the WO outright if the project's still in pre-production
+    # (drawing / drawing_approved / purchasing). Ops WOs only make sense
+    # once physical work is starting.
+    _assert_wo_allowed_for_project(p, payload.stage)
     w = WorkOrder(project_id=project_id, code=payload.code,
                   stage=payload.stage, notes=payload.notes)
     db.add(w)
-    # A work order means ops is actively running the project — advance to
-    # 'production'. A qc- or packaging-stage WO jumps straight to that status
-    # so the board reflects what's happening. Forward-only.
-    advance_project_status(p, "production")
+    # The WO is now legitimately at-or-just-past the project's stage, so
+    # advance the project by AT MOST one step — advance_project_status
+    # caps at cur+1 regardless. A qc WO on a production project bumps
+    # to qc; a packaging WO on a qc project bumps to packaging.
     bump = _WO_STAGE_TO_PROJECT_STATUS.get((payload.stage or "").lower())
     if bump:
         advance_project_status(p, bump)
@@ -1234,14 +1301,18 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
     w = await db.get(WorkOrder, wo_id)
     if not w:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    # Confirming a work order (marking it complete) is restricted to admin
-    # and director — it's a sign-off that the work actually happened, and
-    # downstream stages (packaging → invoiced …) trigger off it.
-    if completed and Role(user.role) not in {Role.ADMIN, Role.DIRECTOR}:
+    if Role(user.role) not in _WO_MUTATOR_ROLES:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only admin or the director can confirm a work order.",
+            "Only purchasing, admin or director can modify a work order.",
         )
+    # Advancing a WO's own stage has to obey the same 'one project-stage
+    # ahead at most' rule as creation — otherwise a WO can be dragged
+    # straight to 'delivery' regardless of where the project actually is.
+    if stage is not None and w.project_id:
+        p_for_check = await db.get(Project, w.project_id)
+        if p_for_check:
+            _assert_wo_allowed_for_project(p_for_check, stage)
     if stage is not None:  w.stage = stage
     if notes is not None:  w.notes = notes
     if completed and not w.completed_at:
@@ -1257,7 +1328,7 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
             if p:
                 advance_project_status(p, bump)
                 # Completing a QC work order also counts as "QC passed" so
-                # admin can issue the invoice — issue_invoice gates on this.
+                # finance can issue the invoice — issue_invoice gates on this.
                 if bump == "qc" and completed and not p.qc_passed_at:
                     p.qc_passed_at = datetime.now(UTC)
                     if not p.qc_decision:

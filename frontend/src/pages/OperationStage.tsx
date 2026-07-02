@@ -86,12 +86,19 @@ export default function OperationStagePage() {
       api.patch(`/operation/work-orders/${vars.id}`, null,
         { params: { stage: vars.nextStage } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["wo-stage", stage] }),
+    onError: (e: any) => alert(
+      e?.response?.data?.detail
+      ?? "Couldn't advance this work order — the project may not be at the required stage yet.",
+    ),
   });
 
   const complete = useMutation({
     mutationFn: (id: string) =>
       api.patch(`/operation/work-orders/${id}`, null, { params: { completed: true } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["wo-stage", stage] }),
+    onError: (e: any) => alert(
+      e?.response?.data?.detail ?? "Couldn't complete this work order.",
+    ),
   });
 
   if (!meta) {
