@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Receipt, Building2, FileText, Briefcase, Calendar,
-  Loader2, AlertCircle, Check, X,
+  Loader2, AlertCircle, Check, X, TrendingUp, Wallet, AlertTriangle,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -58,6 +58,23 @@ export default function CustomerPODetailPage() {
     queryKey: ["customer-po", id],
     queryFn: () => api.get(`/customer-pos/${id}`).then((r) => r.data as CustomerPO),
     enabled: !!id,
+  });
+
+  const quoteId = q.data?.quotation_id ?? null;
+  const custId  = q.data?.customer_id ?? null;
+
+  const quote = useQuery({
+    queryKey: ["quotation-recap", quoteId],
+    queryFn: () => api.get(`/quotations/${quoteId}`).then((r) => r.data as any),
+    enabled: !!quoteId,
+    retry: false,
+  });
+
+  const custSummary = useQuery({
+    queryKey: ["customer-summary-recap", custId],
+    queryFn: () => api.get(`/customers/${custId}/summary`).then((r) => r.data as any),
+    enabled: !!custId,
+    retry: false,
   });
 
   const decide = useMutation({
@@ -262,6 +279,22 @@ export default function CustomerPODetailPage() {
         )}
       </div>
 
+      {/* Quotation + customer recap — inline, so reviewers don't have to
+          bounce to other pages to sanity-check what this PO is against. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <QuotationRecap
+          quote={quote.data}
+          loading={quote.isLoading}
+          linkedId={p.quotation_id}
+        />
+        <CustomerRecap
+          summary={custSummary.data}
+          loading={custSummary.isLoading}
+          customerId={p.customer_id}
+          fallbackName={p.customer_name}
+        />
+      </div>
+
       {/* Line items */}
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100">
@@ -338,6 +371,190 @@ function Meta({
         {icon} {label}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
+    </div>
+  );
+}
+
+const idrCompact = (n: number) => {
+  const v = Math.abs(n || 0);
+  if (v >= 1e9) return `Rp ${(n / 1e9).toFixed(1)}B`;
+  if (v >= 1e6) return `Rp ${(n / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `Rp ${(n / 1e3).toFixed(0)}k`;
+  return `Rp ${Math.round(n || 0)}`;
+};
+
+function QuotationRecap({
+  quote, loading, linkedId,
+}: { quote: any; loading: boolean; linkedId: string | null }) {
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
+        <div className="font-semibold flex items-center gap-2">
+          <FileText size={14} className="text-brand-600" /> Quotation recap
+        </div>
+        {quote?.id && (
+          <Link
+            to={`/quotations/${quote.id}`}
+            className="text-xs text-brand-700 hover:underline"
+          >
+            Open quotation
+          </Link>
+        )}
+      </header>
+      <div className="p-5 text-sm">
+        {loading ? (
+          <div className="text-xs muted flex items-center gap-2">
+            <Loader2 size={12} className="animate-spin" /> Loading…
+          </div>
+        ) : !linkedId ? (
+          <div className="text-xs muted">This PO isn't linked to a quotation.</div>
+        ) : !quote ? (
+          <div className="text-xs muted">Couldn't load the linked quotation.</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Meta label="Number" icon={<FileText size={12} />}>
+                <span className="font-mono text-xs">{quote.number}</span>
+              </Meta>
+              <Meta label="Status">
+                <span className="chip capitalize bg-ink-100 text-ink-700">
+                  {String(quote.status ?? "—").replace(/_/g, " ")}
+                </span>
+              </Meta>
+              <Meta label="Variant">
+                <span className="capitalize">{quote.variant ?? "—"}</span>
+              </Meta>
+              <Meta label="Valid until" icon={<Calendar size={12} />}>
+                {quote.valid_until ?? "—"}
+              </Meta>
+              <Meta label="Discount">
+                {Number(quote.discount_pct ?? 0)}%
+              </Meta>
+              <Meta label="Quoted total">
+                <span className="tabular-nums font-medium">
+                  {idr(Number(quote.total ?? 0))}
+                </span>
+              </Meta>
+            </div>
+            {Array.isArray(quote.items) && quote.items.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-ink-100">
+                <div className="text-[10px] uppercase muted tracking-wider mb-1">
+                  Lines quoted ({quote.items.length})
+                </div>
+                <ul className="space-y-1 text-xs">
+                  {quote.items.slice(0, 6).map((it: any, i: number) => (
+                    <li key={i} className="flex justify-between gap-2">
+                      <span className="truncate">
+                        {i + 1}. {it.description ?? "—"}
+                      </span>
+                      <span className="tabular-nums muted shrink-0">
+                        {Number(it.qty ?? 0)} × {idr(Number(it.unit_price ?? 0))}
+                      </span>
+                    </li>
+                  ))}
+                  {quote.items.length > 6 && (
+                    <li className="muted text-[11px]">
+                      + {quote.items.length - 6} more line(s)…
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CustomerRecap({
+  summary, loading, customerId, fallbackName,
+}: {
+  summary: any;
+  loading: boolean;
+  customerId: string | null;
+  fallbackName: string | null;
+}) {
+  const c = summary?.customer;
+  const s = summary?.stats;
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
+        <div className="font-semibold flex items-center gap-2">
+          <Building2 size={14} className="text-brand-600" /> Customer recap
+        </div>
+        {customerId && (
+          <Link
+            to={`/customers/${customerId}`}
+            className="text-xs text-brand-700 hover:underline"
+          >
+            Open customer
+          </Link>
+        )}
+      </header>
+      <div className="p-5 text-sm">
+        {loading ? (
+          <div className="text-xs muted flex items-center gap-2">
+            <Loader2 size={12} className="animate-spin" /> Loading…
+          </div>
+        ) : !customerId ? (
+          <div className="text-xs muted">No linked customer.</div>
+        ) : !summary ? (
+          <div className="text-xs muted">
+            {fallbackName ?? "Couldn't load customer summary."}
+          </div>
+        ) : (
+          <>
+            <div className="font-medium text-ink-900">{c?.company_name}</div>
+            <div className="text-xs muted capitalize mt-0.5">
+              {c?.industry ?? "—"} · stage {String(c?.stage ?? "").replace(/_/g, " ")}
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Meta label="Won revenue" icon={<TrendingUp size={12} />}>
+                <span className="tabular-nums font-medium text-emerald-700">
+                  {idrCompact(s?.won_revenue ?? 0)}
+                </span>
+              </Meta>
+              <Meta label="Pipeline" icon={<FileText size={12} />}>
+                <span className="tabular-nums">
+                  {idrCompact(s?.pipeline_value ?? 0)}
+                </span>
+              </Meta>
+              <Meta label="Outstanding AR" icon={<AlertTriangle size={12} />}>
+                <span className={clsx(
+                  "tabular-nums font-medium",
+                  (s?.outstanding_ar ?? 0) > 0 ? "text-amber-700" : "text-ink-700",
+                )}>
+                  {idrCompact(s?.outstanding_ar ?? 0)}
+                </span>
+              </Meta>
+              <Meta label="Active projects" icon={<Briefcase size={12} />}>
+                {s?.active_projects ?? 0}
+              </Meta>
+              <Meta label="Win rate">
+                {Math.round((s?.win_rate ?? 0) * 100)}%
+                <span className="muted text-[11px] ml-1">
+                  ({s?.won ?? 0}/{s?.won + s?.lost || 0})
+                </span>
+              </Meta>
+              <Meta label="Lifetime value" icon={<Wallet size={12} />}>
+                <span className="tabular-nums">
+                  {idrCompact(Number(c?.lifetime_value ?? 0))}
+                </span>
+              </Meta>
+            </div>
+            {s?.last_activity_at && (
+              <div className="text-[11px] muted mt-3 pt-3 border-t border-ink-100">
+                Last contact:{" "}
+                <b className="text-ink-700">
+                  {new Date(s.last_activity_at).toLocaleString()}
+                </b>
+                {" · known "}{s?.days_known ?? 0} day(s)
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
