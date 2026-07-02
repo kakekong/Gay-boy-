@@ -847,8 +847,10 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* Logistics & import documents (post-drawing, purchasing) */}
-      {logistics && (
+      {/* Logistics & import documents — only meaningful once the drawing
+          has been approved. Hidden before that so the project page stays
+          focused on what's actually happening at the current stage. */}
+      {logistics && PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("drawing_approved") && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
             <div>
@@ -978,7 +980,11 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Operations QC */}
+      {/* Operations QC — only shown once the project has reached the QC
+          stage (i.e. production is done and it's time to inspect). Kept
+          visible afterwards so historical qc_decision/qc_passed_at stays
+          on the page. */}
+      {(PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("qc") || p.qc_decision || p.qc_passed_at) && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
@@ -1024,6 +1030,7 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* Admin & finance close-out: invoice + faktur pajak */}
       <div className="card overflow-hidden">
