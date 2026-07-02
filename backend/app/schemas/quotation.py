@@ -69,6 +69,11 @@ class QuotationOut(BaseModel):
     is_posted: bool = False
     posted_at: datetime | None = None
     posted_snapshot: dict = Field(default_factory=dict)
+    # Timestamps: the detail page renders `created_at` as the "Issued"
+    # date and `updated_at` for last-edit context, so the row's own
+    # dates need to travel over the wire.
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
