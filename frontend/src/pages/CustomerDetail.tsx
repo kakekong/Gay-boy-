@@ -246,6 +246,133 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      {/* Multiple PICs / contacts — right below the header */}
+      <ContactsSection customerId={id!} />
+
+      {/* Quotations */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-ink-900 flex items-center gap-2">
+              <FileText size={15} /> Quotations
+            </div>
+            <div className="text-xs muted">
+              {(quotations.data ?? []).length} document{(quotations.data ?? []).length === 1 ? "" : "s"} for this customer
+            </div>
+          </div>
+          <button className="btn-primary" onClick={() => setOpenQuote(true)}>
+            <Plus size={14} /> New quotation
+          </button>
+        </div>
+        {(quotations.data ?? []).length === 0 ? (
+          <div className="p-8 text-center text-sm muted">
+            No quotations yet. Click "New quotation" to create one.
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Number</th>
+                <th className="th">Variant</th>
+                <th className="th">Status</th>
+                <th className="th text-right">Discount</th>
+                <th className="th text-right">Total</th>
+                <th className="th">Valid until</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(quotations.data ?? []).map((qt: any) => (
+                <tr
+                  key={qt.id}
+                  className="tr-hover border-t border-ink-100 cursor-pointer"
+                  onClick={() => (window.location.href = `/quotations/${qt.id}`)}
+                >
+                  <td className="td">
+                    <Link
+                      to={`/quotations/${qt.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-mono text-xs text-brand-700 hover:underline"
+                    >
+                      {qt.number}
+                    </Link>
+                  </td>
+                  <td className="td capitalize muted">{qt.variant}</td>
+                  <td className="td">
+                    <span className={clsx("chip", QSTATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
+                      {qt.status.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td className="td text-right tabular-nums">{Number(qt.discount_pct)}%</td>
+                  <td className="td text-right font-medium tabular-nums">{idr(Number(qt.total))}</td>
+                  <td className="td muted">{qt.valid_until ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Incoming customer POs (gate to project creation) */}
+      <IncomingCustomerPOsSection customerId={id!} />
+
+      {/* Supplier POs tied to this customer's projects */}
+      <CustomerPOsSection customerId={id!} />
+
+      {/* Projects */}
+      {summary.data?.projects?.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <Briefcase size={15} className="text-brand-600" /> Projects
+            </div>
+            <div className="text-xs muted">{summary.data.projects.length} record(s)</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">Code</th>
+                  <th className="th">Status</th>
+                  <th className="th">PO Number</th>
+                  <th className="th text-right">PO Value</th>
+                  <th className="th">Target delivery</th>
+                  <th className="th text-right">Margin (est / act)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.data.projects.map((p: any) => (
+                  <tr
+                    key={p.id}
+                    className="tr-hover border-t border-ink-100 cursor-pointer"
+                    onClick={() => (window.location.href = `/projects/${p.id}`)}
+                  >
+                    <td className="td">
+                      <Link to={`/projects/${p.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-mono text-xs text-brand-700 hover:underline">
+                        {p.code}
+                      </Link>
+                    </td>
+                    <td className="td">
+                      <span className={clsx("chip capitalize",
+                        PSTATUS[p.status] ?? "bg-ink-100 text-ink-700")}>
+                        {p.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="td muted">{p.po_number ?? "—"}</td>
+                    <td className="td text-right tabular-nums font-medium">{idr(p.po_value)}</td>
+                    <td className="td muted">{p.target_delivery ?? "—"}</td>
+                    <td className="td text-right tabular-nums text-xs">
+                      {(p.margin_estimate * 100).toFixed(1)}% / {(p.margin_actual * 100).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* AI strip */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card p-5">
@@ -318,61 +445,6 @@ export default function CustomerDetailPage() {
         </>
       )}
 
-      {/* Projects */}
-      {summary.data?.projects?.length > 0 && (
-        <div className="card overflow-hidden">
-          <div className="px-5 py-3 border-b border-ink-100">
-            <div className="font-semibold flex items-center gap-2">
-              <Briefcase size={15} className="text-brand-600" /> Projects
-            </div>
-            <div className="text-xs muted">{summary.data.projects.length} record(s)</div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-ink-50/60">
-                <tr>
-                  <th className="th">Code</th>
-                  <th className="th">Status</th>
-                  <th className="th">PO Number</th>
-                  <th className="th text-right">PO Value</th>
-                  <th className="th">Target delivery</th>
-                  <th className="th text-right">Margin (est / act)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.data.projects.map((p: any) => (
-                  <tr
-                    key={p.id}
-                    className="tr-hover border-t border-ink-100 cursor-pointer"
-                    onClick={() => (window.location.href = `/projects/${p.id}`)}
-                  >
-                    <td className="td">
-                      <Link to={`/projects/${p.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-mono text-xs text-brand-700 hover:underline">
-                        {p.code}
-                      </Link>
-                    </td>
-                    <td className="td">
-                      <span className={clsx("chip capitalize",
-                        PSTATUS[p.status] ?? "bg-ink-100 text-ink-700")}>
-                        {p.status.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td className="td muted">{p.po_number ?? "—"}</td>
-                    <td className="td text-right tabular-nums font-medium">{idr(p.po_value)}</td>
-                    <td className="td muted">{p.target_delivery ?? "—"}</td>
-                    <td className="td text-right tabular-nums text-xs">
-                      {(p.margin_estimate * 100).toFixed(1)}% / {(p.margin_actual * 100).toFixed(1)}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {stageFlash && (
         <div className={clsx(
           "rounded-xl border px-4 py-2 text-sm flex items-start gap-2",
@@ -407,69 +479,6 @@ export default function CustomerDetailPage() {
         onPatch={(key, body) => patchTask.mutate({ key, body })}
         busy={completeTask.isPending || reopenTask.isPending || patchTask.isPending}
       />
-
-      {/* Quotations */}
-      <div className="card overflow-hidden">
-        <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
-          <div>
-            <div className="font-semibold text-ink-900 flex items-center gap-2">
-              <FileText size={15} /> Quotations
-            </div>
-            <div className="text-xs muted">
-              {(quotations.data ?? []).length} document{(quotations.data ?? []).length === 1 ? "" : "s"} for this customer
-            </div>
-          </div>
-          <button className="btn-primary" onClick={() => setOpenQuote(true)}>
-            <Plus size={14} /> New quotation
-          </button>
-        </div>
-        {(quotations.data ?? []).length === 0 ? (
-          <div className="p-8 text-center text-sm muted">
-            No quotations yet. Click "New quotation" to create one.
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead className="bg-ink-50/60">
-              <tr>
-                <th className="th">Number</th>
-                <th className="th">Variant</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Discount</th>
-                <th className="th text-right">Total</th>
-                <th className="th">Valid until</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(quotations.data ?? []).map((qt: any) => (
-                <tr
-                  key={qt.id}
-                  className="tr-hover border-t border-ink-100 cursor-pointer"
-                  onClick={() => (window.location.href = `/quotations/${qt.id}`)}
-                >
-                  <td className="td">
-                    <Link
-                      to={`/quotations/${qt.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="font-mono text-xs text-brand-700 hover:underline"
-                    >
-                      {qt.number}
-                    </Link>
-                  </td>
-                  <td className="td capitalize muted">{qt.variant}</td>
-                  <td className="td">
-                    <span className={clsx("chip", QSTATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
-                      {qt.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                  <td className="td text-right tabular-nums">{Number(qt.discount_pct)}%</td>
-                  <td className="td text-right font-medium tabular-nums">{idr(Number(qt.total))}</td>
-                  <td className="td muted">{qt.valid_until ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
       {/* Invoices */}
       {summary.data?.invoices?.length > 0 && (
@@ -560,15 +569,6 @@ export default function CustomerDetailPage() {
 
       {/* Attachments */}
       <AttachmentsSection ownerType="customer" ownerId={id!} />
-
-      {/* Multiple PICs / contacts */}
-      <ContactsSection customerId={id!} />
-
-      {/* Incoming customer POs (gate to project creation) */}
-      <IncomingCustomerPOsSection customerId={id!} />
-
-      {/* Supplier POs tied to this customer's projects */}
-      <CustomerPOsSection customerId={id!} />
 
       {/* Activity timeline */}
       <div className="card p-5">
