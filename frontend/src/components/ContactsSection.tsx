@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Users, Plus, Star, Trash2, Pencil, Save, X, Loader2, Phone, Mail,
-  MessageCircle, AlertCircle,
+  MessageCircle, AlertCircle, FileText, Upload,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -240,6 +240,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
                 {c.notes && (
                   <div className="mt-1 text-xs muted">{c.notes}</div>
                 )}
+                <ContactIdCards contactId={c.id} />
               </div>
               <div className="flex gap-1 shrink-0">
                 <button
@@ -275,5 +276,84 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
       {children}
     </label>
+  );
+}
+
+// KTP / passport / other ID cards attached to a specific contact. Reuses the
+// generic /attachments endpoints with owner_type='customer_contact'.
+function ContactIdCards({ contactId }: { contactId: string }) {
+  const qc = useQueryClient();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const list = useQuery({
+    queryKey: ["contact-idcards", contactId],
+    queryFn: () => api.get("/attachments", {
+      params: { owner_type: "customer_contact", owner_id: contactId },
+    }).then((r) => r.data as any[]),
+  });
+  const refresh = () => qc.invalidateQueries({ queryKey: ["contact-idcards", contactId] });
+
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("owner_type", "customer_contact");
+      fd.append("owner_id", contactId);
+      fd.append("description", "id_card");
+      fd.append("file", file);
+      return api.post("/attachments", fd);
+    },
+    onSuccess: refresh,
+    onError: (e: any) => alert(e?.response?.data?.detail ?? "Upload failed"),
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.delete(`/attachments/${id}`),
+    onSuccess: refresh,
+    onError: (e: any) => alert(e?.response?.data?.detail ?? "Delete failed"),
+  });
+
+  const viewFile = async (id: string) => {
+    try {
+      const resp = await api.get(`/attachments/${id}/download`, { responseType: "blob" });
+      const url = URL.createObjectURL(resp.data as Blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      alert(e?.response?.data?.detail ?? "Could not open file");
+    }
+  };
+
+  const files = list.data ?? [];
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+      <span className="uppercase tracking-wider muted">ID cards</span>
+      {files.map((f: any) => (
+        <span key={f.id}
+          className="inline-flex items-center gap-1 rounded-full bg-ink-50 border border-ink-200 px-2 py-0.5">
+          <button type="button" onClick={() => viewFile(f.id)}
+            className="text-brand-700 hover:underline inline-flex items-center gap-1">
+            <FileText size={10} /> {f.filename}
+          </button>
+          <button type="button" title="Remove"
+            className="text-red-600 hover:opacity-80"
+            onClick={() => {
+              if (window.confirm(`Remove ${f.filename}?`)) del.mutate(f.id);
+            }}>
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+      <input ref={inputRef} type="file" className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) upload.mutate(f);
+          if (inputRef.current) inputRef.current.value = "";
+        }} />
+      <button type="button"
+        className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+        disabled={upload.isPending}
+        onClick={() => inputRef.current?.click()}>
+        {upload.isPending ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+        Upload ID
+      </button>
+    </div>
   );
 }

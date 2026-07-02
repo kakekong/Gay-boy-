@@ -24,6 +24,7 @@ router = APIRouter()
 ALLOWED_OWNERS = {
     "customer", "quotation", "project", "approval_request",
     "supplier_po", "customer_po", "invoice", "delivery_order",
+    "customer_contact",
 }
 MAX_FILE_SIZE_MB = 20
 
@@ -56,6 +57,12 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         # management can see. Sales of the customer's deal can see too.
         return role in (
             Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR, Role.SALES,
+        )
+    if owner_type == "customer_contact":
+        # KTP / ID card files per PIC. Same audience as the customer record
+        # itself — sales works with these people daily.
+        return role in (
+            Role.SALES, Role.ADMIN, Role.MANAGER, Role.DIRECTOR, Role.FINANCE,
         )
     return role == Role.DIRECTOR
 
