@@ -77,11 +77,14 @@ const ROLES: RoleSection[] = [
         detail: "Sends a Won request to the director; the quote flips to Won once they approve. Still no project yet — that needs the customer PO.",
         detail_id: "Mengirim permintaan Menang ke direktur; penawaran jadi Menang setelah disetujui. Belum ada proyek — itu butuh PO pelanggan." },
       { title: "Customer sends their signed PO → Submit customer PO", title_id: "Pelanggan kirim PO tertanda → Kirim PO pelanggan",
-        detail: "On the quote's 'Next step' card: attach the PO file, pick which line items they actually ordered, set the PO number.",
-        detail_id: "Di kartu 'Langkah berikutnya' pada penawaran: lampirkan file PO, pilih item yang benar-benar dipesan, isi nomor PO." },
-      { title: "Director approves the customer PO → project is created", title_id: "Direktur menyetujui PO pelanggan → proyek terbentuk",
+        detail: "On the quote's 'Next step' card: attach the PO file, pick which line items they actually ordered, set the PO number, and tick 'This PO is a down payment' if it's a DP.",
+        detail_id: "Di kartu 'Langkah berikutnya' pada penawaran: lampirkan file PO, pilih item yang benar-benar dipesan, isi nomor PO, dan centang 'PO ini adalah down payment' kalau DP." },
+      { title: "Regular PO → Director approves → project is created", title_id: "PO reguler → Direktur menyetujui → proyek terbentuk",
         detail: "The project carries the PO number, date and value automatically.",
         detail_id: "Proyek otomatis mewarisi nomor PO, tanggal, dan nilai." },
+      { title: "DP PO → Finance approves → you confirm deposit landed → project", title_id: "PO DP → Keuangan menyetujui → Anda konfirmasi DP masuk → proyek",
+        detail: "DP PO routes to Finance first (they issue the DP invoice). Once the customer pays, Finance approves it — you get pinged to confirm the deposit cleared, and clicking 'Confirm deposit received' is what spawns the project.",
+        detail_id: "PO DP masuk ke Keuangan dulu (mereka menerbitkan faktur DP). Setelah pelanggan bayar, Keuangan menyetujui — Anda dapat notifikasi untuk konfirmasi DP cair, dan klik 'Konfirmasi DP diterima' inilah yang membentuk proyek." },
     ],
     buttons: [
       { page: "Customers", page_id: "Pelanggan", button: "+ New customer", button_id: "+ Pelanggan baru",
@@ -101,7 +104,14 @@ const ROLES: RoleSection[] = [
       { page: "Quotation page (approved)", page_id: "Halaman penawaran (disetujui)", button: "Mark won", button_id: "Tandai menang",
         effect: "Sends a Won request to the director", effect_id: "Mengirim permintaan Menang ke direktur" },
       { page: "Quotation page (Won)", page_id: "Halaman penawaran (Menang)", button: "Submit customer PO", button_id: "Kirim PO pelanggan",
-        effect: "File the customer's PO → director approval → project", effect_id: "Daftarkan PO pelanggan → persetujuan direktur → proyek" },
+        effect: "File the customer's PO → director approval → project (regular) OR finance → your DP-received confirm → project (DP)",
+        effect_id: "Daftarkan PO pelanggan → persetujuan direktur → proyek (reguler) ATAU keuangan → konfirmasi DP masuk → proyek (DP)" },
+      { page: "Customer PO detail", page_id: "Detail PO pelanggan", button: "Confirm deposit received", button_id: "Konfirmasi DP diterima",
+        effect: "Only shows on a DP PO once finance has approved — clicking it spawns the project",
+        effect_id: "Hanya muncul di PO DP setelah keuangan menyetujui — klik untuk membentuk proyek" },
+      { page: "Ops board", page_id: "Papan Operasi", button: "Stage cards / rows", button_id: "Kartu / baris tahap",
+        effect: "Read-only view of where your customers' orders are in production (no WO codes, no notes, no action buttons)",
+        effect_id: "Tampilan read-only lokasi pesanan pelanggan di produksi (tanpa kode WO, catatan, atau tombol aksi)" },
       { page: "Customer PO", page_id: "PO Pelanggan", button: "(sidebar, Workspace)", button_id: "(sidebar, Ruang kerja)",
         effect: "Track the POs you've filed and their status", effect_id: "Pantau PO yang Anda daftarkan dan statusnya" },
       { page: "Notifications bell", page_id: "Lonceng notifikasi", button: "Any item", button_id: "Item apa saja",
@@ -112,9 +122,12 @@ const ROLES: RoleSection[] = [
       "EVERY quotation needs director approval before it leaves draft — there's no more discount-based auto-approve.",
       "Follow-ups you log — on a customer or a quotation — now go to the director for approval before they're recorded.",
       "Marking a quote Won sends a request to the director; it only flips to Won once they approve in /approvals.",
-      "A project is NOT created when you mark a quote Won. You file the customer's PO (with the PO file + ordered items), and the director's approval of that PO is what spawns the project.",
+      "A project is NOT created when you mark a quote Won. You file the customer's PO — and the approval of that PO is what spawns the project.",
+      "Two PO paths: a regular PO goes to the director for approval; a DP PO (tick the 'This PO is a down payment' toggle) goes to finance first, then you get pinged to confirm the deposit landed — your 'Confirm deposit received' click spawns the project.",
       "When the customer only orders some of the quoted items, untick the rest in the Submit-customer-PO modal and edit prices if they negotiated.",
       "Every stage move needs the director's approval — the customer stays on the old stage until they click Approve in /approvals.",
+      "Ops board is read-only for you — you can see which of your customers' orders are moving through production, but the WO codes, notes and action buttons are hidden. That's production's territory.",
+      "The customer page reads top-to-bottom as a deal funnel: name → contacts → quotations → customer POs → projects. Rejected POs show the director's / finance's reason inline on the quotation page.",
       "Overdue stage tasks light up the bell and the calendar in red.",
     ],
     rules_id: [
@@ -122,9 +135,12 @@ const ROLES: RoleSection[] = [
       "SETIAP penawaran wajib persetujuan direktur sebelum keluar dari draft — tidak ada lagi auto-approve berdasarkan diskon.",
       "Tindak lanjut yang Anda catat — di pelanggan atau penawaran — sekarang masuk ke direktur untuk persetujuan sebelum tercatat.",
       "Menandai penawaran Menang mengirim permintaan ke direktur; baru jadi Menang setelah disetujui di /approvals.",
-      "Proyek TIDAK terbentuk saat Anda menandai penawaran Menang. Anda mendaftarkan PO pelanggan (dengan file PO + item yang dipesan), dan persetujuan direktur atas PO itulah yang membentuk proyek.",
+      "Proyek TIDAK terbentuk saat Anda menandai penawaran Menang. Anda mendaftarkan PO pelanggan — dan persetujuan atas PO itulah yang membentuk proyek.",
+      "Dua jalur PO: PO reguler masuk ke direktur untuk disetujui; PO DP (centang toggle 'PO ini adalah down payment') masuk ke keuangan dulu, lalu Anda dapat notifikasi untuk konfirmasi DP masuk — klik 'Konfirmasi DP diterima' Anda yang membentuk proyek.",
       "Kalau pelanggan hanya pesan sebagian item dari penawaran, hilangkan centang yang tidak dipesan di modal Kirim-PO-pelanggan, dan edit harga kalau ada negosiasi.",
       "Setiap pindah tahap butuh persetujuan direktur — pelanggan tetap di tahap lama sampai direktur klik Setujui di /approvals.",
+      "Papan Operasi read-only untuk Anda — Anda bisa lihat pesanan pelanggan Anda bergerak di produksi, tapi kode WO, catatan, dan tombol aksi disembunyikan. Itu wilayah produksi.",
+      "Halaman pelanggan mengalir atas-ke-bawah sebagai funnel deal: nama → kontak → penawaran → PO pelanggan → proyek. PO yang ditolak menampilkan alasan direktur / keuangan langsung di halaman penawaran.",
       "Tugas tahap yang telat akan menyala merah di lonceng dan kalender.",
     ],
   },
@@ -191,14 +207,19 @@ const ROLES: RoleSection[] = [
     blurb_id: "Direktori karyawan, tag, absensi, dan menyuplai data ke payroll.",
     daily:
       "Every day glance at the Attendance page to fix wrongly-marked absences. " +
+      "Whenever a new hire lands, file their KTP / contract / NPWP / BPJS on their employee profile. " +
       "On the 1st of the month, sweep for anyone with a red missed-days chip.",
     daily_id:
       "Setiap hari lihat halaman Absensi untuk perbaiki tanda alpa yang salah. " +
+      "Setiap ada karyawan baru, arsipkan KTP / kontrak / NPWP / BPJS di profil karyawannya. " +
       "Tanggal 1 tiap bulan, sapu siapa saja yang punya chip merah hari-bolos.",
     flow: [
       { title: "Day 1 of the month", title_id: "Tanggal 1 setiap bulan",
         detail: "Open Employees", detail_id: "Buka Karyawan" },
       { title: "Anyone joined? → Admin → Users → New user", title_id: "Ada yang masuk? → Admin → Pengguna → Pengguna baru" },
+      { title: "Open the new employee's profile → Employee documents", title_id: "Buka profil karyawan baru → Dokumen karyawan",
+        detail: "Upload KTP, signed employment contract, NPWP (tax ID) and BPJS (social security) into the four labelled slots.",
+        detail_id: "Unggah KTP, kontrak kerja tertanda, NPWP, dan BPJS ke empat slot bertanda tersebut." },
       { title: "Anyone left? → deactivate their account", title_id: "Ada yang keluar? → nonaktifkan akunnya" },
       { title: "Daily: Attendance → spot wrong Absent marks → fix", title_id: "Harian: Absensi → temukan tanda Alpa salah → perbaiki" },
       { title: "End of month: scan missed-days chips", title_id: "Akhir bulan: pindai chip hari-bolos" },
@@ -207,6 +228,9 @@ const ROLES: RoleSection[] = [
     buttons: [
       { page: "Employees", page_id: "Karyawan", button: "+ Manage tags", button_id: "+ Kelola tag",
         effect: "Create / rename labels", effect_id: "Buat / ganti nama label" },
+      { page: "Employee profile", page_id: "Profil karyawan", button: "Employee documents → Upload", button_id: "Dokumen karyawan → Unggah",
+        effect: "File KTP / contract / NPWP / BPJS per employee (visible to HR + finance + management)",
+        effect_id: "Arsipkan KTP / kontrak / NPWP / BPJS per karyawan (terlihat HR + keuangan + manajemen)" },
       { page: "Employee card", page_id: "Kartu karyawan", button: "(missed-days chip)", button_id: "(chip hari-bolos)",
         effect: "Quick attendance read", effect_id: "Baca absensi cepat" },
       { page: "Employee profile", page_id: "Profil karyawan", button: "Attendance card → month picker", button_id: "Kartu Absensi → pemilih bulan",
@@ -217,10 +241,14 @@ const ROLES: RoleSection[] = [
     rules: [
       "Yellow chip = 1–2 missed days; red chip = 3+. Red usually means a payroll conversation.",
       "Tags like 'Top performer' or 'Mining specialist' make filtering faster.",
+      "Every employee should have all four docs on file: KTP, contract, NPWP, BPJS. Missing ones show as empty slots on the Employee documents card so they're easy to spot.",
+      "Employee documents are visible to HR, finance and management — sales / admin / purchasing don't see them.",
     ],
     rules_id: [
       "Chip kuning = 1–2 hari bolos; chip merah = 3+. Merah biasanya berarti perlu bicara payroll.",
       "Tag seperti 'Top performer' atau 'Spesialis tambang' bikin penyaringan lebih cepat.",
+      "Setiap karyawan harus punya keempat dokumen terarsip: KTP, kontrak, NPWP, BPJS. Yang belum ada tampil sebagai slot kosong di kartu Dokumen karyawan supaya mudah terlihat.",
+      "Dokumen karyawan hanya bisa dilihat HR, keuangan, dan manajemen — sales / admin / pembelian tidak melihatnya.",
     ],
   },
   {
@@ -230,41 +258,55 @@ const ROLES: RoleSection[] = [
     emoji: "🧑‍💼",
     Icon: UserCog,
     blurb:
-      "Data hygiene. You can edit any customer, but big changes route " +
-      "through the manager for approval.",
+      "Operations glue. You run projects, purchasing follow-through, inventory, " +
+      "and the ops board — CRM and pricing aren't your desk.",
     blurb_id:
-      "Kebersihan data. Anda bisa mengedit pelanggan mana saja, tapi perubahan " +
-      "besar diteruskan ke manajer untuk persetujuan.",
-    daily: "Maintain inventory counts and chart-of-accounts. Verify payment claims when they come in.",
-    daily_id: "Jaga stok inventaris dan bagan akun. Verifikasi klaim pembayaran saat masuk.",
+      "Perekat operasi. Anda mengurus proyek, tindak lanjut pembelian, inventaris, " +
+      "dan papan operasi — CRM dan pricing bukan meja Anda.",
+    daily:
+      "Drive projects forward on the Operation board, keep Inventory counts honest, " +
+      "verify payment claims and shipping docs. Finance owns the invoice file itself.",
+    daily_id:
+      "Dorong proyek maju di Papan Operasi, jaga stok Inventaris tetap benar, " +
+      "verifikasi klaim pembayaran dan dokumen kirim. Keuangan yang pegang file faktur.",
     flow: [
-      { title: "Open Customers → spot stale data", title_id: "Buka Pelanggan → temukan data basi" },
-      { title: "Small fix?", title_id: "Perbaikan kecil?",
-        detail: "Edit → auto-saves", detail_id: "Edit → tersimpan otomatis" },
-      { title: "Big change?", title_id: "Perubahan besar?",
-        detail: "Name, terms, owner → goes to Manager for approval",
-        detail_id: "Nama, syarat, pemilik → masuk ke Manajer untuk disetujui" },
-      { title: "Inventory → Adjust stock if needed", title_id: "Inventaris → Sesuaikan stok kalau perlu" },
-      { title: "Chart of Accounts → add new accounts as the business grows", title_id: "Bagan Akun → tambah akun baru seiring bisnis berkembang" },
+      { title: "Open Projects → work the active ones", title_id: "Buka Proyek → kerjakan yang aktif" },
+      { title: "Operation board → advance work orders through the stages", title_id: "Papan Operasi → jalankan work order melalui tiap tahap",
+        detail: "Receiving → Warehousing → QC → Packaging → Delivery.",
+        detail_id: "Penerimaan → Penyimpanan → QC → Pengemasan → Pengiriman." },
+      { title: "Inventory → Adjust stock if a count is off", title_id: "Inventaris → Sesuaikan stok kalau hitungan salah" },
+      { title: "After QC passes → Finance issues the final invoice + DO", title_id: "Setelah QC lulus → Keuangan menerbitkan faktur akhir + DO",
+        detail: "You confirm 'customer received' once the goods land — that's the delivered gate.",
+        detail_id: "Anda konfirmasi 'pelanggan menerima' setelah barang tiba — itu gerbang delivered." },
       { title: "Payment verification → match received money to invoices", title_id: "Verifikasi Pembayaran → cocokkan uang masuk dengan faktur" },
     ],
     buttons: [
-      { page: "Customers", page_id: "Pelanggan", button: "(any field)", button_id: "(field apa saja)",
-        effect: "Small fixes save instantly, big ones request approval",
-        effect_id: "Perbaikan kecil langsung simpan, yang besar minta persetujuan" },
+      { page: "Projects", page_id: "Proyek", button: "(row / detail)", button_id: "(baris / detail)",
+        effect: "Drive a project through drawings, deliveries, QC, close-out",
+        effect_id: "Jalankan proyek melewati gambar, pengiriman, QC, dan penutupan" },
+      { page: "Operation board", page_id: "Papan Operasi", button: "Stage card", button_id: "Kartu tahap",
+        effect: "Open a stage's work-order list; mark Done / Advance them",
+        effect_id: "Buka daftar work order di tahap itu; tandai Selesai / Lanjutkan" },
       { page: "Inventory", page_id: "Inventaris", button: "Adjust", button_id: "Sesuaikan",
         effect: "Correct stock counts", effect_id: "Koreksi jumlah stok" },
-      { page: "Chart of Accounts", page_id: "Bagan Akun", button: "+ Add account", button_id: "+ Tambah akun",
-        effect: "New ledger account", effect_id: "Akun ledger baru" },
+      { page: "Project detail", page_id: "Detail Proyek", button: "Confirm customer received", button_id: "Konfirmasi pelanggan menerima",
+        effect: "Marks deliveries delivered + moves the project to 'delivered'",
+        effect_id: "Menandai pengiriman terkirim + memindahkan proyek ke 'delivered'" },
       { page: "Payment verification", page_id: "Verifikasi Pembayaran", button: "Verify / Reject", button_id: "Verifikasi / Tolak",
         effect: "Settle a customer payment", effect_id: "Selesaikan pembayaran pelanggan" },
+      { page: "Chart of Accounts", page_id: "Bagan Akun", button: "+ Add account", button_id: "+ Tambah akun",
+        effect: "New ledger account", effect_id: "Akun ledger baru" },
     ],
     rules: [
-      "You see all customers, but mutating 'important' fields creates an Approval Request.",
+      "You don't have CRM or Price Requests in your sidebar — customer-facing sales is out of your scope.",
+      "You still see Finance, Chart of Accounts, Payment verification, Attendance and Users so ops work has a bank / accounting side to it.",
+      "Finance now uploads the invoice file (down-payment or final) — you don't. You confirm the customer received the goods, not the invoice paperwork.",
       "Adjusting stock writes an audit trail — corrections are visible to the director.",
     ],
     rules_id: [
-      "Anda lihat semua pelanggan, tapi mengubah field 'penting' akan membuat Permintaan Persetujuan.",
+      "Anda tidak lagi punya CRM atau Permintaan Harga di sidebar — sisi sales pelanggan di luar wilayah Anda.",
+      "Anda tetap melihat Keuangan, Bagan Akun, Verifikasi Pembayaran, Absensi, dan Pengguna supaya kerja operasi tetap punya sisi bank / akuntansi.",
+      "Keuangan sekarang yang mengunggah file faktur (down-payment atau final) — bukan Anda. Anda hanya konfirmasi barang diterima pelanggan, bukan berkas fakturnya.",
       "Penyesuaian stok mencatat jejak audit — koreksinya bisa dilihat direktur.",
     ],
   },
@@ -274,32 +316,70 @@ const ROLES: RoleSection[] = [
     label_id: "Keuangan",
     emoji: "💰",
     Icon: BarChart3,
-    blurb: "You handle the money side — verifying customer payments and watching AR.",
-    blurb_id: "Anda menangani sisi keuangan — memverifikasi pembayaran pelanggan dan memantau piutang.",
-    daily: "Check Payment verification for new proofs of payment. Match incoming money to open invoices.",
-    daily_id: "Cek Verifikasi pembayaran untuk bukti baru. Cocokkan uang masuk dengan faktur terbuka.",
+    blurb:
+      "The money desk. You issue invoices (DP and final), approve them into the tax record, " +
+      "gate down-payment POs, and watch AR / financial reports.",
+    blurb_id:
+      "Meja keuangan. Anda menerbitkan faktur (DP dan final), menyetujuinya ke catatan pajak, " +
+      "mengunci gerbang PO DP, dan memantau piutang / laporan keuangan.",
+    daily:
+      "Morning: Approvals for any DP POs from sales; Payment verification for new proofs. " +
+      "Whenever a project passes QC, upload its final invoice + DO. Approve invoices with the Faktur Pajak number to close them out.",
+    daily_id:
+      "Pagi: Persetujuan untuk PO DP dari sales; Verifikasi Pembayaran untuk bukti baru. " +
+      "Setiap proyek lulus QC, unggah faktur akhir + DO. Setujui faktur dengan nomor Faktur Pajak untuk menutupnya.",
     flow: [
-      { title: "Customer uploads a payment proof", title_id: "Pelanggan unggah bukti bayar",
-        detail: "From their portal — 'I paid this'", detail_id: "Dari portal mereka — 'Saya sudah bayar'" },
-      { title: "Open Payment verification", title_id: "Buka Verifikasi pembayaran" },
-      { title: "Match the amount + reference to the invoice", title_id: "Cocokkan jumlah + referensi dengan faktur",
-        detail: "View the proof file inline", detail_id: "Lihat file bukti langsung" },
-      { title: "Verify → invoice marked paid", title_id: "Verifikasi → faktur ditandai lunas",
-        detail: "Or Reject with a reason", detail_id: "Atau Tolak dengan alasan" },
-      { title: "Watch outstanding AR on the Finance page", title_id: "Pantau piutang di halaman Keuangan" },
+      { title: "Sales files a DP customer PO → your Approvals queue", title_id: "Sales mendaftarkan PO DP pelanggan → antrean Persetujuan Anda",
+        detail: "Open the customer PO, review the deal + attached PO file, click 'Finance approve DP'.",
+        detail_id: "Buka PO pelanggan, tinjau deal + file PO terlampir, klik 'Setujui DP'." },
+      { title: "Issue the DP invoice from the project", title_id: "Terbitkan faktur DP dari proyek",
+        detail: "Project detail → Issue invoice panel → pick 'Down payment (before delivery)' → upload the invoice file.",
+        detail_id: "Detail proyek → panel Terbitkan faktur → pilih 'Down payment (sebelum kirim)' → unggah file faktur." },
+      { title: "Customer pays → sales confirms → project spawns", title_id: "Pelanggan bayar → sales konfirmasi → proyek terbentuk",
+        detail: "You told sales the DP is approved; sales clicks 'Confirm deposit received' once it lands.",
+        detail_id: "Anda memberi tahu sales DP disetujui; sales klik 'Konfirmasi DP diterima' setelah masuk." },
+      { title: "After QC passes → issue the final invoice + DO", title_id: "Setelah QC lulus → terbitkan faktur akhir + DO",
+        detail: "Project detail → Issue invoice → 'Final invoice (after delivery)' → upload both files.",
+        detail_id: "Detail proyek → Terbitkan faktur → 'Faktur akhir (setelah kirim)' → unggah kedua file." },
+      { title: "Approve invoices with the Faktur Pajak number", title_id: "Setujui faktur dengan nomor Faktur Pajak",
+        detail: "Finance → Pending invoices → enter FP number + upload FP file → Approve.",
+        detail_id: "Keuangan → Faktur menunggu → isi nomor FP + unggah file FP → Setujui." },
+      { title: "Payment verification → match proofs to invoices", title_id: "Verifikasi Pembayaran → cocokkan bukti dengan faktur" },
+      { title: "Watch AR + financial reports", title_id: "Pantau piutang + laporan keuangan" },
     ],
     buttons: [
+      { page: "Customer PO detail (DP)", page_id: "Detail PO Pelanggan (DP)", button: "Finance approve DP", button_id: "Setujui DP",
+        effect: "Approves a DP PO; sales gets pinged to confirm the deposit once it lands",
+        effect_id: "Menyetujui PO DP; sales akan dinotifikasi untuk konfirmasi DP setelah masuk" },
+      { page: "Project detail", page_id: "Detail Proyek", button: "Issue DP invoice", button_id: "Terbitkan faktur DP",
+        effect: "Upload a down-payment invoice for a project (before delivery, no DO)",
+        effect_id: "Unggah faktur down-payment untuk proyek (sebelum kirim, tanpa DO)" },
+      { page: "Project detail", page_id: "Detail Proyek", button: "Issue invoice + DO", button_id: "Terbitkan faktur + DO",
+        effect: "Upload the final post-QC invoice + delivery-order",
+        effect_id: "Unggah faktur akhir pasca-QC + delivery-order" },
+      { page: "Finance → Pending invoices", page_id: "Keuangan → Faktur menunggu", button: "Approve (with FP no.)", button_id: "Setujui (dengan No. FP)",
+        effect: "Enter faktur pajak + upload the FP file; invoice moves to approved",
+        effect_id: "Isi faktur pajak + unggah file FP; faktur pindah ke approved" },
       { page: "Payment verification", page_id: "Verifikasi pembayaran", button: "Verify / Reject", button_id: "Verifikasi / Tolak",
         effect: "Settle or bounce a customer payment", effect_id: "Selesaikan atau tolak pembayaran pelanggan" },
       { page: "Finance", page_id: "Keuangan", button: "(read)", button_id: "(lihat)",
         effect: "See invoices, payments, outstanding AR", effect_id: "Lihat faktur, pembayaran, piutang" },
+      { page: "Financial reports", page_id: "Laporan keuangan", button: "Any tab", button_id: "Tab apa saja",
+        effect: "P&L, cash flow, revenue by sales rep — sliced by month / quarter / year",
+        effect_id: "Laba/rugi, arus kas, pendapatan per sales — per bulan / kuartal / tahun" },
     ],
     rules: [
-      "You verify payments and read the finance figures, but the director still signs off on quotations and POs.",
+      "You now own invoice issuing — both flavours. DP invoices skip the QC gate (they're billed before delivery); final invoices need QC-passed and carry the delivery order.",
+      "The Faktur Pajak number is entered by you at the approve step, not at issue — that way a mistyped FP can't corrupt the tax record before finance double-checks.",
+      "DP customer POs route to your Approvals queue (not the director's). Approving one moves it to sales' 'confirm deposit received' step — you don't spawn the project yourself.",
+      "You still see Approvals, Payment verification, all finance reports, Chart of Accounts and Recent ledgers.",
       "Reject a payment proof with a clear reason — the customer sees it.",
     ],
     rules_id: [
-      "Anda memverifikasi pembayaran dan membaca angka keuangan, tapi direktur tetap menyetujui penawaran dan PO.",
+      "Anda sekarang yang menerbitkan faktur — kedua jenisnya. Faktur DP melewati gerbang QC (ditagih sebelum kirim); faktur akhir butuh QC lulus dan membawa DO.",
+      "Nomor Faktur Pajak Anda isi di langkah setujui, bukan saat terbit — jadi salah ketik FP tidak bisa mencemari catatan pajak sebelum keuangan cek ulang.",
+      "PO pelanggan DP masuk ke antrean Persetujuan Anda (bukan direktur). Setuju memindahkannya ke langkah 'konfirmasi DP diterima' milik sales — Anda tidak membentuk proyek sendiri.",
+      "Anda tetap melihat Persetujuan, Verifikasi Pembayaran, semua laporan keuangan, Bagan Akun, dan Ledger Terbaru.",
       "Tolak bukti bayar dengan alasan jelas — pelanggan akan melihatnya.",
     ],
   },
@@ -365,9 +445,12 @@ const ROLES: RoleSection[] = [
       { title: "Open Approvals first", title_id: "Buka Persetujuan dulu",
         detail: "Quotations, customer POs, stage moves, sales follow-ups, and Mark-won requests — green-light or reject. Approving a follow-up records it; approving Mark-won flips the quote to Won and posts the ledger.",
         detail_id: "Penawaran, PO pelanggan, pindah tahap, tindak lanjut sales, dan permintaan Mark-won — setujui atau tolak. Menyetujui tindak lanjut mencatatnya; menyetujui Mark-won mengubah penawaran jadi Menang dan posting ke ledger." },
-      { title: "Approve a customer PO → project is created", title_id: "Setujui PO pelanggan → proyek terbentuk",
-        detail: "The project carries the customer's PO number, date and ordered items. This is the ONLY way projects are made now.",
-        detail_id: "Proyek mewarisi nomor PO pelanggan, tanggal, dan item yang dipesan. Ini SATU-SATUNYA cara proyek dibuat sekarang." },
+      { title: "Approve a regular customer PO → project is created", title_id: "Setujui PO pelanggan reguler → proyek terbentuk",
+        detail: "The project carries the customer's PO number, date and ordered items. DP POs take a different path — see next step.",
+        detail_id: "Proyek mewarisi nomor PO pelanggan, tanggal, dan item yang dipesan. PO DP jalur berbeda — lihat langkah berikutnya." },
+      { title: "Down-payment POs route through Finance instead", title_id: "PO DP lewat Keuangan, bukan Anda",
+        detail: "Finance approves the DP PO + issues the DP invoice, sales confirms the deposit landed, and the project spawns then. You still see the PO in the approvals feed for visibility but don't gate it.",
+        detail_id: "Keuangan menyetujui PO DP + menerbitkan faktur DP, sales konfirmasi DP masuk, dan proyek terbentuk saat itu. Anda tetap melihat PO di feed persetujuan untuk visibilitas tapi tidak menjadi gerbang." },
       { title: "Executive Dashboard", title_id: "Dasbor Eksekutif",
         detail: "Read the AI recommendations", detail_id: "Baca rekomendasi AI" },
       { title: "Project needs material → Purchasing → + New PO", title_id: "Proyek butuh material → Pembelian → + PO baru",
@@ -416,20 +499,24 @@ const ROLES: RoleSection[] = [
       "Build custom roles (Admin → Users → Custom roles) when the fixed roles don't fit — pick a name, a base access tier, and tick the pages it can open.",
       "EVERY quotation needs your approval before sales can send it — no auto-approve on small discounts anymore.",
       "Sales follow-ups and Mark-won both queue in Approvals and only take effect once you approve — a follow-up isn't recorded, and a deal isn't Won, until then.",
-      "A customer PO is the gate to project creation: approving it is what spawns the project (carrying the PO number / date / value).",
+      "Two customer-PO gates: regular POs go to YOU (approve → project spawns). Down-payment POs go to Finance first (finance approves → sales confirms deposit → project spawns). You still see DP POs in the approvals feed for visibility.",
+      "Every rejected PO stores the rejection reason. It shows up inline on the source quotation's PO list and on the customer page, so sales sees why without asking.",
       "Only YOU can issue a supplier PO and decide which supplier serves which project — keeps the customer ↔ supplier mapping private. Non-directors can request one, but it waits for your approval.",
       "Only YOU can approve a CRM stage transition. Every 'Advance to …' from sales/manager/admin queues up in Approvals.",
       "PO Recap is director-only — the company-wide view of customer + supplier POs.",
+      "Traceability chain: project detail links back to the customer PO that spawned it, which links back to the quotation. All three docs travel together forwards and backwards.",
       "Mark-paid + post-to-ledger feel irreversible — reverse uses a matching reversal entry, not a hard delete.",
     ],
     rules_id: [
       "Buat peran khusus (Admin → Pengguna → Peran khusus) kalau peran bawaan tidak cocok — pilih nama, tingkat akses dasar, dan centang halaman yang bisa dibuka.",
       "SETIAP penawaran butuh persetujuan Anda sebelum sales bisa mengirimnya — tidak ada lagi auto-approve untuk diskon kecil.",
       "Tindak lanjut sales dan Mark-won sama-sama masuk antrean Persetujuan dan baru berlaku setelah Anda setujui — tindak lanjut belum tercatat, dan deal belum Menang, sampai saat itu.",
-      "PO pelanggan adalah gerbang pembuatan proyek: menyetujuinya yang membentuk proyek (membawa nomor PO / tanggal / nilai).",
+      "Dua gerbang PO pelanggan: PO reguler ke ANDA (setujui → proyek terbentuk). PO DP ke Keuangan dulu (keuangan setuju → sales konfirmasi DP → proyek terbentuk). Anda tetap melihat PO DP di feed persetujuan untuk visibilitas.",
+      "Setiap PO yang ditolak menyimpan alasan penolakan. Muncul langsung di daftar PO pada penawaran sumber dan di halaman pelanggan, jadi sales tahu alasan tanpa bertanya.",
       "Hanya ANDA yang bisa menerbitkan PO supplier dan menentukan supplier mana melayani proyek mana — menjaga pemetaan pelanggan ↔ supplier tetap rahasia. Non-direktur bisa meminta, tapi menunggu persetujuan Anda.",
       "Hanya ANDA yang bisa menyetujui pindah tahap CRM. Setiap 'Lanjut ke …' dari sales/manajer/admin masuk antrean Persetujuan.",
       "Rekap PO hanya untuk direktur — tampilan PO pelanggan + supplier seluruh perusahaan.",
+      "Rantai jejak: detail proyek balik ke PO pelanggan yang membentuknya, dan itu balik ke penawaran. Ketiganya bergerak bersama, maju dan mundur.",
       "Tandai-dibayar + posting-ke-ledger terasa tak terbalik — pembalikan pakai entri jurnal balik, bukan hapus paksa.",
     ],
   },
@@ -535,8 +622,38 @@ const TROUBLES: { problem: string; problem_id: string; answer: string; answer_id
   {
     problem: "Marked Won but no project appeared",
     problem_id: "Sudah Menang tapi proyek belum muncul",
-    answer: "That's intentional. Sales has to submit the customer's PO (with the PO file + ordered items) and the Director has to approve it — approval creates the project.",
-    answer_id: "Itu memang disengaja. Sales harus mengirim PO pelanggan (dengan file PO + item yang dipesan) dan Direktur harus menyetujuinya — persetujuan membuat proyek.",
+    answer: "That's intentional. Sales files the customer's PO (with the PO file + ordered items). Regular PO → Director approves → project spawns. DP PO → Finance approves → Sales confirms 'deposit received' → project spawns. Both paths end in a project, but the trigger differs.",
+    answer_id: "Itu memang disengaja. Sales mendaftarkan PO pelanggan (dengan file PO + item yang dipesan). PO reguler → Direktur menyetujui → proyek terbentuk. PO DP → Keuangan menyetujui → Sales konfirmasi 'DP diterima' → proyek terbentuk. Kedua jalur berujung ke proyek, tapi pemicunya beda.",
+  },
+  {
+    problem: "DP PO stuck on 'pending finance' or 'pending sales confirm'",
+    problem_id: "PO DP macet di 'menunggu keuangan' atau 'menunggu sales konfirmasi'",
+    answer: "'pending_finance' → ping Finance to open Approvals and click 'Finance approve DP'. 'pending_sales_confirm' → ping Sales; they click 'Confirm deposit received' on the customer PO once the money's in the bank, and the project spawns.",
+    answer_id: "'pending_finance' → hubungi Keuangan untuk membuka Persetujuan dan klik 'Setujui DP'. 'pending_sales_confirm' → hubungi Sales; mereka klik 'Konfirmasi DP diterima' di PO pelanggan setelah uang masuk rekening, dan proyek akan terbentuk.",
+  },
+  {
+    problem: "PO was rejected — why?",
+    problem_id: "PO ditolak — kenapa?",
+    answer: "Open the source quotation: the PO row shows the rejection reason in a red inline note, with the decided date. Or open the PO detail itself — same reason appears in the 'Director/Finance decision' card.",
+    answer_id: "Buka penawaran sumber: baris PO menampilkan alasan penolakan dalam catatan merah inline, dengan tanggal keputusan. Atau buka detail PO — alasan yang sama muncul di kartu 'Keputusan Direktur/Keuangan'.",
+  },
+  {
+    problem: "Employee missing KTP / NPWP / BPJS / contract",
+    problem_id: "Karyawan belum punya KTP / NPWP / BPJS / kontrak",
+    answer: "HR: open the employee profile → Employee documents card → the empty slot for the missing doc → Upload. Files are visible to HR, finance and management.",
+    answer_id: "HR: buka profil karyawan → kartu Dokumen karyawan → slot kosong untuk dokumen yang hilang → Unggah. File terlihat oleh HR, keuangan, dan manajemen.",
+  },
+  {
+    problem: "Admin can't see CRM anymore",
+    problem_id: "Admin tidak lihat CRM lagi",
+    answer: "That's the new scope. Admin's sidebar is Operations-only (Projects, Operation board, Inventory, Finance, Payment verification). Customer-facing sales lives with Sales / Manager / Director.",
+    answer_id: "Itu batas wilayah baru. Sidebar admin hanya Operasi (Proyek, Papan Operasi, Inventaris, Keuangan, Verifikasi Pembayaran). Sisi pelanggan ada di Sales / Manajer / Direktur.",
+  },
+  {
+    problem: "Sales can see the ops board but no action buttons",
+    problem_id: "Sales melihat papan operasi tapi tanpa tombol aksi",
+    answer: "Correct — sales gets a read-only view (customer / project / target-delivery / created). WO codes, notes and Advance/Done buttons are hidden. Advancing WOs is production's job.",
+    answer_id: "Benar — sales dapat tampilan read-only (pelanggan / proyek / target kirim / tanggal dibuat). Kode WO, catatan, dan tombol Lanjutkan/Selesai disembunyikan. Menjalankan WO adalah tugas produksi.",
   },
   {
     problem: "Stage move stuck on amber 'awaiting approval'",
@@ -801,15 +918,17 @@ function SystemFlow() {
     <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
       {lane("🏢", "Customer", ["sends inquiry", "approves drawings", "pays invoices"], "border-cyan-200")}
       {arrow}
-      {lane("👤", "Sales", ["adds customer", "builds quote", "files customer PO"], "border-brand-200")}
+      {lane("👤", "Sales", ["adds customer", "builds quote", "files customer PO (regular OR DP)", "confirms DP received"], "border-brand-200")}
       {arrow}
-      {lane("📊", "Manager", ["reviews data changes", "watches at-risk deals"], "border-emerald-200")}
+      {lane("💰", "Finance", ["approves DP POs", "issues DP + final invoices", "verifies payments"], "border-amber-200")}
       {arrow}
-      {lane("👑", "Director", ["approves quotes + customer POs", "customer PO → creates project", "issues supplier PO"], "border-red-200")}
+      {lane("👑", "Director", ["approves quotes + regular POs", "regular PO → creates project", "issues supplier PO"], "border-red-200")}
+      {arrow}
+      {lane("🧑‍💼", "Admin", ["runs ops board", "drives projects", "inventory + payment claims"], "border-violet-200")}
       {arrow}
       {lane("🏭", "Supplier", ["uploads drawing", "sets warehouse ETA"], "border-teal-200")}
       {arrow}
-      {lane("🛠", "HR / Finance", ["attendance", "payroll", "verify payments"], "border-amber-200")}
+      {lane("🛠", "HR", ["employee docs (KTP/NPWP/BPJS)", "attendance", "payroll feed"], "border-emerald-200")}
     </div>
   );
 }
