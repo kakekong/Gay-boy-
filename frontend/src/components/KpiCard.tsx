@@ -21,18 +21,22 @@ const ACCENT: Record<NonNullable<Props["accent"]>, string> = {
 
 export function KpiCard({ label, value, delta, hint, icon: Icon, accent = "ink" }: Props) {
   return (
-    <div className="card card-hover p-5">
-      <div className="flex items-start justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+    <div className="card card-hover p-5 min-w-0 overflow-hidden">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-500 min-w-0">
           {label}
         </div>
         {Icon && (
-          <div className={clsx("h-8 w-8 rounded-lg flex items-center justify-center", ACCENT[accent])}>
+          <div className={clsx("h-8 w-8 rounded-lg flex items-center justify-center shrink-0", ACCENT[accent])}>
             <Icon size={16} />
           </div>
         )}
       </div>
-      <div className="mt-2 text-3xl font-semibold text-ink-900 tabular-nums tracking-tight">
+      <div
+        className="mt-2 font-semibold text-ink-900 tabular-nums tracking-tight break-words"
+        style={{ fontSize: "clamp(1.125rem, 2.4vw, 1.875rem)" }}
+        title={String(value)}
+      >
         {value}
       </div>
       <div className="mt-1.5 flex items-center gap-2 text-xs">

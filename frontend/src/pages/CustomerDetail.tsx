@@ -726,14 +726,20 @@ function Kpi({ label, value, Icon, tone }: {
     ink:     "bg-ink-100 text-ink-700",
   }[tone];
   return (
-    <div className="card p-3">
-      <div className="flex items-start justify-between">
-        <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
-        <div className={`h-6 w-6 rounded ${cls} grid place-items-center`}>
+    <div className="card p-3 min-w-0 overflow-hidden">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider muted min-w-0">{label}</div>
+        <div className={`h-6 w-6 rounded ${cls} grid place-items-center shrink-0`}>
           <Icon size={12} />
         </div>
       </div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
+      <div
+        className="mt-1 font-semibold tabular-nums break-words"
+        style={{ fontSize: "clamp(0.875rem, 1.6vw, 1.125rem)" }}
+        title={value}
+      >
+        {value}
+      </div>
     </div>
   );
 }
