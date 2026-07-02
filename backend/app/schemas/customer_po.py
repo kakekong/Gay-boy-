@@ -23,6 +23,11 @@ class CustomerPOCreate(BaseModel):
     po_date: date | None = None
     items: list[CustomerPOItem] = Field(default_factory=list)
     notes: str | None = None
+    # Sales flags this on submission when the customer's PO is for a
+    # deposit / DP. A DP PO routes through finance approval first, then
+    # sales confirms once the money is in, and only then the project
+    # spawns. Regular POs keep the director-approves path.
+    is_downpayment: bool = False
 
 
 class CustomerPOPatch(BaseModel):
@@ -46,6 +51,9 @@ class CustomerPOOut(BaseModel):
     total: float
     notes: str | None = None
     status: str
+    is_downpayment: bool = False
+    dp_finance_approved_at: datetime | None = None
+    dp_sales_confirmed_at: datetime | None = None
     project_id: UUID | None = None
     project_code: str | None = None
     decided_by: UUID | None = None

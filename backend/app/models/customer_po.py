@@ -13,7 +13,7 @@ in separate tables and behind separate endpoints.
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -25,10 +25,19 @@ from app.models.base import AuthorshipMixin, TimestampMixin, UUIDPK
 class CustomerPO(Base, UUIDPK, TimestampMixin, AuthorshipMixin):
     """An incoming PO from the customer.
 
-    Lifecycle:
-      pending_approval → approved → (project created, project_id set)
+    Two lifecycles:
+
+    Regular PO (`is_downpayment=False`):
+      pending_approval → approved → (project spawns) → project_id set
                        → rejected
                        → cancelled
+
+    Down-payment PO (`is_downpayment=True`):
+      pending_finance → (finance approves + issues DP invoice)
+        → pending_sales_confirm → (sales confirms after DP received)
+        → approved → (project spawns) → project_id set
+
+      Any step can also land at rejected / cancelled.
     """
 
     __tablename__ = "customer_pos"
@@ -65,3 +74,23 @@ class CustomerPO(Base, UUIDPK, TimestampMixin, AuthorshipMixin):
     )
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decision_notes: Mapped[str | None] = mapped_column(Text)
+
+    # Down-payment flag. When True the PO takes a different path: finance
+    # signs off first (they're the ones who chase the deposit invoice),
+    # then sales confirms once payment lands, and only then the project
+    # spawns. False keeps the original director-approves flow.
+    is_downpayment: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+    )
+    dp_finance_approved_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    dp_finance_approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    dp_sales_confirmed_by: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    dp_sales_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )

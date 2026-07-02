@@ -67,6 +67,9 @@ async def _enrich(db: AsyncSession, po: CustomerPO) -> dict:
         "total": float(po.total or 0),
         "notes": po.notes,
         "status": po.status,
+        "is_downpayment": bool(po.is_downpayment),
+        "dp_finance_approved_at": po.dp_finance_approved_at,
+        "dp_sales_confirmed_at": po.dp_sales_confirmed_at,
         "project_id": po.project_id,
         "project_code": project.code if project else None,
         "decided_by": po.decided_by,
@@ -238,6 +241,16 @@ async def create_customer_po(
     items = [it.model_dump() for it in payload.items]
     total = _items_total(items)
     is_director = Role(user.role) == Role.DIRECTOR
+    is_dp = bool(payload.is_downpayment)
+
+    # DP POs route through finance → sales-confirm → project. Non-DP POs
+    # keep the historical director-approves-then-project path.
+    if is_dp:
+        initial_status = "pending_finance"
+    elif is_director:
+        initial_status = "approved"
+    else:
+        initial_status = "pending_approval"
 
     po = CustomerPO(
         number=payload.number.strip(),
@@ -247,14 +260,31 @@ async def create_customer_po(
         items=items,
         total=total,
         notes=payload.notes,
-        status="approved" if is_director else "pending_approval",
+        is_downpayment=is_dp,
+        status=initial_status,
         created_by=user.id, updated_by=user.id,
     )
     db.add(po)
     await db.flush()
 
-    if is_director:
-        # Director submission applies immediately — create the project now.
+    if is_dp:
+        # DP POs go to finance for approval; the director also always
+        # sees the filing as an approval-request notification so they
+        # know a customer PO has landed regardless of type.
+        await request_approval(
+            db,
+            target_type="customer_po",
+            target_id=po.id,
+            requested_by=user.id,
+            required_role=Role.FINANCE,
+            reason=(
+                f"Down-payment PO {po.number} from {customer.company_name} "
+                "— finance approval required before DP invoicing."
+            ),
+            payload={"action": "dp_finance_approve"},
+        )
+    elif is_director:
+        # Director direct submission applies immediately.
         po.decided_by = user.id
         from datetime import UTC, datetime as _dt
         po.decided_at = _dt.now(UTC)
@@ -414,6 +444,105 @@ async def reject_customer_po(
             "Please give a reason for rejecting — the requester will see it.",
         )
     return await _decide_customer_po(po_id, False, payload.notes, db, user)
+
+
+# ─── Down-payment (DP) sub-flow ──────────────────────────────────────────────
+#
+# The DP path is: sales files DP PO → finance approves it (they're the ones
+# who chase the DP invoice + verify receipt) → sales confirms the deposit
+# has landed → project spawns. Director still sees it via the general
+# approval queue because request_approval() dispatches to the director role
+# too, but they don't have to sign off.
+
+
+@router.post("/{po_id}/dp/finance-approve", response_model=CustomerPOOut)
+async def dp_finance_approve(
+    po_id: UUID,
+    payload: _DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Finance approves a DP PO. Moves it to `pending_sales_confirm`, at
+    which point sales must confirm the deposit has actually been received
+    before the project spawns."""
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only finance (or director) can approve a DP PO.",
+        )
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    if not po.is_downpayment:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This isn't a down-payment PO — use the standard approve flow.",
+        )
+    if po.status != "pending_finance":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"DP PO is at status '{po.status}', not pending_finance.",
+        )
+    po.dp_finance_approved_by = user.id
+    po.dp_finance_approved_at = _dt.now(UTC)
+    if payload.notes:
+        po.decision_notes = payload.notes
+    po.status = "pending_sales_confirm"
+    await db.flush()
+    return await _enrich(db, po)
+
+
+@router.post("/{po_id}/dp/sales-confirm", response_model=CustomerPOOut)
+async def dp_sales_confirm(
+    po_id: UUID,
+    payload: _DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Sales confirms the deposit has landed. This is the trigger that
+    spawns the project on a DP PO."""
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only sales (or manager/director) can confirm a DP PO.",
+        )
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    if not po.is_downpayment:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This isn't a down-payment PO — nothing for sales to confirm here.",
+        )
+    if po.status != "pending_sales_confirm":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"DP PO is at status '{po.status}', not awaiting sales confirmation.",
+        )
+    if Role(user.role) == Role.SALES:
+        cust = await db.get(Customer, po.customer_id)
+        if not cust or cust.sales_pic_id != user.id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "You can only confirm DP for your own customers.",
+            )
+    po.dp_sales_confirmed_by = user.id
+    po.dp_sales_confirmed_at = _dt.now(UTC)
+    po.status = "approved"
+    po.decided_by = user.id
+    po.decided_at = _dt.now(UTC)
+    if payload.notes:
+        po.decision_notes = payload.notes
+    project = await _spawn_project(db, po, user)
+    po.project_id = project.id
+    await db.flush()
+    return await _enrich(db, po)
 
 
 async def _spawn_project(

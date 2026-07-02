@@ -17,6 +17,9 @@ interface CustomerPO {
   po_date: string | null;
   total: number;
   status: string;
+  is_downpayment: boolean;
+  dp_finance_approved_at: string | null;
+  dp_sales_confirmed_at: string | null;
   customer_id: string;
   customer_name: string | null;
   quotation_id: string | null;
@@ -36,10 +39,12 @@ interface CustomerPO {
 }
 
 const STATUS_CHIP: Record<string, string> = {
-  pending_approval: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-  approved:         "bg-emerald-50 text-emerald-700",
-  rejected:         "bg-red-50 text-red-700",
-  cancelled:        "bg-ink-100 text-ink-600",
+  pending_approval:      "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  pending_finance:       "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
+  pending_sales_confirm: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+  approved:              "bg-emerald-50 text-emerald-700",
+  rejected:              "bg-red-50 text-red-700",
+  cancelled:             "bg-ink-100 text-ink-600",
 };
 
 const idr = (n: number) =>
@@ -51,6 +56,9 @@ export default function CustomerPODetailPage() {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const canDecide = me?.role === "manager" || me?.role === "director";
+  const canFinanceApproveDp = me?.role === "finance" || me?.role === "director";
+  const canSalesConfirmDp =
+    me?.role === "sales" || me?.role === "manager" || me?.role === "director";
   const [reason, setReason] = useState("");
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -88,6 +96,41 @@ export default function CustomerPODetailPage() {
       qc.invalidateQueries({ queryKey: ["customer-pos-for-quote"] });
       setReason("");
       setFlash({ kind: "ok", text: vars.approve ? "PO approved — project created." : "PO rejected." });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.detail ?? e?.message ?? "Action failed",
+    }),
+  });
+
+  const dpFinanceApprove = useMutation({
+    mutationFn: () => api.post(`/customer-pos/${id}/dp/finance-approve`,
+      { notes: reason.trim() || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      qc.invalidateQueries({ queryKey: ["incoming-customer-pos"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-all"] });
+      setReason("");
+      setFlash({
+        kind: "ok",
+        text: "Finance approved — sales has been notified to confirm the deposit landed.",
+      });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.detail ?? e?.message ?? "Action failed",
+    }),
+  });
+
+  const dpSalesConfirm = useMutation({
+    mutationFn: () => api.post(`/customer-pos/${id}/dp/sales-confirm`,
+      { notes: reason.trim() || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      qc.invalidateQueries({ queryKey: ["incoming-customer-pos"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-all"] });
+      setReason("");
+      setFlash({ kind: "ok", text: "Deposit confirmed — project created." });
     },
     onError: (e: any) => setFlash({
       kind: "err",
@@ -160,6 +203,11 @@ export default function CustomerPODetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {p.is_downpayment && (
+              <span className="chip bg-violet-50 text-violet-700 ring-1 ring-violet-200 text-xs font-semibold">
+                Down payment
+              </span>
+            )}
             <span className={clsx(
               "chip capitalize px-3 py-1 text-xs font-semibold",
               STATUS_CHIP[p.status] ?? "bg-ink-100 text-ink-700",
@@ -173,7 +221,7 @@ export default function CustomerPODetailPage() {
           </div>
         </div>
 
-        {/* Manager/Director approve/reject panel — only while pending. */}
+        {/* Regular PO: manager/director approve/reject while pending. */}
         {canDecide && p.status === "pending_approval" && (
           <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 space-y-2">
             <div className="text-xs font-semibold text-amber-900">
@@ -205,6 +253,87 @@ export default function CustomerPODetailPage() {
                 Approve
               </button>
             </div>
+          </div>
+        )}
+
+        {/* DP PO leg 1: finance approves + issues DP invoice. */}
+        {p.is_downpayment && p.status === "pending_finance" && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 space-y-2">
+            <div className="text-xs font-semibold text-violet-900">
+              Down-payment PO — finance approval required. Issue the DP
+              invoice from the project view once you approve; sales will
+              be notified to confirm the deposit landed.
+            </div>
+            {canFinanceApproveDp ? (
+              <>
+                <textarea
+                  className="input text-sm"
+                  rows={2}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Notes for sales (optional)…"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setFlash(null); decide.mutate({ approve: false }); }}
+                    className="btn-danger"
+                    disabled={decide.isPending || dpFinanceApprove.isPending}
+                  >
+                    <X size={14} /> Reject
+                  </button>
+                  <button
+                    onClick={() => { setFlash(null); dpFinanceApprove.mutate(); }}
+                    className="btn-success"
+                    disabled={dpFinanceApprove.isPending}
+                  >
+                    {dpFinanceApprove.isPending
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <Check size={14} />}
+                    Finance approve DP
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="text-xs muted">Waiting on finance to approve.</div>
+            )}
+          </div>
+        )}
+
+        {/* DP PO leg 2: sales confirms the deposit landed → project spawns. */}
+        {p.is_downpayment && p.status === "pending_sales_confirm" && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 space-y-2">
+            <div className="text-xs font-semibold text-blue-900">
+              Finance approved the DP{p.dp_finance_approved_at && (
+                <> on {new Date(p.dp_finance_approved_at).toLocaleDateString()}</>
+              )}. Sales — confirm the deposit has cleared to spawn the project.
+            </div>
+            {canSalesConfirmDp ? (
+              <>
+                <textarea
+                  className="input text-sm"
+                  rows={2}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Reference / bank confirmation (optional)…"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setFlash(null); dpSalesConfirm.mutate(); }}
+                    className="btn-success"
+                    disabled={dpSalesConfirm.isPending}
+                  >
+                    {dpSalesConfirm.isPending
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <Check size={14} />}
+                    Confirm deposit received
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="text-xs muted">
+                Waiting on sales to confirm the deposit landed.
+              </div>
+            )}
           </div>
         )}
 

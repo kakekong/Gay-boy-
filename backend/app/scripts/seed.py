@@ -94,6 +94,15 @@ COLUMN_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS ix_customer_pos_status ON customer_pos (status)",
     "CREATE INDEX IF NOT EXISTS ix_customer_pos_number ON customer_pos (number)",
 
+    # Down-payment path — a DP PO routes through finance + sales confirm
+    # before the project spawns. Booleans + timestamps added lazily so
+    # older installs migrate on next boot.
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS is_downpayment BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_finance_approved_by UUID REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_finance_approved_at TIMESTAMPTZ",
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_sales_confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_sales_confirmed_at TIMESTAMPTZ",
+
     # entity_comments — chat thread on quotations + POs
     """
     CREATE TABLE IF NOT EXISTS entity_comments (

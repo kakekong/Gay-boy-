@@ -67,6 +67,7 @@ export function SubmitCustomerPOModal({
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DraftItem[]>([]);
   const [file, setFile] = useState<File | null>(null);
+  const [isDp, setIsDp] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function loadQuotation(qid: string) {
@@ -113,6 +114,7 @@ export function SubmitCustomerPOModal({
             uom: it.uom ?? null,
           })),
         notes: notes || null,
+        is_downpayment: isDp,
       });
       const poId = poRes.data.id as string;
       // 2. Upload the PO file, scoped to the new PO record so the
@@ -220,6 +222,30 @@ export function SubmitCustomerPOModal({
               actually order in this PO.
             </span>
           </label>
+
+          {/* Down-payment toggle */}
+          <div className="rounded-xl border border-ink-200 bg-ink-50/40 p-3">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isDp}
+                onChange={(e) => setIsDp(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block text-sm font-medium">
+                  This PO is a down payment (DP)
+                </span>
+                <span className="block text-[11px] muted mt-0.5">
+                  DP POs route to finance first (they issue the DP invoice and
+                  verify the deposit landed). Once finance approves, you'll get
+                  notified to confirm the deposit has cleared — that's what
+                  spawns the project. Leave unchecked for a regular PO that goes
+                  straight to the director.
+                </span>
+              </span>
+            </label>
+          </div>
 
           {/* PO number + date */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -411,7 +437,7 @@ export function SubmitCustomerPOModal({
             {create.isPending
               ? <Loader2 size={14} className="animate-spin" />
               : <CheckCircle2 size={14} />}
-            Submit for director approval
+            {isDp ? "Submit for finance approval" : "Submit for director approval"}
           </button>
         </footer>
       </div>
