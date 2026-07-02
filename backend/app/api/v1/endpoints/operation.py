@@ -1007,6 +1007,9 @@ async def _save_attachment(
     return a
 
 
+_INVOICE_ISSUER_ROLES = {Role.FINANCE, Role.ADMIN, Role.DIRECTOR}
+
+
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)
 async def issue_invoice(
     project_id: UUID,
@@ -1015,25 +1018,51 @@ async def issue_invoice(
     due_date: str | None = Form(None),
     courier: str | None = Form(None),
     create_delivery_order: bool = Form(True),
+    invoice_type: str = Form(
+        "final",
+        description=(
+            "'dp' for a down-payment invoice issued before delivery, "
+            "'final' for the post-delivery invoice, 'single' for a "
+            "one-shot invoice."
+        ),
+    ),
     invoice_file: UploadFile | None = File(None),
     delivery_order_file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Admin issues the delivery order + invoice once operations have passed QC.
+    """Finance issues the delivery order + invoice.
 
-    Admin only uploads the documents and sets the amount — the faktur pajak
-    number is entered by finance during approval (so it can't be misclicked or
-    miskeyed at issue time). The invoice parks at `pending_finance`.
+    Two flavours: a **down-payment ('dp')** invoice can be filed anytime after
+    the customer PO is approved — the customer pays a deposit before we start
+    delivery — and a **final ('final')** invoice which is issued after QC
+    passes to bill the remaining balance. 'single' is the legacy one-shot mode
+    (whole amount in a single invoice, issued post-QC).
+
+    Finance is the one who uploads the invoice file so the tax record can't be
+    corrupted by an admin misclick at issue time. The faktur pajak number is
+    still entered by finance during the approve step so the number is committed
+    at the moment finance signs off, not at upload time.
+
+    The invoice parks at `pending_finance` regardless of type.
     """
-    if Role(user.role) not in _ADMIN_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
+    if Role(user.role) not in _INVOICE_ISSUER_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Finance/admin/director only")
+    itype = (invoice_type or "final").strip().lower()
+    if itype not in {"dp", "final", "single"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "invoice_type must be 'dp', 'final', or 'single'")
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if not p.qc_passed_at:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Issue the invoice only after QC has passed.")
+    # DP invoices are issued BEFORE delivery, so no QC gate; final/single stay
+    # gated on QC to preserve the post-delivery billing flow.
+    if itype != "dp" and not p.qc_passed_at:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The final invoice can only be issued after QC has passed. "
+            "Issue a down-payment ('dp') invoice if you need to bill before delivery.",
+        )
     if not p.customer_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project has no customer.")
 
@@ -1055,10 +1084,11 @@ async def issue_invoice(
     inv = Invoice(
         number=await _next_doc_number(db, Invoice, "INV"),
         project_id=project_id, customer_id=p.customer_id,
+        type=itype,
         issue_date=date.today(), due_date=parsed_due,
         amount=inv_amount, tax_amount=inv_tax, total=total,
         status="pending_finance",
-        # Faktur pajak is set by finance on approval, not by admin here.
+        # Faktur pajak is filled in by finance on approval, not on issue.
         faktur_pajak_no=None,
         faktur_pajak_status="none",
         issued_by=user.id,
@@ -1070,8 +1100,10 @@ async def issue_invoice(
         await _save_attachment(db, file=invoice_file, owner_type="invoice",
                                owner_id=inv.id, user=user, label="invoice")
 
+    # A DP invoice comes before the DO, so don't auto-create a delivery order
+    # when the type is 'dp' — the DO is filed on the final invoice.
     do = None
-    if create_delivery_order:
+    if create_delivery_order and itype != "dp":
         do = DeliveryOrder(
             project_id=project_id,
             number=await _next_doc_number(db, DeliveryOrder, "DO"),
@@ -1086,7 +1118,7 @@ async def issue_invoice(
                                    label="delivery_order")
     return {
         "invoice": {"id": str(inv.id), "number": inv.number, "status": inv.status,
-                    "total": float(inv.total or 0),
+                    "type": inv.type, "total": float(inv.total or 0),
                     "faktur_pajak_no": inv.faktur_pajak_no},
         "delivery_order": {"id": str(do.id), "number": do.number} if do else None,
     }

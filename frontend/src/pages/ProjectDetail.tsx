@@ -221,11 +221,18 @@ export default function ProjectDetailPage() {
   const issueInvoice = useMutation({
     mutationFn: (body: {
       amount?: number; invoiceFile?: File | null; doFile?: File | null;
+      invoiceType?: "dp" | "final" | "single";
     }) => {
       const fd = new FormData();
       if (body.amount != null) fd.append("amount", String(body.amount));
       if (body.invoiceFile) fd.append("invoice_file", body.invoiceFile);
       if (body.doFile) fd.append("delivery_order_file", body.doFile);
+      fd.append("invoice_type", body.invoiceType ?? "final");
+      // A DP invoice is billed BEFORE delivery so no DO is filed with it —
+      // the backend also skips DO creation when type == 'dp'.
+      if ((body.invoiceType ?? "final") === "dp") {
+        fd.append("create_delivery_order", "false");
+      }
       return api.post(`/operation/projects/${id}/issue-invoice`, fd);
     },
     onSuccess: refresh, onError: onErr,
@@ -265,6 +272,7 @@ export default function ProjectDetailPage() {
   const [invAmount, setInvAmount] = useState("");
   const [invFile, setInvFile] = useState<File | null>(null);
   const [doFile, setDoFile] = useState<File | null>(null);
+  const [invType, setInvType] = useState<"dp" | "final">("final");
   // Per-invoice finance-approval form state (FP number + FP file).
   const [fpForm, setFpForm] = useState<Record<string, { no: string; file?: File | null }>>({});
 
@@ -1140,10 +1148,39 @@ export default function ProjectDetailPage() {
             );
           })}
 
-          {isAdmin && (p.qc_passed_at || PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("qc")) && (
+          {isFinance && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
-              <div className="text-[11px] uppercase tracking-wider muted">Issue invoice + delivery order</div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="text-[11px] uppercase tracking-wider muted">
+                Issue invoice {invType === "final" ? "+ delivery order" : "(down-payment)"}
+              </div>
+              <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
+                {([
+                  ["dp", "Down payment (before delivery)"],
+                  ["final", "Final invoice (after delivery)"],
+                ] as const).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setInvType(k)}
+                    className={clsx(
+                      "px-3 py-1 rounded-md text-xs font-medium",
+                      invType === k ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {invType === "final" && !p.qc_passed_at && (
+                <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  Final invoice can only be issued after QC has passed. Use "Down payment"
+                  to bill before delivery, or wait for QC.
+                </div>
+              )}
+              <div className={clsx(
+                "grid grid-cols-1 gap-2",
+                invType === "final" ? "sm:grid-cols-3" : "sm:grid-cols-2",
+              )}>
                 <input className="input" placeholder="Amount (blank = quotation total)"
                   value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
                 <label className="block">
@@ -1152,25 +1189,35 @@ export default function ProjectDetailPage() {
                     className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
                     onChange={(e) => setInvFile(e.target.files?.[0] ?? null)} />
                 </label>
-                <label className="block">
-                  <span className="block text-[10px] muted mb-1">Delivery-order file</span>
-                  <input type="file"
-                    className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
-                    onChange={(e) => setDoFile(e.target.files?.[0] ?? null)} />
-                </label>
+                {invType === "final" && (
+                  <label className="block">
+                    <span className="block text-[10px] muted mb-1">Delivery-order file</span>
+                    <input type="file"
+                      className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
+                      onChange={(e) => setDoFile(e.target.files?.[0] ?? null)} />
+                  </label>
+                )}
               </div>
               <p className="text-[11px] muted">
-                Faktur pajak is entered by finance during approval — not here.
+                Finance uploads the invoice here. Faktur pajak number is entered
+                by finance again during the approval step, not on upload.
               </p>
-              <button className="btn-primary" disabled={issueInvoice.isPending}
+              <button className="btn-primary"
+                disabled={
+                  issueInvoice.isPending
+                  || (invType === "final" && !p.qc_passed_at)
+                }
                 onClick={() => issueInvoice.mutate(
                   {
                     amount: invAmount ? Number(invAmount) : undefined,
-                    invoiceFile: invFile, doFile,
+                    invoiceFile: invFile,
+                    doFile: invType === "final" ? doFile : null,
+                    invoiceType: invType,
                   },
                   { onSuccess: () => { setInvAmount(""); setInvFile(null); setDoFile(null); } },
                 )}>
-                <FileText size={14} /> Issue invoice + DO
+                <FileText size={14} />
+                {invType === "dp" ? "Issue DP invoice" : "Issue invoice + DO"}
               </button>
             </div>
           )}
