@@ -27,14 +27,27 @@ export default function PaymentVerificationPage() {
     refetchInterval: 30_000,
   });
 
+  // The verify path fans out into invoice status, project status, ledger
+  // entries and AR aging. Invalidate every cache key that surfaces any
+  // of those so the admin's project page + the finance dashboard reflect
+  // the new state without a hard refresh.
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: ["claims"] });
+    qc.invalidateQueries({ queryKey: ["ar-aging"] });
+    qc.invalidateQueries({ queryKey: ["notifications"] });
+    qc.invalidateQueries({ queryKey: ["pending-invoices"] });
+    qc.invalidateQueries({ queryKey: ["pending-claims", "finance-dashboard"] });
+    // Every open project detail page pulls this key — invalidate the
+    // prefix so any cached project's invoice/claim status refreshes.
+    qc.invalidateQueries({ queryKey: ["project-full"] });
+  };
+
   const verify = useMutation({
     mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
       api.post(`/payments/claims/${id}/verify`, { notes: notes ?? "" }),
     onSuccess: () => {
-      setFlash({ kind: "ok", text: "Payment verified — invoice updated." });
-      qc.invalidateQueries({ queryKey: ["claims"] });
-      qc.invalidateQueries({ queryKey: ["ar-aging"] });
-      qc.invalidateQueries({ queryKey: ["notifications"] });
+      setFlash({ kind: "ok", text: "Payment verified — invoice + project updated." });
+      invalidateAll();
     },
     onError: (e: any) => setFlash({
       kind: "err",
@@ -47,7 +60,7 @@ export default function PaymentVerificationPage() {
       api.post(`/payments/claims/${id}/reject`, { notes: notes ?? "" }),
     onSuccess: () => {
       setFlash({ kind: "ok", text: "Claim rejected." });
-      qc.invalidateQueries({ queryKey: ["claims"] });
+      invalidateAll();
     },
     onError: (e: any) => setFlash({
       kind: "err",

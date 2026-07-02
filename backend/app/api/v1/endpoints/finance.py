@@ -239,27 +239,51 @@ async def delete_invoice(
 @router.get("/ar/aging")
 async def ar_aging(db: AsyncSession = Depends(get_db),
                    _user: User = Depends(get_current_user)):
-    """AR aging buckets: 0-30, 31-60, 61-90, 90+ days past due."""
+    """AR aging buckets: 0-30, 31-60, 61-90, 90+ days past due.
+
+    Any invoice that's been issued (approved by finance) and isn't fully
+    paid counts as outstanding. Missing 'approved' from this filter was
+    why the Finance dashboard showed Rp 0 outstanding even when a huge
+    unpaid approved invoice existed.
+    """
     today = date.today()
     buckets = {"0-30": 0.0, "31-60": 0.0, "61-90": 0.0, "90+": 0.0, "current": 0.0}
     rows = (await db.scalars(
-        select(Invoice).where(Invoice.status.in_(["issued", "partial", "overdue"]))
+        select(Invoice).where(
+            Invoice.status.in_(["issued", "approved", "partial", "overdue"])
+        )
     )).all()
+    if not rows:
+        return buckets
+    # Subtract any verified payments so a partially-paid invoice only
+    # ages the outstanding remainder, not the full total.
+    inv_ids = [r.id for r in rows]
+    paid_by_inv: dict = {}
+    for row in (await db.execute(
+        select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id.in_(inv_ids))
+        .group_by(Payment.invoice_id)
+    )).all():
+        paid_by_inv[row[0]] = float(row[1] or 0)
     for inv in rows:
+        outstanding = max(0.0, float(inv.total or 0) - paid_by_inv.get(inv.id, 0.0))
+        if outstanding <= 0:
+            continue
         if not inv.due_date:
+            # No due date: park as 'current' rather than dropping it.
+            buckets["current"] += outstanding
             continue
         delta = (today - inv.due_date).days
-        amount = float(inv.total)
         if delta < 0:
-            buckets["current"] += amount
+            buckets["current"] += outstanding
         elif delta <= 30:
-            buckets["0-30"] += amount
+            buckets["0-30"] += outstanding
         elif delta <= 60:
-            buckets["31-60"] += amount
+            buckets["31-60"] += outstanding
         elif delta <= 90:
-            buckets["61-90"] += amount
+            buckets["61-90"] += outstanding
         else:
-            buckets["90+"] += amount
+            buckets["90+"] += outstanding
     return buckets
 
 

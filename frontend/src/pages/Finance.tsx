@@ -37,7 +37,82 @@ export default function FinancePage() {
       </div>
 
       <PendingInvoiceApprovals />
+      <PendingPaymentClaims />
       <ArAging />
+    </div>
+  );
+}
+
+function PendingPaymentClaims() {
+  // Complements the invoice-approval queue above with the second thing
+  // finance actually has to do: verify customer payment claims. Landing
+  // on /finance with zero-pending on both is what tells finance the desk
+  // is clean. If claims are pending, one click jumps to the full
+  // Payment verification page to act on them.
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+  const pending = useQuery({
+    queryKey: ["pending-claims", "finance-dashboard"],
+    queryFn: () => api
+      .get("/payments/claims", { params: { status_eq: "pending" } })
+      .then((r) => r.data as any[]),
+  });
+  const rows = pending.data ?? [];
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Banknote size={15} className="text-brand-600" /> Pending payment claims
+          </div>
+          <div className="text-xs muted">
+            Customers submitted these payments — verify them to advance the
+            project to paid/closed. Approving the invoice above isn't enough
+            on its own; this is the actual money-in step.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="chip bg-amber-50 text-amber-700">{rows.length} pending</span>
+          <Link to="/finance/payment-verification" className="btn-ghost text-xs">
+            Open verification queue
+          </Link>
+        </div>
+      </div>
+      {pending.isLoading ? (
+        <div className="p-6 text-center text-sm muted flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading…
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="p-6 text-center text-sm muted">
+          No customer payments waiting for verification.
+        </div>
+      ) : (
+        <ul className="divide-y divide-ink-100">
+          {rows.slice(0, 5).map((c: any) => (
+            <li key={c.id} className="p-4 flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-sm">
+                <span className="font-mono font-medium">{c.invoice_number ?? "—"}</span>
+                <span className="muted"> · {c.customer_user_name ?? "—"}</span>
+                {c.method && <span className="muted"> · {c.method}</span>}
+                {c.reference && <span className="muted"> · ref {c.reference}</span>}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-sm font-semibold tabular-nums">{idr(c.amount)}</div>
+                <Link
+                  to="/finance/payment-verification"
+                  className="btn-primary text-xs"
+                >
+                  <CheckCircle size={12} /> Verify
+                </Link>
+              </div>
+            </li>
+          ))}
+          {rows.length > 5 && (
+            <li className="px-4 py-2 text-xs muted text-center">
+              + {rows.length - 5} more claim(s) in the verification queue.
+            </li>
+          )}
+        </ul>
+      )}
     </div>
   );
 }
