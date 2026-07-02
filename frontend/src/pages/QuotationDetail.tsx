@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -593,6 +593,8 @@ interface CPORow {
   project_code: string | null;
   total: number;
   po_date: string | null;
+  decision_notes: string | null;
+  decided_at: string | null;
 }
 
 function WonNextStepCard({
@@ -651,31 +653,51 @@ function WonNextStepCard({
             </thead>
             <tbody>
               {rows.map((p) => (
-                <tr key={p.id} className="border-t border-ink-100">
-                  <td className="px-3 py-1.5 font-mono text-xs">{p.number}</td>
-                  <td className="px-3 py-1.5 muted">{p.po_date ?? "—"}</td>
-                  <td className="px-3 py-1.5">
-                    <span className={clsx(
-                      "chip capitalize",
-                      p.status === "approved" ? "bg-emerald-50 text-emerald-700"
-                        : p.status === "pending_approval" ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-                        : p.status === "rejected" ? "bg-red-50 text-red-700"
-                        : "bg-ink-100 text-ink-600",
-                    )}>
-                      {p.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    {p.project_id ? (
-                      <Link to={`/projects/${p.project_id}`} className="font-mono text-xs text-brand-700 hover:underline">
-                        {p.project_code ?? p.project_id.slice(0, 8)}
+                <React.Fragment key={p.id}>
+                  <tr className="border-t border-ink-100">
+                    <td className="px-3 py-1.5">
+                      <Link to={`/customer-pos/${p.id}`}
+                        className="font-mono text-xs text-brand-700 hover:underline">
+                        {p.number}
                       </Link>
-                    ) : <span className="muted">—</span>}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
-                    {"Rp " + new Intl.NumberFormat("id-ID").format(Math.round(p.total || 0))}
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-3 py-1.5 muted">{p.po_date ?? "—"}</td>
+                    <td className="px-3 py-1.5">
+                      <span className={clsx(
+                        "chip capitalize",
+                        p.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                          : p.status === "pending_approval" ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                          : p.status === "rejected" ? "bg-red-50 text-red-700"
+                          : "bg-ink-100 text-ink-600",
+                      )}>
+                        {p.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {p.project_id ? (
+                        <Link to={`/projects/${p.project_id}`} className="font-mono text-xs text-brand-700 hover:underline">
+                          {p.project_code ?? p.project_id.slice(0, 8)}
+                        </Link>
+                      ) : <span className="muted">—</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {"Rp " + new Intl.NumberFormat("id-ID").format(Math.round(p.total || 0))}
+                    </td>
+                  </tr>
+                  {p.status === "rejected" && p.decision_notes && (
+                    <tr className="border-t border-red-100 bg-red-50/40">
+                      <td colSpan={5} className="px-3 py-1.5 text-xs text-red-800">
+                        <span className="font-semibold">Rejection reason:</span>{" "}
+                        {p.decision_notes}
+                        {p.decided_at && (
+                          <span className="muted ml-2">
+                            ({new Date(p.decided_at).toLocaleDateString()})
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

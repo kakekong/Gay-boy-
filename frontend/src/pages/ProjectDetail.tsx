@@ -310,6 +310,7 @@ export default function ProjectDetailPage() {
   const p   = data.data.project;
   const cu  = data.data.customer;
   const qt  = data.data.quotation;
+  const cpo = data.data.customer_po;
   const salesPicId   = data.data.sales_pic_id;
   const salesPicName = data.data.sales_pic_name;
   const wos = data.data.work_orders ?? [];
@@ -356,6 +357,13 @@ export default function ProjectDetailPage() {
                   <Link to={`/quotations/${qt.id}`}
                     className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700">
                     <FileText size={13} /> {qt.number}
+                  </Link>
+                )}
+                {cpo && (
+                  <Link to={`/customer-pos/${cpo.id}`}
+                    className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                    title="Customer PO that spawned this project">
+                    <FileText size={13} /> PO {cpo.number}
                   </Link>
                 )}
                 {salesPicName && (

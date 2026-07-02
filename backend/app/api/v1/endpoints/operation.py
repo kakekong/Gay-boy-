@@ -223,6 +223,13 @@ async def project_full(project_id: UUID,
             .group_by(Payment.invoice_id)
         )).all():
             paid_by_inv[row[0]] = float(row[1] or 0)
+    # Customer PO that spawned this project — for the traceability chain
+    # from quotation → PO → project so the header links back one step.
+    from app.models.customer_po import CustomerPO
+    customer_po = (await db.scalars(
+        select(CustomerPO).where(CustomerPO.project_id == project_id)
+        .order_by(CustomerPO.created_at.desc()).limit(1)
+    )).first()
     purchase_requests = (await db.scalars(
         select(PurchaseRequest).where(PurchaseRequest.project_id == project_id)
         .order_by(PurchaseRequest.created_at.desc())
@@ -317,6 +324,11 @@ async def project_full(project_id: UUID,
             "status": quotation.status,
             "total": float(quotation.total or 0) if show_money else None,
         } if quotation else None,
+        "customer_po": {
+            "id": str(customer_po.id), "number": customer_po.number,
+            "status": customer_po.status,
+            "po_date": customer_po.po_date,
+        } if customer_po else None,
         "work_orders": [
             {
                 "id": str(w.id), "code": w.code, "stage": w.stage, "notes": w.notes,
