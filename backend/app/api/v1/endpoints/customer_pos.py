@@ -48,10 +48,17 @@ async def _enrich(db: AsyncSession, po: CustomerPO) -> dict:
     cust = await db.get(Customer, po.customer_id) if po.customer_id else None
     quote = await db.get(Quotation, po.quotation_id) if po.quotation_id else None
     project = await db.get(Project, po.project_id) if po.project_id else None
+    sales_pic = None
+    if cust and cust.sales_pic_id:
+        rep = await db.get(User, cust.sales_pic_id)
+        if rep:
+            sales_pic = {"id": str(rep.id), "name": rep.full_name}
     return {
         "id": po.id,
         "customer_id": po.customer_id,
         "customer_name": cust.company_name if cust else None,
+        "sales_pic_id": sales_pic["id"] if sales_pic else None,
+        "sales_pic_name": sales_pic["name"] if sales_pic else None,
         "quotation_id": po.quotation_id,
         "quotation_number": quote.number if quote else None,
         "number": po.number,
@@ -75,6 +82,7 @@ async def list_customer_pos(
     user: User = Depends(_any_internal),
     customer_id: UUID | None = None,
     status_eq: str | None = None,
+    sales_pic_id: UUID | None = None,
 ):
     stmt = select(CustomerPO).order_by(CustomerPO.created_at.desc())
     if customer_id:
@@ -82,13 +90,85 @@ async def list_customer_pos(
     if status_eq:
         stmt = stmt.where(CustomerPO.status == status_eq)
     # Sales sees only their own customers' POs (matches the rest of the
-    # CRM scope rules).
+    # CRM scope rules). A sales_pic_id filter lets management scope by rep.
     if Role(user.role) == Role.SALES:
         stmt = stmt.join(
             Customer, Customer.id == CustomerPO.customer_id
         ).where(Customer.sales_pic_id == user.id)
+    elif sales_pic_id:
+        stmt = stmt.join(
+            Customer, Customer.id == CustomerPO.customer_id
+        ).where(Customer.sales_pic_id == sales_pic_id)
     rows = (await db.scalars(stmt)).all()
     return [await _enrich(db, r) for r in rows]
+
+
+async def _export_sections(
+    db: AsyncSession, user: User,
+    status_eq: str | None, sales_pic_id: UUID | None,
+) -> list[dict]:
+    stmt = select(CustomerPO).order_by(CustomerPO.created_at.desc())
+    if status_eq:
+        stmt = stmt.where(CustomerPO.status == status_eq)
+    if Role(user.role) == Role.SALES:
+        stmt = stmt.join(
+            Customer, Customer.id == CustomerPO.customer_id
+        ).where(Customer.sales_pic_id == user.id)
+    elif sales_pic_id:
+        stmt = stmt.join(
+            Customer, Customer.id == CustomerPO.customer_id
+        ).where(Customer.sales_pic_id == sales_pic_id)
+    rows = (await db.scalars(stmt)).all()
+    from app.services.tabular_export import _fmt_cell  # noqa: F401
+    body = []
+    for po in rows:
+        e = await _enrich(db, po)
+        body.append([
+            e["number"], e.get("customer_name") or "—",
+            e.get("sales_pic_name") or "—",
+            e.get("quotation_number") or "—",
+            e.get("project_code") or "—",
+            e.get("po_date") or "—",
+            e["status"],
+            f"Rp {int(round(e['total'] or 0)):,}".replace(",", "."),
+        ])
+    return [{
+        "name": "Customer POs",
+        "headers": ["PO number", "Customer", "Sales rep", "Quotation",
+                    "Project", "PO date", "Status", "Total"],
+        "rows": body,
+    }]
+
+
+@router.get("/export.pdf")
+async def export_customer_pos_pdf(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_any_internal),
+    status_eq: str | None = None,
+    sales_pic_id: UUID | None = None,
+):
+    from fastapi.responses import Response
+    from app.services.tabular_export import render_pdf
+    data = render_pdf("Customer POs", await _export_sections(db, user, status_eq, sales_pic_id))
+    return Response(content=data, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="customer-pos.pdf"'})
+
+
+@router.get("/export.xlsx")
+async def export_customer_pos_xlsx(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_any_internal),
+    status_eq: str | None = None,
+    sales_pic_id: UUID | None = None,
+):
+    from fastapi.responses import Response
+    from app.services.tabular_export import render_xlsx
+    data = render_xlsx("Customer POs", await _export_sections(db, user, status_eq, sales_pic_id))
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="customer-pos.xlsx"'},
+    )
 
 
 @router.get("/{po_id}", response_model=CustomerPOOut)

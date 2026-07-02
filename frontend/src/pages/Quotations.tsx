@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { FileText, Send, Info } from "lucide-react";
+import { FileText, Send, Plus } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import type { Quotation } from "@/types";
+import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 
 const STATUS: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -18,6 +20,7 @@ const STATUS: Record<string, string> = {
 export default function QuotationsPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
+  const [creating, setCreating] = useState(false);
 
   const q = useQuery({
     queryKey: ["quotations"],
@@ -42,17 +45,25 @@ export default function QuotationsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Quotations</h1>
           <p className="text-sm muted">Price offers across every stage.</p>
         </div>
-        <Link to="/customers" className="btn-ghost text-xs">
-          <Info size={13} /> To create one, open a customer in CRM
-        </Link>
+        <button className="btn-primary" onClick={() => setCreating(true)}>
+          <Plus size={14} /> New quotation
+        </button>
       </div>
+
+      {creating && (
+        <NewQuotationForm
+          onClose={() => {
+            setCreating(false);
+            qc.invalidateQueries({ queryKey: ["quotations"] });
+          }}
+        />
+      )}
 
       <div className="table-shell">
         <table className="w-full">
           <thead className="bg-ink-50/60">
             <tr>
               <th className="th">Number</th>
-              <th className="th">Variant</th>
               <th className="th">Status</th>
               <th className="th text-right">Discount</th>
               <th className="th text-right">Total</th>
@@ -78,7 +89,6 @@ export default function QuotationsPage() {
                     </Link>
                   </div>
                 </td>
-                <td className="td capitalize muted">{qt.variant}</td>
                 <td className="td">
                   <span className={clsx("chip", STATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
                     {qt.status.replace(/_/g, " ")}

@@ -36,6 +36,8 @@ class CustomerPOOut(BaseModel):
     id: UUID
     customer_id: UUID
     customer_name: str | None = None
+    sales_pic_id: UUID | None = None
+    sales_pic_name: str | None = None
     quotation_id: UUID | None = None
     quotation_number: str | None = None
     number: str

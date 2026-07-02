@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Receipt, Loader2, AlertCircle, Search, Filter, ChevronRight,
+  Receipt, Loader2, AlertCircle, Search, Filter, ChevronRight, Download,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -15,12 +15,15 @@ interface CPORow {
   status: string;
   customer_id: string;
   customer_name: string | null;
+  sales_pic_id: string | null;
+  sales_pic_name: string | null;
   quotation_id: string | null;
   quotation_number: string | null;
   project_id: string | null;
   project_code: string | null;
   created_at: string;
 }
+interface SalesRep { id: string; full_name: string }
 
 const STATUS_CHIP: Record<string, string> = {
   pending_approval: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
@@ -36,15 +39,63 @@ export default function CustomerPOsPage() {
   const nav = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [salesFilter, setSalesFilter] = useState<string>("");
+
+  const salesReps = useQuery({
+    queryKey: ["sales-reps"],
+    queryFn: () => api.get("/users", { params: { role: "sales" } })
+      .then((r) => r.data as SalesRep[]),
+    retry: false,
+  });
 
   const pos = useQuery({
-    queryKey: ["customer-pos-all", statusFilter],
+    queryKey: ["customer-pos-all", statusFilter, salesFilter],
     queryFn: () =>
       api.get("/customer-pos", {
-        params: { status_eq: statusFilter || undefined },
+        params: {
+          status_eq: statusFilter || undefined,
+          sales_pic_id: salesFilter || undefined,
+        },
       }).then((r) => r.data as CPORow[]),
     retry: false,
   });
+
+  const download = (fmt: "pdf" | "xlsx" | "csv") => {
+    if (fmt === "csv") {
+      const header = ["PO number", "Customer", "Sales rep", "Quotation",
+                      "Project", "PO date", "Status", "Total"];
+      const escape = (v: any) => {
+        const s = String(v ?? "");
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = [header.join(",")];
+      rows.forEach((p) => lines.push([
+        p.number, p.customer_name ?? "", p.sales_pic_name ?? "",
+        p.quotation_number ?? "", p.project_code ?? "",
+        p.po_date ?? "", p.status, p.total,
+      ].map(escape).join(",")));
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "customer-pos.csv";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return;
+    }
+    api.get(`/customer-pos/export.${fmt}`, {
+      params: {
+        status_eq: statusFilter || undefined,
+        sales_pic_id: salesFilter || undefined,
+      },
+      responseType: "blob",
+    }).then((r) => {
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `customer-pos.${fmt}`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }).catch((e: any) => alert(e?.response?.data?.detail ?? "Export failed"));
+  };
 
   const rows = useMemo(() => {
     let list = pos.data ?? [];
@@ -53,6 +104,7 @@ export default function CustomerPOsPage() {
       list = list.filter((p) =>
         p.number.toLowerCase().includes(q)
         || (p.customer_name ?? "").toLowerCase().includes(q)
+        || (p.sales_pic_name ?? "").toLowerCase().includes(q)
         || (p.quotation_number ?? "").toLowerCase().includes(q)
         || (p.project_code ?? "").toLowerCase().includes(q),
       );
@@ -86,7 +138,7 @@ export default function CustomerPOsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="input max-w-[200px]"
+          className="input max-w-[180px]"
         >
           <option value="">All statuses</option>
           <option value="pending_approval">Pending approval</option>
@@ -94,9 +146,30 @@ export default function CustomerPOsPage() {
           <option value="rejected">Rejected</option>
           <option value="cancelled">Cancelled</option>
         </select>
+        <select
+          value={salesFilter}
+          onChange={(e) => setSalesFilter(e.target.value)}
+          className="input max-w-[180px]"
+        >
+          <option value="">All sales reps</option>
+          {(salesReps.data ?? []).map((s) => (
+            <option key={s.id} value={s.id}>{s.full_name}</option>
+          ))}
+        </select>
         <div className="text-xs muted">
           <Filter size={12} className="inline mr-1" />
           {rows.length} of {pos.data?.length ?? 0}
+        </div>
+        <div className="ml-auto flex gap-1.5">
+          <button className="btn-ghost text-xs" onClick={() => download("csv")}>
+            <Download size={12} /> CSV
+          </button>
+          <button className="btn-ghost text-xs" onClick={() => download("xlsx")}>
+            <Download size={12} /> Excel
+          </button>
+          <button className="btn-ghost text-xs" onClick={() => download("pdf")}>
+            <Download size={12} /> PDF
+          </button>
         </div>
       </div>
 
@@ -131,6 +204,7 @@ export default function CustomerPOsPage() {
               <tr>
                 <th className="th">PO number</th>
                 <th className="th">Customer</th>
+                <th className="th">Sales rep</th>
                 <th className="th">Quotation</th>
                 <th className="th">Project</th>
                 <th className="th">PO date</th>
@@ -148,6 +222,7 @@ export default function CustomerPOsPage() {
                 >
                   <td className="td font-mono text-xs">{p.number}</td>
                   <td className="td">{p.customer_name ?? "—"}</td>
+                  <td className="td muted">{p.sales_pic_name ?? "—"}</td>
                   <td className="td font-mono text-xs muted">
                     {p.quotation_number ?? "—"}
                   </td>

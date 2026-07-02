@@ -187,11 +187,11 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
       >
         {forbidden ? (
           <div className="p-8 text-center text-sm muted">
-            Uploaded files are visible to the director only.
+            Please only upload customer details.
           </div>
         ) : (q.data ?? []).length === 0 ? (
           <div className="p-8 text-center text-sm muted">
-            {dragOver ? "Drop to upload" : "No files yet. Drop one here, or click Upload."}
+            {dragOver ? "Drop to upload" : "Please only upload customer details. Drop a file here, or click Upload."}
           </div>
         ) : (
           <ul className="divide-y divide-ink-100 p-1">
