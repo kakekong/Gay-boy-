@@ -167,10 +167,16 @@ function MainApp() {
           <RoleRouteGuard>
           <Routes>
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/customers" element={<CustomersPage />} />
-          <Route path="/customers/:id" element={<CustomerDetailPage />} />
+          <Route path="/customers" element={
+            <RequireRole roles={["sales", "purchasing", "finance", "hr", "manager", "director"]}>
+              <CustomersPage />
+            </RequireRole>} />
+          <Route path="/customers/:id" element={
+            <RequireRole roles={["sales", "purchasing", "finance", "hr", "manager", "director"]}>
+              <CustomerDetailPage />
+            </RequireRole>} />
           <Route path="/price-requests" element={
-            <RequireRole roles={["sales", "purchasing", "admin", "manager", "director"]}>
+            <RequireRole roles={["sales", "purchasing", "manager", "director"]}>
               <PriceRequestsPage />
             </RequireRole>} />
           <Route path="/quotations" element={<QuotationsPage />} />

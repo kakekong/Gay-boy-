@@ -24,7 +24,7 @@ router = APIRouter()
 ALLOWED_OWNERS = {
     "customer", "quotation", "project", "approval_request",
     "supplier_po", "customer_po", "invoice", "delivery_order",
-    "customer_contact",
+    "customer_contact", "employee",
 }
 MAX_FILE_SIZE_MB = 20
 
@@ -63,6 +63,12 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         # itself — sales works with these people daily.
         return role in (
             Role.SALES, Role.ADMIN, Role.MANAGER, Role.DIRECTOR, Role.FINANCE,
+        )
+    if owner_type == "employee":
+        # Personnel docs — KTP, employment contract, NPWP (tax id), BPJS
+        # (social-security id). HR files them; management/finance may view.
+        return role in (
+            Role.HR, Role.MANAGER, Role.DIRECTOR, Role.FINANCE,
         )
     return role == Role.DIRECTOR
 

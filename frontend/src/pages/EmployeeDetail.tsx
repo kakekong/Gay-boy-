@@ -9,6 +9,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
+import { EmployeeDocsSection } from "@/components/EmployeeDocsSection";
 import { StageBadge } from "@/components/StageBadge";
 import { TagChip } from "@/components/TagChip";
 import { TagPicker } from "@/components/TagPicker";
@@ -199,6 +200,9 @@ export default function EmployeeDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Personnel documents — KTP, contract, NPWP, BPJS. HR/finance/management. */}
+      <EmployeeDocsSection employeeId={e.id} />
 
       {/* HR work summary — counts only, no names or money */}
       {isHR && (

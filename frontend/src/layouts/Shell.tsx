@@ -32,9 +32,10 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
     label_id: "Ruang kerja",
     items: [
       { to: "/", label: "Dashboard", label_id: "Dasbor", icon: LayoutDashboard },
-      { to: "/customers", label: "CRM", label_id: "Pelanggan", icon: Users },
+      { to: "/customers", label: "CRM", label_id: "Pelanggan", icon: Users,
+        roles: ["sales", "purchasing", "finance", "hr", "manager", "director"] },
       { to: "/price-requests", label: "Price requests", label_id: "Permintaan harga", icon: Tag,
-        roles: ["sales", "purchasing", "admin", "manager", "director"] },
+        roles: ["sales", "purchasing", "manager", "director"] },
       { to: "/quotations", label: "Quotations", label_id: "Penawaran", icon: FileText },
       { to: "/customer-pos", label: "Customer PO", label_id: "PO Pelanggan", icon: Receipt },
       { to: "/purchase-orders", label: "Purchasing PO", label_id: "PO Pembelian", icon: Truck,
