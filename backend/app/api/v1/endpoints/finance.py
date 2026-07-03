@@ -18,7 +18,9 @@ from app.models.user import User
 # router to the finance line and management. Sales/HR/purchasing/external roles
 # have no business here. Mirrors the /finance + payment-verification sidebar gate.
 router = APIRouter(
-    dependencies=[Depends(require(Role.FINANCE, Role.ADMIN, Role.MANAGER, Role.DIRECTOR))]
+    # Admin is scoped to projects/ops/inventory — the finance router is
+    # off-limits for them. Finance + manager oversight + director stay.
+    dependencies=[Depends(require(Role.FINANCE, Role.MANAGER, Role.DIRECTOR))]
 )
 
 

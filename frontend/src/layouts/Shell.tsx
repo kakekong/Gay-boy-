@@ -156,6 +156,20 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/chat",
     "/role-guide",
   ],
+  // Admin's scope is production/ops only: projects, the operation board,
+  // and inventory. Everything customer-facing (CRM, quotations, customer
+  // POs), finance (invoice approval, payment verification, chart of
+  // accounts), purchasing directories, and the approvals queue are out
+  // of scope. Personal utilities (attendance, chat, role guide) stay so
+  // admin can clock in and read their own playbook.
+  admin: [
+    "/projects",
+    "/operation",
+    "/inventory",
+    "/attendance",
+    "/chat",
+    "/role-guide",
+  ],
 };
 
 export function Shell({ children }: { children: React.ReactNode }) {

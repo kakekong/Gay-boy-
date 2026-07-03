@@ -1152,7 +1152,7 @@ export default function ProjectDetailPage() {
                 {/* Payments — record what the customer paid and see how much
                     is left. When cumulative verified ≥ invoice total, finance
                     verify auto-advances the project delivered → paid → closed. */}
-                {iv.status === "approved" && (isAdmin || isFinance) && (
+                {iv.status === "approved" && canFinanceApprove && (
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="text-[11px] uppercase tracking-wider muted">
@@ -1251,7 +1251,7 @@ export default function ProjectDetailPage() {
             );
           })}
 
-          {isFinance && (
+          {canFinanceApprove && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider muted">
                 Issue invoice {invType === "final" ? "+ delivery order" : "(down-payment)"}

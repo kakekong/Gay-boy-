@@ -23,7 +23,9 @@ from app.models.payment_claim import PaymentClaim
 from app.models.user import User
 
 router = APIRouter()
-_finance = require(Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
+# Admin is out of the finance verification loop — projects/ops/inventory
+# only. Finance verifies payment claims; manager sees; director backstop.
+_finance = require(Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
 
 
 class ClaimIn(BaseModel):
