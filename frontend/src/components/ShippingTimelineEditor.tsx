@@ -13,9 +13,36 @@ const FIELDS: { key: string; label: string }[] = [
   { key: "act_arrive_customer",       label: "Actual arrival at customer's warehouse" },
 ];
 
+// Who may edit which shipping-timeline field.
+// - Purchasing owns the origin leg: they book the supplier's shipment and
+//   see the ETA come back, so they update Est. + Actual shipped-from-origin.
+// - Admin owns the arrival legs: they're on the ground when goods hit our
+//   warehouse and when they land at the customer's site, so they stamp the
+//   Actual arrival dates.
+// - Manager and director keep unrestricted edit rights so ops always has a
+//   fallback to fix anything mid-flight.
+function canEditField(role: string, key: string): boolean {
+  if (role === "director" || role === "manager") return true;
+  if (role === "purchasing") {
+    return key === "est_ship_from_origin" || key === "act_ship_from_origin";
+  }
+  if (role === "admin") {
+    return key === "act_arrive_our_warehouse" || key === "act_arrive_customer";
+  }
+  return false;
+}
+
 export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
-  const isDirector = useAuthStore((s) => s.user?.role) === "director";
+  const role = useAuthStore((s) => s.user?.role) ?? "";
+  const isDirector = role === "director";
+  // is_import + origin location are metadata about the shipment as a whole;
+  // purchasing books the leg from origin so they own those too. Admin
+  // never touches them (their scope is arrival stamps only).
+  const canEditMeta = role === "director" || role === "manager" || role === "purchasing";
+  const editableCount = FIELDS.filter((f) => canEditField(role, f.key)).length;
+  // Nothing this user may touch → don't render the editor at all.
+  if (editableCount === 0 && !canEditMeta) return null;
   const q = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => api.get(`/operation/projects/${projectId}`).then((r) => r.data),
@@ -42,14 +69,19 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
 
   const save = useMutation({
     mutationFn: () => {
-      // Only send fields the user actually filled in — empty strings would
-      // null out existing dates. Plain JS truthy check is enough here.
-      const body: Record<string, any> = {
-        is_import: isImport,
-        origin_location: origin || null,
-      };
+      // Only send fields the user actually filled in AND is permitted to
+      // edit — empty strings would null out existing dates, and sending a
+      // field the user can't edit would let purchasing overwrite an
+      // arrival stamp they shouldn't touch.
+      const body: Record<string, any> = {};
+      if (canEditMeta) {
+        body.is_import = isImport;
+        body.origin_location = origin || null;
+      }
       for (const f of FIELDS) {
-        if (form[f.key]) body[f.key] = form[f.key];
+        if (canEditField(role, f.key) && form[f.key]) {
+          body[f.key] = form[f.key];
+        }
       }
       return api.patch(`/operation/projects/${projectId}`, body).then((r) => r.data);
     },
@@ -106,32 +138,55 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={isImport} onChange={(e) => setIsImport(e.target.checked)}
-            className="h-4 w-4 rounded border-ink-300 text-brand-600" />
-          This is an international import
-        </label>
-        <label className="block">
-          <span className="block text-xs font-medium text-ink-600 mb-1">Origin location</span>
-          <input className="input" value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
-            placeholder="e.g. Shanghai, China" />
-        </label>
-      </div>
+      {canEditMeta && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={isImport} onChange={(e) => setIsImport(e.target.checked)}
+              className="h-4 w-4 rounded border-ink-300 text-brand-600" />
+            This is an international import
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-600 mb-1">Origin location</span>
+            <input className="input" value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+              placeholder="e.g. Shanghai, China" />
+          </label>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {FIELDS.map((f) => (
-          <label key={f.key} className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">{f.label}</span>
-            <input type="date" className="input" value={form[f.key] ?? ""}
-              onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
-          </label>
-        ))}
+        {FIELDS.map((f) => {
+          const canEdit = canEditField(role, f.key);
+          return (
+            <label key={f.key} className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {f.label}
+                {!canEdit && (
+                  <span className="ml-2 text-[10px] uppercase tracking-wider muted">
+                    read-only
+                  </span>
+                )}
+              </span>
+              <input
+                type="date"
+                className="input"
+                value={form[f.key] ?? ""}
+                disabled={!canEdit}
+                onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+              />
+            </label>
+          );
+        })}
       </div>
       <div className="mt-3 text-[11px] muted">
         Tip: blank fields are ignored on save (they don't erase existing dates).
         Clearing a date you previously set: contact ops or use the API directly.
+        {role === "purchasing" && (
+          <> Purchasing edits the origin-shipment dates; arrival stamps are admin's job.</>
+        )}
+        {role === "admin" && (
+          <> Admin stamps the actual arrival dates once goods land; forecast + origin dates are set by purchasing.</>
+        )}
       </div>
     </div>
   );

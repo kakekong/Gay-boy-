@@ -578,6 +578,38 @@ async def update_project(project_id: UUID,
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     data = payload.model_dump(exclude_unset=True)
 
+    # Per-role shipping-leg ownership. Manager + director stay unrestricted
+    # (they're the fallback for anything that goes sideways in ops).
+    # - Purchasing books the origin leg: Est. + Actual shipped-from-origin,
+    #   plus the is_import / origin_location metadata.
+    # - Admin stamps arrival: Actual arrival at our warehouse + at the
+    #   customer's site. Nothing else on the shipping strip.
+    # Attempting to write outside your lane returns a 403 so the API
+    # matches the disabled fields in the UI.
+    _PURCHASING_SHIPPING = {"est_ship_from_origin", "act_ship_from_origin"}
+    _PURCHASING_META = {"is_import", "origin_location"}
+    _ADMIN_SHIPPING = {"act_arrive_our_warehouse", "act_arrive_customer"}
+    user_role = Role(user.role)
+    if user_role == Role.PURCHASING:
+        allowed = _PURCHASING_SHIPPING | _PURCHASING_META
+        gated_keys = SHIPPING_FIELDS | {"is_import", "origin_location"}
+        bad = sorted(k for k in data if k in gated_keys and k not in allowed)
+        if bad:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Purchasing may only edit {sorted(allowed)} on the shipping "
+                f"strip — got {bad}.",
+            )
+    elif user_role == Role.ADMIN:
+        gated_keys = SHIPPING_FIELDS | {"is_import", "origin_location"}
+        bad = sorted(k for k in data if k in gated_keys and k not in _ADMIN_SHIPPING)
+        if bad:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Admin may only edit {sorted(_ADMIN_SHIPPING)} on the "
+                f"shipping strip — got {bad}.",
+            )
+
     # Changing a shipping/delivery date is director-gated: a non-director's
     # edit is filed for approval (with the whole patch) and applied only when
     # the director signs off. Director edits apply immediately.
