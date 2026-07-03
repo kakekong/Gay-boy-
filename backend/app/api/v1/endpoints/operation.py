@@ -46,6 +46,16 @@ def _can_see_project_money(user: User) -> bool:
     return Role(user.role) != Role.PURCHASING
 
 
+def _can_see_project_customer(user: User) -> bool:
+    """Whether this user may see the customer identity behind a project.
+
+    Same customer-blindness rule as the PO screens — purchasing shouldn't
+    map customer ↔ supplier. Blank the name (surface a neutral code
+    fallback client-side) but keep the API shape.
+    """
+    return Role(user.role) != Role.PURCHASING
+
+
 @router.get("/projects")
 async def list_projects(db: AsyncSession = Depends(get_db),
                         user: User = Depends(get_current_user)):
@@ -80,15 +90,21 @@ async def list_projects(db: AsyncSession = Depends(get_db),
         )).all():
             sales_by_id[u.id] = u.full_name
     show_money = _can_see_project_money(user)
+    show_customer = _can_see_project_customer(user)
     out = []
     for p in rows:
         cust = customers_by_id.get(p.customer_id)
         rep_id = cust.sales_pic_id if cust else None
         out.append({
-            "id": str(p.id), "code": p.code, "customer_id": str(p.customer_id),
-            "customer_name": cust.company_name if cust else None,
-            "sales_pic_id": str(rep_id) if rep_id else None,
-            "sales_pic_name": sales_by_id.get(rep_id) if rep_id else None,
+            "id": str(p.id), "code": p.code,
+            # Purchasing sees a neutral "Order {code}" placeholder — the
+            # customer identity + the sales rep are both hidden so no
+            # customer ↔ supplier map can be inferred.
+            "customer_id": str(p.customer_id) if show_customer else None,
+            "customer_name": (cust.company_name if cust else None)
+                             if show_customer else f"Order {p.code}",
+            "sales_pic_id": str(rep_id) if (rep_id and show_customer) else None,
+            "sales_pic_name": sales_by_id.get(rep_id) if (rep_id and show_customer) else None,
             "status": p.status,
             "po_value": float(p.po_value) if show_money else None,
             "target_delivery": p.target_delivery, "actual_delivery": p.actual_delivery,
@@ -112,6 +128,7 @@ async def get_project(project_id: UUID,
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
     show_money = _can_see_project_money(user)
+    show_customer = _can_see_project_customer(user)
     return {
         "id": str(p.id), "code": p.code, "status": p.status,
         "po_number": p.po_number, "po_date": p.po_date,
@@ -131,10 +148,15 @@ async def get_project(project_id: UUID,
         "act_arrive_our_warehouse": p.act_arrive_our_warehouse,
         "est_arrive_customer": p.est_arrive_customer,
         "act_arrive_customer": p.act_arrive_customer,
-        "customer": {
-            "id": str(customer.id), "company_name": customer.company_name,
-            "industry": customer.industry, "stage": customer.stage,
-        } if customer else None,
+        # Purchasing gets a neutral placeholder — no customer identity leaks.
+        "customer": (
+            {
+                "id": str(customer.id), "company_name": customer.company_name,
+                "industry": customer.industry, "stage": customer.stage,
+            } if (customer and show_customer)
+            else ({"id": None, "company_name": f"Order {p.code}",
+                   "industry": None, "stage": None} if customer else None)
+        ),
         "quotation": {
             "id": str(quotation.id), "number": quotation.number,
             "status": quotation.status,
@@ -414,13 +436,17 @@ async def project_full(project_id: UUID,
                 "claims": claims_by_inv.get(inv.id, []),
             } for inv in invoices
         ],
-        "sales_pic_id": sales_rep["id"] if sales_rep else None,
-        "sales_pic_name": sales_rep["name"] if sales_rep else None,
-        "people": people_out,
-        "customer": {
-            "id": str(customer.id), "company_name": customer.company_name,
-            "industry": customer.industry, "stage": customer.stage,
-        } if customer else None,
+        "sales_pic_id": sales_rep["id"] if (sales_rep and _can_see_project_customer(user)) else None,
+        "sales_pic_name": sales_rep["name"] if (sales_rep and _can_see_project_customer(user)) else None,
+        "people": people_out if _can_see_project_customer(user) else [],
+        "customer": (
+            {
+                "id": str(customer.id), "company_name": customer.company_name,
+                "industry": customer.industry, "stage": customer.stage,
+            } if (customer and _can_see_project_customer(user))
+            else ({"id": None, "company_name": f"Order {p.code}",
+                   "industry": None, "stage": None} if customer else None)
+        ),
         "quotation": {
             "id": str(quotation.id), "number": quotation.number,
             "status": quotation.status,

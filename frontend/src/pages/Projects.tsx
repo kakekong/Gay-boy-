@@ -22,8 +22,12 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function ProjectsPage() {
   const nav = useNavigate();
-  // Purchasing sees projects for procurement context but not deal economics.
-  const showMoney = useAuthStore((s) => s.user?.role) !== "purchasing";
+  const role = useAuthStore((s) => s.user?.role);
+  // Purchasing sees projects for procurement context but not deal
+  // economics and not the customer identity — same customer-blindness
+  // rule as the PO screens so no customer ↔ supplier map can be built.
+  const showMoney = role !== "purchasing";
+  const showCustomer = role !== "purchasing";
   const q = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data),
@@ -48,8 +52,8 @@ export default function ProjectsPage() {
               <th className="th">Code</th>
               <th className="th">Status</th>
               {showMoney && <th className="th text-right">PO Value</th>}
-              <th className="th">Customer</th>
-              <th className="th">Sales rep</th>
+              {showCustomer && <th className="th">Customer</th>}
+              {showCustomer && <th className="th">Sales rep</th>}
             </tr>
           </thead>
           <tbody>
@@ -77,30 +81,37 @@ export default function ProjectsPage() {
                 {showMoney && (
                   <td className="td text-right tabular-nums">{idr(p.po_value)}</td>
                 )}
-                <td className="td">
-                  {p.customer_id ? (
-                    <Link
-                      to={`/customers/${p.customer_id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-brand-700 hover:underline"
-                    >
-                      {p.customer_name ?? p.customer_id.slice(0, 8)}
-                    </Link>
-                  ) : <span className="muted">—</span>}
-                </td>
-                <td className="td">
-                  {p.sales_pic_name ? (
-                    <span className="inline-flex items-center gap-1 text-sm">
-                      <UserIcon size={11} className="text-ink-400" />
-                      <UserLink id={p.sales_pic_id} name={p.sales_pic_name} />
-                    </span>
-                  ) : <span className="muted">—</span>}
-                </td>
+                {showCustomer && (
+                  <td className="td">
+                    {p.customer_id ? (
+                      <Link
+                        to={`/customers/${p.customer_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-brand-700 hover:underline"
+                      >
+                        {p.customer_name ?? p.customer_id.slice(0, 8)}
+                      </Link>
+                    ) : <span className="muted">—</span>}
+                  </td>
+                )}
+                {showCustomer && (
+                  <td className="td">
+                    {p.sales_pic_name ? (
+                      <span className="inline-flex items-center gap-1 text-sm">
+                        <UserIcon size={11} className="text-ink-400" />
+                        <UserLink id={p.sales_pic_id} name={p.sales_pic_name} />
+                      </span>
+                    ) : <span className="muted">—</span>}
+                  </td>
+                )}
               </tr>
             ))}
             {!q.data?.length && (
               <tr>
-                <td colSpan={showMoney ? 5 : 4} className="td text-center muted py-12">
+                <td
+                  colSpan={2 + (showMoney ? 1 : 0) + (showCustomer ? 2 : 0)}
+                  className="td text-center muted py-12"
+                >
                   No projects yet.
                 </td>
               </tr>
