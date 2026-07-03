@@ -210,6 +210,7 @@ async def _scoped(pr_id: UUID, db: AsyncSession, user: User) -> PriceRequest:
 @router.get("")
 async def list_price_requests(
     status_eq: str | None = None,
+    customer_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -224,6 +225,10 @@ async def list_price_requests(
         stmt = stmt.where(PriceRequest.status != "draft")
     if status_eq:
         stmt = stmt.where(PriceRequest.status == status_eq)
+    if customer_id:
+        # Customer-scoped view — used by the customer detail page's PR list
+        # so sales sees only the PRs filed against this customer.
+        stmt = stmt.where(PriceRequest.customer_id == customer_id)
     rows = (await db.scalars(stmt)).all()
     return [await _serialize(db, pr, role) for pr in rows]
 

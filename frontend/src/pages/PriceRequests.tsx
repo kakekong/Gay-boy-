@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText } from "lucide-react";
 import clsx from "clsx";
@@ -23,6 +23,14 @@ export default function PriceRequestsPage() {
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Landing here from a customer page? /price-requests?customer=<id>
+  // auto-opens the create form with that customer preselected so sales
+  // don't have to hunt through the customer picker again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const prefillCustomerId = searchParams.get("customer");
+  useEffect(() => {
+    if (prefillCustomerId) setCreating(true);
+  }, [prefillCustomerId]);
 
   const list = useQuery({
     queryKey: ["price-requests"],
@@ -56,7 +64,17 @@ export default function PriceRequestsPage() {
       </div>
 
       {creating && (
-        <CreateForm onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setSelected(id); }} />
+        <CreateForm
+          initialCustomerId={prefillCustomerId ?? ""}
+          onClose={() => {
+            setCreating(false);
+            if (prefillCustomerId) {
+              searchParams.delete("customer");
+              setSearchParams(searchParams, { replace: true });
+            }
+          }}
+          onCreated={(id) => { setCreating(false); setSelected(id); }}
+        />
       )}
 
       <div className="card overflow-hidden">
@@ -100,8 +118,14 @@ export default function PriceRequestsPage() {
   );
 }
 
-function CreateForm({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const [customerId, setCustomerId] = useState("");
+function CreateForm({
+  onClose, onCreated, initialCustomerId = "",
+}: {
+  onClose: () => void;
+  onCreated: (id: string) => void;
+  initialCustomerId?: string;
+}) {
+  const [customerId, setCustomerId] = useState(initialCustomerId);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<any[]>([{ description: "", qty: 1, uom: "", spec: "" }]);
 

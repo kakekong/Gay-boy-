@@ -5,7 +5,7 @@ import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
   Clock, ListChecks, CheckCircle2, Circle, RotateCcw, ChevronRight, Truck,
-  ShoppingCart, Banknote, Building, CalendarDays,
+  ShoppingCart, Banknote, Building, CalendarDays, Tag,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -85,6 +85,13 @@ export default function CustomerDetailPage() {
     queryFn: () =>
       api.get(`/quotations`, { params: { customer_id: id } }).then((r) => r.data),
     enabled: !!id,
+  });
+  const priceRequests = useQuery({
+    queryKey: ["customer-price-requests", id],
+    queryFn: () =>
+      api.get(`/price-requests`, { params: { customer_id: id } }).then((r) => r.data),
+    enabled: !!id,
+    retry: false,
   });
   const summary = useQuery({
     queryKey: ["customer-summary", id],
@@ -248,6 +255,98 @@ export default function CustomerDetailPage() {
 
       {/* Multiple PICs / contacts — right below the header */}
       <ContactsSection customerId={id!} />
+
+      {/* Price requests — filed BEFORE the quotation so purchasing can
+          cost it and the director can set the sell price. Sitting above
+          Quotations here so sales sees the intended order (PR → Quote →
+          PO → Project) at a glance instead of jumping straight to
+          "+ New quotation". */}
+      {(() => {
+        const prs = priceRequests.data ?? [];
+        return (
+          <div className="card overflow-hidden">
+            <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="font-semibold text-ink-900 flex items-center gap-2">
+                  <Tag size={15} className="text-brand-600" /> Price requests
+                </div>
+                <div className="text-xs muted">
+                  {prs.length} request{prs.length === 1 ? "" : "s"} for this customer ·
+                  filed before the quote so purchasing can cost it and the
+                  director can set the selling price.
+                </div>
+              </div>
+              <Link
+                to={`/price-requests?customer=${id}`}
+                className="btn-primary"
+              >
+                <Plus size={14} /> New price request
+              </Link>
+            </div>
+            {prs.length === 0 ? (
+              <div className="p-8 text-center text-sm muted">
+                No price requests yet — file one so purchasing can cost the
+                order and the director can set the sell price. Once approved
+                the resulting quotation auto-fills.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="th">Number</th>
+                    <th className="th">Status</th>
+                    <th className="th text-right">Lines</th>
+                    <th className="th">Filed</th>
+                    <th className="th">Quotation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prs.map((pr: any) => (
+                    <tr
+                      key={pr.id}
+                      className="tr-hover border-t border-ink-100 cursor-pointer"
+                      onClick={() => (window.location.href = `/price-requests?open=${pr.id}`)}
+                    >
+                      <td className="td font-mono text-xs">{pr.number}</td>
+                      <td className="td">
+                        <span className={clsx(
+                          "chip capitalize",
+                          pr.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                          : pr.status === "pending_purchasing" ? "bg-amber-50 text-amber-700"
+                          : pr.status === "pending_director" ? "bg-violet-50 text-violet-700"
+                          : pr.status === "rejected" ? "bg-red-50 text-red-700"
+                          : "bg-ink-100 text-ink-700",
+                        )}>
+                          {String(pr.status ?? "").replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td className="td text-right tabular-nums">
+                        {(pr.items ?? []).length}
+                      </td>
+                      <td className="td muted">
+                        {pr.created_at ? new Date(pr.created_at).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="td">
+                        {pr.quotation_id ? (
+                          <Link
+                            to={`/quotations/${pr.quotation_id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-mono text-xs text-brand-700 hover:underline"
+                          >
+                            open
+                          </Link>
+                        ) : (
+                          <span className="muted text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Quotations */}
       <div className="card overflow-hidden">
