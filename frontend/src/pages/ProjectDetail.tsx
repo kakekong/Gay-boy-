@@ -287,6 +287,18 @@ export default function ProjectDetailPage() {
     mutationFn: () => api.post(`/operation/projects/${id}/customer-received`),
     onSuccess: refresh, onError: onErr,
   });
+  // Director-only escape hatch for stale/test projects. Soft-deletes on
+  // the backend so the audit/history chain isn't orphaned. Navigates back
+  // to the Projects list on success so the deleted row disappears from
+  // view immediately.
+  const deleteProject = useMutation({
+    mutationFn: () => api.delete(`/operation/projects/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      nav("/projects");
+    },
+    onError: onErr,
+  });
   const submitClaim = useMutation({
     mutationFn: (body: {
       invoiceId: string; amount: number; paidAt?: string;
@@ -392,6 +404,23 @@ export default function ProjectDetailPage() {
                   STATUS_CHIP[p.status] ?? "bg-ink-100 text-ink-700")}>
                   {p.status.replace(/_/g, " ")}
                 </span>
+                {role === "director" && (
+                  <button
+                    type="button"
+                    className="btn-ghost text-red-600 text-xs px-2 py-0.5"
+                    title="Delete this project (director only). Soft-delete so history isn't orphaned; the linked customer PO gets unlinked."
+                    disabled={deleteProject.isPending}
+                    onClick={() => {
+                      if (window.confirm(
+                        `Delete ${p.code}? The project is soft-deleted and disappears from the Projects list. The linked customer PO is unlinked so it can be re-approved later. Purchase orders, drawings and invoices remain in the DB.`,
+                      )) {
+                        deleteProject.mutate();
+                      }
+                    }}
+                  >
+                    <Trash2 size={12} /> Delete project
+                  </button>
+                )}
               </div>
               <div className="mt-1 flex items-center gap-3 text-sm flex-wrap">
                 {cu && (

@@ -633,6 +633,48 @@ async def update_project(project_id: UUID,
     return {"ok": True, "id": str(p.id), "pending_approval": False}
 
 
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Soft-delete a project. Director-only escape hatch for cleaning up
+    stale records (typically test data or projects created before a
+    workflow reorder). The row stays in the DB with is_deleted=True so
+    the historical PO / quotation / invoice chain isn't orphaned — the
+    list endpoint already filters is_deleted=False.
+    """
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only the director can delete a project.",
+        )
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if p.is_deleted:
+        return None
+    p.is_deleted = True
+    p.deleted_at = datetime.now(UTC)
+    # Unlink from the customer PO so a director can re-file the same PO
+    # later without a duplicate-project constraint clash.
+    from app.models.customer_po import CustomerPO
+    for po in (await db.scalars(
+        select(CustomerPO).where(CustomerPO.project_id == project_id)
+    )).all():
+        po.project_id = None
+    await db.flush()
+    from app.core.audit import record as audit_record
+    await audit_record(
+        db, actor=user, action="delete", entity="project",
+        entity_id=p.id,
+        before={"code": p.code, "status": p.status,
+                "customer_id": str(p.customer_id) if p.customer_id else None},
+    )
+    return None
+
+
 # ─── Post-drawing logistics (purchasing) ─────────────────────────────────────
 # Which import documents each delivery mode requires. Two weeks before the
 # estimated delivery, purchasing must have these collected.
