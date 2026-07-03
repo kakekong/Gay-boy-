@@ -14,6 +14,7 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useLangStore, useT } from "@/store/lang";
 import { NotificationsBell } from "@/components/NotificationsBell";
+import { NotificationToaster } from "@/components/NotificationToaster";
 import { exitViewAs } from "@/lib/viewAs";
 
 interface NavItem {
@@ -44,7 +45,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["director"] },
       { to: "/calendar", label: "Calendar", label_id: "Kalender", icon: CalendarDays },
       { to: "/chat", label: "Chat", label_id: "Obrolan", icon: MessageCircle, badgeQuery: "chat-unread" },
-      { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare, roles: ["manager", "director"] },
+      { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare, roles: ["manager", "director"],
+        badgeQuery: "approvals-pending" },
     ],
   },
   {
@@ -56,13 +58,15 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/operation", label: "Operation", label_id: "Operasi", icon: Wrench },
       { to: "/finance", label: "Finance", label_id: "Keuangan", icon: Banknote,
-        roles: ["finance", "admin", "manager", "director"] },
+        roles: ["finance", "admin", "manager", "director"],
+        badgeQuery: "finance-pending" },
       { to: "/finance/reports", label: "Financial reports", label_id: "Laporan keuangan", icon: BarChart3,
         roles: ["finance", "admin", "manager", "director"] },
       { to: "/finance/estimated", label: "Estimated finance", label_id: "Estimasi keuangan", icon: Banknote,
         roles: ["finance", "admin", "manager", "director"] },
       { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
-        roles: ["admin", "finance", "manager", "director"] },
+        roles: ["admin", "finance", "manager", "director"],
+        badgeQuery: "claims-pending" },
       { to: "/inventory", label: "Inventory", label_id: "Inventaris", icon: Package,
         roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
@@ -186,8 +190,42 @@ export function Shell({ children }: { children: React.ReactNode }) {
     refetchInterval: 15_000,
     enabled: !!user,
   });
+
+  // Role-scoped sidebar counters — surface each queue's pending pile as
+  // a red badge on the item it lives under. Same 30s cadence as the
+  // notification bell so both surfaces stay in sync.
+  const role = user?.role ?? "";
+  const canSeePendingInvoices = ["finance", "manager", "director"].includes(role);
+  const canSeePendingClaims   = ["finance", "manager", "director"].includes(role);
+  const canSeePendingApprovals = ["manager", "director", "finance"].includes(role);
+
+  const pendingInvoices = useQuery({
+    queryKey: ["nav-pending-invoices"],
+    queryFn: () => api.get("/finance/invoices/pending")
+      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
+    refetchInterval: 30_000,
+    enabled: !!user && canSeePendingInvoices,
+  });
+  const pendingClaims = useQuery({
+    queryKey: ["nav-pending-claims"],
+    queryFn: () => api.get("/payments/claims", { params: { status_eq: "pending" } })
+      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
+    refetchInterval: 30_000,
+    enabled: !!user && canSeePendingClaims,
+  });
+  const pendingApprovals = useQuery({
+    queryKey: ["nav-pending-approvals"],
+    queryFn: () => api.get("/approvals", { params: { status_eq: "pending" } })
+      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
+    refetchInterval: 30_000,
+    enabled: !!user && canSeePendingApprovals,
+  });
+
   const badges: Record<string, number> = {
     "chat-unread": unread.data ?? 0,
+    "finance-pending": pendingInvoices.data ?? 0,
+    "claims-pending": pendingClaims.data ?? 0,
+    "approvals-pending": pendingApprovals.data ?? 0,
   };
 
   return (
@@ -275,8 +313,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
                         </span>
                       )}
                       {n.badgeQuery && badges[n.badgeQuery] > 0 && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500 text-white min-w-[18px] text-center">
-                          {badges[n.badgeQuery]}
+                        <span className="relative inline-flex items-center">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60 animate-ping" />
+                          <span className="relative text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500 text-white min-w-[18px] text-center">
+                            {badges[n.badgeQuery]}
+                          </span>
                         </span>
                       )}
                     </NavLink>
@@ -373,6 +414,42 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </header>
 
         <ImpersonationBanner />
+
+        {/* Right-side toast that briefly pops in when a pending queue's
+            count rises since the last poll — payment claim landed, new
+            invoice submitted for approval, new approval request, etc. */}
+        <NotificationToaster
+          sources={[
+            {
+              key: "approvals-pending",
+              count: pendingApprovals.data ?? 0,
+              title: "New approval request",
+              body: (n) => `${n} new pending approval${n === 1 ? "" : "s"}.`,
+              link: "/approvals",
+            },
+            {
+              key: "finance-pending",
+              count: pendingInvoices.data ?? 0,
+              title: "Invoice waiting for finance",
+              body: (n) => `${n} new invoice${n === 1 ? "" : "s"} to review + sign off on the faktur pajak.`,
+              link: "/finance",
+            },
+            {
+              key: "claims-pending",
+              count: pendingClaims.data ?? 0,
+              title: "New payment claim",
+              body: (n) => `${n} customer payment${n === 1 ? "" : "s"} to verify.`,
+              link: "/finance/payment-verification",
+            },
+            {
+              key: "chat-unread",
+              count: unread.data ?? 0,
+              title: "New chat message",
+              body: (n) => `${n} unread message${n === 1 ? "" : "s"}.`,
+              link: "/chat",
+            },
+          ]}
+        />
 
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
