@@ -66,12 +66,14 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
 # UI — nobody sets it from a dropdown. It reflects where the project actually
 # is, advanced forward by real events (e.g. the customer approving a drawing
 # moves it to `drawing_approved`). It never moves backward on its own.
-# Ordered so the real flow walks straight through: production happens, then
-# ops's final QC inspects the goods, then they're packaged for shipment;
-# admin/finance issue + approve the invoice; the customer receives the goods;
-# payment closes it out.
+#
+# Purchasing files the supplier PO first (that trigger sets 'purchasing').
+# Then the supplier posts a drawing (→ drawing), the director approves it
+# (→ drawing_approved), ops does the physical work (production → QC →
+# packaging), finance invoices (→ invoiced) and admin confirms delivery
+# (→ delivered), then verified payment closes it out (→ paid → closed).
 PROJECT_STATUS_ORDER: list[str] = [
-    "new", "drawing", "drawing_approved", "purchasing",
+    "new", "purchasing", "drawing", "drawing_approved",
     "production", "qc", "packaging", "invoiced", "delivered", "paid", "closed",
 ]
 

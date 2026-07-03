@@ -28,8 +28,11 @@ const STATUS_CHIP: Record<string, string> = {
   closed:           "bg-emerald-100 text-emerald-800",
 };
 
+// Mirrors backend PROJECT_STATUS_ORDER: purchasing files a supplier PO
+// first, then supplier posts a drawing → director approves → ops runs
+// production/QC/packaging → finance/admin close out → payment.
 const PIPELINE_STAGES = [
-  "new", "drawing", "drawing_approved", "purchasing",
+  "new", "purchasing", "drawing", "drawing_approved",
   "production", "qc", "packaging", "invoiced", "delivered", "paid", "closed",
 ];
 
@@ -619,7 +622,7 @@ export default function ProjectDetailPage() {
           const blockedReason = !canManageWO
             ? "Only purchasing, admin or director can file work orders."
             : allowedStages.length === 0
-              ? `The project is still at '${p.status.replace(/_/g, " ")}'. Work orders will unlock once it reaches production — advance the earlier stages (drawing → drawing_approved → purchasing → production) first.`
+              ? `The project is still at '${p.status.replace(/_/g, " ")}'. Work orders will unlock once it reaches production — advance the earlier stages (purchasing → drawing → drawing_approved → production) first.`
               : null;
           return (
             <div className="p-3 space-y-2 border-b border-ink-100 bg-ink-50/40">

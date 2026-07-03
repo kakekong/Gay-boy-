@@ -1036,6 +1036,11 @@ async def confirm_delivery(project_id: UUID,
             "All required documents must be approved by the director first.",
         )
     p.delivery_confirmed_at = datetime.now(UTC)
+    # Under the reordered pipeline, drawing_approved → production is a
+    # direct step. Confirming delivery is the trigger — the goods are on
+    # the way, the ops board should be live. advance_project_status caps
+    # at one step, so it's safe if the project is already ahead.
+    advance_project_status(p, "production")
     # Spawn the receiving WO if the operations board doesn't have one yet.
     existing = await db.scalar(
         select(WorkOrder).where(
@@ -1352,8 +1357,8 @@ def _assert_wo_allowed_for_project(p: "Project", stage: str) -> None:
             status.HTTP_409_CONFLICT,
             f"Can't file a '{stage}' work order while the project is still "
             f"at '{p.status}'. The project has to reach '{min_required}' "
-            "first — advance the previous stages (drawing → drawing_approved "
-            "→ purchasing → production …) before jumping ahead.",
+            "first — advance the previous stages (purchasing → drawing → "
+            "drawing_approved → production …) before jumping ahead.",
         )
 
 
@@ -1370,7 +1375,7 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     # Refuse the WO outright if the project's still in pre-production
-    # (drawing / drawing_approved / purchasing). Ops WOs only make sense
+    # (purchasing / drawing / drawing_approved). Ops WOs only make sense
     # once physical work is starting.
     _assert_wo_allowed_for_project(p, payload.stage)
     w = WorkOrder(project_id=project_id, code=payload.code,
