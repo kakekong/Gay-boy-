@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -138,6 +138,16 @@ export default function QuotationDetailPage() {
     onSuccess: () => { setLostOpen(false); setLostReason(""); onActionSuccess("Mark lost")(); },
     onError: onActionError,
   });
+  // Lightweight PATCH used by the inline Valid-until editor on the header
+  // — only sends the two meta fields the backend allows post-submit, so a
+  // sales owner can push a new expiry date without having to open the
+  // full edit modal (which is locked at approved/sent/etc.).
+  const patchMeta = useMutation({
+    mutationFn: (body: { valid_until?: string | null; notes?: string | null }) =>
+      api.patch(`/quotations/${id}`, body),
+    onSuccess: () => { refresh(); },
+    onError: onActionError,
+  });
 
   if (q.isLoading) return <div className="muted">Loading…</div>;
   if (!q.data)     return <div className="muted">Not found.</div>;
@@ -159,6 +169,11 @@ export default function QuotationDetailPage() {
   const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent");
   const canEdit = (isOwner || user?.role === "director") &&
     (Q.status === "draft" || Q.status === "rejected");
+  // The full form is locked once the quote is out of draft/rejected, but
+  // meta like Valid until and Notes stays editable up to the closed
+  // states (won / lost / cancelled). Backend enforces the same rule.
+  const canEditMeta = (isOwner || user?.role === "director") &&
+    !["won", "lost", "cancelled"].includes(Q.status);
 
   return (
     <div className="space-y-6">
@@ -264,7 +279,13 @@ export default function QuotationDetailPage() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
           <Field label="Issued" icon={<Calendar size={13} />}>{Q.created_at?.slice?.(0,10) ?? "—"}</Field>
-          <Field label="Valid until" icon={<Calendar size={13} />}>{Q.valid_until ?? "—"}</Field>
+          <Field label="Valid until" icon={<Calendar size={13} />}>
+            <ValidUntilCell
+              value={Q.valid_until}
+              canEdit={canEditMeta}
+              onSave={(v) => patchMeta.mutate({ valid_until: v || null })}
+            />
+          </Field>
           <Field label="Currency" icon={<Receipt size={13} />}>{Q.currency}</Field>
           <Field label="Items" icon={<FileText size={13} />}>{(Q.items ?? []).length}</Field>
         </div>
@@ -552,6 +573,56 @@ export default function QuotationDetailPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+function ValidUntilCell({
+  value, canEdit, onSave,
+}: {
+  value: string | null | undefined;
+  canEdit: boolean;
+  onSave: (v: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  // Snap the editor's draft to the latest server value when we leave
+  // edit mode, so the next open shows the persisted date.
+  useEffect(() => { if (!editing) setDraft(value ?? ""); }, [value, editing]);
+  if (!canEdit) return <>{value ?? "—"}</>;
+  if (editing) {
+    return (
+      <div className="inline-flex items-center gap-1">
+        <input
+          type="date"
+          className="input py-0.5 text-sm"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoFocus
+        />
+        <button
+          className="text-brand-700 text-xs font-medium hover:underline"
+          onClick={() => { onSave(draft); setEditing(false); }}
+        >
+          save
+        </button>
+        <button
+          className="text-ink-500 text-xs hover:underline"
+          onClick={() => setEditing(false)}
+        >
+          cancel
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="text-brand-700 hover:underline"
+      title="Click to edit"
+      onClick={() => setEditing(true)}
+    >
+      {value ?? "set date"}
+    </button>
   );
 }
 

@@ -186,22 +186,41 @@ async def update_quotation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Edit a quotation after creation. Only the owner (or director) may edit,
-    and only while it's still a draft or was rejected — once it's submitted /
-    approved / won the numbers are locked."""
+    """Edit a quotation after creation.
+
+    The owner (or director) may edit. Only draft / rejected quotations are
+    fully editable — once the numbers have been submitted for approval or
+    sent to the customer, they're locked.
+
+    Exception: valid_until and notes can be updated at any stage before the
+    deal is closed (won / lost / cancelled). Those two are meta the customer
+    frequently renegotiates and don't affect pricing, so blocking them on a
+    submitted / approved / sent / won quote would just force sales to file
+    a bogus 'rejected' state to get back into edit mode.
+    """
     q = await _load(q_id, db)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    if q.status not in ("draft", "rejected"):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"A '{q.status}' quotation can't be edited. Only drafts "
-            "(or rejected ones) are editable.",
-        )
 
     data = payload.model_dump(exclude_unset=True)
+    # Fields that don't change pricing/approval — allowed even after submit.
+    _META_FIELDS = {"valid_until", "notes"}
+    _CLOSED_STATES = {"won", "lost", "cancelled"}
+    is_meta_only = bool(data) and all(k in _META_FIELDS for k in data)
+
+    if q.status in _CLOSED_STATES:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation can't be edited — the deal is closed.",
+        )
+    if q.status not in ("draft", "rejected") and not is_meta_only:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation is locked for pricing edits. "
+            "Only valid_until / notes can be updated at this stage.",
+        )
 
     # Prices on a price-request-backed quotation are fixed by the director's
     # approved form — sales can adjust meta (validity, notes) but not the lines.
