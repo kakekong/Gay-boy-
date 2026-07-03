@@ -14,7 +14,7 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useLangStore, useT } from "@/store/lang";
 import { NotificationsBell } from "@/components/NotificationsBell";
-import { NotificationToaster } from "@/components/NotificationToaster";
+import { NotificationBanner, NotificationStripe } from "@/components/NotificationBanner";
 import { exitViewAs } from "@/lib/viewAs";
 
 interface NavItem {
@@ -415,41 +415,53 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
         <ImpersonationBanner />
 
-        {/* Right-side toast that briefly pops in when a pending queue's
-            count rises since the last poll — payment claim landed, new
-            invoice submitted for approval, new approval request, etc. */}
-        <NotificationToaster
-          sources={[
+        {/* App-style notification stack — banner cards slide in from the
+            top-right when a queue's count rises, with a Web-Audio chime
+            and (opt-in) native browser Notifications. NotificationStripe
+            is the persistent top bar summarising every non-zero queue so
+            unopened items can't just sit in the sidebar unnoticed. */}
+        {(() => {
+          const sources = [
             {
               key: "approvals-pending",
               count: pendingApprovals.data ?? 0,
-              title: "New approval request",
-              body: (n) => `${n} new pending approval${n === 1 ? "" : "s"}.`,
+              title: "Approval requests",
+              body: (n: number) => `${n} new pending approval${n === 1 ? "" : "s"}.`,
               link: "/approvals",
+              severity: "high" as const,
             },
             {
               key: "finance-pending",
               count: pendingInvoices.data ?? 0,
-              title: "Invoice waiting for finance",
-              body: (n) => `${n} new invoice${n === 1 ? "" : "s"} to review + sign off on the faktur pajak.`,
+              title: "Invoices waiting for finance",
+              body: (n: number) => `${n} new invoice${n === 1 ? "" : "s"} to review + sign off on the faktur pajak.`,
               link: "/finance",
+              severity: "medium" as const,
             },
             {
               key: "claims-pending",
               count: pendingClaims.data ?? 0,
-              title: "New payment claim",
-              body: (n) => `${n} customer payment${n === 1 ? "" : "s"} to verify.`,
+              title: "Payment claims",
+              body: (n: number) => `${n} customer payment${n === 1 ? "" : "s"} to verify.`,
               link: "/finance/payment-verification",
+              severity: "medium" as const,
             },
             {
               key: "chat-unread",
               count: unread.data ?? 0,
-              title: "New chat message",
-              body: (n) => `${n} unread message${n === 1 ? "" : "s"}.`,
+              title: "Chat messages",
+              body: (n: number) => `${n} unread message${n === 1 ? "" : "s"}.`,
               link: "/chat",
+              severity: "low" as const,
             },
-          ]}
-        />
+          ];
+          return (
+            <>
+              <NotificationStripe sources={sources} />
+              <NotificationBanner sources={sources} />
+            </>
+          );
+        })()}
 
         <main className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
