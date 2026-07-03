@@ -122,13 +122,18 @@ async def create_from_price_request(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "This price request already has a quotation")
 
+    # PR notes carry internal `[purchasing]` / `[director]` side-channel
+    # lines that must not bleed into the customer-facing quotation. Filter
+    # them out at the copy point so the quote only inherits the sales-
+    # authored notes that were meant for the customer.
+    from app.api.v1.endpoints.price_requests import strip_internal_notes
     q = Quotation(
         number=await next_quotation_number(db),
         customer_id=pr.customer_id,
         sales_pic_id=pr.sales_pic_id or user.id,
         price_request_id=pr.id,
         discount_pct=0, tax_pct=11,
-        notes=pr.notes,
+        notes=strip_internal_notes(pr.notes),
         status="draft",
         created_by=user.id, updated_by=user.id,
     )
@@ -455,11 +460,21 @@ async def mark_lost(q_id: UUID, reason: str,
 
 
 async def _load(q_id: UUID, db: AsyncSession) -> Quotation:
-    return await db.scalar(
+    q = await db.scalar(
         select(Quotation)
         .options(selectinload(Quotation.items))
         .where(Quotation.id == q_id)
     )
+    if q is not None and q.notes:
+        # Safety net: any legacy quotation whose notes still carry a
+        # [purchasing]/[director]/… side-channel line from the old copy
+        # path gets scrubbed on the way out so it never renders on a
+        # sales page or on the PDF/portal.
+        from app.api.v1.endpoints.price_requests import strip_internal_notes
+        cleaned = strip_internal_notes(q.notes)
+        if cleaned != q.notes:
+            q.notes = cleaned
+    return q
 
 
 @router.get("", response_model=list[QuotationOut])

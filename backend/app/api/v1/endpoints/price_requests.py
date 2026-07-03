@@ -33,6 +33,38 @@ _PURCHASING = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
 _MANAGEMENT = {Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.FINANCE}
 
 
+import re as _re
+
+# Lines starting with a known internal-role tag are side-channel notes
+# between staff, never for the customer. Matches only the concrete tags
+# we actually write today so a user's own note like "[urgent]" doesn't
+# get accidentally scrubbed.
+_INTERNAL_TAG_LINE = _re.compile(
+    r"^\s*\[(?:purchasing|director|manager|admin|finance|sales)\](?:\s.*)?$",
+    _re.IGNORECASE,
+)
+
+
+def strip_internal_notes(text: str | None) -> str | None:
+    """Drop internal role-tagged lines from a shared notes blob.
+
+    Purchasing/director/etc. append `[purchasing] …`, `[director] …` (and
+    similar) to Price-Request notes as an internal side-channel. Sales
+    shouldn't see those on the PR page, and the tags MUST NOT bleed into
+    the customer-facing quotation when we copy notes across — the quote's
+    notes are printed on the PDF and shown on the customer portal.
+
+    Only strips lines that match a concrete known-internal tag so a
+    user-authored line that happens to start with a bracket (e.g. an
+    inline reference like "[ref 001] follow up") is preserved.
+    """
+    if not text:
+        return text
+    kept = [ln for ln in text.splitlines() if not _INTERNAL_TAG_LINE.match(ln)]
+    result = "\n".join(kept).strip()
+    return result or None
+
+
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 class ItemIn(BaseModel):
     description: str
@@ -128,12 +160,19 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             row["sell_basis"] = it.get("sell_basis") or "unit"
             row["line_total"] = float(it.get("sell_price") or 0) * float(it.get("qty") or 0)
         items.append(row)
+    # Sales sees only the sales-authored notes; the [purchasing]/[director]
+    # role-tagged side-channel lines are filtered out. Purchasing/mgmt see
+    # the full blob so their conversation with the director isn't hidden
+    # from them.
+    notes_for_role = (
+        strip_internal_notes(pr.notes) if role == Role.SALES else pr.notes
+    )
     out = {
         "id": str(pr.id),
         "number": pr.number,
         "status": pr.status,
         "items": items,
-        "notes": pr.notes,
+        "notes": notes_for_role,
         "sales_pic_id": str(pr.sales_pic_id) if pr.sales_pic_id else None,
         "quotation_id": str(pr.quotation_id) if pr.quotation_id else None,
         "priced_at": pr.priced_at,
