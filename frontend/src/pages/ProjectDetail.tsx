@@ -84,6 +84,14 @@ export default function ProjectDetailPage() {
   // Only purchasing / admin / director may file or move work orders — the
   // backend enforces the same set. Sales/finance/hr never touch WOs.
   const canManageWO = ["purchasing", "admin", "director"].includes(role);
+  // Sales sees only the customer-facing shell of a project (header,
+  // pipeline, sales rep, shipping timeline view). Every internal card —
+  // work orders, drawings, deliveries, invoices, supplier POs, logistics,
+  // QC, margins — stays hidden so the sales role never leaks internal
+  // ops or money detail. The customer's project timeline lives on the
+  // portal; this is the internal page.
+  const isSales = role === "sales";
+  const canSeeOpsDetails = !isSales;
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -506,8 +514,8 @@ export default function ProjectDetailPage() {
         <PeopleInvolvedCard people={people} />
       )}
 
-      {/* Profit / Margin — hidden from purchasing */}
-      {showMoney && (
+      {/* Profit / Margin — hidden from purchasing and sales */}
+      {showMoney && canSeeOpsDetails && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <Stat label="PO value"      value={idr(p.po_value)}              tone="brand"   />
           <Stat label="Margin (est)"  value={pct(p.margin_estimate)}       tone="amber"   />
@@ -525,12 +533,14 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Shipping timeline */}
+      {/* Shipping timeline — sales gets the read-only viewer so they can
+          answer 'when's it arriving?' from the customer, but not the
+          editor (dates flow from purchasing/ops). */}
       <ShippingTimeline projectId={p.id} />
-      <ShippingTimelineEditor projectId={p.id} />
+      {canSeeOpsDetails && <ShippingTimelineEditor projectId={p.id} />}
 
       {/* Price request (the approved order behind this project) */}
-      {priceReq && (
+      {priceReq && canSeeOpsDetails && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
@@ -571,7 +581,8 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Work orders */}
+      {/* Work orders — ops-internal, hidden from sales */}
+      {canSeeOpsDetails && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
@@ -710,8 +721,10 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+      )}
 
-      {/* Drawings */}
+      {/* Drawings — internal, hidden from sales */}
+      {canSeeOpsDetails && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -863,11 +876,13 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+      )}
 
       {/* Logistics & import documents — only meaningful once the drawing
           has been approved. Hidden before that so the project page stays
-          focused on what's actually happening at the current stage. */}
-      {logistics && PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("drawing_approved") && (
+          focused on what's actually happening at the current stage.
+          Also hidden from sales — this is purchasing's card. */}
+      {canSeeOpsDetails && logistics && PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("drawing_approved") && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
             <div>
@@ -1000,8 +1015,8 @@ export default function ProjectDetailPage() {
       {/* Operations QC — only shown once the project has reached the QC
           stage (i.e. production is done and it's time to inspect). Kept
           visible afterwards so historical qc_decision/qc_passed_at stays
-          on the page. */}
-      {(PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("qc") || p.qc_decision || p.qc_passed_at) && (
+          on the page. Also hidden from sales (internal ops signal). */}
+      {canSeeOpsDetails && (PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("qc") || p.qc_decision || p.qc_passed_at) && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
@@ -1049,7 +1064,9 @@ export default function ProjectDetailPage() {
       </div>
       )}
 
-      {/* Admin & finance close-out: invoice + faktur pajak */}
+      {/* Finance close-out: invoice + faktur pajak. Sales doesn't see
+          money detail so this whole card is hidden from them. */}
+      {canSeeOpsDetails && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
@@ -1333,8 +1350,10 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </div>
+      )}
 
-      {/* Deliveries */}
+      {/* Deliveries — ops-internal, hidden from sales */}
+      {canSeeOpsDetails && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -1467,8 +1486,11 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+      )}
 
-      {/* Invoices */}
+      {/* Invoices list — same audience as the finance close-out card,
+          hidden from sales. */}
+      {canSeeOpsDetails && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -1505,8 +1527,10 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+      )}
 
-      {/* Supplier POs */}
+      {/* Supplier POs — customer/supplier mapping is kept private from sales. */}
+      {canSeeOpsDetails && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-end justify-between gap-3 flex-wrap">
           <div>
@@ -1565,9 +1589,11 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+      )}
 
-      {/* Legacy purchase requests (only when present — inventory-side flow) */}
-      {prs.length > 0 && (
+      {/* Legacy purchase requests (only when present — inventory-side flow).
+          Hidden from sales alongside the other purchasing internals. */}
+      {canSeeOpsDetails && prs.length > 0 && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
