@@ -56,6 +56,19 @@ async def create_quotation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Sales can no longer type a quotation out of thin air — the intended
+    # flow is PR → purchasing costs → director sets sell + approves →
+    # quotation auto-generates via /quotations/from-price-request/{pr_id}.
+    # Director/manager/admin still have the direct path so they can file
+    # a one-off quote when a customer's already negotiated a fixed price
+    # off-system.
+    if Role(user.role) == Role.SALES:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Sales can't create a quotation directly. File a price request "
+            "first — the quotation is generated automatically once the "
+            "director approves the sell price on that PR.",
+        )
     # Number is auto-generated from the fixed company token, but the user may
     # supply a custom full number (editable when needed) or just override the
     # token segment.

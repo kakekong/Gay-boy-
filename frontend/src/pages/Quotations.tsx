@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import type { Quotation } from "@/types";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
+import { useAuthStore } from "@/store/auth";
 
 const STATUS: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -21,6 +22,12 @@ export default function QuotationsPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [creating, setCreating] = useState(false);
+  const role = useAuthStore((s) => s.user?.role) ?? "";
+  // Sales must go through a Price Request first. Only director/manager/
+  // admin retain the direct create-a-quote path for the rare off-system
+  // fixed-price case; the backend enforces the same rule with a 409 if
+  // sales tries anyway.
+  const canDirectCreate = ["director", "manager", "admin"].includes(role);
 
   const q = useQuery({
     queryKey: ["quotations"],
@@ -45,12 +52,22 @@ export default function QuotationsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Quotations</h1>
           <p className="text-sm muted">Price offers across every stage.</p>
         </div>
-        <button className="btn-primary" onClick={() => setCreating(true)}>
-          <Plus size={14} /> New quotation
-        </button>
+        {canDirectCreate ? (
+          <button className="btn-primary" onClick={() => setCreating(true)}>
+            <Plus size={14} /> New quotation
+          </button>
+        ) : (
+          <Link
+            to="/price-requests"
+            className="btn-primary"
+            title="Sales files a price request first; the quotation is generated once the director approves the sell price."
+          >
+            <Plus size={14} /> New price request
+          </Link>
+        )}
       </div>
 
-      {creating && (
+      {creating && canDirectCreate && (
         <NewQuotationForm
           onClose={() => {
             setCreating(false);

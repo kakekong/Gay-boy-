@@ -359,13 +359,31 @@ export default function CustomerDetailPage() {
               {(quotations.data ?? []).length} document{(quotations.data ?? []).length === 1 ? "" : "s"} for this customer
             </div>
           </div>
-          <button className="btn-primary" onClick={() => setOpenQuote(true)}>
-            <Plus size={14} /> New quotation
-          </button>
+          {/* Sales can't create quotations directly anymore — every
+              quote has to come off an approved Price Request so the
+              sell price is director-signed. This button now jumps to
+              the PR flow for this customer. Director/manager/admin
+              still get the direct-create form for the rare off-system
+              case. */}
+          {(me?.role === "director" || me?.role === "manager" || me?.role === "admin") ? (
+            <button className="btn-primary" onClick={() => setOpenQuote(true)}>
+              <Plus size={14} /> New quotation
+            </button>
+          ) : (
+            <Link
+              to={`/price-requests?customer=${id}`}
+              className="btn-primary"
+              title="Sales files a price request first; the quotation is generated once the director approves the sell price."
+            >
+              <Plus size={14} /> New price request
+            </Link>
+          )}
         </div>
         {(quotations.data ?? []).length === 0 ? (
           <div className="p-8 text-center text-sm muted">
-            No quotations yet. Click "New quotation" to create one.
+            No quotations yet. File a price request first — the quotation
+            is generated automatically once the director approves the
+            sell price.
           </div>
         ) : (
           <table className="w-full">
