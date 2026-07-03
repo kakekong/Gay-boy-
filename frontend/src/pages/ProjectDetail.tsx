@@ -370,8 +370,6 @@ export default function ProjectDetailPage() {
   const cpo = data.data.customer_po;
   const salesPicId   = data.data.sales_pic_id;
   const salesPicName = data.data.sales_pic_name;
-  const people: Array<{ id: string; name: string; role: string; contribution: string }>
-    = data.data.people ?? [];
   const wos = data.data.work_orders ?? [];
   const dr  = data.data.drawings ?? [];
   const dos = data.data.deliveries ?? [];
@@ -539,12 +537,6 @@ export default function ProjectDetailPage() {
           </p>
         </div>
       </div>
-
-      {/* People involved — who touched what on this project. Deduped so
-          one user shows up once with a list of the actions they took. */}
-      {people.length > 0 && (
-        <PeopleInvolvedCard people={people} />
-      )}
 
       {/* Profit / Margin — hidden from purchasing and sales */}
       {showMoney && canSeeOpsDetails && (
@@ -1734,77 +1726,6 @@ function EditableDateField({
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm py-0.5 px-0 cursor-pointer disabled:opacity-50"
       />
-    </div>
-  );
-}
-
-const ROLE_TONE: Record<string, string> = {
-  sales:      "bg-brand-50 text-brand-700",
-  purchasing: "bg-teal-50 text-teal-700",
-  admin:      "bg-violet-50 text-violet-700",
-  finance:    "bg-amber-50 text-amber-700",
-  manager:    "bg-emerald-50 text-emerald-700",
-  director:   "bg-red-50 text-red-700",
-  hr:         "bg-yellow-50 text-yellow-700",
-};
-
-function PeopleInvolvedCard({
-  people,
-}: {
-  people: Array<{ id: string; name: string; role: string; contribution: string }>;
-}) {
-  // Dedupe by user id, aggregating each person's contribution list. The
-  // backend already emits one row per action so a single reviewer who
-  // approved three drawings shows up once with three lines under them.
-  const byId = new Map<string, { name: string; role: string; contributions: string[] }>();
-  for (const row of people) {
-    if (!row.id) continue;
-    const cur = byId.get(row.id) ?? { name: row.name, role: row.role, contributions: [] };
-    if (!cur.contributions.includes(row.contribution)) {
-      cur.contributions.push(row.contribution);
-    }
-    byId.set(row.id, cur);
-  }
-  const rows = Array.from(byId.entries());
-
-  return (
-    <div className="card overflow-hidden">
-      <header className="px-5 py-3 border-b border-ink-100">
-        <div className="font-semibold flex items-center gap-2">
-          <UserIcon size={15} className="text-brand-600" /> People involved
-        </div>
-        <div className="text-xs muted">
-          Everyone who has touched this project — sales, purchasing, finance,
-          director and ops sign-offs.
-        </div>
-      </header>
-      <ul className="divide-y divide-ink-100">
-        {rows.map(([id, u]) => (
-          <li key={id} className="px-5 py-3 flex items-start gap-3">
-            <div className="h-8 w-8 rounded-full bg-brand-50 text-brand-700 grid place-items-center text-xs font-semibold shrink-0">
-              {(u.name ?? "?").slice(0, 1).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium">
-                  <UserLink id={id} name={u.name ?? "—"} />
-                </span>
-                <span className={clsx(
-                  "chip capitalize text-[10px]",
-                  ROLE_TONE[u.role] ?? "bg-ink-100 text-ink-700",
-                )}>
-                  {u.role ?? "—"}
-                </span>
-              </div>
-              <ul className="mt-1 space-y-0.5 text-xs muted">
-                {u.contributions.map((c, i) => (
-                  <li key={i}>· {c}</li>
-                ))}
-              </ul>
-            </div>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
