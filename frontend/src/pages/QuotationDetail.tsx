@@ -112,6 +112,17 @@ export default function QuotationDetailPage() {
     mutationFn: () => api.post(`/quotations/${id}/submit`),
     onSuccess: onActionSuccess("Submit"), onError: onActionError,
   });
+  // Escape hatch for an accidental submit: pulls the quote back to draft
+  // and deletes the pending approval request so the director's queue
+  // can't decide a withdrawn submission.
+  const unsubmit = useMutation({
+    mutationFn: () => api.post(`/quotations/${id}/unsubmit`),
+    onSuccess: () => {
+      refresh();
+      setFlash({ kind: "ok", text: "Submission withdrawn — the quotation is back in draft and editable." });
+    },
+    onError: onActionError,
+  });
   const approve = useMutation({
     mutationFn: () => api.post(`/quotations/${id}/approve`, { notes: "" }),
     onSuccess: onActionSuccess("Approve"), onError: onActionError,
@@ -165,6 +176,9 @@ export default function QuotationDetailPage() {
   const canApprove = user && (user.role === "manager" || user.role === "director");
   const isOwner    = user && user.id === Q.sales_pic_id;
   const canSubmit  = isOwner && Q.status === "draft";
+  // Withdraw an accidental submit while the director hasn't decided yet.
+  const canUnsubmit = (isOwner || user?.role === "director")
+    && Q.status === "pending_approval";
   const canDecide  = canApprove && Q.status === "pending_approval";
   const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent");
   const canEdit = (isOwner || user?.role === "director") &&
@@ -238,6 +252,23 @@ export default function QuotationDetailPage() {
             {canSubmit && (
               <button className="btn-primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
                 <Send size={15} /> Submit
+              </button>
+            )}
+            {canUnsubmit && (
+              <button
+                className="btn-ghost"
+                title="Withdraw the submission — the quotation goes back to draft and the approval request is removed from the director's queue."
+                onClick={() => {
+                  if (window.confirm(
+                    "Withdraw this submission? The quotation returns to draft (editable) and leaves the director's approval queue.",
+                  )) unsubmit.mutate();
+                }}
+                disabled={unsubmit.isPending}
+              >
+                {unsubmit.isPending
+                  ? <Loader2 size={15} className="animate-spin" />
+                  : <Undo2 size={15} />}
+                Unsubmit
               </button>
             )}
             {canDecide && (

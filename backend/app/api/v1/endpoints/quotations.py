@@ -333,6 +333,57 @@ async def submit_quotation(
     return await _load(q.id, db)
 
 
+@router.post("/{q_id}/unsubmit", response_model=QuotationOut)
+async def unsubmit_quotation(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Pull an accidentally-submitted quotation back to draft.
+
+    Only works while it's still `pending_approval` — once the director has
+    approved or rejected it, the decision stands and the normal edit rules
+    apply. Only the owner (or director) may withdraw. The pending
+    ApprovalRequest is deleted so the director's queue can't decide a
+    quotation that's already back in draft (a stale approve would have
+    flipped it straight to 'approved').
+    """
+    q = await db.get(Quotation, q_id)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.DIRECTOR, Role.ADMIN):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    if q.status != "pending_approval":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Only a pending-approval quotation can be unsubmitted — this "
+            f"one is '{q.status}'."
+            + (" It was already decided; edit it (draft/rejected rules) or "
+               "ask the director." if q.status in ("approved", "rejected") else ""),
+        )
+    # Remove the live approval request so the approvals queue stays clean
+    # and nobody can decide a withdrawn submission.
+    reqs = (await db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "quotation",
+            ApprovalRequest.target_id == q.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )).all()
+    for req in reqs:
+        await db.delete(req)
+    q.status = "draft"
+    q.updated_by = user.id
+    await audit_record(db, actor=user, action="unsubmit", entity="quotation",
+                       entity_id=q.id, before={"status": "pending_approval"},
+                       after={"status": "draft",
+                              "withdrawn_requests": len(reqs)})
+    await db.flush()
+    return await _load(q.id, db)
+
+
 @router.post("/{q_id}/approve", response_model=QuotationOut)
 async def approve_quotation(q_id: UUID, payload: QuotationDecide,
                             db: AsyncSession = Depends(get_db),
