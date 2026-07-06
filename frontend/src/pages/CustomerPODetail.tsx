@@ -36,6 +36,15 @@ interface CustomerPO {
   decided_at: string | null;
   decision_notes: string | null;
   created_at: string;
+  dp_invoices?: Array<{
+    id: string;
+    number: string;
+    status: string;
+    total: number;
+    issue_date: string | null;
+    due_date: string | null;
+    faktur_pajak_no: string | null;
+  }>;
 }
 
 const STATUS_CHIP: Record<string, string> = {
@@ -137,6 +146,60 @@ export default function CustomerPODetailPage() {
       text: e?.response?.data?.detail ?? e?.message ?? "Action failed",
     }),
   });
+
+  // DP rejection has its own endpoint — the standard /reject 403s finance
+  // and 409s on DP statuses. Works at pending_finance AND
+  // pending_sales_confirm (deposit never arrived).
+  const dpReject = useMutation({
+    mutationFn: () => api.post(`/customer-pos/${id}/dp/finance-reject`,
+      { notes: reason.trim() || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      qc.invalidateQueries({ queryKey: ["incoming-customer-pos"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-all"] });
+      setReason("");
+      setFlash({ kind: "ok", text: "DP PO rejected — sales will see the reason." });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.detail ?? e?.message ?? "Action failed",
+    }),
+  });
+
+  // Finance issues the DP invoice against the PO itself — the project
+  // doesn't exist yet at this stage (it spawns at sales-confirm).
+  const [dpInvAmount, setDpInvAmount] = useState("");
+  const [dpInvFile, setDpInvFile] = useState<File | null>(null);
+  const issueDpInvoice = useMutation({
+    mutationFn: () => {
+      const fd = new FormData();
+      if (dpInvAmount.trim()) fd.append("amount", dpInvAmount.trim());
+      if (dpInvFile) fd.append("invoice_file", dpInvFile);
+      return api.post(`/customer-pos/${id}/dp-invoice`, fd);
+    },
+    onSuccess: (r: any) => {
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      setDpInvAmount("");
+      setDpInvFile(null);
+      setFlash({
+        kind: "ok",
+        text: `DP invoice ${r?.data?.number ?? ""} issued — approve it with the faktur pajak number in Finance → Pending invoice approvals.`,
+      });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.detail ?? e?.message ?? "Couldn't issue the DP invoice",
+    }),
+  });
+
+  function onDpReject() {
+    setFlash(null);
+    if (!reason.trim()) {
+      setFlash({ kind: "err", text: "Please give a reason for rejecting." });
+      return;
+    }
+    dpReject.mutate();
+  }
 
   function onApprove() {
     setFlash(null);
@@ -256,13 +319,13 @@ export default function CustomerPODetailPage() {
           </div>
         )}
 
-        {/* DP PO leg 1: finance approves + issues DP invoice. */}
+        {/* DP PO leg 1: finance approves. */}
         {p.is_downpayment && p.status === "pending_finance" && (
           <div className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 space-y-2">
             <div className="text-xs font-semibold text-violet-900">
-              Down-payment PO — finance approval required. Issue the DP
-              invoice from the project view once you approve; sales will
-              be notified to confirm the deposit landed.
+              Down-payment PO — finance approval required. After approving,
+              issue the DP invoice right here on this page; sales confirms
+              the deposit once the customer pays it.
             </div>
             {canFinanceApproveDp ? (
               <>
@@ -271,20 +334,20 @@ export default function CustomerPODetailPage() {
                   rows={2}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Notes for sales (optional)…"
+                  placeholder="Notes for sales (required to reject)…"
                 />
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { setFlash(null); decide.mutate({ approve: false }); }}
+                    onClick={onDpReject}
                     className="btn-danger"
-                    disabled={decide.isPending || dpFinanceApprove.isPending}
+                    disabled={dpReject.isPending || dpFinanceApprove.isPending}
                   >
                     <X size={14} /> Reject
                   </button>
                   <button
                     onClick={() => { setFlash(null); dpFinanceApprove.mutate(); }}
                     className="btn-success"
-                    disabled={dpFinanceApprove.isPending}
+                    disabled={dpFinanceApprove.isPending || dpReject.isPending}
                   >
                     {dpFinanceApprove.isPending
                       ? <Loader2 size={14} className="animate-spin" />
@@ -299,14 +362,57 @@ export default function CustomerPODetailPage() {
           </div>
         )}
 
-        {/* DP PO leg 2: sales confirms the deposit landed → project spawns. */}
+        {/* DP PO leg 2: finance issues the DP invoice (against the PO —
+            no project exists yet), then sales confirms the deposit landed
+            → project spawns and the invoice is re-linked to it. */}
         {p.is_downpayment && p.status === "pending_sales_confirm" && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 space-y-2">
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 space-y-3">
             <div className="text-xs font-semibold text-blue-900">
               Finance approved the DP{p.dp_finance_approved_at && (
                 <> on {new Date(p.dp_finance_approved_at).toLocaleDateString()}</>
-              )}. Sales — confirm the deposit has cleared to spawn the project.
+              )}. {(p.dp_invoices ?? []).length === 0
+                ? "Finance — issue the DP invoice below so the customer can pay."
+                : "Sales — confirm the deposit has cleared to start the project."}
             </div>
+
+            {/* Finance: issue the DP invoice against the PO. */}
+            {canFinanceApproveDp && (
+              <div className="rounded-lg bg-white/70 border border-blue-100 p-3 space-y-2">
+                <div className="text-[11px] uppercase tracking-wider muted">
+                  Issue DP invoice (against this PO — the project doesn't exist yet)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    className="input"
+                    placeholder={`Amount (blank = PO total ${idr(p.total)})`}
+                    value={dpInvAmount}
+                    onChange={(e) => setDpInvAmount(e.target.value)}
+                  />
+                  <input
+                    type="file"
+                    className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
+                    onChange={(e) => setDpInvFile(e.target.files?.[0] ?? null)}
+                  />
+                </div>
+                <button
+                  className="btn-primary"
+                  disabled={issueDpInvoice.isPending}
+                  onClick={() => { setFlash(null); issueDpInvoice.mutate(); }}
+                >
+                  {issueDpInvoice.isPending
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <FileText size={14} />}
+                  Issue DP invoice
+                </button>
+                <div className="text-[11px] muted">
+                  Parks at pending-finance like every invoice — enter the faktur
+                  pajak in Finance → Pending invoice approvals. It re-links to the
+                  project automatically once sales confirms the deposit.
+                </div>
+              </div>
+            )}
+
+            {/* Sales: confirm the deposit landed. */}
             {canSalesConfirmDp ? (
               <>
                 <textarea
@@ -327,6 +433,16 @@ export default function CustomerPODetailPage() {
                       : <Check size={14} />}
                     Confirm deposit received
                   </button>
+                  {canFinanceApproveDp && (
+                    <button
+                      onClick={onDpReject}
+                      className="btn-ghost text-red-600"
+                      disabled={dpReject.isPending}
+                      title="Deposit never arrived / deal fell through — requires a reason above"
+                    >
+                      <X size={14} /> Cancel DP (deposit not received)
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
@@ -334,6 +450,33 @@ export default function CustomerPODetailPage() {
                 Waiting on sales to confirm the deposit landed.
               </div>
             )}
+          </div>
+        )}
+
+        {/* DP invoices issued against this PO. */}
+        {p.is_downpayment && (p.dp_invoices ?? []).length > 0 && (
+          <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
+            <div className="text-[11px] uppercase tracking-wider muted mb-1.5">
+              DP invoices for this PO
+            </div>
+            <ul className="space-y-1 text-sm">
+              {(p.dp_invoices ?? []).map((iv) => (
+                <li key={iv.id} className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-xs font-medium">{iv.number}</span>
+                  <span className={clsx(
+                    "chip text-[10px]",
+                    iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                    : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
+                    : iv.status === "rejected" ? "bg-red-50 text-red-700"
+                    : "bg-ink-100 text-ink-600",
+                  )}>{iv.status.replace(/_/g, " ")}</span>
+                  <span className="tabular-nums">{idr(iv.total)}</span>
+                  {iv.faktur_pajak_no && (
+                    <span className="muted text-xs">FP {iv.faktur_pajak_no}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

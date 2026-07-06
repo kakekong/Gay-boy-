@@ -38,7 +38,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/price-requests", label: "Price requests", label_id: "Permintaan harga", icon: Tag,
         roles: ["sales", "purchasing", "manager", "director"] },
       { to: "/quotations", label: "Quotations", label_id: "Penawaran", icon: FileText },
-      { to: "/customer-pos", label: "Customer PO", label_id: "PO Pelanggan", icon: Receipt },
+      { to: "/customer-pos", label: "Customer PO", label_id: "PO Pelanggan", icon: Receipt,
+        badgeQuery: "dp-pending" },
       { to: "/purchase-orders", label: "Purchasing PO", label_id: "PO Pembelian", icon: Truck,
         roles: ["director"] },
       { to: "/po-recap", label: "PO Recap", label_id: "Rekap PO", icon: ClipboardList,
@@ -136,6 +137,11 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/finance/estimated",
     "/finance/reports",
     "/finance",
+    // Finance approves DP customer POs + issues the DP invoice from the
+    // PO detail page, and issues final invoices from the project page —
+    // both were unreachable when the allowlist lacked these two.
+    "/customer-pos",
+    "/projects",
     "/attendance",
     "/chat",
     "/role-guide",
@@ -197,7 +203,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const role = user?.role ?? "";
   const canSeePendingInvoices = ["finance", "manager", "director"].includes(role);
   const canSeePendingClaims   = ["finance", "manager", "director"].includes(role);
-  const canSeePendingApprovals = ["manager", "director", "finance"].includes(role);
+  // GET /approvals is manager/director-only on the backend — polling it as
+  // finance just 403s every 30s. Finance gets its own DP queue below.
+  const canSeePendingApprovals = ["manager", "director"].includes(role);
+  // DP customer-PO queues: finance owns pending_finance, the sales rep owns
+  // pending_sales_confirm (the list endpoint scopes sales to own customers).
+  const dpQueueStatus =
+    role === "finance" || role === "director" ? "pending_finance"
+    : role === "sales" ? "pending_sales_confirm"
+    : null;
 
   const pendingInvoices = useQuery({
     queryKey: ["nav-pending-invoices"],
@@ -215,10 +229,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
   });
   const pendingApprovals = useQuery({
     queryKey: ["nav-pending-approvals"],
-    queryFn: () => api.get("/approvals", { params: { status_eq: "pending" } })
+    queryFn: () => api.get("/approvals")
       .then((r) => Array.isArray(r.data) ? r.data.length : 0),
     refetchInterval: 30_000,
     enabled: !!user && canSeePendingApprovals,
+  });
+  const pendingDp = useQuery({
+    queryKey: ["nav-pending-dp", dpQueueStatus],
+    queryFn: () => api.get("/customer-pos", { params: { status_eq: dpQueueStatus } })
+      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
+    refetchInterval: 30_000,
+    enabled: !!user && !!dpQueueStatus,
   });
 
   const badges: Record<string, number> = {
@@ -226,6 +247,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     "finance-pending": pendingInvoices.data ?? 0,
     "claims-pending": pendingClaims.data ?? 0,
     "approvals-pending": pendingApprovals.data ?? 0,
+    "dp-pending": pendingDp.data ?? 0,
   };
 
   return (
@@ -445,6 +467,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
               body: (n: number) => `${n} customer payment${n === 1 ? "" : "s"} to verify.`,
               link: "/finance/payment-verification",
               severity: "medium" as const,
+            },
+            {
+              key: "dp-pending",
+              count: pendingDp.data ?? 0,
+              title: role === "sales" ? "DP deposits to confirm" : "DP POs awaiting finance",
+              body: (n: number) =>
+                role === "sales"
+                  ? `${n} down payment${n === 1 ? "" : "s"} approved by finance — confirm receipt to start the project.`
+                  : `${n} down-payment PO${n === 1 ? "" : "s"} waiting for finance approval.`,
+              link: "/customer-pos",
+              severity: "high" as const,
             },
             {
               key: "chat-unread",

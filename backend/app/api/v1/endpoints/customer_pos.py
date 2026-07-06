@@ -9,7 +9,7 @@ create the project immediately.
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,9 @@ router = APIRouter()
 
 _any_internal = require(
     Role.SALES, Role.PURCHASING, Role.MANAGER, Role.ADMIN, Role.HR, Role.DIRECTOR,
+    # Finance approves DP POs and issues the DP invoice — they need read
+    # access to the PO list/detail like every other internal role.
+    Role.FINANCE,
 )
 _director_only = require(Role.DIRECTOR)
 
@@ -187,7 +190,25 @@ async def get_customer_po(
         cust = await db.get(Customer, po.customer_id)
         if not cust or cust.sales_pic_id != user.id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
-    return await _enrich(db, po)
+    out = await _enrich(db, po)
+    # Surface any DP invoices issued against this PO so the detail page can
+    # show them before the project exists (detail-only — lists skip this).
+    if po.is_downpayment:
+        from app.models.finance import Invoice
+        out["dp_invoices"] = [
+            {
+                "id": str(i.id), "number": i.number, "status": i.status,
+                "total": float(i.total or 0), "issue_date": i.issue_date,
+                "due_date": i.due_date,
+                "faktur_pajak_no": i.faktur_pajak_no,
+            }
+            for i in (await db.scalars(
+                select(Invoice)
+                .where(Invoice.customer_po_id == po.id)
+                .order_by(Invoice.created_at.asc())
+            )).all()
+        ]
+    return out
 
 
 @router.post("", response_model=CustomerPOOut, status_code=201)
@@ -448,11 +469,38 @@ async def reject_customer_po(
 
 # ─── Down-payment (DP) sub-flow ──────────────────────────────────────────────
 #
-# The DP path is: sales files DP PO → finance approves it (they're the ones
-# who chase the DP invoice + verify receipt) → sales confirms the deposit
-# has landed → project spawns. Director still sees it via the general
-# approval queue because request_approval() dispatches to the director role
-# too, but they don't have to sign off.
+# The DP path is: sales files DP PO → finance approves it → finance issues
+# the DP invoice AGAINST THE PO (no project exists yet) → customer pays →
+# sales confirms the deposit landed → project spawns and the DP invoice is
+# re-linked to it. Rejection at either pending stage goes through
+# dp/finance-reject. Every DP action also closes the ApprovalRequest that
+# was filed at submission so no stale live-fire request lingers in the
+# director's queue.
+
+
+async def _close_dp_approval_request(
+    db: AsyncSession, po_id: UUID, *, approve: bool, decider_id, notes: str | None,
+) -> None:
+    """Mark the DP PO's pending ApprovalRequest decided so the generic
+    /approvals queue can't re-fire on a PO the DP endpoints already
+    handled (double-approve used to spawn duplicate projects)."""
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    req = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "customer_po",
+            ApprovalRequest.target_id == po_id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )
+    if req:
+        req.status = (
+            ApprovalStatus.APPROVED if approve else ApprovalStatus.REJECTED
+        ).value
+        req.decided_by = decider_id
+        req.decided_at = _dt.now(UTC)
+        req.decision_notes = notes
 
 
 @router.post("/{po_id}/dp/finance-approve", response_model=CustomerPOOut)
@@ -463,8 +511,8 @@ async def dp_finance_approve(
     user: User = Depends(get_current_user),
 ):
     """Finance approves a DP PO. Moves it to `pending_sales_confirm`, at
-    which point sales must confirm the deposit has actually been received
-    before the project spawns."""
+    which point finance issues the DP invoice and sales confirms the
+    deposit has actually been received before the project spawns."""
     from datetime import UTC
     from datetime import datetime as _dt
 
@@ -491,8 +539,148 @@ async def dp_finance_approve(
     if payload.notes:
         po.decision_notes = payload.notes
     po.status = "pending_sales_confirm"
+    await _close_dp_approval_request(
+        db, po_id, approve=True, decider_id=user.id, notes=payload.notes,
+    )
     await db.flush()
     return await _enrich(db, po)
+
+
+@router.post("/{po_id}/dp/finance-reject", response_model=CustomerPOOut)
+async def dp_finance_reject(
+    po_id: UUID,
+    payload: _DecisionIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Finance (or director) rejects a DP PO — at either DP stage.
+
+    pending_finance: the PO itself is wrong (bad number, wrong items).
+    pending_sales_confirm: the deposit never arrived, deal fell through.
+    A reason is required; it lands in decision_notes so sales sees why.
+    """
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only finance (or director) can reject a DP PO.",
+        )
+    if not (payload.notes or "").strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Please give a reason for rejecting — the requester will see it.",
+        )
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    if not po.is_downpayment:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This isn't a down-payment PO — use the standard reject flow.",
+        )
+    if po.status not in ("pending_finance", "pending_sales_confirm"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"DP PO is already '{po.status}' — nothing to reject.",
+        )
+    po.status = "rejected"
+    po.decided_by = user.id
+    po.decided_at = _dt.now(UTC)
+    po.decision_notes = payload.notes
+    await _close_dp_approval_request(
+        db, po_id, approve=False, decider_id=user.id, notes=payload.notes,
+    )
+    await db.flush()
+    return await _enrich(db, po)
+
+
+@router.post("/{po_id}/dp-invoice", status_code=201)
+async def issue_dp_invoice(
+    po_id: UUID,
+    amount: float | None = Form(None),
+    tax_amount: float | None = Form(None),
+    due_date: str | None = Form(None),
+    invoice_file: UploadFile | None = File(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Finance issues the DP invoice AGAINST THE CUSTOMER PO — before the
+    project exists. This resolves the chicken-and-egg in the DP flow: the
+    customer pays the deposit against this invoice, and only then does
+    sales confirm receipt (which spawns the project and re-links this
+    invoice to it via customer_po_id).
+
+    The invoice parks at `pending_finance` like every other invoice, so
+    the faktur pajak number is still entered at the finance-approve step.
+    """
+    from datetime import date as _date
+
+    from app.models.finance import Invoice
+
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only finance (or director) can issue a DP invoice.",
+        )
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    if not po.is_downpayment:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This PO isn't a down payment — issue the invoice from the project page.",
+        )
+    if po.status not in ("pending_finance", "pending_sales_confirm"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"DP PO is at status '{po.status}' — the DP invoice is issued "
+            "while the deposit is being collected. Once the project exists, "
+            "use the project page.",
+        )
+
+    parsed_due = None
+    if due_date:
+        try:
+            parsed_due = _date.fromisoformat(due_date)
+        except ValueError as e:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "due_date must be YYYY-MM-DD",
+            ) from e
+
+    from app.api.v1.endpoints.operation import _next_doc_number, _save_attachment
+
+    inv_amount = amount if amount is not None else float(po.total or 0)
+    inv_tax = tax_amount or 0.0
+    inv = Invoice(
+        number=await _next_doc_number(db, Invoice, "INV"),
+        project_id=None,
+        customer_po_id=po.id,
+        customer_id=po.customer_id,
+        type="dp",
+        issue_date=_date.today(),
+        due_date=parsed_due,
+        amount=inv_amount,
+        tax_amount=inv_tax,
+        total=inv_amount + inv_tax,
+        status="pending_finance",
+        faktur_pajak_no=None,
+        faktur_pajak_status="none",
+        issued_by=user.id,
+    )
+    db.add(inv)
+    await db.flush()
+    if invoice_file is not None:
+        await _save_attachment(
+            db, file=invoice_file, owner_type="invoice",
+            owner_id=inv.id, user=user, label="dp_invoice",
+        )
+    return {
+        "id": str(inv.id), "number": inv.number, "status": inv.status,
+        "type": inv.type, "total": float(inv.total or 0),
+        "customer_po_id": str(po.id),
+    }
 
 
 @router.post("/{po_id}/dp/sales-confirm", response_model=CustomerPOOut)
@@ -503,7 +691,8 @@ async def dp_sales_confirm(
     user: User = Depends(get_current_user),
 ):
     """Sales confirms the deposit has landed. This is the trigger that
-    spawns the project on a DP PO."""
+    spawns the project on a DP PO. Any DP invoices issued against the PO
+    are re-linked to the new project."""
     from datetime import UTC
     from datetime import datetime as _dt
 
@@ -541,6 +730,21 @@ async def dp_sales_confirm(
         po.decision_notes = payload.notes
     project = await _spawn_project(db, po, user)
     po.project_id = project.id
+    # Re-link DP invoices issued against this PO to the new project so
+    # they show up on the project page and its payment tracking.
+    from app.models.finance import Invoice
+    for inv in (await db.scalars(
+        select(Invoice).where(
+            Invoice.customer_po_id == po.id,
+            Invoice.project_id.is_(None),
+        )
+    )).all():
+        inv.project_id = project.id
+    # Defensive: the request should already be closed by finance-approve,
+    # but clean up any pending one so the director's queue can't re-fire.
+    await _close_dp_approval_request(
+        db, po_id, approve=True, decider_id=user.id, notes=payload.notes,
+    )
     await db.flush()
     return await _enrich(db, po)
 

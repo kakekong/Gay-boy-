@@ -103,6 +103,11 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_sales_confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL",
     "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_sales_confirmed_at TIMESTAMPTZ",
 
+    # DP invoices are issued against the customer PO before the project
+    # exists; project_id is backfilled at sales-confirm via this link.
+    "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_po_id UUID REFERENCES customer_pos(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_invoices_customer_po_id ON invoices (customer_po_id)",
+
     # entity_comments — chat thread on quotations + POs
     """
     CREATE TABLE IF NOT EXISTS entity_comments (

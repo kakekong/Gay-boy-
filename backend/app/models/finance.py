@@ -16,6 +16,15 @@ class Invoice(Base, UUIDPK, TimestampMixin):
     project_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), index=True
     )
+    # DP invoices are issued against the customer PO BEFORE the project
+    # exists (the deposit is what triggers project creation). This link is
+    # how the invoice finds its project later: dp_sales_confirm backfills
+    # project_id on every invoice carrying this PO id.
+    customer_po_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("customer_pos.id", ondelete="SET NULL"),
+        index=True,
+    )
     customer_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("customers.id", ondelete="RESTRICT"),
         nullable=False, index=True,

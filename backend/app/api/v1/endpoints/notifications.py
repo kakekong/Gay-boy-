@@ -67,6 +67,59 @@ async def list_notifications(
                 "at": a.created_at,
             })
 
+    # 1a. Down-payment PO handoffs. These live outside the generic
+    # approvals queue: finance owns the pending_finance leg, the customer's
+    # sales rep owns the deposit confirmation. Without these two sections
+    # both DP handoffs were silent.
+    from app.models.customer_po import CustomerPO
+    if role in (Role.FINANCE, Role.DIRECTOR):
+        dp_wait_fin = (await db.execute(
+            select(CustomerPO, Customer)
+            .join(Customer, CustomerPO.customer_id == Customer.id)
+            .where(
+                CustomerPO.is_downpayment.is_(True),
+                CustomerPO.status == "pending_finance",
+            )
+            .order_by(CustomerPO.created_at.asc())
+            .limit(20)
+        )).all()
+        for po, c in dp_wait_fin:
+            items.append({
+                "id": f"dp-finance:{po.id}",
+                "kind": "approval",
+                "severity": "high",
+                "title": f"DP PO awaiting finance: {po.number}",
+                "body": f"{c.company_name} · approve, then issue the DP invoice",
+                "link": f"/customer-pos/{po.id}",
+                "at": po.created_at,
+            })
+    if role in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+        dp_wait_sales_stmt = (
+            select(CustomerPO, Customer)
+            .join(Customer, CustomerPO.customer_id == Customer.id)
+            .where(
+                CustomerPO.is_downpayment.is_(True),
+                CustomerPO.status == "pending_sales_confirm",
+            )
+            .order_by(CustomerPO.dp_finance_approved_at.asc().nullslast())
+            .limit(20)
+        )
+        if role == Role.SALES:
+            dp_wait_sales_stmt = dp_wait_sales_stmt.where(
+                Customer.sales_pic_id == me.id
+            )
+        for po, c in (await db.execute(dp_wait_sales_stmt)).all():
+            items.append({
+                "id": f"dp-sales:{po.id}",
+                "kind": "approval",
+                "severity": "high",
+                "title": f"Confirm DP received: {po.number}",
+                "body": f"{c.company_name} · finance approved — confirm the "
+                        "deposit landed to start the project",
+                "link": f"/customer-pos/{po.id}",
+                "at": po.dp_finance_approved_at or po.created_at,
+            })
+
     # 1b. Decision on YOUR request (any role) — surface the outcome + the
     # reason the approver gave so the requester learns why.
     decided_stmt = (

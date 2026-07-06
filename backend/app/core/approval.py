@@ -109,6 +109,10 @@ async def decide(
         raise PermissionError("director approval required")
     if Role(req.required_role) == Role.MANAGER and decider_role not in (Role.MANAGER, Role.DIRECTOR):
         raise PermissionError("manager or director approval required")
+    if Role(req.required_role) == Role.FINANCE and decider_role not in (Role.FINANCE, Role.DIRECTOR):
+        # DP customer-PO approvals target finance — a manager must not be
+        # able to decide them through the generic approvals API.
+        raise PermissionError("finance or director approval required")
     req.status = (ApprovalStatus.APPROVED if approve else ApprovalStatus.REJECTED).value
     req.decided_by = decider_id
     req.decided_at = datetime.now(UTC)
@@ -161,24 +165,53 @@ async def apply_to_target(
         from app.models.customer_po import CustomerPO
         po = await db.get(CustomerPO, req.target_id)
         if po:
+            is_dp_request = bool(
+                po.is_downpayment
+                or (req.payload or {}).get("action") == "dp_finance_approve"
+            )
+            # Stale-request guard: if the PO has already moved past its
+            # pending state (the DP endpoints or the PO-page buttons acted
+            # on it directly), do NOT re-apply — re-approving used to
+            # spawn a duplicate project.
+            pending_states = (
+                ("pending_finance", "pending_sales_confirm")
+                if is_dp_request else ("pending_approval",)
+            )
+            if po.status not in pending_states:
+                applied["skipped"] = (
+                    f"customer PO already '{po.status}' — decision recorded "
+                    "but not re-applied"
+                )
+                return applied
+
             decider = await db.get(__import__("app.models.user", fromlist=["User"]).User, req.decided_by) if req.decided_by else None
             po.decided_by = req.decided_by
             po.decided_at = req.decided_at or _dt.now(UTC)
             po.decision_notes = req.decision_notes
             if approve:
-                po.status = "approved"
-                # Use the decider as the project's creator so authorship
-                # reflects who signed off — falling back to the requester
-                # if for any reason the decider record is missing.
-                actor = decider
-                if actor is None:
-                    from app.models.user import User as _UserModel
-                    actor = await db.get(_UserModel, req.requested_by)
-                if actor is not None:
-                    project = await _spawn_project(db, po, actor)
-                    po.project_id = project.id
-                    applied["project_id"] = str(project.id)
-                    applied["project_code"] = project.code
+                if is_dp_request:
+                    # DP chain: approval here is FINANCE approval only.
+                    # Never spawn the project — that stays gated behind
+                    # sales confirming the deposit landed.
+                    if po.status == "pending_finance":
+                        po.status = "pending_sales_confirm"
+                        po.dp_finance_approved_by = req.decided_by
+                        po.dp_finance_approved_at = req.decided_at or _dt.now(UTC)
+                    applied["dp"] = "finance approval applied; awaiting sales deposit confirmation"
+                else:
+                    po.status = "approved"
+                    # Use the decider as the project's creator so authorship
+                    # reflects who signed off — falling back to the requester
+                    # if for any reason the decider record is missing.
+                    actor = decider
+                    if actor is None:
+                        from app.models.user import User as _UserModel
+                        actor = await db.get(_UserModel, req.requested_by)
+                    if actor is not None:
+                        project = await _spawn_project(db, po, actor)
+                        po.project_id = project.id
+                        applied["project_id"] = str(project.id)
+                        applied["project_code"] = project.code
             else:
                 po.status = "rejected"
             applied["new_status"] = po.status
