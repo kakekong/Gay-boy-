@@ -416,6 +416,15 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
         except PermissionError as e:
             raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
     q.status = "approved"
+    # Fused pipeline: approving the quotation IS the sign-off that the deal
+    # reached the 'quotation' stage — advance the customer automatically so
+    # sales doesn't file a separate stage-move request for the same ground.
+    if q.customer_id:
+        from app.core.stage_playbook import bump_customer_stage
+        from app.core.stage_tasks import ensure_stage_tasks
+        cust = await db.get(Customer, q.customer_id)
+        if cust and bump_customer_stage(cust, "quotation"):
+            await ensure_stage_tasks(db, cust, "quotation")
     await audit_record(db, actor=user, action="approve", entity="quotation",
                        entity_id=q.id, after={"status": "approved"})
     return await _load(q.id, db)
@@ -465,17 +474,12 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    # Pipeline gate: a deal can't be marked Won until its customer has
-    # reached negotiation (and that stage move was approved). Stops sales
-    # jumping straight to Won from an earlier stage.
-    from app.core.stage_playbook import stage_index
+    # Fused pipeline: no more "advance to negotiation first" bounce. The
+    # director's Won approval IS the sign-off that the deal reached
+    # negotiation — the customer's stage is bumped automatically when the
+    # Won lands (direct director path below, or apply_to_target for the
+    # approval-request path).
     cust = await db.get(Customer, q.customer_id) if q.customer_id else None
-    if cust and stage_index(cust.stage) < stage_index("negotiation"):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Customer is still at '{cust.stage}'. Advance the pipeline to "
-            "negotiation (with approval) before marking the deal Won.",
-        )
     # Only the director can flip a deal to Won directly. Everyone else files
     # an approval request; the Won + ledger posting happen on approval.
     if Role(user.role) != Role.DIRECTOR:
@@ -517,6 +521,13 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     # just means "the customer said yes, we're waiting for paperwork."
     # See app/api/v1/endpoints/customer_pos.py for the new gate.
     #
+    # Fused pipeline: Won implies the deal reached negotiation — advance the
+    # customer stage in the same stroke (forward-only, no-op if past it).
+    if cust:
+        from app.core.stage_playbook import bump_customer_stage
+        from app.core.stage_tasks import ensure_stage_tasks
+        if bump_customer_stage(cust, "negotiation"):
+            await ensure_stage_tasks(db, cust, "negotiation")
     # Auto-post to the ledger (idempotent)
     try:
         await ledger.post_quotation(db, q)

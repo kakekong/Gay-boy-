@@ -127,6 +127,22 @@ def customer_stage_for_project(project_status: str) -> str | None:
     return PROJECT_TO_CUSTOMER_STAGE.get(project_status)
 
 
+def bump_customer_stage(customer, to_stage: str) -> bool:
+    """Forward-only bump of the customer's deal stage.
+
+    Used to fuse deal-document approvals with the CRM pipeline: when the
+    director approves a quotation / Mark-Won / customer PO, the customer's
+    stage advances to match — sales no longer files a separate stage-move
+    request for ground the deal has already covered. Never regresses; a
+    customer already at or past `to_stage` is untouched. Returns True if
+    the stage changed (caller should then ensure_stage_tasks)."""
+    ti = stage_index(to_stage)
+    if ti < 0 or stage_index(customer.stage) >= ti:
+        return False
+    customer.stage = to_stage
+    return True
+
+
 def sync_customer_stage_from_projects(customer, project_statuses: list[str]) -> bool:
     """Bump `customer.stage` forward to the furthest stage implied by any of
     the given project statuses. Never regresses. Returns True if changed."""

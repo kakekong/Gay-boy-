@@ -784,6 +784,13 @@ async def _spawn_project(
     )
     db.add(project)
     await db.flush()
+    # Fused pipeline: an approved customer PO advances the deal to 'po' —
+    # the PO approval is the sign-off, no separate stage-move request.
+    from app.core.stage_playbook import bump_customer_stage
+    from app.core.stage_tasks import ensure_stage_tasks
+    cust = await db.get(Customer, po.customer_id) if po.customer_id else None
+    if cust and bump_customer_stage(cust, "po"):
+        await ensure_stage_tasks(db, cust, "po")
     # The receiving work order is no longer created here — purchasing spawns
     # it by confirming the delivery date (see operation.confirm_delivery),
     # which matches the post-drawing logistics flow.

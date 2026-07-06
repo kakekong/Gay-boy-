@@ -139,6 +139,17 @@ async def apply_to_target(
         if q:
             q.status = "approved" if approve else "rejected"
             applied["new_status"] = q.status
+            # Fused pipeline: quotation approval advances the deal to the
+            # 'quotation' stage in the same decision — no separate
+            # stage-move request from sales.
+            if approve and q.customer_id:
+                from app.core.stage_playbook import bump_customer_stage
+                from app.core.stage_tasks import ensure_stage_tasks
+                from app.models.crm import Customer as _Cust
+                cust = await db.get(_Cust, q.customer_id)
+                if cust and bump_customer_stage(cust, "quotation"):
+                    await ensure_stage_tasks(db, cust, "quotation")
+                    applied["customer_stage"] = "quotation"
     elif req.target_type == "customer":
         from app.models.crm import Customer
         c = await db.get(Customer, req.target_id)
@@ -347,6 +358,16 @@ async def apply_to_target(
         q = await db.get(Quotation, req.target_id)
         if q and approve:
             q.status = "won"
+            # Fused pipeline: the Won approval is also the sign-off that the
+            # deal reached negotiation — bump the stage in the same stroke.
+            if q.customer_id:
+                from app.core.stage_playbook import bump_customer_stage
+                from app.core.stage_tasks import ensure_stage_tasks
+                from app.models.crm import Customer as _Cust
+                cust = await db.get(_Cust, q.customer_id)
+                if cust and bump_customer_stage(cust, "negotiation"):
+                    await ensure_stage_tasks(db, cust, "negotiation")
+                    applied["customer_stage"] = "negotiation"
             from app.services import ledger
             try:
                 await ledger.post_quotation(db, q)
