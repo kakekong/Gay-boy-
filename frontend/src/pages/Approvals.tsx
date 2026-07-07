@@ -47,6 +47,17 @@ export default function ApprovalsPage() {
     refetchInterval: 30_000,
   });
 
+  // Documents that need your decision but live OUTSIDE the request system —
+  // drawings, shipping docs, delivery proofs, pending-director price
+  // requests. Decided on their own pages; listed here so nothing hides.
+  const docs = useQuery({
+    queryKey: ["approvals-pending-docs"],
+    queryFn: () => api.get("/approvals/pending-documents").then((r) => r.data as Array<{
+      kind: string; title: string; body: string; link: string; at: string | null;
+    }>),
+    refetchInterval: 30_000,
+  });
+
   const decide = useMutation({
     mutationFn: ({ id, approve, notes }: { id: string; approve: boolean; notes?: string }) =>
       api.post(
@@ -127,6 +138,53 @@ export default function ApprovalsPage() {
           </div>
         )}
       </div>
+
+      {/* Status-based decision queues that don't flow through the request
+          system — drawings, shipping docs, delivery proofs, price
+          requests. Click through to decide on the owning page. */}
+      {(docs.data ?? []).length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <FileText size={15} className="text-brand-600" />
+              Documents waiting for your decision
+            </div>
+            <div className="text-xs muted">
+              Decided on their own pages — drawings & shipping docs on the
+              project, price requests on their queue. Listed here so nothing
+              slips past the inbox.
+            </div>
+          </div>
+          <ul className="divide-y divide-ink-100">
+            {(docs.data ?? []).map((d, i) => (
+              <li key={`${d.kind}-${i}`}>
+                <Link
+                  to={d.link}
+                  className="flex items-start gap-3 px-5 py-3 hover:bg-ink-50 group"
+                >
+                  <div className={clsx(
+                    "h-8 w-8 rounded-lg grid place-items-center shrink-0 text-xs font-semibold",
+                    d.kind === "drawing" ? "bg-cyan-50 text-cyan-700"
+                    : d.kind === "import_doc" ? "bg-teal-50 text-teal-700"
+                    : d.kind === "delivery_proof" ? "bg-lime-50 text-lime-700"
+                    : "bg-violet-50 text-violet-700",
+                  )}>
+                    {d.kind === "drawing" ? "DRW"
+                     : d.kind === "import_doc" ? "DOC"
+                     : d.kind === "delivery_proof" ? "POD"
+                     : "PR"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{d.title}</div>
+                    <div className="text-xs muted">{d.body}</div>
+                  </div>
+                  <ChevronRight size={14} className="text-ink-300 group-hover:text-ink-600 shrink-0 mt-1.5" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

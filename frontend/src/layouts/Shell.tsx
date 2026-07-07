@@ -234,6 +234,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
     refetchInterval: 30_000,
     enabled: !!user && canSeePendingApprovals,
   });
+  // Status-based decision docs (drawings, shipping docs, delivery proofs,
+  // pending-director PRs) — counted into the same Approvals badge so the
+  // sidebar number reflects EVERYTHING waiting on a decision.
+  const pendingDocs = useQuery({
+    queryKey: ["nav-pending-docs"],
+    queryFn: () => api.get("/approvals/pending-documents")
+      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
+    refetchInterval: 30_000,
+    enabled: !!user && canSeePendingApprovals,
+  });
   const pendingDp = useQuery({
     queryKey: ["nav-pending-dp", dpQueueStatus],
     queryFn: () => api.get("/customer-pos", { params: { status_eq: dpQueueStatus } })
@@ -246,7 +256,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     "chat-unread": unread.data ?? 0,
     "finance-pending": pendingInvoices.data ?? 0,
     "claims-pending": pendingClaims.data ?? 0,
-    "approvals-pending": pendingApprovals.data ?? 0,
+    "approvals-pending": (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
     "dp-pending": pendingDp.data ?? 0,
   };
 
@@ -446,9 +456,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           const sources = [
             {
               key: "approvals-pending",
-              count: pendingApprovals.data ?? 0,
-              title: "Approval requests",
-              body: (n: number) => `${n} new pending approval${n === 1 ? "" : "s"}.`,
+              count: (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
+              title: "Approvals & documents",
+              body: (n: number) => `${n} item${n === 1 ? "" : "s"} waiting for a decision.`,
               link: "/approvals",
               severity: "high" as const,
             },

@@ -17,6 +17,112 @@ from app.models.user import User
 router = APIRouter()
 
 
+@router.get("/pending-documents")
+async def pending_documents(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
+):
+    """Director-decision documents that DON'T flow through ApprovalRequest.
+
+    Drawings, logistics/import docs, delivery-proof verification and
+    pending-director price requests are all status-based queues decided on
+    other pages — they never used to appear in the approvals inbox, so
+    they silently piled up unless the director happened to open the right
+    project. This aggregates them (read-only, with deep links to where the
+    decision actually happens) so the inbox is the one place to check.
+    """
+    from app.models.operation import DeliveryOrder, Drawing, Project
+    from app.models.price_request import PriceRequest
+
+    items: list[dict] = []
+
+    # 1. Drawings awaiting sign-off (decided on the project page).
+    drows = (await db.execute(
+        select(Drawing, Project)
+        .join(Project, Drawing.project_id == Project.id)
+        .where(Drawing.status == "submitted")
+        .order_by(Drawing.created_at.asc())
+        .limit(50)
+    )).all()
+    for d, p in drows:
+        items.append({
+            "kind": "drawing",
+            "title": f"Drawing rev {d.revision} — {p.code}",
+            "body": "Submitted, waiting for approval on the project page.",
+            "link": f"/projects/{p.id}",
+            "at": d.created_at,
+        })
+
+    # 2. Logistics / import documents at 'pending' (per-project JSONB).
+    lrows = (await db.scalars(
+        select(Project).where(
+            Project.is_deleted.is_(False),
+        ).limit(500)
+    )).all()
+    for p in lrows:
+        pending_keys = [
+            k for k, v in (p.import_docs or {}).items()
+            if isinstance(v, dict) and v.get("status") == "pending"
+        ]
+        if pending_keys:
+            items.append({
+                "kind": "import_doc",
+                "title": f"{len(pending_keys)} shipping document(s) — {p.code}",
+                "body": "Uploaded by purchasing, waiting for approval "
+                        f"({', '.join(sorted(pending_keys))}).",
+                "link": f"/projects/{p.id}",
+                "at": p.updated_at or p.created_at,
+            })
+
+    # 3. Delivery proofs uploaded but not yet verified.
+    dorows = (await db.execute(
+        select(DeliveryOrder, Project)
+        .join(Project, DeliveryOrder.project_id == Project.id)
+        .where(DeliveryOrder.verified_at.is_(None))
+        .order_by(DeliveryOrder.created_at.asc())
+        .limit(50)
+    )).all()
+    do_ids = [d.id for d, _ in dorows]
+    proofed: set = set()
+    if do_ids:
+        arows = (await db.scalars(
+            select(Attachment.owner_id).where(
+                Attachment.owner_type == "delivery_order",
+                Attachment.owner_id.in_(do_ids),
+            )
+        )).all()
+        proofed = set(arows)
+    for d, p in dorows:
+        if d.id in proofed:
+            items.append({
+                "kind": "delivery_proof",
+                "title": f"Delivery proof — {d.number} ({p.code})",
+                "body": "Proof uploaded, waiting for verification on the project page.",
+                "link": f"/projects/{p.id}",
+                "at": d.created_at,
+            })
+
+    # 4. Price requests waiting on the director's sell price (director only).
+    if Role(user.role) == Role.DIRECTOR:
+        prows = (await db.scalars(
+            select(PriceRequest).where(
+                PriceRequest.is_deleted.is_(False),
+                PriceRequest.status == "pending_director",
+            ).order_by(PriceRequest.created_at.asc()).limit(50)
+        )).all()
+        for pr in prows:
+            items.append({
+                "kind": "price_request",
+                "title": f"Price request {pr.number}",
+                "body": "Costed by purchasing — set the sell price and approve.",
+                "link": "/price-requests",
+                "at": pr.priced_at or pr.created_at,
+            })
+
+    items.sort(key=lambda x: (x["at"] is None, x["at"]))
+    return items
+
+
 @router.get("")
 async def inbox(
     db: AsyncSession = Depends(get_db),

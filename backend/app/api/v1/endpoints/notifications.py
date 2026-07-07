@@ -242,23 +242,27 @@ async def list_notifications(
             "at": rem.due_at,
         })
 
-    # 4. Drawings awaiting customer approval
-    d_stmt = (
-        select(Drawing)
-        .where(Drawing.status == "submitted")
-        .order_by(Drawing.created_at.desc())
-        .limit(20)
-    )
-    for d in (await db.scalars(d_stmt)).all():
-        items.append({
-            "id": f"drawing:{d.id}",
-            "kind": "drawing_pending",
-            "severity": "low",
-            "title": f"Drawing awaiting customer (rev {d.revision})",
-            "body": "Submitted, waiting on customer approval",
-            "link": "/projects",
-            "at": d.created_at,
-        })
+    # 4. Drawings awaiting sign-off — decided internally by manager /
+    # director / admin on the project page, so only those roles get the
+    # item (sales/purchasing/finance can't act on it), and the link goes
+    # straight to the owning project instead of the bare list.
+    if role in (Role.MANAGER, Role.DIRECTOR, Role.ADMIN):
+        d_stmt = (
+            select(Drawing)
+            .where(Drawing.status == "submitted")
+            .order_by(Drawing.created_at.desc())
+            .limit(20)
+        )
+        for d in (await db.scalars(d_stmt)).all():
+            items.append({
+                "id": f"drawing:{d.id}",
+                "kind": "drawing_pending",
+                "severity": "medium",
+                "title": f"Drawing awaiting approval (rev {d.revision})",
+                "body": "Submitted — review it on the project page",
+                "link": f"/projects/{d.project_id}",
+                "at": d.created_at,
+            })
 
     # 6. People oversight (manager/director): attendance + missed deadlines
     if role in (Role.MANAGER, Role.DIRECTOR):
