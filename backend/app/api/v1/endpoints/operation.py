@@ -669,13 +669,20 @@ async def upload_drawing(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Internal staff upload a drawing on behalf of the supplier. It lands as
-    'submitted', awaiting the director's sign-off — no supplier login needed."""
+    """Internal staff upload a drawing — sales files the customer's version,
+    purchasing the supplier's. It lands as 'submitted', awaiting the
+    director's sign-off — no supplier login needed."""
     if Role(user.role) not in _DRAWING_UPLOAD_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to upload drawings")
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    # Sales may only file drawings on their own customers' projects —
+    # same scope rule as the rest of the sales surface.
+    if Role(user.role) == Role.SALES:
+        cust = await db.get(Customer, p.customer_id) if p.customer_id else None
+        if not cust or cust.sales_pic_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer's project")
 
     data = await file.read()
     if not data:

@@ -747,8 +747,12 @@ export default function ProjectDetailPage() {
       </div>
       )}
 
-      {/* Drawings — internal, hidden from sales */}
-      {canSeeOpsDetails && (
+      {/* Drawings — visible to sales too: they're often the ones holding the
+          customer's drawing and need to file it. Sales gets upload + the
+          revision list only; approve/reject stays with director/manager/
+          admin (canApproveDrawing). All other ops cards remain hidden from
+          sales via canSeeOpsDetails. */}
+      {(canSeeOpsDetails || canUploadDrawing) && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -756,9 +760,10 @@ export default function ProjectDetailPage() {
           </div>
           <div className="text-xs muted">{dr.length} revision(s)</div>
           <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
-            Staff upload the supplier's drawing here; the director reviews and
-            approves (or requests a revision). An approval advances the project
-            to "drawing approved" automatically so logistics can begin.
+            Upload the customer's or supplier's drawing here — sales files the
+            customer's version, purchasing the supplier's. The director reviews
+            and approves (or requests a revision). An approval advances the
+            project to "drawing approved" automatically so logistics can begin.
           </div>
         </div>
 
