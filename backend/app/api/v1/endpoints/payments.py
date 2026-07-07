@@ -157,6 +157,152 @@ async def _recompute_invoice_status(db: AsyncSession, invoice_id: UUID) -> str:
     return inv.status
 
 
+@router.get("/open-invoices")
+async def open_invoices(
+    db: AsyncSession = Depends(get_db),
+    _me: User = Depends(_finance),
+):
+    """Invoices that can still receive a payment — the picker for the
+    manual-payment form. Returns outstanding = total - verified payments."""
+    from app.models.crm import Customer
+
+    rows = (await db.scalars(
+        select(Invoice).where(
+            Invoice.status.in_(["issued", "approved", "partial", "overdue"])
+        ).order_by(Invoice.issue_date.asc().nullslast())
+    )).all()
+    if not rows:
+        return []
+    inv_ids = [r.id for r in rows]
+    paid_by_inv: dict = {}
+    for row in (await db.execute(
+        select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id.in_(inv_ids))
+        .group_by(Payment.invoice_id)
+    )).all():
+        paid_by_inv[row[0]] = float(row[1] or 0)
+    cust_ids = {r.customer_id for r in rows if r.customer_id}
+    cust_names: dict = {}
+    if cust_ids:
+        for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(cust_ids))
+        )).all():
+            cust_names[c.id] = c.company_name
+    out = []
+    for inv in rows:
+        total = float(inv.total or 0)
+        paid = paid_by_inv.get(inv.id, 0.0)
+        outstanding = max(0.0, total - paid)
+        if outstanding <= 0:
+            continue
+        out.append({
+            "id": str(inv.id), "number": inv.number, "type": inv.type,
+            "customer_name": cust_names.get(inv.customer_id),
+            "total": total, "paid": paid, "outstanding": outstanding,
+            "due_date": inv.due_date,
+        })
+    return out
+
+
+class ManualPaymentIn(BaseModel):
+    invoice_id: UUID
+    amount: float
+    paid_at: date_t | None = None
+    method: str | None = None
+    reference: str | None = None
+    notes: str | None = None
+    attachment_id: UUID | None = None
+
+
+@router.post("/manual", status_code=201)
+async def record_manual_payment(
+    payload: ManualPaymentIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(_finance),
+):
+    """Finance records AND verifies a customer payment in one stroke — for
+    customers who pay by transfer and never touch the portal. Creates the
+    claim already verified (so the audit trail matches the portal flow),
+    the Payment row, the ledger post, recomputes the invoice status, and
+    advances the project when the invoice lands fully paid — identical
+    side effects to the claim-then-verify path.
+    """
+    inv = await db.get(Invoice, payload.invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    if payload.amount <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Amount must be positive")
+    if inv.status in ("paid", "rejected", "draft", "pending_finance"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Invoice is '{inv.status}' — payments can only be recorded on "
+            "an issued/approved invoice that isn't fully paid yet.",
+        )
+
+    now = datetime.now(UTC)
+    c = PaymentClaim(
+        invoice_id=payload.invoice_id,
+        customer_user_id=me.id,
+        amount=payload.amount,
+        paid_at=payload.paid_at,
+        method=payload.method,
+        reference=payload.reference,
+        notes=(f"[recorded by finance: {me.full_name}] "
+               + (payload.notes or "")).strip(),
+        attachment_id=payload.attachment_id,
+        status="verified",
+        verified_by=me.id,
+        verified_at=now,
+        decision_notes="Recorded manually by finance (customer paid outside the portal).",
+    )
+    db.add(c)
+    payment = Payment(
+        invoice_id=payload.invoice_id,
+        amount=payload.amount,
+        paid_at=(datetime.combine(payload.paid_at, datetime.min.time()).replace(tzinfo=UTC)
+                 if payload.paid_at else now),
+        method=payload.method,
+        reference=payload.reference,
+        notes=f"Manual entry by {me.full_name}. {payload.notes or ''}".strip(),
+    )
+    db.add(payment)
+    await db.flush()
+
+    # Ledger: cash up, receivable down — attributed to the customer's rep.
+    sales_pic_id = None
+    if inv.customer_id:
+        from app.models.crm import Customer
+        cust = await db.get(Customer, inv.customer_id)
+        sales_pic_id = cust.sales_pic_id if cust else None
+    from app.services.ledger import post_payment
+    await post_payment(
+        db,
+        amount=float(payload.amount),
+        entry_date=payload.paid_at or now.date(),
+        invoice_number=inv.number,
+        customer_id=inv.customer_id,
+        sales_pic_id=sales_pic_id,
+        payment_id=payment.id,
+        created_by=me.id,
+    )
+
+    new_inv_status = await _recompute_invoice_status(db, payload.invoice_id)
+    if new_inv_status == "paid" and inv.project_id:
+        from app.models.operation import Project, advance_project_status
+        project = await db.get(Project, inv.project_id)
+        if project:
+            advance_project_status(project, "paid")
+            advance_project_status(project, "closed")
+
+    await audit_record(
+        db, actor=me, action="manual_payment", entity="invoice",
+        entity_id=payload.invoice_id,
+        after={"claim_id": str(c.id), "amount": float(payload.amount),
+               "new_status": new_inv_status},
+    )
+    return await _serialize(db, c)
+
+
 @router.post("/claims/{claim_id}/verify")
 async def verify_claim(
     claim_id: UUID,

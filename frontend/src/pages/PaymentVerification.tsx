@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Banknote, CheckCircle2, XCircle, Loader2, Receipt, AlertCircle,
+  PenLine, ChevronDown, ChevronUp, Paperclip,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -98,6 +99,11 @@ export default function PaymentVerificationPage() {
         </div>
       )}
 
+      <ManualPaymentCard
+        onDone={(text) => { setFlash({ kind: "ok", text }); invalidateAll(); }}
+        onError={(text) => setFlash({ kind: "err", text })}
+      />
+
       <div className="card p-1 inline-flex flex-wrap gap-1">
         {[
           { key: "pending",  label: "Pending"  },
@@ -133,6 +139,203 @@ export default function PaymentVerificationPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const METHODS = [
+  { value: "bank_transfer", label: "Bank transfer" },
+  { value: "cash",          label: "Cash" },
+  { value: "cheque",        label: "Cheque / giro" },
+  { value: "other",         label: "Other" },
+];
+
+// For customers who pay by transfer and never open the portal: finance
+// picks the open invoice, keys in what landed on the bank statement, and
+// the backend records + verifies it in one stroke (same side effects as
+// the portal claim → verify path).
+function ManualPaymentCard({ onDone, onError }: {
+  onDone: (text: string) => void;
+  onError: (text: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [invoiceId, setInvoiceId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paidAt, setPaidAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState("bank_transfer");
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+
+  const invoices = useQuery({
+    queryKey: ["open-invoices"],
+    queryFn: () => api.get("/payments/open-invoices").then((r) => r.data as any[]),
+    enabled: open,
+  });
+  const selected = (invoices.data ?? []).find((i) => i.id === invoiceId);
+
+  const reset = () => {
+    setInvoiceId(""); setAmount(""); setReference(""); setNotes("");
+    setFile(null); setMethod("bank_transfer");
+    setPaidAt(new Date().toISOString().slice(0, 10));
+  };
+
+  const record = useMutation({
+    mutationFn: async () => {
+      let attachmentId: string | null = null;
+      if (file) {
+        const fd = new FormData();
+        fd.append("owner_type", "invoice");
+        fd.append("owner_id", invoiceId);
+        fd.append("description", "payment_proof");
+        fd.append("file", file);
+        const up = await api.post("/attachments", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        attachmentId = up.data?.id ?? null;
+      }
+      return api.post("/payments/manual", {
+        invoice_id: invoiceId,
+        amount: Number(amount),
+        paid_at: paidAt || null,
+        method,
+        reference: reference || null,
+        notes: notes || null,
+        attachment_id: attachmentId,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["open-invoices"] });
+      reset();
+      onDone("Payment recorded and verified — invoice + project updated.");
+    },
+    onError: (e: any) => onError(
+      e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? "Failed to record payment",
+    ),
+  });
+
+  const amountNum = Number(amount);
+  const canSubmit = !!invoiceId && amountNum > 0 && !record.isPending;
+
+  return (
+    <div className="card">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-3.5 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <PenLine size={16} className="text-brand-600" />
+          Record a payment manually
+          <span className="font-normal muted hidden sm:inline">
+            — for customers who paid outside the portal
+          </span>
+        </span>
+        {open ? <ChevronUp size={16} className="text-ink-400" /> : <ChevronDown size={16} className="text-ink-400" />}
+      </button>
+
+      {open && (
+        <div className="border-t border-ink-100 p-5 space-y-3">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider muted">Invoice *</label>
+            <select
+              className="input mt-0.5"
+              value={invoiceId}
+              onChange={(e) => {
+                setInvoiceId(e.target.value);
+                const inv = (invoices.data ?? []).find((i) => i.id === e.target.value);
+                if (inv) setAmount(String(inv.outstanding));
+              }}
+            >
+              <option value="">
+                {invoices.isLoading ? "Loading open invoices…"
+                  : (invoices.data?.length ? "Select an open invoice…" : "No open invoices")}
+              </option>
+              {(invoices.data ?? []).map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.number} — {i.customer_name ?? "—"} — {idr(i.outstanding)} outstanding
+                </option>
+              ))}
+            </select>
+            {selected && (
+              <div className="mt-1 text-xs muted">
+                Invoice total {idr(selected.total)} · already paid {idr(selected.paid)} ·
+                due {selected.due_date ?? "—"}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider muted">Amount received *</label>
+              <input
+                type="number" min={1} className="input mt-0.5" value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider muted">Date paid</label>
+              <input
+                type="date" className="input mt-0.5" value={paidAt}
+                onChange={(e) => setPaidAt(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider muted">Method</label>
+              <select className="input mt-0.5" value={method} onChange={(e) => setMethod(e.target.value)}>
+                {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider muted">Reference no.</label>
+              <input
+                className="input mt-0.5" value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="Transfer / giro ref"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-wider muted">Notes</label>
+            <input
+              className="input mt-0.5" value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. confirmed on bank statement 7 Jul"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer text-ink-600 hover:text-ink-900">
+              <Paperclip size={14} />
+              {file ? file.name : "Attach proof (optional)"}
+              <input
+                type="file" className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            <button
+              className="btn-success"
+              disabled={!canSubmit}
+              onClick={() => record.mutate()}
+            >
+              {record.isPending
+                ? <Loader2 size={14} className="animate-spin" />
+                : <CheckCircle2 size={14} />}
+              Record & verify payment
+            </button>
+          </div>
+
+          {selected && amountNum > 0 && amountNum < selected.outstanding && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Partial payment — the invoice stays open with {idr(selected.outstanding - amountNum)} remaining.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
