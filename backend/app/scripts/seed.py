@@ -284,17 +284,40 @@ COLUMN_MIGRATIONS: list[str] = [
     """,
 
     # Backfill: advance projects to 'purchasing' if a supplier PO already
-    # exists for them but the status is still upstream (drawing_approved or
-    # earlier). Matches the new rule that "supplier PO triggers purchasing".
-    # Idempotent: only nudges projects that are at the listed pre-purchasing
-    # statuses, never regresses anything past purchasing.
+    # exists for them but the status is still 'new'. Under the REORDERED
+    # pipeline (new -> purchasing -> drawing -> drawing_approved -> ...)
+    # 'drawing'/'drawing_approved' sit AFTER purchasing, so the old version
+    # of this statement — which listed them in the WHERE — regressed those
+    # projects back to 'purchasing' on every boot. Only 'new' is upstream
+    # of purchasing now.
     """
     UPDATE projects p
        SET status = 'purchasing'
-     WHERE p.status IN ('new', 'drawing', 'drawing_approved')
+     WHERE p.status = 'new'
        AND EXISTS (
          SELECT 1 FROM supplier_pos sp WHERE sp.project_id = p.id
        )
+    """,
+
+    # Repair the projects the old backfill knocked backwards: a project
+    # sitting at 'purchasing' (or 'drawing') whose drawing was already
+    # APPROVED belongs at 'drawing_approved'; one with any drawing filed
+    # at all belongs at least at 'drawing'. Forward-only and idempotent —
+    # projects already past these stages are untouched.
+    """
+    UPDATE projects p
+       SET status = 'drawing_approved'
+     WHERE p.status IN ('purchasing', 'drawing')
+       AND EXISTS (
+         SELECT 1 FROM drawings d
+          WHERE d.project_id = p.id AND d.status = 'approved'
+       )
+    """,
+    """
+    UPDATE projects p
+       SET status = 'drawing'
+     WHERE p.status = 'purchasing'
+       AND EXISTS (SELECT 1 FROM drawings d WHERE d.project_id = p.id)
     """,
 ]
 
