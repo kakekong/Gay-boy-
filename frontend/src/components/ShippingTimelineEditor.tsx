@@ -16,9 +16,9 @@ const FIELDS: { key: string; label: string }[] = [
 // Who may edit which shipping-timeline field.
 // - Purchasing owns the origin leg: they book the supplier's shipment and
 //   see the ETA come back, so they update Est. + Actual shipped-from-origin.
-// - Admin owns the arrival legs: they're on the ground when goods hit our
-//   warehouse and when they land at the customer's site, so they stamp the
-//   Actual arrival dates.
+// - Admin owns both arrival legs end to end: they forecast when goods hit
+//   our warehouse / the customer's site and stamp the actual dates when
+//   they land — all four arrival fields.
 // - Manager and director keep unrestricted edit rights so ops always has a
 //   fallback to fix anything mid-flight.
 function canEditField(role: string, key: string): boolean {
@@ -27,7 +27,8 @@ function canEditField(role: string, key: string): boolean {
     return key === "est_ship_from_origin" || key === "act_ship_from_origin";
   }
   if (role === "admin") {
-    return key === "act_arrive_our_warehouse" || key === "act_arrive_customer";
+    return key === "est_arrive_our_warehouse" || key === "act_arrive_our_warehouse"
+        || key === "est_arrive_customer" || key === "act_arrive_customer";
   }
   return false;
 }
@@ -185,7 +186,7 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
           <> Purchasing edits the origin-shipment dates; arrival stamps are admin's job.</>
         )}
         {role === "admin" && (
-          <> Admin stamps the actual arrival dates once goods land; forecast + origin dates are set by purchasing.</>
+          <> Admin owns the arrival legs — estimated and actual, at our warehouse and the customer's; origin-shipment dates are purchasing's.</>
         )}
       </div>
     </div>

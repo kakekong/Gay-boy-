@@ -498,13 +498,17 @@ async def update_project(project_id: UUID,
     # (they're the fallback for anything that goes sideways in ops).
     # - Purchasing books the origin leg: Est. + Actual shipped-from-origin,
     #   plus the is_import / origin_location metadata.
-    # - Admin stamps arrival: Actual arrival at our warehouse + at the
-    #   customer's site. Nothing else on the shipping strip.
+    # - Admin owns both arrival legs end to end: estimated AND actual
+    #   arrival at our warehouse + at the customer's site. Nothing else
+    #   on the shipping strip.
     # Attempting to write outside your lane returns a 403 so the API
     # matches the disabled fields in the UI.
     _PURCHASING_SHIPPING = {"est_ship_from_origin", "act_ship_from_origin"}
     _PURCHASING_META = {"is_import", "origin_location"}
-    _ADMIN_SHIPPING = {"act_arrive_our_warehouse", "act_arrive_customer"}
+    _ADMIN_SHIPPING = {
+        "est_arrive_our_warehouse", "act_arrive_our_warehouse",
+        "est_arrive_customer", "act_arrive_customer",
+    }
     user_role = Role(user.role)
     if user_role == Role.PURCHASING:
         allowed = _PURCHASING_SHIPPING | _PURCHASING_META
