@@ -1087,13 +1087,13 @@ export default function ProjectDetailPage() {
         <div className="p-5 space-y-3">
           {p.qc_passed_at ? (
             <div className="text-sm text-emerald-700">
-              Passed {new Date(p.qc_passed_at).toLocaleString()} — handed to admin to issue
-              the delivery order &amp; invoice.
+              Passed {new Date(p.qc_passed_at).toLocaleString()} — finance can now issue
+              the final invoice + delivery order.
             </div>
           ) : (
             <div className="text-sm muted">
-              Operations checks the goods. Passing QC hands the project to admin for the
-              delivery order + invoice.
+              Operations checks the goods. Passing QC unlocks the final invoice +
+              delivery order (issued by finance).
             </div>
           )}
           {p.qc_findings && (

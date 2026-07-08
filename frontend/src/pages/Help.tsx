@@ -81,11 +81,13 @@ export default function HelpPage() {
               you can see.
             </P>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-              <Tile icon="👤" title="Sales" body="Your customers, quotations, calendar, chat." />
-              <Tile icon="📝" title="Admin" body="Data entry pages + Chart of Accounts." />
-              <Tile icon="👥" title="HR" body="The Employees directory + tag management." />
+              <Tile icon="👤" title="Sales" body="Your customers, price requests, quotations, customer POs, calendar, chat." />
+              <Tile icon="📦" title="Purchasing" body="Price-request costing, suppliers, supplier POs, inventory, projects (customer names hidden)." />
+              <Tile icon="🧑‍💼" title="Admin" body="Projects, Operation board, Inventory — ops only, no money or CRM pages." />
+              <Tile icon="💰" title="Finance" body="Invoices, payment verification, customer POs, financial reports, Chart of Accounts." />
+              <Tile icon="👥" title="HR" body="The Employees directory, documents + attendance." />
               <Tile icon="👔" title="Manager" body="Whole-org pipeline + Approvals inbox." />
-              <Tile icon="👑" title="Director" body="Everything, plus Salary." />
+              <Tile icon="👑" title="Director" body="Everything, plus Salary and every approval gate." />
             </div>
           </Section>
 
@@ -110,17 +112,20 @@ export default function HelpPage() {
           <Section id="pages" title="3. The pages — one by one" icon={<Map size={20} />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <PageCard icon={<LayoutIcon />}    title="Dashboard"            blurb="Greeting · 4 KPI cards · recent customers · AI tip of the day." path="/" nav={nav} />
-              <PageCard icon={<Users size={18}/>} title="CRM (Customers)"      blurb="Table view OR Pipeline (Kanban) — drag cards across stages." path="/customers" nav={nav} />
+              <PageCard icon={<Users size={18}/>} title="CRM (Customers)"      blurb="Table view OR Pipeline (Kanban). Manual stage moves file an approval request; approved deal documents move stages automatically." path="/customers" nav={nav} />
               <PageCard icon={<FileText size={18}/>} title="Quotations"        blurb="List of price offers; click for the full detail page with line items, follow-ups, linked accounts." path="/quotations" nav={nav} />
               <PageCard icon={<CalendarDays size={18}/>} title="Calendar"      blurb="Month view aggregating reminders, quote expiries, deliveries, payment dues." path="/calendar" nav={nav} />
               <PageCard icon={<MessageCircle size={18}/>} title="Chat"          blurb="Direct messages with colleagues. Polls every 5s; unread badge in topbar." path="/chat" nav={nav} />
-              <PageCard icon={<CheckSquare size={18}/>}  title="Approvals"      blurb="Inbox of discount + data-change requests waiting for your yes (manager/director)." path="/approvals" nav={nav} />
-              <PageCard icon={<Briefcase size={18}/>}    title="Projects"       blurb="Won deals turned into deliverables with margin tracking." path="/projects" nav={nav} />
-              <PageCard icon={<ShoppingCart size={18}/>} title="Purchasing"     blurb="PR → RFQ → Supplier PO → Goods Receipt → QC pipeline." path="/purchasing" nav={nav} />
+              <PageCard icon={<CheckSquare size={18}/>}  title="Approvals"      blurb="Inbox of quotations, POs, stage moves, follow-ups + documents (drawings, delivery proofs) waiting for a manager/director decision." path="/approvals" nav={nav} />
+              <PageCard icon={<FileText size={18}/>}     title="Price requests" blurb="Sales asks for pricing → purchasing/director fill costs → approved PR becomes the quotation." path="/price-requests" nav={nav} />
+              <PageCard icon={<Receipt size={18}/>}      title="Customer PO"    blurb="Customer POs filed against won quotes — regular ones gate on the director, DP ones on finance + sales confirm." path="/customer-pos" nav={nav} />
+              <PageCard icon={<Briefcase size={18}/>}    title="Projects"       blurb="Won deals turned into deliverables with margin tracking — one stage at a time, forward only." path="/projects" nav={nav} />
+              <PageCard icon={<ShoppingCart size={18}/>} title="Purchasing"     blurb="Supplier directory + PR → RFQ → Supplier PO → Goods Receipt → QC pipeline." path="/purchasing" nav={nav} />
               <PageCard icon={<Wrench size={18}/>}       title="Operation"      blurb="Work-order board: Receiving · Warehousing · QC · Packaging · Delivery." path="/operation" nav={nav} />
-              <PageCard icon={<Banknote size={18}/>}     title="Finance"        blurb="AR Aging dashboard with 5 stacked buckets." path="/finance" nav={nav} />
+              <PageCard icon={<Banknote size={18}/>}     title="Finance"        blurb="AR Aging dashboard, pending invoices, faktur pajak approval (finance/director)." path="/finance" nav={nav} />
+              <PageCard icon={<Banknote size={18}/>}     title="Payment verification" blurb="Verify portal payment claims, or record a customer's bank transfer manually (finance)." path="/finance/payment-verification" nav={nav} />
               <PageCard icon={<Package size={18}/>}      title="Inventory"      blurb="Stock levels with low/out chips and one-click Request order." path="/inventory" nav={nav} />
-              <PageCard icon={<Receipt size={18}/>}      title="Chart of Accounts" blurb="109 pre-seeded Indonesian accounts (admin/director only)." path="/accounts" nav={nav} />
+              <PageCard icon={<Receipt size={18}/>}      title="Chart of Accounts" blurb="109 pre-seeded Indonesian accounts (finance/director)." path="/accounts" nav={nav} />
               <PageCard icon={<Users size={18}/>}        title="Employees"      blurb="Directory + per-employee KPI page + tag management (HR/director)." path="/employees" nav={nav} />
               <PageCard icon={<Wallet size={18}/>}       title="Salary"         blurb="Monthly payroll that auto-posts to the ledger (director only)." path="/salary" nav={nav} />
               <PageCard icon={<BarChart3 size={18}/>}    title="KPI"            blurb="Per-department performance numbers." path="/kpi" nav={nav} />
@@ -138,26 +143,27 @@ export default function HelpPage() {
                 "Fill company name, industry, PIC name, phone/WhatsApp, email",
                 "You become the Sales PIC automatically (if you're sales)",
                 "Open the customer → log a call / presentation / meeting activity",
-                "Drag the card to the next stage on the Pipeline view as the deal progresses",
+                "Manual stage moves need a manager/director sign-off — but approving deal documents (quotation, Won, PO) advances the pipeline automatically",
               ]}
             />
             <Workflow
-              title="B) Sending a quotation"
+              title="B) Getting a quotation out (price request first)"
               steps={[
-                "Click + New quotation (from CRM, the customer page, or the Quotations page)",
-                "Pick customer + add line items (description, qty, unit price)",
-                "Adjust discount — the slider tells you live who has to approve",
-                "Save as draft, then click Submit. The discount tier auto-routes for approval",
+                "Customer page → + Price request: list the items you need priced",
+                "Purchasing / director fill in costs and approve the PR",
+                "Generate quotation from the approved PR — prices carry over",
+                "Click Submit → EVERY quotation waits for director approval (Unsubmit pulls back an accidental submit)",
                 "Once approved, send via WhatsApp or email; log a follow-up afterwards",
               ]}
             />
             <Workflow
-              title="C) Marking a deal won (and the books update themselves)"
+              title="C) From Won to a project (the PO is the trigger)"
               steps={[
-                "Open the quotation → Mark won",
-                "A Project is auto-created with the same value",
-                "Chart of Accounts auto-posts: Piutang Usaha ↑, Penjualan ↑, PPN Keluaran ↑, Diskon ↑",
-                "Open Linked Accounts card to see exactly what posted; Reverse if needed",
+                "Open the approved quotation → Mark won → the director approves the Won request",
+                "Winning does NOT create the project — file the customer's PO on the quote's Next-step card (attach the PO file, pick ordered items)",
+                "Regular PO → director approves → project spawns with the PO number/value",
+                "DP PO → finance approves + issues the DP invoice → you confirm 'deposit received' → project spawns",
+                "The ledger posts automatically along the way; the Linked Accounts card shows what posted",
               ]}
             />
             <Workflow
@@ -180,12 +186,22 @@ export default function HelpPage() {
               ]}
             />
             <Workflow
-              title="F) Approving a discount (Manager / Director)"
+              title="F) Clearing the Approvals inbox (Manager / Director)"
               steps={[
-                "The Approvals nav item shows a count when waiting",
-                "Open the request → review the discount and total",
-                "Click Approve or Reject (with reason)",
-                "The salesperson is notified; the quote moves forward",
+                "The Approvals nav item shows a count when anything is waiting",
+                "Quotations, customer/supplier POs, Mark-won, follow-ups and shipping-date changes are director-only; manual stage moves clear through manager or director",
+                "The Documents card lists drawings, import docs, delivery proofs and price requests waiting for a decision — with deep links",
+                "Click Approve or Reject (with reason — the requester sees it)",
+                "Approving a deal document also advances the customer's pipeline stage automatically",
+              ]}
+            />
+            <Workflow
+              title="G) Recording a customer payment (Finance)"
+              steps={[
+                "Customer paid through the portal? Payment verification → Verify the claim",
+                "Customer paid by bank transfer without the portal? 'Record a payment manually' — pick the open invoice, amount prefills to the outstanding balance",
+                "Or open the project → invoice card → 'Enter payment manually' for the same one-stroke record + verify",
+                "Full payment auto-advances the project to paid → closed",
               ]}
             />
           </Section>
@@ -197,23 +213,31 @@ export default function HelpPage() {
                 <thead className="bg-ink-50">
                   <tr>
                     <th className="th text-left">Page</th>
-                    {(["Sales","Admin","HR","Manager","Director"] as const).map((r) => (
+                    {(["Sales","Purchasing","Admin","Finance","HR","Manager","Director"] as const).map((r) => (
                       <th key={r} className="th text-center">{r}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  <Row page="Dashboard / CRM / Quotations / Calendar / Chat / KPI / AI Command" mask="11111" />
-                  <Row page="Approvals" mask="00011" />
-                  <Row page="Inventory (view)" mask="11111" />
-                  <Row page="Inventory (edit)" mask="01001" />
-                  <Row page="Chart of Accounts" mask="01001" />
-                  <Row page="Employees + Tags" mask="00101" />
-                  <Row page="Salary" mask="00001" />
-                  <Row page="Executive Dashboard" mask="00011" />
+                  <Row page="CRM + Quotations" mask="1000011" />
+                  <Row page="Price requests" mask="1100011" />
+                  <Row page="Customer PO" mask="1001011" />
+                  <Row page="Projects" mask="1111011" />
+                  <Row page="Operation board" mask="1010011" />
+                  <Row page="Inventory" mask="0110011" />
+                  <Row page="Finance pages (invoices, payment verification, reports, accounts)" mask="0001011" />
+                  <Row page="Approvals" mask="0000011" />
+                  <Row page="Employees + documents" mask="0000101" />
+                  <Row page="Salary" mask="0000001" />
+                  <Row page="Executive Dashboard" mask="0000011" />
                 </tbody>
               </table>
             </div>
+            <P>
+              Purchasing sees Projects with the customer's identity hidden ("Order PRJ-…"),
+              and sales sees the Operation board read-only. Finance's Projects access is for
+              invoicing and payment entry.
+            </P>
           </Section>
 
           {/* 6. Reference */}
@@ -234,12 +258,16 @@ export default function HelpPage() {
               <Stage label="Won / Lost" desc="Terminal outcome 🎉 / 😞" />
             </div>
 
-            <h3 className="font-semibold mt-5 mb-1">Discount tier rules</h3>
-            <div className="grid grid-cols-3 gap-2 text-sm">
-              <Tier label="0 – 5%" who="Auto-approved" tone="emerald" />
-              <Tier label="5 – 15%" who="Manager approval" tone="amber" />
-              <Tier label="> 15%" who="Director approval" tone="red" />
+            <h3 className="font-semibold mt-5 mb-1">Who approves what</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+              <Tier label="Director" who="Every quotation, customer & supplier PO, Mark-won, follow-ups, price requests, shipping-date changes" tone="red" />
+              <Tier label="Finance" who="DP customer POs, faktur pajak, payment verification" tone="amber" />
+              <Tier label="Manager or Director" who="Manual CRM stage moves, data changes" tone="emerald" />
             </div>
+            <P>
+              There is no discount-based auto-approval anymore — every quotation waits for
+              the director regardless of discount.
+            </P>
 
             <h3 className="font-semibold mt-5 mb-1">Number format</h3>
             <P>
@@ -265,12 +293,13 @@ export default function HelpPage() {
           <Section id="troubles" title="8. Troubleshooting" icon={<AlertCircle size={20} />}>
             <div className="space-y-2">
               <T q="I can't see Employees / Salary / Approvals" a="You don't have permission for that role. Ask the Director to grant it." />
-              <T q="My quotation is stuck in Pending approval" a="Manager (or Director if >15%) needs to act. Ping them in Chat." />
-              <T q="The customer card won't drag in Pipeline" a="Click and hold the card body (not the link text). Mobile drag is finicky — use Table view." />
+              <T q="My quotation is stuck in Pending approval" a="Every quotation waits for the Director in /approvals — ping them in Chat. Submitted by accident? Use Unsubmit to pull it back to draft." />
+              <T q="I can't create a quotation (sales)" a="Quotations start from a Price request now. File the PR on the customer page, wait for pricing approval, then Generate quotation from it." />
+              <T q="I saved shipping dates but nothing changed" a="Non-director date edits wait for the Director's approval — check the Approvals inbox. Director edits apply instantly." />
               <T q="I see 'Invalid payload' on login" a="Password is wrong or has unexpected characters. Try again carefully." />
               <T q="WhatsApp button does nothing" a="The customer has no phone/WhatsApp number on file. Edit the customer first." />
               <T q="I deleted a chat message" a="Deletes are soft (shows '[deleted]') and not restorable. Send a new message instead." />
-              <T q="I can't find my customer" a="Sales see only their own. If you think it's yours but missing, ask Admin who the Sales PIC is." />
+              <T q="I can't find my customer" a="Sales see only their own. If you think it's yours but missing, ask a Manager or the Director who the Sales PIC is." />
             </div>
           </Section>
         </div>
@@ -375,7 +404,7 @@ function Workflow({ title, steps }: { title: string; steps: string[] }) {
   );
 }
 function Row({ page, mask }: { page: string; mask: string }) {
-  // mask is "11011" — order: Sales, Admin, HR, Manager, Director
+  // mask is "1100011" — order: Sales, Purchasing, Admin, Finance, HR, Manager, Director
   return (
     <tr className="border-t border-ink-100">
       <td className="td">{page}</td>
@@ -439,17 +468,17 @@ function IndonesianQuickGuide() {
         <IdTile title="Pelanggan (CRM)"
           body="Daftar semua pelanggan. Klik 'Pelanggan baru' untuk wizard 3 langkah: data dasar, kontak (PIC), data pajak (NPWP/PKP)." />
         <IdTile title="Penawaran (Quotations)"
-          body="Buat penawaran ke pelanggan. Bisa diekspor ke PDF / Excel. Diskon di atas batas perlu persetujuan manajer." />
+          body="Penawaran dibuat dari Permintaan Harga yang disetujui (sales tidak bisa buat dari nol). Setiap penawaran wajib persetujuan direktur sebelum dikirim." />
         <IdTile title="Kalender"
           body="Reminder per tahap (stage) muncul otomatis di sini. Centang kalau sudah selesai." />
         <IdTile title="Persetujuan (Approvals)"
-          body="Permintaan pindah stage, diskon besar, perubahan data sensitif menunggu OK direktur di halaman ini." />
+          body="Penawaran, PO pelanggan/supplier, Mark-won, pindah stage, dan dokumen (gambar, bukti kirim) menunggu keputusan manajer/direktur di halaman ini." />
         <IdTile title="Proyek & Operasi"
           body="Setelah PO masuk, customer pindah ke Proyek. Pantau tanggal kirim, gambar teknik, dan invoice di sini." />
         <IdTile title="Pembelian (Purchasing)"
           body="PO ke supplier, RFQ, dan dokumen masuk dari supplier (invoice, drawing, surat jalan)." />
         <IdTile title="Keuangan & Verifikasi Bayar"
-          body="Invoice dan pembayaran masuk. Bukti transfer pelanggan diverifikasi di Payment verification." />
+          body="Invoice dan pembayaran masuk. Bukti transfer pelanggan diverifikasi di Payment verification — atau catat manual kalau pelanggan bayar tanpa portal." />
       </div>
       <div className="rounded-lg bg-ink-50 border border-ink-100 p-3 text-xs text-ink-700">
         <span className="font-semibold">Tip:</span> tombol bahasa di pojok kanan atas
