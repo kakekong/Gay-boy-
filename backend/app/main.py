@@ -20,14 +20,37 @@ async def lifespan(_app: FastAPI):
     missing (e.g. ``entity_comments`` for the Discussion feature) so a fresh
     deploy or a Hugging Face Space rebuild "just works" without a separate
     ``python -m app.scripts.seed`` step. Idempotent — create_all only adds
-    missing tables — and never blocks startup if the DB is briefly
-    unreachable.
+    missing tables.
+
+    Hardened against a HUNG database, not just a failing one: a TCP connect
+    that neither succeeds nor errors (e.g. Neon mid-resume) used to block
+    this forever, which kept the port closed and left the Space stuck on
+    "Restarting" with an empty log. Now every attempt is capped at 90s,
+    retried twice, and each step prints with flush so the container log
+    always shows where boot is.
     """
-    try:
-        from app.scripts.seed import ensure_schema
-        await ensure_schema()
-    except Exception:
-        logging.getLogger(__name__).exception("startup ensure_schema failed")
+    import asyncio
+
+    from app.scripts.seed import ensure_schema
+
+    for attempt in range(1, 4):
+        print(f"[boot] database schema check (attempt {attempt}/3)…", flush=True)
+        try:
+            await asyncio.wait_for(ensure_schema(), timeout=90)
+            print("[boot] schema ready — starting API.", flush=True)
+            break
+        except asyncio.TimeoutError:
+            print(f"[boot] schema check timed out after 90s "
+                  f"(attempt {attempt}/3) — database unreachable or hung.", flush=True)
+        except Exception:
+            logging.getLogger(__name__).exception("startup ensure_schema failed")
+            print("[boot] schema check failed — starting API anyway "
+                  "(see traceback above).", flush=True)
+            break
+    else:
+        print("[boot] giving up on the schema check — starting API anyway; "
+              "requests needing missing columns may error until the DB is back.",
+              flush=True)
     yield
 
 
