@@ -16,51 +16,57 @@ class StageTask(TypedDict):
     title: str
     due_after_days: int
     hint: str  # short helper text shown under the title
+    roles: list[str]  # roles that actually DO this task — routes notifications
 
 
+# `roles` routes each task's notification to the department that executes
+# it: "Issue invoice" pings finance, "Raise purchase request" pings
+# purchasing, "Schedule delivery" pings admin (ops). Manager/director see
+# everything regardless. The reminder rows themselves stay owned by the
+# deal's sales PIC — this only controls who gets nagged about them.
 STAGE_PLAYBOOK: dict[str, list[StageTask]] = {
     "lead": [
-        {"key": "first_contact",     "title": "Make first contact",            "due_after_days": 1, "hint": "Call or WhatsApp within 24 hours"},
-        {"key": "qualify_need",      "title": "Qualify need + budget",         "due_after_days": 3, "hint": "Log discovery notes on the customer"},
+        {"key": "first_contact",     "title": "Make first contact",            "due_after_days": 1, "hint": "Call or WhatsApp within 24 hours",             "roles": ["sales"]},
+        {"key": "qualify_need",      "title": "Qualify need + budget",         "due_after_days": 3, "hint": "Log discovery notes on the customer",          "roles": ["sales"]},
     ],
     "presentation": [
-        {"key": "schedule_demo",     "title": "Schedule presentation/demo",    "due_after_days": 3, "hint": "Confirm date with PIC"},
-        {"key": "send_company_deck", "title": "Send company profile / deck",   "due_after_days": 2, "hint": "Attach the PDF to the customer"},
+        {"key": "schedule_demo",     "title": "Schedule presentation/demo",    "due_after_days": 3, "hint": "Confirm date with PIC",                        "roles": ["sales"]},
+        {"key": "send_company_deck", "title": "Send company profile / deck",   "due_after_days": 2, "hint": "Attach the PDF to the customer",               "roles": ["sales"]},
     ],
     "engineering": [
-        {"key": "spec_review",       "title": "Engineering spec review",       "due_after_days": 5, "hint": "Confirm technical scope with engineering"},
-        {"key": "site_survey",       "title": "Schedule site survey if needed","due_after_days": 7, "hint": "Skip if remote-only project"},
+        {"key": "spec_review",       "title": "Engineering spec review",       "due_after_days": 5, "hint": "Confirm technical scope with engineering",     "roles": ["sales"]},
+        {"key": "site_survey",       "title": "Schedule site survey if needed","due_after_days": 7, "hint": "Skip if remote-only project",                  "roles": ["sales"]},
     ],
     "quotation": [
-        {"key": "draft_quote",       "title": "Draft quotation",               "due_after_days": 2, "hint": "Use the New quotation form"},
-        {"key": "send_quote",        "title": "Send quotation to customer",    "due_after_days": 4, "hint": "Send via WhatsApp/email and log the activity"},
+        {"key": "draft_quote",       "title": "Draft quotation",               "due_after_days": 2, "hint": "Use the New quotation form",                   "roles": ["sales"]},
+        {"key": "send_quote",        "title": "Send quotation to customer",    "due_after_days": 4, "hint": "Send via WhatsApp/email and log the activity", "roles": ["sales"]},
     ],
     "negotiation": [
-        {"key": "follow_up_quote",   "title": "Follow up on quotation",        "due_after_days": 3, "hint": "Check pricing/term objections"},
-        {"key": "second_follow_up",  "title": "Second follow-up if no answer", "due_after_days": 7, "hint": "Escalate to manager if silent"},
+        {"key": "follow_up_quote",   "title": "Follow up on quotation",        "due_after_days": 3, "hint": "Check pricing/term objections",                "roles": ["sales"]},
+        {"key": "second_follow_up",  "title": "Second follow-up if no answer", "due_after_days": 7, "hint": "Escalate to manager if silent",                "roles": ["sales"]},
     ],
     "po": [
-        {"key": "collect_po",        "title": "Collect signed PO",             "due_after_days": 5, "hint": "Upload to the customer's attachments"},
-        {"key": "confirm_terms",     "title": "Confirm payment terms",         "due_after_days": 3, "hint": "Tempo days / DP %"},
+        {"key": "collect_po",        "title": "Collect signed PO",             "due_after_days": 5, "hint": "Upload to the customer's attachments",         "roles": ["sales"]},
+        {"key": "confirm_terms",     "title": "Confirm payment terms",         "due_after_days": 3, "hint": "Tempo days / DP %",                            "roles": ["sales"]},
     ],
     "drawing": [
-        {"key": "send_drawing",      "title": "Send drawing for approval",     "due_after_days": 5, "hint": "From Operations → Drawings"},
-        {"key": "drawing_signoff",   "title": "Collect customer sign-off",     "due_after_days": 10, "hint": "Required before purchasing"},
+        {"key": "send_drawing",      "title": "Send drawing for approval",     "due_after_days": 5, "hint": "From Operations → Drawings",                   "roles": ["admin"]},
+        {"key": "drawing_signoff",   "title": "Collect customer sign-off",     "due_after_days": 10, "hint": "Required before purchasing",                  "roles": ["sales"]},
     ],
     "purchasing": [
-        {"key": "raise_pr",          "title": "Raise purchase request",        "due_after_days": 3, "hint": "Open Purchasing → New PR"},
-        {"key": "select_supplier",   "title": "Select supplier & issue PO",    "due_after_days": 7, "hint": "From RFQ comparisons"},
+        {"key": "raise_pr",          "title": "Raise purchase request",        "due_after_days": 3, "hint": "Open Purchasing → New PR",                     "roles": ["purchasing"]},
+        {"key": "select_supplier",   "title": "Select supplier & issue PO",    "due_after_days": 7, "hint": "From RFQ comparisons",                         "roles": ["purchasing"]},
     ],
     "delivery": [
-        {"key": "schedule_delivery", "title": "Schedule delivery to customer", "due_after_days": 3, "hint": "Set arrival date in project shipping"},
-        {"key": "delivery_proof",    "title": "Upload delivery proof",         "due_after_days": 7, "hint": "BAST / packing list"},
+        {"key": "schedule_delivery", "title": "Schedule delivery to customer", "due_after_days": 3, "hint": "Set arrival date in project shipping",         "roles": ["admin"]},
+        {"key": "delivery_proof",    "title": "Upload delivery proof",         "due_after_days": 7, "hint": "BAST / packing list",                          "roles": ["admin"]},
     ],
     "invoicing": [
-        {"key": "issue_invoice",     "title": "Issue invoice",                 "due_after_days": 2, "hint": "From Finance → Invoices"},
-        {"key": "send_invoice",      "title": "Send invoice to customer",      "due_after_days": 3, "hint": "Email/WhatsApp"},
+        {"key": "issue_invoice",     "title": "Issue invoice",                 "due_after_days": 2, "hint": "From Finance → Invoices",                      "roles": ["finance"]},
+        {"key": "send_invoice",      "title": "Send invoice to customer",      "due_after_days": 3, "hint": "Email/WhatsApp",                               "roles": ["finance"]},
     ],
     "payment": [
-        {"key": "follow_payment",    "title": "Follow up on payment",          "due_after_days": 7, "hint": "Verify in Payment verification when received"},
+        {"key": "follow_payment",    "title": "Follow up on payment",          "due_after_days": 7, "hint": "Verify in Payment verification when received", "roles": ["sales", "finance"]},
     ],
     # closed_won / closed_lost get no required tasks
     "closed_won":  [],

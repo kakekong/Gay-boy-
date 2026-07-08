@@ -151,96 +151,132 @@ async def list_notifications(
             "at": a.decided_at,
         })
 
-    # 2. At-risk open quotations owned by the caller (or all if manager+)
-    seven_days_ago = now - timedelta(days=7)
-    q_stmt = (
-        select(Quotation, Customer)
-        .join(Customer, Quotation.customer_id == Customer.id)
-        .where(Quotation.status.in_(["sent", "pending_approval", "approved"]))
-        .order_by(Quotation.created_at.desc())
-        .limit(50)
-    )
-    if role == Role.SALES:
-        q_stmt = q_stmt.where(Quotation.sales_pic_id == me.id)
-    for q, c in (await db.execute(q_stmt)).all():
-        last_act = await db.scalar(
-            select(func.max(Activity.occurred_at))
-            .where(Activity.customer_id == q.customer_id)
+    # 2. At-risk open quotations — a sales concern. Sales sees their own
+    # deals, manager/director see all. Other departments can't act on a
+    # stalled quotation, so they don't get nagged about it.
+    if role in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+        seven_days_ago = now - timedelta(days=7)
+        q_stmt = (
+            select(Quotation, Customer)
+            .join(Customer, Quotation.customer_id == Customer.id)
+            .where(Quotation.status.in_(["sent", "pending_approval", "approved"]))
+            .order_by(Quotation.created_at.desc())
+            .limit(50)
         )
-        idle_since = last_act or q.created_at
-        if idle_since < seven_days_ago:
-            days_idle = (now - idle_since).days
+        if role == Role.SALES:
+            q_stmt = q_stmt.where(Quotation.sales_pic_id == me.id)
+        for q, c in (await db.execute(q_stmt)).all():
+            last_act = await db.scalar(
+                select(func.max(Activity.occurred_at))
+                .where(Activity.customer_id == q.customer_id)
+            )
+            idle_since = last_act or q.created_at
+            if idle_since < seven_days_ago:
+                days_idle = (now - idle_since).days
+                items.append({
+                    "id": f"deal-risk:{q.id}",
+                    "kind": "at_risk_deal",
+                    "severity": "high" if days_idle >= 14 else "medium",
+                    "title": f"At-risk deal: {c.company_name}",
+                    "body": f"{q.number} idle for {days_idle} days",
+                    "link": f"/quotations/{q.id}",
+                    "at": idle_since,
+                })
+
+    # 3. Overdue / due-soon invoices — collections is finance's job;
+    # sales chases their own customers; manager/director oversee. Ops
+    # roles (admin/purchasing/hr) can't do anything about an unpaid
+    # invoice, so it never reaches them.
+    if role in (Role.FINANCE, Role.SALES, Role.MANAGER, Role.DIRECTOR):
+        soon = today + timedelta(days=3)
+        inv_stmt = (
+            select(Invoice, Customer)
+            .join(Customer, Invoice.customer_id == Customer.id)
+            .where(
+                Invoice.status.in_(["issued", "partial", "overdue"]),
+                Invoice.due_date.is_not(None),
+                Invoice.due_date <= soon,
+            )
+            .order_by(Invoice.due_date.asc())
+        )
+        if role == Role.SALES:
+            inv_stmt = inv_stmt.where(Customer.sales_pic_id == me.id)
+        for inv, c in (await db.execute(inv_stmt)).all():
+            overdue = inv.due_date < today
             items.append({
-                "id": f"deal-risk:{q.id}",
-                "kind": "at_risk_deal",
-                "severity": "high" if days_idle >= 14 else "medium",
-                "title": f"At-risk deal: {c.company_name}",
-                "body": f"{q.number} idle for {days_idle} days",
-                "link": f"/quotations/{q.id}",
-                "at": idle_since,
+                "id": f"invoice:{inv.id}",
+                "kind": "payment_due",
+                "severity": "high" if overdue else "medium",
+                "title": ("Overdue" if overdue else "Due soon") + f": {inv.number}",
+                "body": f"{c.company_name} · Rp " + f"{float(inv.total or 0):,.0f}".replace(",", "."),
+                # Sales can't open /finance — send them to the customer
+                # instead, where the invoice context lives for them.
+                "link": f"/customers/{c.id}" if role == Role.SALES else "/finance",
+                "at": datetime.combine(inv.due_date, datetime.min.time()).replace(tzinfo=UTC),
             })
 
-    # 3. Overdue / due-soon invoices
-    soon = today + timedelta(days=3)
-    inv_stmt = (
-        select(Invoice, Customer)
-        .join(Customer, Invoice.customer_id == Customer.id)
-        .where(
-            Invoice.status.in_(["issued", "partial", "overdue"]),
-            Invoice.due_date.is_not(None),
-            Invoice.due_date <= soon,
+    # 3b. Overdue / due-soon stage checklist tasks — routed by who DOES the
+    # work, not broadcast to everyone. Each playbook task declares its
+    # owning roles ("Issue invoice" → finance, "Raise purchase request" →
+    # purchasing, "Schedule delivery" → admin, deal chores → sales).
+    # Sales additionally only sees tasks for their own customers;
+    # manager/director see everything for oversight. HR never gets these.
+    if role in (Role.SALES, Role.FINANCE, Role.PURCHASING, Role.ADMIN,
+                Role.MANAGER, Role.DIRECTOR):
+        soon_dt = now + timedelta(days=2)
+        stage_stmt = (
+            select(Reminder, Customer)
+            .join(Customer, Reminder.customer_id == Customer.id)
+            .where(
+                Reminder.status == "pending",
+                Reminder.kind.like("stage:%"),
+                Reminder.due_at <= soon_dt,
+            )
+            .order_by(Reminder.due_at.asc())
+            .limit(50)
         )
-        .order_by(Invoice.due_date.asc())
-    )
-    if role == Role.SALES:
-        inv_stmt = inv_stmt.where(Customer.sales_pic_id == me.id)
-    for inv, c in (await db.execute(inv_stmt)).all():
-        overdue = inv.due_date < today
-        items.append({
-            "id": f"invoice:{inv.id}",
-            "kind": "payment_due",
-            "severity": "high" if overdue else "medium",
-            "title": ("Overdue" if overdue else "Due soon") + f": {inv.number}",
-            "body": f"{c.company_name} · Rp " + f"{float(inv.total or 0):,.0f}".replace(",", "."),
-            "link": "/finance",
-            "at": datetime.combine(inv.due_date, datetime.min.time()).replace(tzinfo=UTC),
-        })
-
-    # 3b. Overdue / due-soon stage checklist tasks owned by the caller
-    soon_dt = now + timedelta(days=2)
-    stage_stmt = (
-        select(Reminder, Customer)
-        .join(Customer, Reminder.customer_id == Customer.id)
-        .where(
-            Reminder.status == "pending",
-            Reminder.kind.like("stage:%"),
-            Reminder.due_at <= soon_dt,
-        )
-        .order_by(Reminder.due_at.asc())
-        .limit(50)
-    )
-    if role == Role.SALES:
-        stage_stmt = stage_stmt.where(Reminder.user_id == me.id)
-    for rem, cust in (await db.execute(stage_stmt)).all():
-        parsed = parse_stage_task_kind(rem.kind)
-        if not parsed:
-            continue
-        stg, task_key = parsed
-        playbook_item = next(
-            (t for t in playbook_for(stg) if t["key"] == task_key), None
-        )
-        title = playbook_item["title"] if playbook_item else rem.message or task_key
-        overdue = rem.due_at <= now
-        items.append({
-            "id": f"stage-task:{rem.id}",
-            "kind": "stage_task",
-            "severity": "high" if overdue else "medium",
-            "title": ("Overdue" if overdue else "Due soon")
-                     + f": {title} ({stg.replace('_', ' ')})",
-            "body": f"{cust.company_name}",
-            "link": f"/customers/{cust.id}",
-            "at": rem.due_at,
-        })
+        if role == Role.SALES:
+            stage_stmt = stage_stmt.where(Reminder.user_id == me.id)
+        for rem, cust in (await db.execute(stage_stmt)).all():
+            parsed = parse_stage_task_kind(rem.kind)
+            if not parsed:
+                continue
+            stg, task_key = parsed
+            playbook_item = next(
+                (t for t in playbook_for(stg) if t["key"] == task_key), None
+            )
+            task_owner_roles = set(
+                (playbook_item.get("roles") if playbook_item else None) or ["sales"]
+            )
+            if role not in (Role.MANAGER, Role.DIRECTOR) \
+                    and role.value not in task_owner_roles:
+                continue
+            title = playbook_item["title"] if playbook_item else rem.message or task_key
+            overdue = rem.due_at <= now
+            # Land each role on a page it can actually open — and keep
+            # purchasing customer-blind (no company name, no customer link).
+            if role == Role.PURCHASING:
+                body = "Open your purchasing queue"
+                link = "/price-requests"
+            elif role == Role.FINANCE:
+                body = cust.company_name
+                link = "/finance"
+            elif role == Role.ADMIN:
+                body = cust.company_name
+                link = "/projects"
+            else:
+                body = cust.company_name
+                link = f"/customers/{cust.id}"
+            items.append({
+                "id": f"stage-task:{rem.id}",
+                "kind": "stage_task",
+                "severity": "high" if overdue else "medium",
+                "title": ("Overdue" if overdue else "Due soon")
+                         + f": {title} ({stg.replace('_', ' ')})",
+                "body": body,
+                "link": link,
+                "at": rem.due_at,
+            })
 
     # 4. Drawings awaiting sign-off — decided internally by manager /
     # director / admin on the project page, so only those roles get the

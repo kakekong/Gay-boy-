@@ -37,13 +37,21 @@ async def list_events(
     if (range_to - range_from).days > 366:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "range too wide")
 
-    sales_only = Role(user.role) == Role.SALES
+    role = Role(user.role)
+    sales_only = role == Role.SALES
+    oversight = role in (Role.MANAGER, Role.DIRECTOR)
+    # Purchasing stays customer-blind everywhere, the calendar included.
+    blind = role == Role.PURCHASING
     start_dt = datetime.combine(range_from, time.min)
     end_dt = datetime.combine(range_to, time.max)
 
     events: list[dict] = []
 
-    # Reminders (incl. auto-generated per-stage checklist items)
+    # Reminders (incl. auto-generated per-stage checklist items). Stage
+    # tasks are routed by the playbook's owning roles — finance sees
+    # invoicing chores, purchasing sees purchasing chores, admin sees
+    # delivery chores — instead of every role seeing every task. Manual
+    # reminders stay private to their creator (managers+ see all).
     rem_stmt = (
         select(Reminder, Customer)
         .outerjoin(Customer, Reminder.customer_id == Customer.id)
@@ -57,14 +65,20 @@ async def list_events(
         if stage_info:
             stg, task_key = stage_info
             item = next((t for t in playbook_for(stg) if t["key"] == task_key), None)
+            if not oversight:
+                owner_roles = set((item.get("roles") if item else None) or ["sales"])
+                if role.value not in owner_roles:
+                    continue
             task_title = item["title"] if item else (r.message or task_key)
-            cust_label = c.company_name if c else "—"
+            cust_label = "—" if blind else (c.company_name if c else "—")
             title = f"{stg.replace('_', ' ').title()} · {task_title} · {cust_label}"
             subtype = f"stage:{stg}"
             color = "red" if r.status == "pending" and r.due_at <= datetime.now(r.due_at.tzinfo) else "brand"
         else:
+            if not oversight and r.user_id != user.id:
+                continue
             title = r.message or r.kind.replace("_", " ").title()
-            if c:
+            if c and not blind:
                 title = f"{title} · {c.company_name}"
             subtype = r.kind
             color = _color_for_reminder(r.kind)
@@ -75,75 +89,79 @@ async def list_events(
             "subtype": subtype,
             "at": r.due_at,
             "status": r.status,
-            "link": f"/customers/{c.id}" if c else None,
+            "link": f"/customers/{c.id}" if c and not blind else None,
             "color": color,
         })
 
-    # Activities (logged interactions)
-    act_stmt = select(Activity, Customer).join(
-        Customer, Activity.customer_id == Customer.id
-    ).where(Activity.occurred_at >= start_dt, Activity.occurred_at <= end_dt)
-    if sales_only:
-        act_stmt = act_stmt.where(Customer.sales_pic_id == user.id)
-    for a, c in (await db.execute(act_stmt)).all():
-        events.append({
-            "id": f"activity:{a.id}",
-            "kind": "activity",
-            "title": f"{a.type.replace('_', ' ').title()} · {c.company_name}",
-            "subtype": a.type,
-            "at": a.occurred_at,
-            "status": a.direction,
-            "link": f"/customers/{c.id}",
-            "color": "ink",
-        })
+    # Activities (logged interactions) — CRM ground: sales + oversight only.
+    if sales_only or oversight:
+        act_stmt = select(Activity, Customer).join(
+            Customer, Activity.customer_id == Customer.id
+        ).where(Activity.occurred_at >= start_dt, Activity.occurred_at <= end_dt)
+        if sales_only:
+            act_stmt = act_stmt.where(Customer.sales_pic_id == user.id)
+        for a, c in (await db.execute(act_stmt)).all():
+            events.append({
+                "id": f"activity:{a.id}",
+                "kind": "activity",
+                "title": f"{a.type.replace('_', ' ').title()} · {c.company_name}",
+                "subtype": a.type,
+                "at": a.occurred_at,
+                "status": a.direction,
+                "link": f"/customers/{c.id}",
+                "color": "ink",
+            })
 
-    # Quotation valid_until
-    quote_stmt = select(Quotation, Customer).join(
-        Customer, Quotation.customer_id == Customer.id
-    ).where(
-        Quotation.valid_until.is_not(None),
-        Quotation.valid_until >= range_from,
-        Quotation.valid_until <= range_to,
-        Quotation.status.in_(["sent", "approved", "pending_approval", "draft"]),
-    )
-    if sales_only:
-        quote_stmt = quote_stmt.where(Quotation.sales_pic_id == user.id)
-    for q, c in (await db.execute(quote_stmt)).all():
-        events.append({
-            "id": f"quote:{q.id}",
-            "kind": "quotation_expiry",
-            "title": f"Quote expires · {q.number} · {c.company_name}",
-            "subtype": q.status,
-            "at": datetime.combine(q.valid_until, time(17, 0)),
-            "status": q.status,
-            "link": f"/quotations/{q.id}",
-            "color": "violet",
-        })
+    # Quotation valid_until — deal ground: sales + oversight only.
+    if sales_only or oversight:
+        quote_stmt = select(Quotation, Customer).join(
+            Customer, Quotation.customer_id == Customer.id
+        ).where(
+            Quotation.valid_until.is_not(None),
+            Quotation.valid_until >= range_from,
+            Quotation.valid_until <= range_to,
+            Quotation.status.in_(["sent", "approved", "pending_approval", "draft"]),
+        )
+        if sales_only:
+            quote_stmt = quote_stmt.where(Quotation.sales_pic_id == user.id)
+        for q, c in (await db.execute(quote_stmt)).all():
+            events.append({
+                "id": f"quote:{q.id}",
+                "kind": "quotation_expiry",
+                "title": f"Quote expires · {q.number} · {c.company_name}",
+                "subtype": q.status,
+                "at": datetime.combine(q.valid_until, time(17, 0)),
+                "status": q.status,
+                "link": f"/quotations/{q.id}",
+                "color": "violet",
+            })
 
-    # Invoice due dates
-    inv_stmt = select(Invoice, Customer).join(
-        Customer, Invoice.customer_id == Customer.id
-    ).where(
-        Invoice.due_date.is_not(None),
-        Invoice.due_date >= range_from,
-        Invoice.due_date <= range_to,
-        Invoice.status.in_(["draft", "issued", "partial", "overdue"]),
-    )
-    if sales_only:
-        inv_stmt = inv_stmt.where(Customer.sales_pic_id == user.id)
-    for inv, c in (await db.execute(inv_stmt)).all():
-        events.append({
-            "id": f"invoice:{inv.id}",
-            "kind": "payment_due",
-            "title": f"Invoice due · {inv.number} · {c.company_name}",
-            "subtype": inv.status,
-            "at": datetime.combine(inv.due_date, time(12, 0)),
-            "status": inv.status,
-            "link": None,
-            "color": "red" if inv.status == "overdue" else "amber",
-        })
+    # Invoice due dates — finance's queue; sales sees their own customers'.
+    if role == Role.FINANCE or sales_only or oversight:
+        inv_stmt = select(Invoice, Customer).join(
+            Customer, Invoice.customer_id == Customer.id
+        ).where(
+            Invoice.due_date.is_not(None),
+            Invoice.due_date >= range_from,
+            Invoice.due_date <= range_to,
+            Invoice.status.in_(["draft", "issued", "partial", "overdue"]),
+        )
+        if sales_only:
+            inv_stmt = inv_stmt.where(Customer.sales_pic_id == user.id)
+        for inv, c in (await db.execute(inv_stmt)).all():
+            events.append({
+                "id": f"invoice:{inv.id}",
+                "kind": "payment_due",
+                "title": f"Invoice due · {inv.number} · {c.company_name}",
+                "subtype": inv.status,
+                "at": datetime.combine(inv.due_date, time(12, 0)),
+                "status": inv.status,
+                "link": None,
+                "color": "red" if inv.status == "overdue" else "amber",
+            })
 
-    # Project target deliveries
+    # Project target deliveries — everyone who works projects, but the
+    # customer name stays hidden from purchasing.
     proj_stmt = select(Project, Customer).join(
         Customer, Project.customer_id == Customer.id
     ).where(
@@ -158,7 +176,8 @@ async def list_events(
         events.append({
             "id": f"project:{p.id}",
             "kind": "delivery",
-            "title": f"Target delivery · {p.code} · {c.company_name}",
+            "title": f"Target delivery · {p.code}"
+                     + ("" if blind else f" · {c.company_name}"),
             "subtype": p.status,
             "at": datetime.combine(p.target_delivery, time(10, 0)),
             "status": p.status,
@@ -166,7 +185,12 @@ async def list_events(
             "color": "emerald",
         })
 
-    events.sort(key=lambda e: e["at"])
+    # Reminder.due_at is timezone-aware while the datetime.combine() rows
+    # above are naive — comparing them raises. Coerce naive → UTC for the
+    # sort so mixed event types can share a calendar without crashing.
+    from datetime import timezone as _tz
+    events.sort(key=lambda e: e["at"] if e["at"].tzinfo
+                else e["at"].replace(tzinfo=_tz.utc))
     return events
 
 
