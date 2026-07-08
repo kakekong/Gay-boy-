@@ -299,23 +299,49 @@ export default function ProjectDetailPage() {
     },
     onError: onErr,
   });
-  const submitClaim = useMutation({
-    mutationFn: (body: {
+  // Finance records the payment manually and it's verified in one stroke
+  // (same endpoint as the Payment-verification page) — no separate
+  // claim-then-verify round trip when finance is the one typing it in.
+  // Fully paying the invoice auto-advances the project to paid → closed.
+  const recordManualPayment = useMutation({
+    mutationFn: async (body: {
       invoiceId: string; amount: number; paidAt?: string;
-      method?: string; reference?: string; notes?: string;
-    }) => api.post("/payments/claims", {
-      invoice_id: body.invoiceId,
-      amount: body.amount,
-      paid_at: body.paidAt || null,
-      method: body.method || null,
-      reference: body.reference || null,
-      notes: body.notes || null,
-    }),
-    onSuccess: refresh, onError: onErr,
+      method?: string; reference?: string; notes?: string; file?: File | null;
+    }) => {
+      let attachmentId: string | null = null;
+      if (body.file) {
+        const fd = new FormData();
+        fd.append("owner_type", "invoice");
+        fd.append("owner_id", body.invoiceId);
+        fd.append("description", "payment_proof");
+        fd.append("file", body.file);
+        const up = await api.post("/attachments", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        attachmentId = up.data?.id ?? null;
+      }
+      return api.post("/payments/manual", {
+        invoice_id: body.invoiceId,
+        amount: body.amount,
+        paid_at: body.paidAt || null,
+        method: body.method || null,
+        reference: body.reference || null,
+        notes: body.notes || null,
+        attachment_id: attachmentId,
+      });
+    },
+    onSuccess: () => {
+      refresh();
+      qc.invalidateQueries({ queryKey: ["claims"] });
+      qc.invalidateQueries({ queryKey: ["open-invoices"] });
+      qc.invalidateQueries({ queryKey: ["ar-aging"] });
+    },
+    onError: onErr,
   });
-  // Per-invoice payment-claim form state.
+  // Per-invoice manual-payment form state.
   const [payForm, setPayForm] = useState<Record<string, {
-    amount?: string; paidAt?: string; method?: string; reference?: string; notes?: string;
+    amount?: string; paidAt?: string; method?: string; reference?: string;
+    notes?: string; file?: File | null;
   }>>({});
   const [qcFindings, setQcFindings] = useState("");
   const [invAmount, setInvAmount] = useState("");
@@ -1197,8 +1223,10 @@ export default function ProjectDetailPage() {
 
                 {/* Payments — record what the customer paid and see how much
                     is left. When cumulative verified ≥ invoice total, finance
-                    verify auto-advances the project delivered → paid → closed. */}
-                {iv.status === "approved" && canFinanceApprove && (
+                    verify auto-advances the project delivered → paid → closed.
+                    Stays visible on 'partial'/'overdue' so finance can enter
+                    the remaining tranches from this same card. */}
+                {["approved", "issued", "partial", "overdue"].includes(iv.status) && canFinanceApprove && (
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="text-[11px] uppercase tracking-wider muted">
@@ -1236,13 +1264,14 @@ export default function ProjectDetailPage() {
                         ))}
                       </ul>
                     )}
-                    {/* Record a claim — admin can enter what the customer told
-                        them (transfer amount, ref, etc.) since the customer
-                        portal isn't the only way in. Finance then verifies it. */}
+                    {/* Manual entry — finance types in what landed on the bank
+                        statement (for customers who pay outside the portal)
+                        and it's recorded + verified in one stroke. Full
+                        payment auto-advances the project to paid → closed. */}
                     {(iv.outstanding ?? 0) > 0 && (
                       <details>
                         <summary className="cursor-pointer text-brand-700 hover:underline text-[11px]">
-                          Record customer payment
+                          Enter payment manually (record &amp; verify)
                         </summary>
                         {(() => {
                           const pf = payForm[iv.id] ?? {};
@@ -1271,9 +1300,14 @@ export default function ProjectDetailPage() {
                                 placeholder="Notes (optional)"
                                 value={pf.notes ?? ""}
                                 onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, notes: e.target.value } }))} />
+                              <label className="sm:col-span-2 text-[11px] text-ink-600 flex items-center gap-2">
+                                Proof of payment (optional):
+                                <input type="file"
+                                  onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, file: e.target.files?.[0] ?? null } }))} />
+                              </label>
                               <button className="btn-primary sm:col-span-2"
-                                disabled={!pf.amount || Number(pf.amount) <= 0 || submitClaim.isPending}
-                                onClick={() => submitClaim.mutate(
+                                disabled={!pf.amount || Number(pf.amount) <= 0 || recordManualPayment.isPending}
+                                onClick={() => recordManualPayment.mutate(
                                   {
                                     invoiceId: iv.id,
                                     amount: Number(pf.amount),
@@ -1281,11 +1315,18 @@ export default function ProjectDetailPage() {
                                     method: pf.method || "bank_transfer",
                                     reference: pf.reference,
                                     notes: pf.notes,
+                                    file: pf.file,
                                   },
                                   { onSuccess: () => setPayForm((m) => ({ ...m, [iv.id]: {} })) },
                                 )}>
-                                Submit payment claim → finance will verify
+                                Record &amp; verify payment
                               </button>
+                              {Number(pf.amount) > 0 && Number(pf.amount) < (iv.outstanding ?? 0) && (
+                                <div className="sm:col-span-2 text-[11px] text-amber-700">
+                                  Partial payment — the invoice stays open with Rp{" "}
+                                  {new Intl.NumberFormat("id-ID").format(Math.round((iv.outstanding ?? 0) - Number(pf.amount)))} remaining.
+                                </div>
+                              )}
                             </div>
                           );
                         })()}
