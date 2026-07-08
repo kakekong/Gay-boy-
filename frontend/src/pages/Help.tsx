@@ -123,7 +123,7 @@ export default function HelpPage() {
               <PageCard icon={<ShoppingCart size={18}/>} title="Purchasing"     blurb="Supplier directory + PR → RFQ → Supplier PO → Goods Receipt → QC pipeline." path="/purchasing" nav={nav} />
               <PageCard icon={<Wrench size={18}/>}       title="Operation"      blurb="Work-order board: Receiving · Warehousing · QC · Packaging · Delivery." path="/operation" nav={nav} />
               <PageCard icon={<Banknote size={18}/>}     title="Finance"        blurb="AR Aging dashboard, pending invoices, faktur pajak approval (finance/director)." path="/finance" nav={nav} />
-              <PageCard icon={<Banknote size={18}/>}     title="Payment verification" blurb="Verify portal payment claims, or record a customer's bank transfer manually (finance)." path="/finance/payment-verification" nav={nav} />
+              <PageCard icon={<Banknote size={18}/>}     title="Payment verification" blurb="Verify or reject payment claims filed from the customer portal (finance)." path="/finance/payment-verification" nav={nav} />
               <PageCard icon={<Package size={18}/>}      title="Inventory"      blurb="Stock levels with low/out chips and one-click Request order." path="/inventory" nav={nav} />
               <PageCard icon={<Receipt size={18}/>}      title="Chart of Accounts" blurb="109 pre-seeded Indonesian accounts (finance/director)." path="/accounts" nav={nav} />
               <PageCard icon={<Users size={18}/>}        title="Employees"      blurb="Directory + per-employee KPI page + tag management (HR/director)." path="/employees" nav={nav} />
@@ -199,8 +199,8 @@ export default function HelpPage() {
               title="G) Recording a customer payment (Finance)"
               steps={[
                 "Customer paid through the portal? Payment verification → Verify the claim",
-                "Customer paid by bank transfer without the portal? 'Record a payment manually' — pick the open invoice, amount prefills to the outstanding balance",
-                "Or open the project → invoice card → 'Enter payment manually' for the same one-stroke record + verify",
+                "Customer paid by bank transfer without the portal? Open the project → invoice card → 'Enter payment manually'",
+                "Amount prefills to the outstanding balance; add date, method, reference and an optional proof file — recorded + verified in one stroke",
                 "Full payment auto-advances the project to paid → closed",
               ]}
             />
