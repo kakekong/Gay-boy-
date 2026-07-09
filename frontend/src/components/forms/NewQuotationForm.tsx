@@ -109,9 +109,15 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       editing
         ? api.patch(`/quotations/${quote.id}`, body).then((r) => r.data)
         : api.post("/quotations", body).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["quotations"] });
       if (editing) qc.invalidateQueries({ queryKey: ["quotation", quote.id] });
+      // Editing an already-approved quotation doesn't apply immediately —
+      // the backend queues it for the director and answers 202.
+      if (editing && data?.status === "pending_approval") {
+        alert(data?.message
+          ?? "Edit sent to the director for approval — the quotation updates once they approve.");
+      }
       onClose();
     },
     onError: (e: any) => {

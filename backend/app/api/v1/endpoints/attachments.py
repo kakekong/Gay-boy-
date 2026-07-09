@@ -24,7 +24,7 @@ router = APIRouter()
 ALLOWED_OWNERS = {
     "customer", "quotation", "project", "approval_request",
     "supplier_po", "customer_po", "invoice", "delivery_order",
-    "customer_contact", "employee",
+    "customer_contact", "employee", "price_request",
 }
 MAX_FILE_SIZE_MB = 20
 
@@ -51,6 +51,15 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         # internal set that can see the Drawings card may open the files.
         return role in (
             Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.PURCHASING, Role.SALES,
+        )
+    if owner_type == "price_request":
+        # Spec sheets / customer RFQ files ride on the PR. Same audience as
+        # the PR page itself: sales files them, purchasing needs them to
+        # cost the items, management oversees. (The file CONTENT may reveal
+        # the customer — that's inherent to costing from a customer spec.)
+        return role in (
+            Role.SALES, Role.PURCHASING, Role.MANAGER, Role.DIRECTOR,
+            Role.ADMIN, Role.FINANCE,
         )
     if owner_type in ("invoice", "delivery_order"):
         # Invoice + DO + faktur pajak files: admin issues, finance approves;

@@ -25,7 +25,7 @@ import { useT, t as tt } from "@/store/lang";
 const STATUS_LABEL_ID: Record<string, string> = {
   draft: "draft", pending_approval: "menunggu persetujuan",
   approved: "disetujui", rejected: "ditolak", sent: "terkirim",
-  won: "menang", lost: "kalah",
+  won: "menang", lost: "kalah", superseded: "digantikan revisi",
 };
 const CPO_STATUS_LABEL_ID: Record<string, string> = {
   draft: "draft", pending_approval: "menunggu persetujuan",
@@ -43,6 +43,7 @@ const STATUS_CHIP: Record<string, string> = {
   sent:              "bg-blue-50 text-blue-700",
   won:               "bg-emerald-100 text-emerald-800",
   lost:              "bg-red-100 text-red-800",
+  superseded:        "bg-ink-200 text-ink-600",
 };
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -179,6 +180,17 @@ export default function QuotationDetailPage() {
     onSuccess: () => { setLostOpen(false); setLostReason(""); onActionSuccess("Mark lost", "Tandai kalah")(); },
     onError: onActionError,
   });
+  // Post a revision: clones this quote into a fresh editable draft
+  // (number suffixed -R<n>) that walks the normal approval path. When
+  // the revision is approved, this original flips to 'superseded'.
+  const revise = useMutation({
+    mutationFn: () => api.post(`/quotations/${id}/revise`).then((r) => r.data),
+    onSuccess: (data: any) => {
+      refresh();
+      if (data?.id) nav(`/quotations/${data.id}`);
+    },
+    onError: onActionError,
+  });
   // Lightweight PATCH used by the inline Valid-until editor on the header
   // — only sends the two meta fields the backend allows post-submit, so a
   // sales owner can push a new expiry date without having to open the
@@ -210,9 +222,22 @@ export default function QuotationDetailPage() {
   const canUnsubmit = (isOwner || user?.role === "director")
     && Q.status === "pending_approval";
   const canDecide  = canApprove && Q.status === "pending_approval";
-  const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent");
+  // Won and Lost are mutually exclusive — and both freeze while a
+  // Mark-won request sits with the director (won_pending).
+  const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent")
+    && !Q.won_pending;
   const canEdit = (isOwner || user?.role === "director") &&
     (Q.status === "draft" || Q.status === "rejected");
+  // Approved/sent quotes can still be edited, but a non-director's edit
+  // is queued for the director; the button stays available unless an
+  // edit is already waiting.
+  const canRequestEdit = (isOwner || user?.role === "director")
+    && (Q.status === "approved" || Q.status === "sent")
+    && !Q.won_pending && !Q.edit_pending;
+  const canRevise = (isOwner || ["manager", "director", "admin"].includes(user?.role ?? ""))
+    && ["approved", "sent", "rejected", "lost"].includes(Q.status)
+    && !Q.won_pending
+    && !(Q.revisions ?? []).some((r: any) => ["draft", "pending_approval"].includes(r.status));
   // The full form is locked once the quote is out of draft/rejected, but
   // meta like Valid until and Notes stays editable up to the closed
   // states (won / lost / cancelled). Backend enforces the same rule.
@@ -258,7 +283,50 @@ export default function QuotationDetailPage() {
                   {t(Q.variant, VARIANT_LABEL_ID[Q.variant] ?? Q.variant)}
                 </span>
                 <span className="chip bg-ink-100 text-ink-600">v{Q.version}</span>
+                {Q.won_pending && (
+                  <span className="chip bg-amber-50 text-amber-700">
+                    {t("Mark-won awaiting director", "Mark-won menunggu direktur")}
+                  </span>
+                )}
+                {Q.edit_pending && (
+                  <span className="chip bg-amber-50 text-amber-700">
+                    {t("Edit awaiting director", "Edit menunggu direktur")}
+                  </span>
+                )}
               </div>
+              {(Q.price_request_number || Q.parent_number || (Q.revisions ?? []).length > 0) && (
+                <div className="mt-1 flex items-center gap-3 flex-wrap text-sm">
+                  {Q.price_request_number && (
+                    <Link
+                      to={`/price-requests?open=${Q.price_request_id}`}
+                      className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                      title={t("Open the source price request", "Buka permintaan harga sumbernya")}
+                    >
+                      <Link2 size={14} /> PR {Q.price_request_number}
+                    </Link>
+                  )}
+                  {Q.parent_number && (
+                    <Link
+                      to={`/quotations/${Q.parent_id}`}
+                      className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                    >
+                      <Undo2 size={14} /> {t("Revision of", "Revisi dari")} {Q.parent_number}
+                    </Link>
+                  )}
+                  {(Q.revisions ?? []).map((r: any) => (
+                    <Link
+                      key={r.id}
+                      to={`/quotations/${r.id}`}
+                      className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                    >
+                      <Pencil size={14} /> {t("Revision", "Revisi")} {r.number}
+                      <span className={clsx("chip text-[10px]", STATUS_CHIP[r.status] ?? "bg-ink-100")}>
+                        {sl(r.status, STATUS_LABEL_ID)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
               {customer.data && (
                 <Link
                   to={`/customers/${Q.customer_id}`}
@@ -276,9 +344,37 @@ export default function QuotationDetailPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {canEdit && (
-              <button className="btn-ghost" onClick={() => setEditOpen(true)}>
+            {(canEdit || canRequestEdit) && (
+              <button
+                className="btn-ghost"
+                onClick={() => setEditOpen(true)}
+                title={canRequestEdit && user?.role !== "director"
+                  ? t("Edits to an approved quotation are sent to the director for approval.",
+                      "Edit pada penawaran yang sudah disetujui dikirim ke direktur untuk persetujuan.")
+                  : undefined}
+              >
                 <Pencil size={15} /> {t("Edit", "Edit")}
+              </button>
+            )}
+            {canRevise && (
+              <button
+                className="btn-ghost"
+                disabled={revise.isPending}
+                title={t(
+                  "Clone this quotation into a new editable draft (-R revision). The original is superseded once the revision is approved.",
+                  "Salin penawaran ini menjadi draft baru (revisi -R). Yang asli digantikan setelah revisinya disetujui.",
+                )}
+                onClick={() => {
+                  if (window.confirm(tt(
+                    "Post a revision? A copy becomes a new editable draft; this version is superseded once the revision is approved.",
+                    "Buat revisi? Salinan menjadi draft baru yang bisa diedit; versi ini digantikan setelah revisi disetujui.",
+                  ))) revise.mutate();
+                }}
+              >
+                {revise.isPending
+                  ? <Loader2 size={15} className="animate-spin" />
+                  : <Plus size={15} />}
+                {t("Post revision", "Buat revisi")}
               </button>
             )}
             {canSubmit && (

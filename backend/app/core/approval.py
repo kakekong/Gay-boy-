@@ -150,6 +150,29 @@ async def apply_to_target(
                 if cust and bump_customer_stage(cust, "quotation"):
                     await ensure_stage_tasks(db, cust, "quotation")
                     applied["customer_stage"] = "quotation"
+            # An approved revision replaces its parent — the old version
+            # flips to 'superseded' so only one offer is ever live.
+            if approve and q.parent_id:
+                parent = await db.get(Quotation, q.parent_id)
+                if parent and parent.status not in ("won", "cancelled", "superseded"):
+                    parent.status = "superseded"
+                    applied["superseded"] = str(parent.id)
+    elif req.target_type == "quotation_edit":
+        # Pricing edit to an already-approved quotation: the stashed
+        # changes apply only when the director approves. Rejection leaves
+        # the quotation exactly as it was.
+        from sqlalchemy import select as _select
+        from sqlalchemy.orm import selectinload as _sel
+        from app.models.quotation import Quotation
+        q = await db.scalar(
+            _select(Quotation).options(_sel(Quotation.items))
+            .where(Quotation.id == req.target_id)
+        )
+        if q and approve and (req.payload or {}).get("action") == "update":
+            from app.api.v1.endpoints.quotations import _apply_quotation_changes
+            changes = (req.payload or {}).get("changes") or {}
+            await _apply_quotation_changes(db, q, changes)
+            applied["applied_changes"] = sorted(changes)
     elif req.target_type == "customer":
         from app.models.crm import Customer
         c = await db.get(Customer, req.target_id)

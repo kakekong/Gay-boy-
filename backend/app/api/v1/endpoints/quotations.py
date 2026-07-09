@@ -38,6 +38,46 @@ router = APIRouter()
 _ledger_viewer = require(Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
 
 
+async def _apply_quotation_changes(db: AsyncSession, q: Quotation, changes: dict) -> None:
+    """Apply a queued edit payload (JSON-shaped) to a quotation + recalc.
+
+    Used by the direct director PATCH path and by the approvals engine when
+    the director approves a non-director's edit to an approved quotation.
+    `changes` comes from QuotationUpdate.model_dump(mode="json") so UUIDs
+    and dates arrive as strings.
+    """
+    from datetime import date as _date
+
+    for field in ("contact_id", "variant", "discount_pct", "tax_pct", "notes"):
+        if field in changes:
+            v = changes[field]
+            if field == "contact_id" and isinstance(v, str):
+                v = UUID(v)
+            setattr(q, field, v)
+    if "valid_until" in changes:
+        v = changes["valid_until"]
+        q.valid_until = _date.fromisoformat(v) if isinstance(v, str) else v
+    new_items = changes.get("items")
+    if new_items is not None:
+        for it in list(q.items):
+            await db.delete(it)
+        await db.flush()
+        items = []
+        for i in new_items:
+            row = dict(i)
+            pid = row.get("product_id")
+            if isinstance(pid, str):
+                row["product_id"] = UUID(pid)
+            row.pop("line_total", None)
+            row.pop("id", None)
+            items.append(QuotationItem(quotation_id=q.id, **row))
+        db.add_all(items)
+    else:
+        items = list(q.items)
+    _recalc(q, items)
+    await db.flush()
+
+
 def _recalc(q: Quotation, items: list[QuotationItem]) -> None:
     subtotal = sum(float(it.qty) * float(it.unit_price) for it in items)
     discount_amount = subtotal * float(q.discount_pct) / 100.0
@@ -223,17 +263,59 @@ async def update_quotation(
     _CLOSED_STATES = {"won", "lost", "cancelled"}
     is_meta_only = bool(data) and all(k in _META_FIELDS for k in data)
 
-    if q.status in _CLOSED_STATES:
+    if q.status in _CLOSED_STATES or q.status == "superseded":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"A '{q.status}' quotation can't be edited — the deal is closed.",
         )
     if q.status not in ("draft", "rejected") and not is_meta_only:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"A '{q.status}' quotation is locked for pricing edits. "
-            "Only valid_until / notes can be updated at this stage.",
-        )
+        if q.status not in ("approved", "sent"):
+            # pending_approval: unsubmit first — editing under the
+            # director's nose would decide a different document.
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"A '{q.status}' quotation is locked for pricing edits. "
+                "Only valid_until / notes can be updated at this stage.",
+            )
+        # Approved/sent quotations CAN take pricing edits, but they need
+        # the director's sign-off again — the numbers were already
+        # approved once. Non-directors file the change; it applies when
+        # the director approves in /approvals. Directors apply directly.
+        if Role(user.role) != Role.DIRECTOR:
+            queued = payload.model_dump(mode="json", exclude_unset=True)
+            queued.pop("number", None)  # number stays a direct meta edit
+            existing = await db.scalar(
+                select(ApprovalRequest).where(
+                    ApprovalRequest.target_type == "quotation_edit",
+                    ApprovalRequest.target_id == q.id,
+                    ApprovalRequest.status == ApprovalStatus.PENDING.value,
+                )
+            )
+            if existing:
+                existing.payload = {"action": "update", "changes": queued}
+                existing.requested_by = user.id
+            else:
+                await request_approval(
+                    db,
+                    target_type="quotation_edit",
+                    target_id=q.id,
+                    requested_by=user.id,
+                    required_role=Role.DIRECTOR,
+                    reason=f"Edit approved quotation {q.number}",
+                    payload={"action": "update", "changes": queued},
+                )
+            await audit_record(db, actor=user, action="edit_requested",
+                               entity="quotation", entity_id=q.id,
+                               after={"changes": sorted(queued)})
+            await db.flush()
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content={
+                    "status": "pending_approval",
+                    "message": "Edit sent to the director for approval — "
+                               "the quotation updates once they approve.",
+                },
+            )
 
     # Prices on a price-request-backed quotation are fixed by the director's
     # approved form — sales can adjust meta (validity, notes) but not the lines.
@@ -384,6 +466,108 @@ async def unsubmit_quotation(
     return await _load(q.id, db)
 
 
+@router.post("/{q_id}/revise", response_model=QuotationOut, status_code=201)
+async def revise_quotation(
+    q_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Post a revision: clone this quotation into a new editable draft.
+
+    The clone carries everything (items, prices, discount, PR link, notes)
+    with the number suffixed -R<version> and parent_id pointing back here.
+    It walks the normal submit → director-approval path; when the revision
+    is APPROVED, this original flips to 'superseded' so only one version
+    of the offer is ever live. Draft/pending quotations can't be revised —
+    a draft is directly editable, and a pending one should be unsubmitted.
+    """
+    q = await _load(q_id, db)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.DIRECTOR, Role.ADMIN):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    if q.status in ("draft", "pending_approval"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A draft is directly editable and a pending quotation should be "
+            "unsubmitted — revisions are for approved/sent/rejected/lost quotes.",
+        )
+    if q.status in ("won", "cancelled", "superseded"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation can't be revised"
+            + (" — revise its live revision instead."
+               if q.status == "superseded" else " — the deal is closed."),
+        )
+    open_rev = await db.scalar(
+        select(Quotation).where(
+            Quotation.parent_id == q.id,
+            Quotation.status.in_(["draft", "pending_approval"]),
+        )
+    )
+    if open_rev:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Revision {open_rev.number} is already open — finish or "
+            "discard that one first.",
+        )
+
+    new_version = int(q.version or 1) + 1
+    base = q.number
+    # Strip an existing -R<n> suffix so R2's revision is -R3, not -R2-R3.
+    import re as _re2
+    base = _re2.sub(r"-R\d+$", "", base)
+    number = f"{base}-R{new_version}"
+    clash = await db.scalar(
+        select(func.count(Quotation.id)).where(Quotation.number == number)
+    )
+    if clash:
+        number = f"{base}-R{new_version}-{datetime.now(UTC).strftime('%H%M%S')}"
+
+    rev = Quotation(
+        number=number,
+        customer_id=q.customer_id,
+        contact_id=q.contact_id,
+        variant=q.variant,
+        sales_pic_id=q.sales_pic_id,
+        price_request_id=q.price_request_id,
+        parent_id=q.id,
+        version=new_version,
+        discount_pct=q.discount_pct,
+        tax_pct=q.tax_pct,
+        valid_until=q.valid_until,
+        notes=q.notes,
+        status="draft",
+        created_by=user.id, updated_by=user.id,
+    )
+    db.add(rev)
+    await db.flush()
+    items = [
+        QuotationItem(
+            quotation_id=rev.id,
+            line_no=it.line_no,
+            source=it.source,
+            product_id=it.product_id,
+            description=it.description,
+            spec=it.spec,
+            qty=it.qty,
+            uom=it.uom,
+            unit_price=it.unit_price,
+            cost_estimate=it.cost_estimate,
+        )
+        for it in q.items
+    ]
+    db.add_all(items)
+    _recalc(rev, items)
+    await db.flush()
+    await audit_record(db, actor=user, action="revise", entity="quotation",
+                       entity_id=q.id,
+                       after={"revision_id": str(rev.id), "number": number})
+    return await _load(rev.id, db)
+
+
 @router.post("/{q_id}/approve", response_model=QuotationOut)
 async def approve_quotation(q_id: UUID, payload: QuotationDecide,
                             db: AsyncSession = Depends(get_db),
@@ -425,6 +609,16 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
         cust = await db.get(Customer, q.customer_id)
         if cust and bump_customer_stage(cust, "quotation"):
             await ensure_stage_tasks(db, cust, "quotation")
+    # A revision that gets approved replaces its parent: the old quotation
+    # flips to 'superseded' so two versions of the same offer can't both
+    # look live. Won/cancelled parents are history and stay untouched.
+    if q.parent_id:
+        parent = await db.get(Quotation, q.parent_id)
+        if parent and parent.status not in ("won", "cancelled", "superseded"):
+            parent.status = "superseded"
+            await audit_record(db, actor=user, action="superseded",
+                               entity="quotation", entity_id=parent.id,
+                               after={"by": str(q.id), "by_number": q.number})
     await audit_record(db, actor=user, action="approve", entity="quotation",
                        entity_id=q.id, after={"status": "approved"})
     return await _load(q.id, db)
@@ -474,6 +668,13 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    # Won and Lost are mutually exclusive terminal outcomes — once one is
+    # set (or superseded by a revision), the other can't be clicked.
+    if q.status in ("won", "lost", "cancelled", "superseded"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation can't be marked Won.",
+        )
     # Fused pipeline: no more "advance to negotiation first" bounce. The
     # director's Won approval IS the sign-off that the deal reached
     # negotiation — the customer's stage is bumped automatically when the
@@ -546,11 +747,51 @@ async def mark_lost(q_id: UUID, reason: str,
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    # Won and Lost are mutually exclusive: a won/closed quote can't flip
+    # to lost, and while a Mark-won request sits in the director's queue
+    # the outcome is theirs to decide — Lost is blocked until then.
+    if q.status in ("won", "lost", "cancelled", "superseded"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation can't be marked Lost.",
+        )
+    won_pending = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "quotation_won",
+            ApprovalRequest.target_id == q.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )
+    if won_pending:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A Mark-won request is pending with the director — wait for "
+            "that decision (or ask the director to reject it) before "
+            "marking the quotation Lost.",
+        )
     q.status = "lost"
     q.notes = (q.notes or "") + f"\n[lost @ {datetime.now(UTC).isoformat()}] {reason}"
     await audit_record(db, actor=user, action="lost", entity="quotation",
                        entity_id=q.id, after={"status": "lost", "reason": reason})
     return await _load(q.id, db)
+
+
+async def _log_export_activity(db: AsyncSession, q: Quotation, user: User,
+                               fmt: str) -> None:
+    """Every PDF/Excel export lands in the customer's activity timeline —
+    who pulled which quotation, in which format, when."""
+    db.add(Activity(
+        customer_id=q.customer_id,
+        user_id=user.id,
+        type="export",
+        direction="internal",
+        occurred_at=datetime.now(UTC),
+        notes=f"Exported quotation {q.number} as {fmt}",
+        meta={"quotation_id": str(q.id), "format": fmt.lower()},
+    ))
+    await db.flush()
 
 
 async def _load(q_id: UUID, db: AsyncSession) -> Quotation:
@@ -559,6 +800,46 @@ async def _load(q_id: UUID, db: AsyncSession) -> Quotation:
         .options(selectinload(Quotation.items))
         .where(Quotation.id == q_id)
     )
+    if q is not None:
+        # Enrich with lineage the detail page renders as click-through
+        # chips: the source price request's number, the parent this quote
+        # revises, and any newer revisions of this quote.
+        pr_number = None
+        if q.price_request_id:
+            from app.models.price_request import PriceRequest
+            pr = await db.get(PriceRequest, q.price_request_id)
+            pr_number = pr.number if pr else None
+        q.price_request_number = pr_number
+        parent_number = None
+        if q.parent_id:
+            parent = await db.get(Quotation, q.parent_id)
+            parent_number = parent.number if parent else None
+        q.parent_number = parent_number
+        revs = (await db.scalars(
+            select(Quotation).where(Quotation.parent_id == q.id)
+            .order_by(Quotation.version.asc())
+        )).all()
+        q.revisions = [
+            {"id": str(r.id), "number": r.number, "status": r.status,
+             "version": r.version, "created_at": r.created_at.isoformat() if r.created_at else None}
+            for r in revs
+        ]
+        # Live director queues on this quote, so the UI can lock the
+        # buttons that conflict (Mark lost while Won is pending, etc.).
+        q.won_pending = bool(await db.scalar(
+            select(ApprovalRequest.id).where(
+                ApprovalRequest.target_type == "quotation_won",
+                ApprovalRequest.target_id == q.id,
+                ApprovalRequest.status == ApprovalStatus.PENDING.value,
+            )
+        ))
+        q.edit_pending = bool(await db.scalar(
+            select(ApprovalRequest.id).where(
+                ApprovalRequest.target_type == "quotation_edit",
+                ApprovalRequest.target_id == q.id,
+                ApprovalRequest.status == ApprovalStatus.PENDING.value,
+            )
+        ))
     if q is not None and q.notes:
         # Safety net: any legacy quotation whose notes still carry a
         # [purchasing]/[director]/… side-channel line from the old copy
@@ -667,6 +948,7 @@ async def export_quotation_pdf(
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    await _log_export_activity(db, q, user, "PDF")
     pic = _pic_fields(cust, contact)
 
     buf = BytesIO()
@@ -831,6 +1113,7 @@ async def export_quotation_excel(
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    await _log_export_activity(db, q, user, "Excel")
     pic = _pic_fields(cust, contact)
 
     wb = Workbook()

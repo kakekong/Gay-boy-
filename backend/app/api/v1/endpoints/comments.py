@@ -19,7 +19,7 @@ from app.models.user import User
 
 router = APIRouter()
 
-ALLOWED_OWNERS = {"quotation", "customer_po", "supplier_po"}
+ALLOWED_OWNERS = {"quotation", "customer_po", "supplier_po", "price_request"}
 
 
 class CommentIn(BaseModel):

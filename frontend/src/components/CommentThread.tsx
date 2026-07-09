@@ -13,7 +13,7 @@ interface Comment {
   created_at: string;
 }
 
-type OwnerType = "quotation" | "customer_po" | "supplier_po";
+type OwnerType = "quotation" | "customer_po" | "supplier_po" | "price_request";
 
 /** A discussion / chat thread attachable to a quotation or PO. */
 export function CommentThread({

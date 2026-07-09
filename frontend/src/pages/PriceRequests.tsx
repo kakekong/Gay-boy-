@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText } from "lucide-react";
+import {
+  Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText,
+  Pencil, ClipboardList,
+} from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useT, t as tt } from "@/store/lang";
+import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { CommentThread } from "@/components/CommentThread";
+import { LogActivityForm } from "@/components/forms/LogActivityForm";
+import { Modal } from "@/components/Modal";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -50,6 +57,12 @@ export default function PriceRequestsPage() {
   useEffect(() => {
     if (prefillCustomerId) setCreating(true);
   }, [prefillCustomerId]);
+  // Deep link from a quotation / project: /price-requests?open=<id>
+  // jumps straight into that PR's detail view.
+  const openId = searchParams.get("open");
+  useEffect(() => {
+    if (openId) setSelected(openId);
+  }, [openId]);
 
   const list = useQuery({
     queryKey: ["price-requests"],
@@ -57,7 +70,19 @@ export default function PriceRequestsPage() {
   });
 
   if (selected) {
-    return <PriceRequestDetail id={selected} role={role} onBack={() => setSelected(null)} />;
+    return (
+      <PriceRequestDetail
+        id={selected}
+        role={role}
+        onBack={() => {
+          setSelected(null);
+          if (openId) {
+            searchParams.delete("open");
+            setSearchParams(searchParams, { replace: true });
+          }
+        }}
+      />
+    );
   }
 
   return (
@@ -254,6 +279,19 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string }>
   >({});
   const [notes, setNotes] = useState("");
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [numberDraft, setNumberDraft] = useState("");
+  const [activityOpen, setActivityOpen] = useState(false);
+  const renumber = useMutation({
+    mutationFn: (number: string) =>
+      api.patch(`/price-requests/${id}`, { number }).then((r) => r.data),
+    onSuccess: () => {
+      setEditingNumber(false);
+      qc.invalidateQueries({ queryKey: ["price-request", id] });
+      qc.invalidateQueries({ queryKey: ["price-requests"] });
+    },
+    onError: onErr,
+  });
 
   const refresh = () => { qc.invalidateQueries({ queryKey: ["price-request", id] }); qc.invalidateQueries({ queryKey: ["price-requests"] }); };
   const mut = (fn: () => Promise<any>) => ({ mutationFn: fn, onSuccess: refresh, onError: onErr });
@@ -334,26 +372,65 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold font-mono">{pr.number}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              {editingNumber ? (
+                <>
+                  <input
+                    className="input w-56 font-mono"
+                    value={numberDraft}
+                    onChange={(e) => setNumberDraft(e.target.value)}
+                    autoFocus
+                  />
+                  <button
+                    className="btn-primary"
+                    disabled={!numberDraft.trim() || renumber.isPending}
+                    onClick={() => renumber.mutate(numberDraft.trim())}
+                  >
+                    {renumber.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  </button>
+                  <button className="btn-ghost" onClick={() => setEditingNumber(false)}>
+                    <X size={14} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-xl font-semibold font-mono">{pr.number}</h1>
+                  {role !== "purchasing" && (
+                    <button
+                      className="btn-ghost p-1.5"
+                      title={tt("Edit the PR number (e.g. to match the customer's RFQ number)",
+                                "Ubah nomor PR (mis. menyamakan dengan nomor RFQ pelanggan)")}
+                      onClick={() => { setNumberDraft(pr.number); setEditingNumber(true); }}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                </>
+              )}
               <span className={clsx("chip capitalize", STATUS_CHIP[pr.status] ?? "bg-ink-100")}>
                 {pr.status.replace(/_/g, " ")}
               </span>
             </div>
             <div className="text-sm muted mt-1">{pr.customer_name}</div>
           </div>
-          {pr.status === "approved" && (
-            pr.quotation_id ? (
-              <button className="btn-ghost" onClick={() => nav(`/quotations/${pr.quotation_id}`)}>
-                <FileText size={14} /> View quotation
+          <div className="flex items-center gap-2 flex-wrap">
+            {role !== "purchasing" && pr.customer_id && (
+              <button className="btn-ghost" onClick={() => setActivityOpen(true)}>
+                <ClipboardList size={14} /> {tt("Log activity", "Catat aktivitas")}
               </button>
-            ) : (role === "sales" || role === "director" || role === "manager" || role === "admin") ? (
+            )}
+            {pr.quotation_id ? (
+              <button className="btn-ghost" onClick={() => nav(`/quotations/${pr.quotation_id}`)}>
+                <FileText size={14} /> {tt("View quotation", "Lihat penawaran")}
+              </button>
+            ) : pr.status === "approved"
+              && (role === "sales" || role === "director" || role === "manager" || role === "admin") ? (
               <button className="btn-primary" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate()}>
                 {makeQuote.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                Create quotation
+                {tt("Create quotation", "Buat penawaran")}
               </button>
-            ) : null
-          )}
+            ) : null}
+          </div>
         </div>
 
         <table className="w-full text-sm mt-4">
@@ -423,6 +500,24 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         )}
         {pr.decision_notes && <div className="mt-3 text-xs muted">Note: {pr.decision_notes}</div>}
       </div>
+
+      {/* Spec sheets / customer RFQ files ride on the PR so purchasing can
+          cost from the source documents. */}
+      <AttachmentsSection ownerType="price_request" ownerId={id} />
+
+      {/* Internal discussion thread — sales ↔ purchasing ↔ director talk
+          about the pricing without abusing the notes field. */}
+      <CommentThread ownerType="price_request" ownerId={id} />
+
+      {activityOpen && pr.customer_id && (
+        <Modal open={activityOpen} onClose={() => setActivityOpen(false)}
+          title={tt("Log activity", "Catat aktivitas")}>
+          <LogActivityForm
+            customerId={pr.customer_id}
+            onClose={() => setActivityOpen(false)}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
-  Loader2, Hammer, User as UserIcon, Trash2,
+  Loader2, Hammer, User as UserIcon, Trash2, Tag,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -518,6 +518,19 @@ export default function ProjectDetailPage() {
                     title={t("Customer PO that spawned this project", "PO pelanggan asal proyek ini")}>
                     <FileText size={13} /> PO {cpo.number}
                   </Link>
+                )}
+                {priceReq && (
+                  ["sales", "purchasing", "manager", "director"].includes(role) ? (
+                    <Link to={`/price-requests?open=${priceReq.id}`}
+                      className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                      title={t("The approved price request this project fulfils", "Permintaan harga yang dipenuhi proyek ini")}>
+                      <Tag size={13} /> PR {priceReq.number}
+                    </Link>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-ink-600">
+                      <Tag size={13} /> PR {priceReq.number}
+                    </span>
+                  )
                 )}
                 {salesPicName && (
                   <span className="inline-flex items-center gap-1.5 text-ink-600">

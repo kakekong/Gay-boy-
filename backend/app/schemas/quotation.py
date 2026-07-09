@@ -47,6 +47,14 @@ class QuotationOut(BaseModel):
     customer_id: UUID
     contact_id: UUID | None = None
     price_request_id: UUID | None = None
+    # Injected by _load (not columns): the PR's human number for the
+    # click-through chip, the revision lineage, and any newer revisions.
+    price_request_number: str | None = None
+    parent_id: UUID | None = None
+    parent_number: str | None = None
+    revisions: list[dict] = Field(default_factory=list)
+    won_pending: bool = False
+    edit_pending: bool = False
     version: int
     variant: str
     status: str

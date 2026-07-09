@@ -82,6 +82,9 @@ class PRCreate(BaseModel):
 class PRUpdate(BaseModel):
     items: list[ItemIn] | None = None
     notes: str | None = None
+    # The PR number is editable meta (e.g. matching the customer's own RFQ
+    # numbering) — allowed at any stage since quotations/projects link by id.
+    number: str | None = None
 
 
 class CostLine(BaseModel):
@@ -292,7 +295,31 @@ async def update_price_request(
     user: User = Depends(get_current_user),
 ):
     pr = await _scoped(pr_id, db, user)
-    if pr.status not in ("draft", "rejected"):
+    # Number is meta and stays editable at any stage (links are by id, so a
+    # rename can't orphan the quotation/project). Everything else keeps the
+    # draft/rejected gate.
+    if payload.number is not None:
+        new_number = payload.number.strip()
+        if new_number and new_number != pr.number:
+            clash = await db.scalar(
+                select(PriceRequest).where(
+                    PriceRequest.number == new_number,
+                    PriceRequest.id != pr.id,
+                )
+            )
+            if clash:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"Price request number '{new_number}' already exists.",
+                )
+            old = pr.number
+            pr.number = new_number
+            await audit_record(db, actor=user, action="renumber",
+                               entity="price_request", entity_id=pr.id,
+                               before={"number": old},
+                               after={"number": new_number})
+    non_meta = payload.items is not None or payload.notes is not None
+    if non_meta and pr.status not in ("draft", "rejected"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Only a draft or rejected request can be edited")
     if payload.items is not None:
