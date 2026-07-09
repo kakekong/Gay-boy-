@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 
 interface CPORow {
   id: string;
@@ -32,11 +33,29 @@ const STATUS_CHIP: Record<string, string> = {
   cancelled:        "bg-ink-100 text-ink-600",
 };
 
+// Indonesian display labels for backend status keys. Display only — the
+// keys themselves are still what the code compares and sends.
+const STATUS_LABEL_ID: Record<string, string> = {
+  pending_approval: "menunggu persetujuan",
+  pending_finance: "menunggu keuangan",
+  pending_sales_confirm: "menunggu konfirmasi sales",
+  approved: "disetujui",
+  rejected: "ditolak",
+  cancelled: "dibatalkan",
+};
+
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
 export default function CustomerPOsPage() {
   const nav = useNavigate();
+  const t = useT();
+  // Display label for a backend status key: humanised English key, or the
+  // Indonesian label from the map when the app is in Indonesian.
+  const sl = (key: string) => {
+    const en = (key ?? "").replace(/_/g, " ");
+    return t(en, STATUS_LABEL_ID[key] ?? en);
+  };
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [salesFilter, setSalesFilter] = useState<string>("");
@@ -62,8 +81,12 @@ export default function CustomerPOsPage() {
 
   const download = (fmt: "pdf" | "xlsx" | "csv") => {
     if (fmt === "csv") {
-      const header = ["PO number", "Customer", "Sales rep", "Quotation",
-                      "Project", "PO date", "Status", "Total"];
+      const header = [
+        tt("PO number", "Nomor PO"), tt("Customer", "Pelanggan"),
+        tt("Sales rep", "Sales"), tt("Quotation", "Penawaran"),
+        tt("Project", "Proyek"), tt("PO date", "Tanggal PO"),
+        tt("Status", "Status"), tt("Total", "Total"),
+      ];
       const escape = (v: any) => {
         const s = String(v ?? "");
         return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -94,7 +117,7 @@ export default function CustomerPOsPage() {
       a.href = url; a.download = `customer-pos.${fmt}`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    }).catch((e: any) => alert(e?.response?.data?.detail ?? "Export failed"));
+    }).catch((e: any) => alert(e?.response?.data?.detail ?? tt("Export failed", "Ekspor gagal")));
   };
 
   const rows = useMemo(() => {
@@ -116,12 +139,13 @@ export default function CustomerPOsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Receipt size={22} className="text-brand-600" /> Customer POs
+          <Receipt size={22} className="text-brand-600" /> {t("Customer POs", "PO Pelanggan")}
         </h1>
         <p className="text-sm muted">
-          POs the customer sent us. Submission happens from the
-          quotation page after marking the quote Won. Director approval
-          on a PO is what creates the project.
+          {t(
+            "POs the customer sent us. Submission happens from the quotation page after marking the quote Won. Director approval on a PO is what creates the project.",
+            "PO yang dikirim pelanggan kepada kita. Pengajuan dilakukan dari halaman penawaran setelah penawaran ditandai Menang. Persetujuan direktur atas PO-lah yang membuat proyek.",
+          )}
         </p>
       </div>
 
@@ -131,7 +155,10 @@ export default function CustomerPOsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by PO number, customer, quotation or project…"
+            placeholder={t(
+              "Search by PO number, customer, quotation or project…",
+              "Cari berdasarkan nomor PO, pelanggan, penawaran, atau proyek…",
+            )}
             className="input pl-9"
           />
         </div>
@@ -140,25 +167,25 @@ export default function CustomerPOsPage() {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="input max-w-[180px]"
         >
-          <option value="">All statuses</option>
-          <option value="pending_approval">Pending approval</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-          <option value="cancelled">Cancelled</option>
+          <option value="">{t("All statuses", "Semua status")}</option>
+          <option value="pending_approval">{t("Pending approval", "Menunggu persetujuan")}</option>
+          <option value="approved">{t("Approved", "Disetujui")}</option>
+          <option value="rejected">{t("Rejected", "Ditolak")}</option>
+          <option value="cancelled">{t("Cancelled", "Dibatalkan")}</option>
         </select>
         <select
           value={salesFilter}
           onChange={(e) => setSalesFilter(e.target.value)}
           className="input max-w-[180px]"
         >
-          <option value="">All sales reps</option>
+          <option value="">{t("All sales reps", "Semua sales")}</option>
           {(salesReps.data ?? []).map((s) => (
             <option key={s.id} value={s.id}>{s.full_name}</option>
           ))}
         </select>
         <div className="text-xs muted">
           <Filter size={12} className="inline mr-1" />
-          {rows.length} of {pos.data?.length ?? 0}
+          {rows.length} {t("of", "dari")} {pos.data?.length ?? 0}
         </div>
         <div className="ml-auto flex gap-1.5">
           <button className="btn-ghost text-xs" onClick={() => download("csv")}>
@@ -177,24 +204,32 @@ export default function CustomerPOsPage() {
         <div className="card p-5 text-sm text-red-700 flex items-start gap-2">
           <AlertCircle size={16} className="mt-0.5 shrink-0" />
           <div className="flex-1">
-            <div className="font-medium">Couldn't load customer POs.</div>
+            <div className="font-medium">
+              {t("Couldn't load customer POs.", "Tidak dapat memuat PO pelanggan.")}
+            </div>
             <div className="text-xs mt-0.5 break-all">
               {(pos.error as any)?.response?.data?.detail
                 ?? (pos.error as any)?.message
-                ?? "Request failed"}
+                ?? t("Request failed", "Permintaan gagal")}
             </div>
           </div>
         </div>
       ) : pos.isLoading ? (
         <div className="card p-10 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading customer POs…
+          <Loader2 size={14} className="animate-spin" /> {t("Loading customer POs…", "Memuat PO pelanggan…")}
         </div>
       ) : !rows.length ? (
         <div className="card p-12 text-center">
           <div className="text-sm muted">
             {(pos.data?.length ?? 0) === 0
-              ? "No customer POs filed yet. Open a Won quotation to submit one."
-              : "No customer POs match your filters."}
+              ? t(
+                  "No customer POs filed yet. Open a Won quotation to submit one.",
+                  "Belum ada PO pelanggan yang diajukan. Buka penawaran berstatus Menang untuk mengajukannya.",
+                )
+              : t(
+                  "No customer POs match your filters.",
+                  "Tidak ada PO pelanggan yang cocok dengan filter Anda.",
+                )}
           </div>
         </div>
       ) : (
@@ -202,14 +237,14 @@ export default function CustomerPOsPage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">PO number</th>
-                <th className="th">Customer</th>
-                <th className="th">Sales rep</th>
-                <th className="th">Quotation</th>
-                <th className="th">Project</th>
-                <th className="th">PO date</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Total</th>
+                <th className="th">{t("PO number", "Nomor PO")}</th>
+                <th className="th">{t("Customer", "Pelanggan")}</th>
+                <th className="th">{t("Sales rep", "Sales")}</th>
+                <th className="th">{t("Quotation", "Penawaran")}</th>
+                <th className="th">{t("Project", "Proyek")}</th>
+                <th className="th">{t("PO date", "Tanggal PO")}</th>
+                <th className="th">{t("Status", "Status")}</th>
+                <th className="th text-right">{t("Total", "Total")}</th>
                 <th className="th w-8"></th>
               </tr>
             </thead>
@@ -235,7 +270,7 @@ export default function CustomerPOsPage() {
                       "chip capitalize",
                       STATUS_CHIP[p.status] ?? "bg-ink-100 text-ink-700",
                     )}>
-                      {p.status.replace(/_/g, " ")}
+                      {sl(p.status)}
                     </span>
                   </td>
                   <td className="td text-right tabular-nums">{idr(p.total)}</td>

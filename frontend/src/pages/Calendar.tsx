@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { NewReminderForm } from "@/components/forms/NewReminderForm";
+import { useT } from "@/store/lang";
 
 interface CalEvent {
   id: string;
@@ -30,13 +31,13 @@ const COLOR: Record<CalEvent["color"], string> = {
   ink:     "bg-ink-400 text-white",
 };
 
-const KIND_META: Record<CalEvent["kind"], { label: string; Icon: any; tone: string }> = {
-  reminder:         { label: "Reminder",        Icon: Bell,           tone: "text-brand-700 bg-brand-50" },
-  activity:         { label: "Activity",        Icon: CheckCircle2,   tone: "text-ink-700 bg-ink-100" },
-  quotation_expiry: { label: "Quote expires",   Icon: FileText,       tone: "text-violet-700 bg-violet-50" },
-  payment_due:      { label: "Payment due",     Icon: AlertCircle,    tone: "text-amber-700 bg-amber-50" },
-  delivery:         { label: "Delivery",        Icon: Truck,          tone: "text-emerald-700 bg-emerald-50" },
-  stage_task:       { label: "Stage task",      Icon: ListChecks,     tone: "text-red-700 bg-red-50" },
+const KIND_META: Record<CalEvent["kind"], { label: string; labelId: string; Icon: any; tone: string }> = {
+  reminder:         { label: "Reminder",        labelId: "Pengingat",             Icon: Bell,           tone: "text-brand-700 bg-brand-50" },
+  activity:         { label: "Activity",        labelId: "Aktivitas",             Icon: CheckCircle2,   tone: "text-ink-700 bg-ink-100" },
+  quotation_expiry: { label: "Quote expires",   labelId: "Penawaran kedaluwarsa", Icon: FileText,       tone: "text-violet-700 bg-violet-50" },
+  payment_due:      { label: "Payment due",     labelId: "Pembayaran jatuh tempo",Icon: AlertCircle,    tone: "text-amber-700 bg-amber-50" },
+  delivery:         { label: "Delivery",        labelId: "Pengiriman",            Icon: Truck,          tone: "text-emerald-700 bg-emerald-50" },
+  stage_task:       { label: "Stage task",      labelId: "Tugas tahap",           Icon: ListChecks,     tone: "text-red-700 bg-red-50" },
 };
 
 function startOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1); }
@@ -47,6 +48,7 @@ function sameDay(a: Date, b: Date) {
 }
 
 export default function CalendarPage() {
+  const t = useT();
   const nav = useNavigate();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState<Date>(new Date());
@@ -87,7 +89,8 @@ export default function CalendarPage() {
     return m;
   }, [filtered]);
 
-  const monthLabel = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const locale = t("en-US", "id-ID");
+  const monthLabel = cursor.toLocaleDateString(locale, { month: "long", year: "numeric" });
   const today = new Date();
   const dayEvents = byDay.get(fmtIsoDay(selected)) ?? [];
 
@@ -96,21 +99,24 @@ export default function CalendarPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <CalendarDays size={22} className="text-brand-600" /> Calendar
+            <CalendarDays size={22} className="text-brand-600" /> {t("Calendar", "Kalender")}
           </h1>
           <p className="text-sm muted">
-            Reminders · activities · quote expiries · payment dues · target deliveries — all in one place.
+            {t(
+              "Reminders · activities · quote expiries · payment dues · target deliveries — all in one place.",
+              "Pengingat · aktivitas · penawaran kedaluwarsa · pembayaran jatuh tempo · target pengiriman — semua di satu tempat."
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-ghost" onClick={() => { setCursor(startOfMonth(new Date())); setSelected(new Date()); }}>
-            Today
+            {t("Today", "Hari ini")}
           </button>
           <button
             className="btn-primary"
             onClick={() => setOpenNew({ open: true, date: fmtIsoDay(selected) })}
           >
-            <Plus size={15} /> New reminder
+            <Plus size={15} /> {t("New reminder", "Pengingat baru")}
           </button>
         </div>
       </div>
@@ -130,7 +136,7 @@ export default function CalendarPage() {
                    : "bg-white text-ink-500 border-ink-200 line-through"
               )}
             >
-              <M.Icon size={12} /> {M.label}
+              <M.Icon size={12} /> {t(M.label, M.labelId)}
             </button>
           );
         })}
@@ -153,7 +159,10 @@ export default function CalendarPage() {
         {/* Month grid */}
         <div className="card lg:col-span-2 overflow-hidden">
           <div className="grid grid-cols-7 border-b border-ink-100 bg-ink-50/60">
-            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+            {[
+              t("Mon", "Sen"), t("Tue", "Sel"), t("Wed", "Rab"), t("Thu", "Kam"),
+              t("Fri", "Jum"), t("Sat", "Sab"), t("Sun", "Min"),
+            ].map((d) => (
               <div key={d} className="px-2 py-2 text-[10px] uppercase tracking-wider text-ink-500 font-semibold">
                 {d}
               </div>
@@ -203,7 +212,7 @@ export default function CalendarPage() {
                       </div>
                     ))}
                     {cellEvents.length > 3 && (
-                      <div className="text-[10px] text-ink-500">+{cellEvents.length - 3} more</div>
+                      <div className="text-[10px] text-ink-500">+{cellEvents.length - 3} {t("more", "lagi")}</div>
                     )}
                   </div>
                 </button>
@@ -217,10 +226,10 @@ export default function CalendarPage() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-xs uppercase tracking-wider muted">
-                {selected.toLocaleDateString(undefined, { weekday: "long" })}
+                {selected.toLocaleDateString(locale, { weekday: "long" })}
               </div>
               <div className="text-2xl font-semibold tracking-tight">
-                {selected.toLocaleDateString(undefined, { day: "numeric", month: "long" })}
+                {selected.toLocaleDateString(locale, { day: "numeric", month: "long" })}
               </div>
             </div>
             <button
@@ -233,7 +242,10 @@ export default function CalendarPage() {
 
           {dayEvents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-ink-200 p-8 text-center text-sm muted">
-              Nothing scheduled. Add a reminder or wait — incoming WhatsApp shows here too.
+              {t(
+                "Nothing scheduled. Add a reminder or wait — incoming WhatsApp shows here too.",
+                "Tidak ada jadwal. Tambahkan pengingat atau tunggu — WhatsApp masuk juga tampil di sini."
+              )}
             </div>
           ) : (
             <ul className="space-y-2">
@@ -257,7 +269,7 @@ export default function CalendarPage() {
                         <div className="text-[11px] muted mt-0.5 flex items-center gap-1.5">
                           {new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           <span>·</span>
-                          <span className="capitalize">{M.label}</span>
+                          <span className="capitalize">{t(M.label, M.labelId)}</span>
                           {e.status && <><span>·</span><span>{e.status}</span></>}
                         </div>
                       </div>
@@ -273,8 +285,11 @@ export default function CalendarPage() {
       <Modal
         open={openNew.open}
         onClose={() => setOpenNew({ open: false })}
-        title="New reminder"
-        subtitle="Schedule a follow-up, payment chase, or delivery check."
+        title={t("New reminder", "Pengingat baru")}
+        subtitle={t(
+          "Schedule a follow-up, payment chase, or delivery check.",
+          "Jadwalkan tindak lanjut, penagihan pembayaran, atau pengecekan pengiriman."
+        )}
       >
         <NewReminderForm
           defaultDate={openNew.date}

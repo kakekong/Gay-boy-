@@ -7,6 +7,7 @@ import { api } from "@/api/client";
 import type { Quotation } from "@/types";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { useAuthStore } from "@/store/auth";
+import { useT, t as tt } from "@/store/lang";
 
 const STATUS: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -18,8 +19,21 @@ const STATUS: Record<string, string> = {
   lost:              "bg-red-100 text-red-800",
 };
 
+// Indonesian display labels for backend status keys. Display only — the
+// keys themselves are still what the code compares and sends.
+const STATUS_LABEL_ID: Record<string, string> = {
+  draft: "draft", pending_approval: "menunggu persetujuan",
+  approved: "disetujui", rejected: "ditolak", sent: "terkirim",
+  won: "menang", lost: "kalah",
+};
+
 export default function QuotationsPage() {
   const qc = useQueryClient();
+  const t = useT();
+  const sl = (key: string) => {
+    const en = (key ?? "").replace(/_/g, " ");
+    return t(en, STATUS_LABEL_ID[key] ?? en);
+  };
   const nav = useNavigate();
   const [creating, setCreating] = useState(false);
   const role = useAuthStore((s) => s.user?.role) ?? "";
@@ -41,7 +55,7 @@ export default function QuotationsPage() {
     onError: (e: any) => alert(
       e?.response?.data?.errors?.[0]?.message
         ?? e?.response?.data?.detail
-        ?? "Couldn't submit quotation"
+        ?? tt("Couldn't submit quotation", "Gagal mengirim penawaran")
     ),
   });
 
@@ -49,20 +63,23 @@ export default function QuotationsPage() {
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Quotations</h1>
-          <p className="text-sm muted">Price offers across every stage.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("Quotations", "Penawaran")}</h1>
+          <p className="text-sm muted">{t("Price offers across every stage.", "Penawaran harga di semua tahap.")}</p>
         </div>
         {canDirectCreate ? (
           <button className="btn-primary" onClick={() => setCreating(true)}>
-            <Plus size={14} /> New quotation
+            <Plus size={14} /> {t("New quotation", "Penawaran baru")}
           </button>
         ) : (
           <Link
             to="/price-requests"
             className="btn-primary"
-            title="Sales files a price request first; the quotation is generated once the director approves the sell price."
+            title={t(
+              "Sales files a price request first; the quotation is generated once the director approves the sell price.",
+              "Sales mengajukan permintaan harga terlebih dahulu; penawaran dibuat setelah direktur menyetujui harga jual.",
+            )}
           >
-            <Plus size={14} /> New price request
+            <Plus size={14} /> {t("New price request", "Permintaan harga baru")}
           </Link>
         )}
       </div>
@@ -80,11 +97,11 @@ export default function QuotationsPage() {
         <table className="w-full">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Number</th>
-              <th className="th">Status</th>
-              <th className="th text-right">Discount</th>
-              <th className="th text-right">Total</th>
-              <th className="th text-right">Actions</th>
+              <th className="th">{t("Number", "Nomor")}</th>
+              <th className="th">{t("Status", "Status")}</th>
+              <th className="th text-right">{t("Discount", "Diskon")}</th>
+              <th className="th text-right">{t("Total", "Total")}</th>
+              <th className="th text-right">{t("Actions", "Aksi")}</th>
             </tr>
           </thead>
           <tbody>
@@ -108,7 +125,7 @@ export default function QuotationsPage() {
                 </td>
                 <td className="td">
                   <span className={clsx("chip", STATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
-                    {qt.status.replace(/_/g, " ")}
+                    {sl(qt.status)}
                   </span>
                 </td>
                 <td className="td text-right tabular-nums">{qt.discount_pct}%</td>
@@ -120,7 +137,7 @@ export default function QuotationsPage() {
                       className="btn-ghost text-brand-700"
                       disabled={submit.isPending}
                     >
-                      <Send size={13} /> Submit
+                      <Send size={13} /> {t("Submit", "Kirim")}
                     </button>
                   )}
                 </td>
@@ -129,7 +146,10 @@ export default function QuotationsPage() {
             {!q.data?.length && (
               <tr>
                 <td colSpan={6} className="td text-center muted py-12">
-                  No quotations yet — open a customer in CRM to create one.
+                  {t(
+                    "No quotations yet — open a customer in CRM to create one.",
+                    "Belum ada penawaran — buka pelanggan di CRM untuk membuatnya.",
+                  )}
                 </td>
               </tr>
             )}

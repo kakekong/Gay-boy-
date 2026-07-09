@@ -5,6 +5,7 @@ import { Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText } from 
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useT, t as tt } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -16,10 +17,28 @@ const STATUS_CHIP: Record<string, string> = {
   rejected: "bg-red-50 text-red-700",
 };
 
+// Indonesian display labels for backend status keys. Display only —
+// never sent back to the API.
+const STATUS_LABEL_ID: Record<string, string> = {
+  draft: "draf",
+  pending_purchasing: "menunggu pembelian",
+  pending_director: "menunggu direktur",
+  approved: "disetujui",
+  rejected: "ditolak",
+};
+
+// Display label for a backend status key: humanised English key, or the
+// Indonesian label when the app is in Indonesian.
+const sl = (key: string) => {
+  const en = (key ?? "").replace(/_/g, " ");
+  return tt(en, STATUS_LABEL_ID[key] ?? en);
+};
+
 const onErr = (e: any) =>
-  alert(e?.response?.data?.detail ?? e?.response?.data?.errors?.[0]?.message ?? e?.message ?? "Failed");
+  alert(e?.response?.data?.detail ?? e?.response?.data?.errors?.[0]?.message ?? e?.message ?? tt("Failed", "Gagal"));
 
 export default function PriceRequestsPage() {
+  const t = useT();
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -46,19 +65,28 @@ export default function PriceRequestsPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Tag size={22} className="text-brand-600" /> Price requests
+            <Tag size={22} className="text-brand-600" /> {t("Price requests", "Permintaan harga")}
           </h1>
           <p className="text-sm muted">
             {role === "purchasing"
-              ? "Fill the procurement cost for each requested order, then send to the director."
+              ? t(
+                  "Fill the procurement cost for each requested order, then send to the director.",
+                  "Isi biaya pengadaan untuk setiap pesanan yang diminta, lalu kirim ke direktur."
+                )
               : role === "director"
-              ? "Set the selling price per line and approve. Sales builds the quotation from this."
-              : "List the goods a customer needs. Purchasing costs it, the director prices it — then your quotation auto-fills."}
+              ? t(
+                  "Set the selling price per line and approve. Sales builds the quotation from this.",
+                  "Tetapkan harga jual per baris lalu setujui. Sales membuat penawaran dari sini."
+                )
+              : t(
+                  "List the goods a customer needs. Purchasing costs it, the director prices it — then your quotation auto-fills.",
+                  "Daftarkan barang yang dibutuhkan pelanggan. Pembelian menghitung biayanya, direktur menetapkan harganya — lalu penawaran Anda terisi otomatis."
+                )}
           </p>
         </div>
         {(role === "sales" || role === "director" || role === "manager" || role === "admin") && (
           <button className="btn-primary" onClick={() => setCreating(true)}>
-            <Plus size={15} /> New price request
+            <Plus size={15} /> {t("New price request", "Permintaan harga baru")}
           </button>
         )}
       </div>
@@ -78,17 +106,17 @@ export default function PriceRequestsPage() {
       )}
 
       <div className="card overflow-hidden">
-        {list.isLoading ? <div className="p-8 muted text-sm">Loading…</div>
-          : (list.data ?? []).length === 0 ? <div className="p-8 text-center muted text-sm">No price requests yet.</div>
+        {list.isLoading ? <div className="p-8 muted text-sm">{t("Loading…", "Memuat…")}</div>
+          : (list.data ?? []).length === 0 ? <div className="p-8 text-center muted text-sm">{t("No price requests yet.", "Belum ada permintaan harga.")}</div>
           : (
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Number</th>
-                  <th className="th">{role === "purchasing" ? "Order" : "Customer"}</th>
-                  <th className="th">Lines</th>
+                  <th className="th">{t("Number", "Nomor")}</th>
+                  <th className="th">{role === "purchasing" ? t("Order", "Pesanan") : t("Customer", "Pelanggan")}</th>
+                  <th className="th">{t("Lines", "Baris")}</th>
                   <th className="th">Status</th>
-                  {role !== "purchasing" && <th className="th text-right">Sell total</th>}
+                  {role !== "purchasing" && <th className="th text-right">{t("Sell total", "Total jual")}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -100,7 +128,7 @@ export default function PriceRequestsPage() {
                     <td className="td muted">{pr.items?.length ?? 0}</td>
                     <td className="td">
                       <span className={clsx("chip capitalize", STATUS_CHIP[pr.status] ?? "bg-ink-100")}>
-                        {pr.status.replace(/_/g, " ")}
+                        {sl(pr.status)}
                       </span>
                     </td>
                     {role !== "purchasing" && (

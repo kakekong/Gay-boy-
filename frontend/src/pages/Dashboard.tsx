@@ -9,8 +9,10 @@ import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
 import { StageBadge } from "@/components/StageBadge";
 import { useAuthStore } from "@/store/auth";
+import { useT } from "@/store/lang";
 
 export default function DashboardPage() {
+  const t = useT();
   const user = useAuthStore((s) => s.user);
   const sales = useQuery({
     queryKey: ["kpi-sales"],
@@ -38,40 +40,40 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <p className="muted text-sm">Welcome back, {user?.full_name?.split(" ")[0]}</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Today's overview</h1>
+          <p className="muted text-sm">{t("Welcome back", "Selamat datang kembali")}, {user?.full_name?.split(" ")[0]}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("Today's overview", "Ringkasan hari ini")}</h1>
         </div>
         <div className="flex items-center gap-2">
           <Link to="/ai" className="btn-ghost">
-            <Sparkles size={15} /> AI Command Center
+            <Sparkles size={15} /> {t("AI Command Center", "Pusat Komando AI")}
           </Link>
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard
-          label="New leads (30d)"
+          label={t("New leads (30d)", "Prospek baru (30 hari)")}
           value={sales.data?.new_leads ?? "—"}
           icon={Users}
           accent="brand"
           delta={{ value: "+12%", trend: "up" }}
         />
         <KpiCard
-          label="Quote → Win"
+          label={t("Quote → Win", "Penawaran → Menang")}
           value={sales.data ? pct(sales.data.quote_to_win_rate) : "—"}
           icon={FileText}
           accent="violet"
-          hint="last 30 days"
+          hint={t("last 30 days", "30 hari terakhir")}
         />
         <KpiCard
-          label="Outstanding AR"
+          label={t("Outstanding AR", "Piutang belum lunas")}
           value={fin.data ? idr(fin.data.outstanding) : "—"}
           icon={Wallet}
           accent="amber"
-          hint="open invoices"
+          hint={t("open invoices", "faktur terbuka")}
         />
         <KpiCard
-          label="Collected"
+          label={t("Collected", "Terkumpul")}
           value={fin.data ? idr(fin.data.collected) : "—"}
           icon={Banknote}
           accent="emerald"
@@ -83,21 +85,21 @@ export default function DashboardPage() {
         <div className="card p-5 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="section-title">Active customers</div>
-              <p className="text-sm muted">Latest by stage.</p>
+              <div className="section-title">{t("Active customers", "Pelanggan aktif")}</div>
+              <p className="text-sm muted">{t("Latest by stage.", "Terbaru berdasarkan tahap.")}</p>
             </div>
             <Link to="/customers" className="text-sm text-brand-700 hover:underline inline-flex items-center gap-1">
-              View all <ArrowUpRight size={14} />
+              {t("View all", "Lihat semua")} <ArrowUpRight size={14} />
             </Link>
           </div>
           <div className="overflow-x-auto -mx-5">
             <table className="w-full">
               <thead>
                 <tr className="border-y border-ink-100">
-                  <th className="th">Company</th>
-                  <th className="th">Industry</th>
+                  <th className="th">{t("Company", "Perusahaan")}</th>
+                  <th className="th">{t("Industry", "Industri")}</th>
                   <th className="th">PIC</th>
-                  <th className="th">Stage</th>
+                  <th className="th">{t("Stage", "Tahap")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -116,7 +118,7 @@ export default function DashboardPage() {
                 {!customers.data?.data?.length && (
                   <tr>
                     <td colSpan={4} className="td text-center muted py-12">
-                      No customers yet — start by adding one.
+                      {t("No customers yet — start by adding one.", "Belum ada pelanggan — mulai dengan menambahkan satu.")}
                     </td>
                   </tr>
                 )}
@@ -134,13 +136,13 @@ export default function DashboardPage() {
                 <Target size={18} />
               </div>
               <div>
-                <div className="section-title">Your monthly target</div>
+                <div className="section-title">{t("Your monthly target", "Target bulanan Anda")}</div>
                 <p className="text-sm muted">{myTarget.data.period}</p>
               </div>
             </div>
             {myTarget.data.no_target ? (
               <div className="text-sm muted">
-                No target set this month yet. Achieved so far:{" "}
+                {t("No target set this month yet. Achieved so far:", "Belum ada target untuk bulan ini. Tercapai sejauh ini:")}{" "}
                 <b className="tabular-nums">{idr(myTarget.data.achieved_amount)}</b>
               </div>
             ) : (
@@ -161,7 +163,7 @@ export default function DashboardPage() {
                   />
                 </div>
                 <div className="mt-2 text-xs muted">
-                  <b>{Math.round(myTarget.data.progress_pct)}%</b> · {idr(myTarget.data.remaining)} to go
+                  <b>{Math.round(myTarget.data.progress_pct)}%</b> · {idr(myTarget.data.remaining)} {t("to go", "lagi")}
                 </div>
               </>
             )}
@@ -174,20 +176,21 @@ export default function DashboardPage() {
               <Sparkles size={18} />
             </div>
             <div>
-              <div className="section-title">AI tip of the day</div>
-              <p className="text-sm muted">From your Command Center.</p>
+              <div className="section-title">{t("AI tip of the day", "Tips AI hari ini")}</div>
+              <p className="text-sm muted">{t("From your Command Center.", "Dari Pusat Komando Anda.")}</p>
             </div>
           </div>
           <div className="rounded-xl bg-gradient-to-br from-brand-50 to-violet-50 p-4 text-sm text-ink-700">
-            Three deals haven't been touched in the last 7 days. Open the AI
-            Command Center to see who needs a follow-up — and a suggested
-            WhatsApp message.
+            {t(
+              "Three deals haven't been touched in the last 7 days. Open the AI Command Center to see who needs a follow-up — and a suggested WhatsApp message.",
+              "Tiga deal belum disentuh dalam 7 hari terakhir. Buka Pusat Komando AI untuk melihat siapa yang perlu ditindaklanjuti — beserta saran pesan WhatsApp."
+            )}
           </div>
           <Link
             to="/ai"
             className="btn-primary w-full mt-4"
           >
-            Open AI Command Center <ArrowUpRight size={14} />
+            {t("Open AI Command Center", "Buka Pusat Komando AI")} <ArrowUpRight size={14} />
           </Link>
         </div>
         </div>
@@ -225,6 +228,7 @@ interface MyQueue {
 }
 
 function MyQueueCard() {
+  const t = useT();
   const q = useQuery({
     queryKey: ["my-queue"],
     queryFn: () => api.get("/dashboard/my-queue").then((r) => r.data as MyQueue),
@@ -244,13 +248,16 @@ function MyQueueCard() {
           <ListTodo size={18} />
         </div>
         <div className="flex-1">
-          <div className="section-title">My queue</div>
+          <div className="section-title">{t("My queue", "Antrian saya")}</div>
           <p className="text-sm muted">
             {q.isLoading
-              ? "Loading…"
+              ? t("Loading…", "Memuat…")
               : totalOpen === 0
-                ? "All caught up 🎉"
-                : `${totalOpen} item${totalOpen === 1 ? "" : "s"} need your attention`}
+                ? t("All caught up 🎉", "Semua sudah beres 🎉")
+                : t(
+                    `${totalOpen} item${totalOpen === 1 ? "" : "s"} need your attention`,
+                    `${totalOpen} item butuh perhatian Anda`
+                  )}
           </p>
         </div>
       </div>
@@ -258,7 +265,7 @@ function MyQueueCard() {
       <div className="space-y-3">
         <QueueBucket
           icon={<BellRing size={14} className="text-red-600" />}
-          label="Follow-ups due"
+          label={t("Follow-ups due", "Tindak lanjut jatuh tempo")}
           count={c?.reminders_due ?? 0}
           tone="red"
         >
@@ -274,7 +281,7 @@ function MyQueueCard() {
               </span>
               <span className="text-[11px] text-red-600 shrink-0 inline-flex items-center gap-1">
                 <Clock size={11} />
-                {new Date(r.due_at).toLocaleDateString()}
+                {new Date(r.due_at).toLocaleDateString(t("en-US", "id-ID"))}
               </span>
             </Link>
           ))}
@@ -282,7 +289,7 @@ function MyQueueCard() {
 
         <QueueBucket
           icon={<Send size={14} className="text-amber-600" />}
-          label="Drafts to submit"
+          label={t("Drafts to submit", "Draf untuk diajukan")}
           count={c?.drafts ?? 0}
           tone="amber"
         >
@@ -293,7 +300,7 @@ function MyQueueCard() {
 
         <QueueBucket
           icon={<Trophy size={14} className="text-emerald-600" />}
-          label="Approved · chase to Won"
+          label={t("Approved · chase to Won", "Disetujui · kejar sampai Menang")}
           count={c?.approved ?? 0}
           tone="emerald"
         >
@@ -305,13 +312,13 @@ function MyQueueCard() {
         {(c?.pending_approval ?? 0) > 0 && (
           <div className="text-xs muted flex items-center gap-1.5 pt-1">
             <Clock size={12} />
-            {c?.pending_approval} awaiting approval
+            {c?.pending_approval} {t("awaiting approval", "menunggu persetujuan")}
           </div>
         )}
       </div>
 
       <Link to="/quotations" className="btn-ghost w-full mt-4">
-        Open quotations <ArrowUpRight size={14} />
+        {t("Open quotations", "Buka penawaran")} <ArrowUpRight size={14} />
       </Link>
     </div>
   );

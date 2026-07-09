@@ -18,6 +18,22 @@ import { CommentThread } from "@/components/CommentThread";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { useAuthStore } from "@/store/auth";
+import { useT, t as tt } from "@/store/lang";
+
+// Indonesian display labels for backend status keys. Display only — the
+// keys themselves are still what the code compares and sends.
+const STATUS_LABEL_ID: Record<string, string> = {
+  draft: "draft", pending_approval: "menunggu persetujuan",
+  approved: "disetujui", rejected: "ditolak", sent: "terkirim",
+  won: "menang", lost: "kalah",
+};
+const CPO_STATUS_LABEL_ID: Record<string, string> = {
+  draft: "draft", pending_approval: "menunggu persetujuan",
+  approved: "disetujui", rejected: "ditolak", cancelled: "dibatalkan",
+};
+const VARIANT_LABEL_ID: Record<string, string> = {
+  short: "singkat", detailed: "rinci",
+};
 
 const STATUS_CHIP: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -46,7 +62,7 @@ function downloadExport(quoteId: string, quoteNumber: string, kind: "pdf" | "xls
     .catch((e) => alert(
       e?.response?.data?.errors?.[0]?.message
       ?? e?.response?.data?.detail
-      ?? "Download failed"
+      ?? tt("Download failed", "Unduhan gagal")
     ));
 }
 
@@ -55,6 +71,13 @@ export default function QuotationDetailPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
+  const t = useT();
+  // Display label for a backend status key: humanised English key, or the
+  // Indonesian label from the given map when the app is in Indonesian.
+  const sl = (key: string, map: Record<string, string>) => {
+    const en = (key ?? "").replace(/_/g, " ");
+    return t(en, map[key] ?? en);
+  };
 
   const [openFollowup, setOpenFollowup] = useState(false);
 
@@ -94,23 +117,24 @@ export default function QuotationDetailPage() {
     qc.invalidateQueries({ queryKey: ["notifications"] });
   };
 
-  function onActionSuccess(label: string) {
+  function onActionSuccess(labelEn: string, labelId: string) {
     return () => {
       refresh();
-      setFlash({ kind: "ok", text: `${label} succeeded.` });
+      setFlash({ kind: "ok", text: tt(`${labelEn} succeeded.`, `${labelId} berhasil.`) });
     };
   }
   function onActionError(e: any) {
     if (e?.message === "cancelled") return;
     const httpStatus = e?.response?.status;
-    const msg = e?.response?.data?.errors?.[0]?.message ?? e?.message ?? "Action failed";
+    const msg = e?.response?.data?.errors?.[0]?.message ?? e?.message
+      ?? tt("Action failed", "Aksi gagal");
     setFlash({ kind: "err", text: `${msg}${httpStatus ? ` (HTTP ${httpStatus})` : ""}` });
     refresh();
   }
 
   const submit = useMutation({
     mutationFn: () => api.post(`/quotations/${id}/submit`),
-    onSuccess: onActionSuccess("Submit"), onError: onActionError,
+    onSuccess: onActionSuccess("Submit", "Kirim"), onError: onActionError,
   });
   // Escape hatch for an accidental submit: pulls the quote back to draft
   // and deletes the pending approval request so the director's queue
@@ -119,26 +143,32 @@ export default function QuotationDetailPage() {
     mutationFn: () => api.post(`/quotations/${id}/unsubmit`),
     onSuccess: () => {
       refresh();
-      setFlash({ kind: "ok", text: "Submission withdrawn — the quotation is back in draft and editable." });
+      setFlash({ kind: "ok", text: tt(
+        "Submission withdrawn — the quotation is back in draft and editable.",
+        "Pengajuan ditarik — penawaran kembali ke draft dan dapat diedit.",
+      ) });
     },
     onError: onActionError,
   });
   const approve = useMutation({
     mutationFn: () => api.post(`/quotations/${id}/approve`, { notes: "" }),
-    onSuccess: onActionSuccess("Approve"), onError: onActionError,
+    onSuccess: onActionSuccess("Approve", "Setujui"), onError: onActionError,
   });
   const reject = useMutation({
     mutationFn: () => api.post(`/quotations/${id}/reject`, { notes: "" }),
-    onSuccess: onActionSuccess("Reject"), onError: onActionError,
+    onSuccess: onActionSuccess("Reject", "Tolak"), onError: onActionError,
   });
   const won = useMutation({
     mutationFn: () => api.post(`/quotations/${id}/won`),
     onSuccess: (res: any) => {
       refresh();
       if (res?.status === 202) {
-        setFlash({ kind: "ok", text: "Mark-won sent to the director for approval." });
+        setFlash({ kind: "ok", text: tt(
+          "Mark-won sent to the director for approval.",
+          "Penandaan menang dikirim ke direktur untuk persetujuan.",
+        ) });
       } else {
-        setFlash({ kind: "ok", text: "Mark won succeeded." });
+        setFlash({ kind: "ok", text: tt("Mark won succeeded.", "Tandai menang berhasil.") });
       }
     },
     onError: onActionError,
@@ -146,7 +176,7 @@ export default function QuotationDetailPage() {
   const lost = useMutation({
     mutationFn: (reason: string) =>
       api.post(`/quotations/${id}/lost`, null, { params: { reason } }),
-    onSuccess: () => { setLostOpen(false); setLostReason(""); onActionSuccess("Mark lost")(); },
+    onSuccess: () => { setLostOpen(false); setLostReason(""); onActionSuccess("Mark lost", "Tandai kalah")(); },
     onError: onActionError,
   });
   // Lightweight PATCH used by the inline Valid-until editor on the header
@@ -160,17 +190,17 @@ export default function QuotationDetailPage() {
     onError: onActionError,
   });
 
-  if (q.isLoading) return <div className="muted">Loading…</div>;
-  if (!q.data)     return <div className="muted">Not found.</div>;
+  if (q.isLoading) return <div className="muted">{t("Loading…", "Memuat…")}</div>;
+  if (!q.data)     return <div className="muted">{t("Not found.", "Tidak ditemukan.")}</div>;
 
   const Q = q.data;
   const tier = Q.discount_pct <= 5 ? "auto"
              : Q.discount_pct <= 15 ? "manager"
              : "director";
   const TIER_META = {
-    auto:     { label: "Auto-approved",     cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", Icon: ShieldCheck },
-    manager:  { label: "Manager approval",  cls: "bg-amber-50 text-amber-700 ring-amber-200",       Icon: ShieldAlert },
-    director: { label: "Director approval", cls: "bg-red-50 text-red-700 ring-red-200",             Icon: Crown },
+    auto:     { label: t("Auto-approved", "Disetujui otomatis"),      cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", Icon: ShieldCheck },
+    manager:  { label: t("Manager approval", "Persetujuan manajer"),  cls: "bg-amber-50 text-amber-700 ring-amber-200",       Icon: ShieldAlert },
+    director: { label: t("Director approval", "Persetujuan direktur"), cls: "bg-red-50 text-red-700 ring-red-200",            Icon: Crown },
   }[tier];
 
   const canApprove = user && (user.role === "manager" || user.role === "director");
@@ -192,7 +222,7 @@ export default function QuotationDetailPage() {
   return (
     <div className="space-y-6">
       <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
-        <ArrowLeft size={15} /> Back
+        <ArrowLeft size={15} /> {t("Back", "Kembali")}
       </button>
 
       {flash && (
@@ -222,9 +252,11 @@ export default function QuotationDetailPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-2xl font-semibold tracking-tight font-mono">{Q.number}</h1>
                 <span className={clsx("chip", STATUS_CHIP[Q.status] ?? "bg-ink-100 text-ink-600")}>
-                  {Q.status.replace(/_/g, " ")}
+                  {sl(Q.status, STATUS_LABEL_ID)}
                 </span>
-                <span className="chip bg-ink-100 text-ink-700 capitalize">{Q.variant}</span>
+                <span className="chip bg-ink-100 text-ink-700 capitalize">
+                  {t(Q.variant, VARIANT_LABEL_ID[Q.variant] ?? Q.variant)}
+                </span>
                 <span className="chip bg-ink-100 text-ink-600">v{Q.version}</span>
               </div>
               {customer.data && (
@@ -246,62 +278,66 @@ export default function QuotationDetailPage() {
           <div className="flex flex-wrap gap-2">
             {canEdit && (
               <button className="btn-ghost" onClick={() => setEditOpen(true)}>
-                <Pencil size={15} /> Edit
+                <Pencil size={15} /> {t("Edit", "Edit")}
               </button>
             )}
             {canSubmit && (
               <button className="btn-primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
-                <Send size={15} /> Submit
+                <Send size={15} /> {t("Submit", "Kirim")}
               </button>
             )}
             {canUnsubmit && (
               <button
                 className="btn-ghost"
-                title="Withdraw the submission — the quotation goes back to draft and the approval request is removed from the director's queue."
+                title={t(
+                  "Withdraw the submission — the quotation goes back to draft and the approval request is removed from the director's queue.",
+                  "Tarik pengajuan — penawaran kembali ke draft dan permintaan persetujuan dihapus dari antrean direktur.",
+                )}
                 onClick={() => {
-                  if (window.confirm(
+                  if (window.confirm(tt(
                     "Withdraw this submission? The quotation returns to draft (editable) and leaves the director's approval queue.",
-                  )) unsubmit.mutate();
+                    "Tarik pengajuan ini? Penawaran kembali ke draft (dapat diedit) dan keluar dari antrean persetujuan direktur.",
+                  ))) unsubmit.mutate();
                 }}
                 disabled={unsubmit.isPending}
               >
                 {unsubmit.isPending
                   ? <Loader2 size={15} className="animate-spin" />
                   : <Undo2 size={15} />}
-                Unsubmit
+                {t("Unsubmit", "Batalkan kirim")}
               </button>
             )}
             {canDecide && (
               <>
                 <button className="btn-success" onClick={() => approve.mutate()} disabled={approve.isPending}>
-                  <CheckCircle2 size={15} /> Approve
+                  <CheckCircle2 size={15} /> {t("Approve", "Setujui")}
                 </button>
                 <button className="btn-danger" onClick={() => reject.mutate()} disabled={reject.isPending}>
-                  <XCircle size={15} /> Reject
+                  <XCircle size={15} /> {t("Reject", "Tolak")}
                 </button>
               </>
             )}
             {canMarkWonLost && (
               <>
                 <button className="btn-success" onClick={() => won.mutate()} disabled={won.isPending}>
-                  <Trophy size={15} /> Mark won
+                  <Trophy size={15} /> {t("Mark won", "Tandai menang")}
                 </button>
                 <button className="btn-ghost text-red-600" onClick={() => setLostOpen(true)} disabled={lost.isPending}>
-                  <Frown size={15} /> Mark lost
+                  <Frown size={15} /> {t("Mark lost", "Tandai kalah")}
                 </button>
               </>
             )}
             <button
               className="btn-ghost"
               onClick={() => downloadExport(Q.id, Q.number, "pdf")}
-              title="Download as PDF"
+              title={t("Download as PDF", "Unduh sebagai PDF")}
             >
               <FileText size={15} /> PDF
             </button>
             <button
               className="btn-ghost"
               onClick={() => downloadExport(Q.id, Q.number, "xlsx")}
-              title="Download as Excel"
+              title={t("Download as Excel", "Unduh sebagai Excel")}
             >
               <FileText size={15} /> Excel
             </button>

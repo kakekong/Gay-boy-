@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { useT } from "@/store/lang";
 
 const STYLES: Record<string, { bg: string; dot: string; label?: string }> = {
   lead:          { bg: "bg-ink-100 text-ink-700",            dot: "bg-ink-400",     label: "Lead" },
@@ -16,12 +17,32 @@ const STYLES: Record<string, { bg: string; dot: string; label?: string }> = {
   closed_lost:   { bg: "bg-red-100 text-red-800",            dot: "bg-red-600",     label: "Lost" },
 };
 
+// Indonesian display labels for the backend stage keys. Display only — the
+// keys themselves are still what the code compares and sends.
+const LABEL_ID: Record<string, string> = {
+  lead:         "Prospek",
+  presentation: "Presentasi",
+  engineering:  "Engineering",
+  quotation:    "Penawaran",
+  negotiation:  "Negosiasi",
+  po:           "PO",
+  drawing:      "Gambar",
+  purchasing:   "Pembelian",
+  delivery:     "Pengiriman",
+  invoicing:    "Penagihan",
+  payment:      "Pembayaran",
+  closed_won:   "Menang",
+  closed_lost:  "Kalah",
+};
+
 export function StageBadge({ stage }: { stage: string }) {
+  const t = useT();
   const s = STYLES[stage] ?? { bg: "bg-ink-100 text-ink-600", dot: "bg-ink-400" };
+  const en = s.label ?? stage;
   return (
     <span className={clsx("chip", s.bg)}>
       <span className={clsx("h-1.5 w-1.5 rounded-full", s.dot)} />
-      {s.label ?? stage}
+      {t(en, LABEL_ID[stage] ?? en)}
     </span>
   );
 }
