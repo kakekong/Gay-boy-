@@ -9,6 +9,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useT, t as tt } from "@/store/lang";
 import { UserLink } from "@/components/UserLink";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
@@ -57,6 +58,41 @@ const WO_STAGE_SUFFIX: Record<string, string> = {
   packaging: "PKG", delivery: "DLY",
 };
 
+// Indonesian display labels for backend status/stage keys. Display only —
+// the keys themselves are still what the code compares and sends.
+const STATUS_LABEL_ID: Record<string, string> = {
+  new: "baru", purchasing: "pembelian", drawing: "gambar",
+  drawing_approved: "gambar disetujui", production: "produksi", qc: "QC",
+  packaging: "pengemasan", invoiced: "difakturkan", delivered: "terkirim",
+  paid: "lunas", closed: "tutup",
+};
+const WO_STAGE_LABEL_ID: Record<string, string> = {
+  receiving: "penerimaan", warehousing: "pergudangan", qc: "QC",
+  packaging: "pengemasan", delivery: "pengiriman",
+};
+const DRAWING_STATUS_LABEL_ID: Record<string, string> = {
+  approved: "disetujui", submitted: "diajukan",
+  revision_requested: "revisi diminta", rejected: "ditolak",
+};
+const DOC_STATUS_LABEL_ID: Record<string, string> = {
+  approved: "disetujui", rejected: "ditolak", pending: "menunggu",
+};
+const INVOICE_STATUS_LABEL_ID: Record<string, string> = {
+  approved: "disetujui", pending_finance: "menunggu keuangan",
+  rejected: "ditolak", issued: "terbit", partial: "sebagian",
+  overdue: "jatuh tempo", paid: "lunas",
+};
+const CLAIM_STATUS_LABEL_ID: Record<string, string> = {
+  verified: "terverifikasi", rejected: "ditolak", pending: "menunggu",
+};
+const SUPPLIER_PO_STATUS_LABEL_ID: Record<string, string> = {
+  open: "terbuka", received: "diterima",
+  pending_approval: "menunggu persetujuan", cancelled: "dibatalkan",
+};
+const DELIVERY_MODE_LABEL_ID: Record<string, string> = {
+  local: "lokal", direct_import: "impor langsung", agent: "lewat agen",
+};
+
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
@@ -64,6 +100,13 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const t = useT();
+  // Display label for a backend status key: humanised English key, or the
+  // Indonesian label from the given map when the app is in Indonesian.
+  const sl = (key: string, map: Record<string, string>) => {
+    const en = (key ?? "").replace(/_/g, " ");
+    return t(en, map[key] ?? en);
+  };
   // Purchasing sees the project's procurement detail (items, work orders,
   // drawings, deliveries) but not its deal economics — PO value, margins,
   // or invoice amounts. The backend nulls these for purchasing too.
@@ -130,7 +173,7 @@ export default function ProjectDetailPage() {
     e?.response?.data?.errors?.[0]?.message
       ?? e?.response?.data?.detail
       ?? e?.message
-      ?? "Operation failed"
+      ?? tt("Operation failed", "Operasi gagal")
   );
 
   // Drawing files live behind the authenticated API. A plain <a href> opens a
@@ -358,37 +401,43 @@ export default function ProjectDetailPage() {
     onSuccess: (data: any) => {
       refresh();
       if (data?.pending_approval) {
-        alert("Shipping/delivery date change submitted to the director for approval.");
+        alert(tt(
+          "Shipping/delivery date change submitted to the director for approval.",
+          "Perubahan tanggal kirim/pengiriman dikirim ke direktur untuk persetujuan.",
+        ));
       }
     },
     onError: onErr,
   });
 
-  if (data.isLoading) return <div className="muted text-sm">Loading…</div>;
+  if (data.isLoading) return <div className="muted text-sm">{t("Loading…", "Memuat…")}</div>;
   if (data.isError) {
     const e: any = data.error;
     const httpStatus = e?.response?.status;
-    const msg = e?.response?.data?.errors?.[0]?.message ?? e?.message ?? "Failed to load project";
+    const msg = e?.response?.data?.errors?.[0]?.message ?? e?.message
+      ?? t("Failed to load project", "Gagal memuat proyek");
     return (
       <div className="space-y-4">
         <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
-          <ArrowLeft size={15} /> Back
+          <ArrowLeft size={15} /> {t("Back", "Kembali")}
         </button>
         <div className="card p-6 text-sm">
-          <div className="font-semibold text-red-700">Could not load project</div>
+          <div className="font-semibold text-red-700">{t("Could not load project", "Gagal memuat proyek")}</div>
           <div className="muted mt-1">{msg}</div>
           {httpStatus && (
             <div className="text-xs muted mt-2">HTTP {httpStatus} · GET /operation/projects/{id}/full</div>
           )}
           <div className="text-xs muted mt-3">
-            If you just upgraded, the api container may still be running the old code.
-            Try a hard refresh, or restart the api container.
+            {t(
+              "If you just upgraded, the api container may still be running the old code. Try a hard refresh, or restart the api container.",
+              "Jika baru saja meng-upgrade, kontainer api mungkin masih menjalankan kode lama. Coba hard refresh, atau restart kontainer api.",
+            )}
           </div>
         </div>
       </div>
     );
   }
-  if (!data.data)     return <div className="muted text-sm">Project not found.</div>;
+  if (!data.data)     return <div className="muted text-sm">{t("Project not found.", "Proyek tidak ditemukan.")}</div>;
 
   const p   = data.data.project;
   const cu  = data.data.customer;
@@ -426,23 +475,27 @@ export default function ProjectDetailPage() {
                 <h1 className="text-2xl font-semibold tracking-tight font-mono">{p.code}</h1>
                 <span className={clsx("chip capitalize",
                   STATUS_CHIP[p.status] ?? "bg-ink-100 text-ink-700")}>
-                  {p.status.replace(/_/g, " ")}
+                  {sl(p.status, STATUS_LABEL_ID)}
                 </span>
                 {role === "director" && (
                   <button
                     type="button"
                     className="btn-ghost text-red-600 text-xs px-2 py-0.5"
-                    title="Delete this project (director only). Soft-delete so history isn't orphaned; the linked customer PO gets unlinked."
+                    title={t(
+                      "Delete this project (director only). Soft-delete so history isn't orphaned; the linked customer PO gets unlinked.",
+                      "Hapus proyek ini (hanya direktur). Soft-delete agar riwayat tidak yatim; PO pelanggan yang tertaut dilepas.",
+                    )}
                     disabled={deleteProject.isPending}
                     onClick={() => {
-                      if (window.confirm(
+                      if (window.confirm(tt(
                         `Delete ${p.code}? The project is soft-deleted and disappears from the Projects list. The linked customer PO is unlinked so it can be re-approved later. Purchase orders, drawings and invoices remain in the DB.`,
-                      )) {
+                        `Hapus ${p.code}? Proyek di-soft-delete dan hilang dari daftar Proyek. PO pelanggan yang tertaut dilepas agar bisa disetujui ulang nanti. Purchase order, gambar, dan faktur tetap ada di DB.`,
+                      ))) {
                         deleteProject.mutate();
                       }
                     }}
                   >
-                    <Trash2 size={12} /> Delete project
+                    <Trash2 size={12} /> {t("Delete project", "Hapus proyek")}
                   </button>
                 )}
               </div>
@@ -462,7 +515,7 @@ export default function ProjectDetailPage() {
                 {cpo && (
                   <Link to={`/customer-pos/${cpo.id}`}
                     className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
-                    title="Customer PO that spawned this project">
+                    title={t("Customer PO that spawned this project", "PO pelanggan asal proyek ini")}>
                     <FileText size={13} /> PO {cpo.number}
                   </Link>
                 )}
@@ -488,14 +541,14 @@ export default function ProjectDetailPage() {
               )}
             >
               {i < stageIdx && <CheckCircle size={10} />}
-              {s.replace(/_/g, " ")}
+              {sl(s, STATUS_LABEL_ID)}
             </span>
           ))}
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
           <EditableTextField
-            label="PO Number"
+            label={t("PO Number", "Nomor PO")}
             icon={<FileText size={13} />}
             value={p.po_number ?? ""}
             disabled={patchProject.isPending}
@@ -508,21 +561,21 @@ export default function ProjectDetailPage() {
             }}
           />
           <EditableDateField
-            label="PO Date"
+            label={t("PO Date", "Tanggal PO")}
             icon={<Calendar size={13} />}
             value={p.po_date ?? ""}
             disabled={patchProject.isPending}
             onChange={(v) => patchProject.mutate({ po_date: v || null })}
           />
           <EditableDateField
-            label="Target delivery"
+            label={t("Target delivery", "Target pengiriman")}
             icon={<Truck size={13} />}
             value={p.target_delivery ?? ""}
             disabled={patchProject.isPending}
             onChange={(v) => patchProject.mutate({ target_delivery: v || null })}
           />
           <EditableDateField
-            label="Actual delivery"
+            label={t("Actual delivery", "Pengiriman aktual")}
             icon={<Truck size={13} />}
             value={p.actual_delivery ?? ""}
             disabled={patchProject.isPending}
@@ -533,33 +586,37 @@ export default function ProjectDetailPage() {
         {/* Delivery-date guide: what each date means and when to set it */}
         <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/40 p-4 text-sm">
           <div className="font-semibold text-ink-800 flex items-center gap-2">
-            <Truck size={14} className="text-brand-600" /> How to set the delivery dates
+            <Truck size={14} className="text-brand-600" /> {t("How to set the delivery dates", "Cara mengisi tanggal pengiriman")}
           </div>
           <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-ink-700">
             <div>
-              <div className="font-medium">Target delivery</div>
+              <div className="font-medium">{t("Target delivery", "Target pengiriman")}</div>
               <p className="text-xs text-ink-600 leading-relaxed mt-0.5">
-                The date you <span className="font-medium">promised the customer</span>.
-                Set it as soon as the PO is signed. Click the date field
-                above and pick a date. Once set, leave it alone — change
-                it only after a written customer reschedule.
+                {t("The date you ", "Tanggal yang ")}
+                <span className="font-medium">{t("promised the customer", "Anda janjikan ke pelanggan")}</span>
+                {t(
+                  ". Set it as soon as the PO is signed. Click the date field above and pick a date. Once set, leave it alone — change it only after a written customer reschedule.",
+                  ". Isi segera setelah PO ditandatangani. Klik kolom tanggal di atas lalu pilih tanggal. Setelah diisi, biarkan — ubah hanya jika ada penjadwalan ulang tertulis dari pelanggan.",
+                )}
               </p>
             </div>
             <div>
-              <div className="font-medium">Actual delivery</div>
+              <div className="font-medium">{t("Actual delivery", "Pengiriman aktual")}</div>
               <p className="text-xs text-ink-600 leading-relaxed mt-0.5">
-                The date the goods <span className="font-medium">actually arrived at the customer</span>.
-                Set it the day delivery is confirmed (proof of delivery,
-                courier sign-off, or customer acknowledgement). The system
-                uses the gap between Target and Actual to track on-time
-                performance.
+                {t("The date the goods ", "Tanggal barang ")}
+                <span className="font-medium">{t("actually arrived at the customer", "benar-benar tiba di pelanggan")}</span>
+                {t(
+                  ". Set it the day delivery is confirmed (proof of delivery, courier sign-off, or customer acknowledgement). The system uses the gap between Target and Actual to track on-time performance.",
+                  ". Isi pada hari pengiriman dikonfirmasi (bukti pengiriman, tanda terima kurir, atau konfirmasi pelanggan). Sistem memakai selisih antara Target dan Aktual untuk memantau ketepatan waktu.",
+                )}
               </p>
             </div>
           </div>
           <p className="text-[11px] text-ink-500 mt-3">
-            For multi-leg shipments (origin → warehouse → customer), use
-            the Shipping timeline editor below for each leg's ETA, and
-            keep this Actual delivery as the final arrival at the customer.
+            {t(
+              "For multi-leg shipments (origin → warehouse → customer), use the Shipping timeline editor below for each leg's ETA, and keep this Actual delivery as the final arrival at the customer.",
+              "Untuk pengiriman multi-tahap (asal → gudang → pelanggan), gunakan editor linimasa pengiriman di bawah untuk ETA tiap tahap, dan isi Pengiriman aktual ini sebagai kedatangan akhir di pelanggan.",
+            )}
           </p>
         </div>
       </div>
@@ -567,16 +624,16 @@ export default function ProjectDetailPage() {
       {/* Profit / Margin — hidden from purchasing and sales */}
       {showMoney && canSeeOpsDetails && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <Stat label="PO value"      value={idr(p.po_value)}              tone="brand"   />
-          <Stat label="Margin (est)"  value={pct(p.margin_estimate)}       tone="amber"   />
+          <Stat label={t("PO value", "Nilai PO")}      value={idr(p.po_value)}              tone="brand"   />
+          <Stat label={t("Margin (est)", "Margin (estimasi)")}  value={pct(p.margin_estimate)}       tone="amber"   />
           <Stat
-            label="Margin (actual)"
+            label={t("Margin (actual)", "Margin (aktual)")}
             value={pct(p.margin_actual)}
             tone={marginDelta < -0.05 ? "red"
                   : marginDelta < 0    ? "amber" : "emerald"}
           />
           <Stat
-            label="Delta vs estimate"
+            label={t("Delta vs estimate", "Selisih vs estimasi")}
             value={`${marginDelta >= 0 ? "+" : ""}${(marginDelta * 100).toFixed(1)} pp`}
             tone={marginDelta < -0.05 ? "red" : marginDelta < 0 ? "amber" : "emerald"}
           />
@@ -594,21 +651,21 @@ export default function ProjectDetailPage() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
-              <FileText size={15} className="text-brand-600" /> Order — {priceReq.number}
+              <FileText size={15} className="text-brand-600" /> {t("Order", "Pesanan")} — {priceReq.number}
             </div>
-            <div className="text-xs muted">The approved price request this project fulfils.</div>
+            <div className="text-xs muted">{t("The approved price request this project fulfils.", "Permintaan harga yang disetujui dan dipenuhi proyek ini.")}</div>
           </div>
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
                 <th className="th">#</th>
-                <th className="th">Description</th>
-                <th className="th text-right">Qty</th>
-                <th className="th">UoM</th>
-                <th className="th">Spec</th>
-                <th className="th text-right">Cost</th>
+                <th className="th">{t("Description", "Deskripsi")}</th>
+                <th className="th text-right">{t("Qty", "Jml")}</th>
+                <th className="th">{t("UoM", "Satuan")}</th>
+                <th className="th">{t("Spec", "Spek")}</th>
+                <th className="th text-right">{t("Cost", "Biaya")}</th>
                 {priceReq.items?.[0] && "sell_price" in priceReq.items[0] && (
-                  <th className="th text-right">Sell</th>
+                  <th className="th text-right">{t("Sell", "Jual")}</th>
                 )}
               </tr>
             </thead>
@@ -637,17 +694,17 @@ export default function ProjectDetailPage() {
         <div className="px-5 py-3 border-b border-ink-100 flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
             <div className="font-semibold flex items-center gap-2">
-              <Wrench size={15} className="text-brand-600" /> Work orders
+              <Wrench size={15} className="text-brand-600" /> {t("Work orders", "Work order")}
             </div>
             <div className="text-xs muted mt-0.5 max-w-xl leading-relaxed">
-              A work order is a single internal step on this project — receiving,
-              warehousing, QC, packaging, or delivery. Each one is a checkable
-              card the shop floor ticks off. Add one per stage you need to track,
-              then mark it complete as the work happens.
+              {t(
+                "A work order is a single internal step on this project — receiving, warehousing, QC, packaging, or delivery. Each one is a checkable card the shop floor ticks off. Add one per stage you need to track, then mark it complete as the work happens.",
+                "Work order adalah satu langkah internal pada proyek ini — penerimaan, pergudangan, QC, pengemasan, atau pengiriman. Masing-masing berupa kartu yang dicentang tim lapangan. Tambahkan satu per tahap yang perlu dilacak, lalu tandai selesai saat pekerjaannya berjalan.",
+              )}
             </div>
           </div>
           <div className="text-[10px] uppercase tracking-wider muted shrink-0">
-            {wos.length} step{wos.length === 1 ? "" : "s"}
+            {wos.length} {t(wos.length === 1 ? "step" : "steps", "langkah")}
           </div>
         </div>
         {(() => {
@@ -667,9 +724,15 @@ export default function ProjectDetailPage() {
             ? newWoStage
             : (allowedStages[0] ?? newWoStage);
           const blockedReason = !canManageWO
-            ? "Only purchasing, admin or director can file work orders."
+            ? t(
+                "Only purchasing, admin or director can file work orders.",
+                "Hanya pembelian, admin, atau direktur yang dapat membuat work order.",
+              )
             : allowedStages.length === 0
-              ? `The project is still at '${p.status.replace(/_/g, " ")}'. Work orders will unlock once it reaches production — advance the earlier stages (purchasing → drawing → drawing_approved → production) first.`
+              ? t(
+                  `The project is still at '${p.status.replace(/_/g, " ")}'. Work orders will unlock once it reaches production — advance the earlier stages (purchasing → drawing → drawing_approved → production) first.`,
+                  `Proyek masih di tahap '${STATUS_LABEL_ID[p.status] ?? p.status.replace(/_/g, " ")}'. Work order terbuka setelah proyek mencapai produksi — selesaikan dulu tahap sebelumnya (pembelian → gambar → gambar disetujui → produksi).`,
+                )
               : null;
           return (
             <div className="p-3 space-y-2 border-b border-ink-100 bg-ink-50/40">
@@ -683,14 +746,14 @@ export default function ProjectDetailPage() {
                 !canFileAny && "opacity-60 pointer-events-none",
               )}>
                 <div className="flex-1 min-w-[180px]">
-                  <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Code *</span>
+                  <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{t("Code *", "Kode *")}</span>
                   <input className="input" value={newWoCode}
                     disabled={!canFileAny}
                     onChange={(e) => setNewWoCode(e.target.value)}
-                    placeholder="e.g. WO-PRJ-2026-0042-02" />
+                    placeholder={t("e.g. WO-PRJ-2026-0042-02", "cth. WO-PRJ-2026-0042-02")} />
                 </div>
                 <div>
-                  <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Stage</span>
+                  <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{t("Stage", "Tahap")}</span>
                   <select
                     className="input"
                     value={effectiveStage}
@@ -698,15 +761,18 @@ export default function ProjectDetailPage() {
                     onChange={(e) => setNewWoStage(e.target.value)}
                   >
                     {allowedStages.length === 0
-                      ? <option value="">— locked —</option>
-                      : allowedStages.map((s) => <option key={s} value={s}>{s}</option>)}
+                      ? <option value="">{t("— locked —", "— terkunci —")}</option>
+                      : allowedStages.map((s) => <option key={s} value={s}>{t(s, WO_STAGE_LABEL_ID[s] ?? s)}</option>)}
                   </select>
                 </div>
                 <button className="btn-primary"
                   disabled={addWO.isPending || !canFileAny}
                   onClick={() => {
                     if (!newWoCode.trim()) {
-                      setFlashErr("Work-order code is required (the default is auto-generated from project + stage).");
+                      setFlashErr(tt(
+                        "Work-order code is required (the default is auto-generated from project + stage).",
+                        "Kode work order wajib diisi (default dibuat otomatis dari proyek + tahap).",
+                      ));
                       return;
                     }
                     setFlashErr(null);
@@ -714,7 +780,7 @@ export default function ProjectDetailPage() {
                     addWO.mutate({ stage: effectiveStage });
                   }}>
                   {addWO.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  Add work order
+                  {t("Add work order", "Tambah work order")}
                 </button>
               </div>
             </div>
@@ -726,16 +792,16 @@ export default function ProjectDetailPage() {
           </div>
         )}
         {wos.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No work orders yet.</div>
+          <div className="p-8 text-center muted text-sm">{t("No work orders yet.", "Belum ada work order.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Code</th>
-                <th className="th">Stage</th>
-                <th className="th">Started</th>
-                <th className="th">Completed</th>
-                <th className="th text-right">Actions</th>
+                <th className="th">{t("Code", "Kode")}</th>
+                <th className="th">{t("Stage", "Tahap")}</th>
+                <th className="th">{t("Started", "Mulai")}</th>
+                <th className="th">{t("Completed", "Selesai")}</th>
+                <th className="th text-right">{t("Actions", "Aksi")}</th>
               </tr>
             </thead>
             <tbody>
@@ -743,7 +809,7 @@ export default function ProjectDetailPage() {
                 <tr key={w.id} className="border-t border-ink-100">
                   <td className="td font-mono text-xs">{w.code}</td>
                   <td className="td">
-                    <span className="chip bg-ink-100 text-ink-700 capitalize">{w.stage}</span>
+                    <span className="chip bg-ink-100 text-ink-700 capitalize">{t(w.stage, WO_STAGE_LABEL_ID[w.stage] ?? w.stage)}</span>
                   </td>
                   <td className="td muted">{w.started_at ? new Date(w.started_at).toLocaleDateString() : "—"}</td>
                   <td className="td muted">
@@ -756,11 +822,11 @@ export default function ProjectDetailPage() {
                       isAdmin ? (
                         <button className="btn-ghost text-emerald-700"
                           onClick={() => completeWO.mutate(w.id)}>
-                          <CheckCircle size={13} /> Complete
+                          <CheckCircle size={13} /> {t("Complete", "Selesaikan")}
                         </button>
                       ) : (
-                        <span className="muted text-xs" title="Only admin or director can confirm a work order">
-                          admin/director only
+                        <span className="muted text-xs" title={t("Only admin or director can confirm a work order", "Hanya admin atau direktur yang dapat mengonfirmasi work order")}>
+                          {t("admin/director only", "hanya admin/direktur")}
                         </span>
                       )
                     )}
@@ -782,29 +848,29 @@ export default function ProjectDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
-            <Hammer size={15} className="text-brand-600" /> Drawings
+            <Hammer size={15} className="text-brand-600" /> {t("Drawings", "Gambar")}
           </div>
-          <div className="text-xs muted">{dr.length} revision(s)</div>
+          <div className="text-xs muted">{dr.length} {t("revision(s)", "revisi")}</div>
           <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
-            Upload the customer's or supplier's drawing here — sales files the
-            customer's version, purchasing the supplier's. The director reviews
-            and approves (or requests a revision). An approval advances the
-            project to "drawing approved" automatically so logistics can begin.
+            {t(
+              "Upload the customer's or supplier's drawing here — sales files the customer's version, purchasing the supplier's. The director reviews and approves (or requests a revision). An approval advances the project to \"drawing approved\" automatically so logistics can begin.",
+              "Unggah gambar dari pelanggan atau supplier di sini — sales mengunggah versi pelanggan, pembelian versi supplier. Direktur meninjau dan menyetujui (atau meminta revisi). Persetujuan otomatis memajukan proyek ke \"gambar disetujui\" sehingga logistik bisa dimulai.",
+            )}
           </div>
         </div>
 
         {canUploadDrawing && (
           <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[180px]">
-              <label className="block text-[11px] uppercase muted mb-1">Drawing file</label>
+              <label className="block text-[11px] uppercase muted mb-1">{t("Drawing file", "File gambar")}</label>
               <input type="file"
                 className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
                 onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
             </div>
             <div className="flex-1 min-w-[180px]">
-              <label className="block text-[11px] uppercase muted mb-1">Notes (optional)</label>
+              <label className="block text-[11px] uppercase muted mb-1">{t("Notes (optional)", "Catatan (opsional)")}</label>
               <input className="input" value={drawingNotes}
-                onChange={(e) => setDrawingNotes(e.target.value)} placeholder="e.g. rev from supplier" />
+                onChange={(e) => setDrawingNotes(e.target.value)} placeholder={t("e.g. rev from supplier", "cth. revisi dari supplier")} />
             </div>
             <button className="btn-primary"
               disabled={!drawingFile || uploadDrawing.isPending}
@@ -813,23 +879,23 @@ export default function ProjectDetailPage() {
                 { onSuccess: () => { setDrawingFile(null); setDrawingNotes(""); } },
               )}>
               {uploadDrawing.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              Upload drawing
+              {t("Upload drawing", "Unggah gambar")}
             </button>
           </div>
         )}
 
         {dr.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No drawings uploaded.</div>
+          <div className="p-8 text-center muted text-sm">{t("No drawings uploaded.", "Belum ada gambar diunggah.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Rev</th>
+                <th className="th">{t("Rev", "Rev")}</th>
                 <th className="th">Status</th>
-                <th className="th">Decision</th>
+                <th className="th">{t("Decision", "Keputusan")}</th>
                 <th className="th">File</th>
-                <th className="th">Notes</th>
-                {canApproveDrawing && <th className="th text-right">Sign-off</th>}
+                <th className="th">{t("Notes", "Catatan")}</th>
+                {canApproveDrawing && <th className="th text-right">{t("Sign-off", "Persetujuan")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -843,7 +909,7 @@ export default function ProjectDetailPage() {
                       : d.status === "revision_requested" ? "bg-red-50 text-red-700"
                       : "bg-ink-100 text-ink-700"
                     )}>
-                      {d.status.replace(/_/g, " ")}
+                      {sl(d.status, DRAWING_STATUS_LABEL_ID)}
                     </span>
                     {/* After a revision is requested, only the account that
                         uploaded the drawing can post a corrected file. */}
@@ -862,7 +928,7 @@ export default function ProjectDetailPage() {
                               { onSuccess: () => setRevFiles((m) => ({ ...m, [d.id]: null })) },
                             );
                           }}>
-                          Re-upload
+                          {t("Re-upload", "Unggah ulang")}
                         </button>
                       </div>
                     )}
@@ -871,7 +937,7 @@ export default function ProjectDetailPage() {
                     {(d.decided_at || d.customer_decision_at) ? (
                       <span>
                         {new Date(d.decided_at ?? d.customer_decision_at).toLocaleDateString()}
-                        {d.decided_by_name && <span className="block text-[11px]">by {d.decided_by_name}</span>}
+                        {d.decided_by_name && <span className="block text-[11px]">{t("by", "oleh")} {d.decided_by_name}</span>}
                       </span>
                     ) : "—"}
                   </td>
@@ -879,9 +945,9 @@ export default function ProjectDetailPage() {
                     {!d.file_url ? "—"
                       : canViewDrawing ? (
                         <button type="button" onClick={() => viewFile(d.file_url)}
-                           className="text-brand-700 hover:underline">View</button>
+                           className="text-brand-700 hover:underline">{t("View", "Lihat")}</button>
                       ) : (
-                        <span className="muted text-xs">internal only</span>
+                        <span className="muted text-xs">{t("internal only", "hanya internal")}</span>
                       )}
                   </td>
                   <td className="td muted">
@@ -889,10 +955,13 @@ export default function ProjectDetailPage() {
                       <span>{d.notes ?? "—"}</span>
                       {((d.uploaded_by != null && d.uploaded_by === userId) || canApproveDrawing) && (
                         <button className="btn-ghost p-1 text-red-600 shrink-0"
-                          title="Delete this revision"
+                          title={t("Delete this revision", "Hapus revisi ini")}
                           disabled={deleteDrawing.isPending}
                           onClick={() => {
-                            if (window.confirm(`Delete revision v${d.revision}? This can't be undone.`))
+                            if (window.confirm(tt(
+                              `Delete revision v${d.revision}? This can't be undone.`,
+                              `Hapus revisi v${d.revision}? Tindakan ini tidak bisa dibatalkan.`,
+                            )))
                               deleteDrawing.mutate(d.id);
                           }}>
                           <Trash2 size={13} />
@@ -904,22 +973,22 @@ export default function ProjectDetailPage() {
                     <td className="td text-right">
                       {d.status === "approved" ? (
                         <span className="text-emerald-700 text-xs inline-flex items-center gap-1">
-                          <CheckCircle size={13} /> Approved
+                          <CheckCircle size={13} /> {t("Approved", "Disetujui")}
                         </span>
                       ) : (
                         <div className="inline-flex gap-1.5">
                           <button className="btn-primary py-1 px-2 text-xs"
                             disabled={decideDrawing.isPending}
                             onClick={() => decideDrawing.mutate({ drawingId: d.id, decision: "approve" })}>
-                            <CheckCircle size={13} /> Approve
+                            <CheckCircle size={13} /> {t("Approve", "Setujui")}
                           </button>
                           <button className="btn-ghost py-1 px-2 text-xs text-red-600"
                             disabled={decideDrawing.isPending}
                             onClick={() => {
-                              const notes = window.prompt("What needs revising? (optional)") ?? undefined;
+                              const notes = window.prompt(tt("What needs revising? (optional)", "Apa yang perlu direvisi? (opsional)")) ?? undefined;
                               decideDrawing.mutate({ drawingId: d.id, decision: "request_revision", notes });
                             }}>
-                            <XCircle size={13} /> Revise
+                            <XCircle size={13} /> {t("Revise", "Revisi")}
                           </button>
                         </div>
                       )}
@@ -942,66 +1011,69 @@ export default function ProjectDetailPage() {
           <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
             <div>
               <div className="font-semibold flex items-center gap-2">
-                <Truck size={15} className="text-brand-600" /> Logistics &amp; import documents
+                <Truck size={15} className="text-brand-600" /> {t("Logistics & import documents", "Logistik & dokumen impor")}
               </div>
               <div className="text-xs muted">
-                Set after the drawing is approved. Documents are due two weeks before delivery.
+                {t(
+                  "Set after the drawing is approved. Documents are due two weeks before delivery.",
+                  "Diisi setelah gambar disetujui. Dokumen jatuh tempo dua minggu sebelum pengiriman.",
+                )}
               </div>
             </div>
             {logistics.docs_due && (
-              <span className="chip bg-red-50 text-red-700">Documents due</span>
+              <span className="chip bg-red-50 text-red-700">{t("Documents due", "Dokumen jatuh tempo")}</span>
             )}
           </div>
           <div className="p-5 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <div className="text-[11px] uppercase tracking-wider muted mb-1">Delivery mode</div>
+                <div className="text-[11px] uppercase tracking-wider muted mb-1">{t("Delivery mode", "Mode pengiriman")}</div>
                 {canLogistics ? (
                   <select className="input" value={logistics.delivery_mode}
                     onChange={(e) => setLogistics.mutate({ delivery_mode: e.target.value })}>
-                    <option value="local">Local</option>
-                    <option value="direct_import">Direct import</option>
-                    <option value="agent">Via agent</option>
+                    <option value="local">{t("Local", "Lokal")}</option>
+                    <option value="direct_import">{t("Direct import", "Impor langsung")}</option>
+                    <option value="agent">{t("Via agent", "Lewat agen")}</option>
                   </select>
-                ) : <div className="capitalize">{logistics.delivery_mode.replace(/_/g, " ")}</div>}
+                ) : <div className="capitalize">{sl(logistics.delivery_mode, DELIVERY_MODE_LABEL_ID)}</div>}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wider muted mb-1">Estimated delivery</div>
+                <div className="text-[11px] uppercase tracking-wider muted mb-1">{t("Estimated delivery", "Estimasi pengiriman")}</div>
                 {canLogistics ? (
                   <input type="date" className="input"
                     defaultValue={logistics.est_delivery_date ?? ""}
                     onChange={(e) => e.target.value && setLogistics.mutate({ est_delivery_date: e.target.value })} />
                 ) : <div>{logistics.est_delivery_date ?? "—"}</div>}
                 {logistics.days_to_delivery != null && (
-                  <div className="text-[11px] muted mt-0.5">{logistics.days_to_delivery} day(s) to go</div>
+                  <div className="text-[11px] muted mt-0.5">{logistics.days_to_delivery} {t("day(s) to go", "hari lagi")}</div>
                 )}
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wider muted mb-1">Delivery date</div>
+                <div className="text-[11px] uppercase tracking-wider muted mb-1">{t("Delivery date", "Tanggal pengiriman")}</div>
                 {logistics.delivery_confirmed_at ? (
                   <div className="text-emerald-700 text-sm">
-                    Confirmed {new Date(logistics.delivery_confirmed_at).toLocaleDateString()}
+                    {t("Confirmed", "Dikonfirmasi")} {new Date(logistics.delivery_confirmed_at).toLocaleDateString()}
                   </div>
                 ) : canLogistics ? (
                   <>
                     <button className="btn-primary"
                       disabled={!logistics.est_delivery_date || !logistics.docs_approved || confirmDelivery.isPending}
                       onClick={() => confirmDelivery.mutate()}>
-                      <CheckCircle size={14} /> Confirm → receiving WO
+                      <CheckCircle size={14} /> {t("Confirm → receiving WO", "Konfirmasi → WO penerimaan")}
                     </button>
                     {!logistics.docs_approved && (
                       <div className="text-[11px] text-amber-700 mt-1">
-                        All documents must be director-approved first.
+                        {t("All documents must be director-approved first.", "Semua dokumen harus disetujui direktur dahulu.")}
                       </div>
                     )}
                   </>
-                ) : <div className="muted">Not confirmed</div>}
+                ) : <div className="muted">{t("Not confirmed", "Belum dikonfirmasi")}</div>}
               </div>
             </div>
 
             <div>
               <div className="text-[11px] uppercase tracking-wider muted mb-2">
-                Required documents ({logistics.delivery_mode.replace(/_/g, " ")})
+                {t("Required documents", "Dokumen wajib")} ({sl(logistics.delivery_mode, DELIVERY_MODE_LABEL_ID)})
               </div>
               <div className="space-y-2">
                 {(logistics.required_docs ?? []).map((d: any) => (
@@ -1014,7 +1086,7 @@ export default function ProjectDetailPage() {
                       : d.status === "rejected" ? "bg-red-50 text-red-700"
                       : d.status === "pending" ? "bg-amber-50 text-amber-700"
                       : "bg-ink-100 text-ink-500")}>
-                      {d.status ? d.status : "missing"}
+                      {d.status ? sl(d.status, DOC_STATUS_LABEL_ID) : t("missing", "belum ada")}
                     </span>
 
                     {/* File: view if uploaded */}
@@ -1022,14 +1094,14 @@ export default function ProjectDetailPage() {
                       <button type="button"
                         className="text-brand-700 hover:underline text-xs"
                         onClick={() => viewFile(`/api/v1/attachments/${d.attachment_id}/download`)}>
-                        {d.filename ? `View (${d.filename})` : "View"}
+                        {d.filename ? `${t("View", "Lihat")} (${d.filename})` : t("View", "Lihat")}
                       </button>
                     )}
 
                     {/* Upload / replace (purchasing/management) */}
                     {canLogistics && (
                       <label className="text-xs text-brand-700 hover:underline cursor-pointer">
-                        {d.attachment_id ? "Replace file" : "Upload file"}
+                        {d.attachment_id ? t("Replace file", "Ganti file") : t("Upload file", "Unggah file")}
                         <input type="file" className="hidden"
                           onChange={(e) => {
                             const f = e.target.files?.[0];
@@ -1045,12 +1117,12 @@ export default function ProjectDetailPage() {
                         <button className="btn-primary py-0.5 px-2 text-xs"
                           disabled={decideDoc.isPending}
                           onClick={() => decideDoc.mutate({ key: d.key, decision: "approve" })}>
-                          <CheckCircle size={12} /> Approve
+                          <CheckCircle size={12} /> {t("Approve", "Setujui")}
                         </button>
                         <button className="btn-ghost py-0.5 px-2 text-xs text-red-600"
                           disabled={decideDoc.isPending}
                           onClick={() => decideDoc.mutate({ key: d.key, decision: "reject" })}>
-                          <XCircle size={12} /> Reject
+                          <XCircle size={12} /> {t("Reject", "Tolak")}
                         </button>
                       </span>
                     )}
@@ -1059,7 +1131,7 @@ export default function ProjectDetailPage() {
               </div>
               {!logistics.docs_approved && (
                 <div className="text-[11px] text-amber-700 mt-2">
-                  {logistics.required_docs.filter((d: any) => d.status !== "approved").length} document(s) not yet approved.
+                  {logistics.required_docs.filter((d: any) => d.status !== "approved").length} {t("document(s) not yet approved.", "dokumen belum disetujui.")}
                 </div>
               )}
             </div>
@@ -1075,42 +1147,46 @@ export default function ProjectDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
-            <ShieldCheck size={15} className="text-brand-600" /> Quality control
+            <ShieldCheck size={15} className="text-brand-600" /> {t("Quality control", "Kontrol kualitas")}
           </div>
           {p.qc_decision && (
             <span className={clsx("chip", p.qc_decision === "pass"
               ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
-              {p.qc_decision === "pass" ? "QC passed" : "QC failed"}
+              {p.qc_decision === "pass" ? t("QC passed", "QC lulus") : t("QC failed", "QC gagal")}
             </span>
           )}
         </div>
         <div className="p-5 space-y-3">
           {p.qc_passed_at ? (
             <div className="text-sm text-emerald-700">
-              Passed {new Date(p.qc_passed_at).toLocaleString()} — finance can now issue
-              the final invoice + delivery order.
+              {t("Passed", "Lulus")} {new Date(p.qc_passed_at).toLocaleString()}{t(
+                " — finance can now issue the final invoice + delivery order.",
+                " — keuangan kini dapat menerbitkan faktur final + surat jalan.",
+              )}
             </div>
           ) : (
             <div className="text-sm muted">
-              Operations checks the goods. Passing QC unlocks the final invoice +
-              delivery order (issued by finance).
+              {t(
+                "Operations checks the goods. Passing QC unlocks the final invoice + delivery order (issued by finance).",
+                "Operasional memeriksa barang. Lulus QC membuka faktur final + surat jalan (diterbitkan keuangan).",
+              )}
             </div>
           )}
           {p.qc_findings && (
-            <div className="text-xs text-amber-700">Findings: {p.qc_findings}</div>
+            <div className="text-xs text-amber-700">{t("Findings:", "Temuan:")} {p.qc_findings}</div>
           )}
           {isOps && !p.qc_passed_at && (
             <div className="space-y-2">
-              <textarea className="input" rows={2} placeholder="Findings (optional)"
+              <textarea className="input" rows={2} placeholder={t("Findings (optional)", "Temuan (opsional)")}
                 value={qcFindings} onChange={(e) => setQcFindings(e.target.value)} />
               <div className="flex gap-2">
                 <button className="btn-primary" disabled={recordQC.isPending}
                   onClick={() => recordQC.mutate({ decision: "pass", findings: qcFindings || undefined })}>
-                  <CheckCircle size={14} /> Pass QC
+                  <CheckCircle size={14} /> {t("Pass QC", "Luluskan QC")}
                 </button>
                 <button className="btn-ghost text-red-600" disabled={recordQC.isPending}
                   onClick={() => recordQC.mutate({ decision: "fail", findings: qcFindings || undefined })}>
-                  <XCircle size={14} /> Fail
+                  <XCircle size={14} /> {t("Fail", "Gagalkan")}
                 </button>
               </div>
             </div>
@@ -1125,16 +1201,16 @@ export default function ProjectDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
-            <Receipt size={15} className="text-brand-600" /> Invoice &amp; faktur pajak
+            <Receipt size={15} className="text-brand-600" /> {t("Invoice & faktur pajak", "Faktur & faktur pajak")}
           </div>
           {p.customer_received_at && (
             <span className="chip bg-emerald-50 text-emerald-700">
-              Customer received {new Date(p.customer_received_at).toLocaleDateString()}
+              {t("Customer received", "Diterima pelanggan")} {new Date(p.customer_received_at).toLocaleDateString()}
             </span>
           )}
         </div>
         <div className="p-5 space-y-4">
-          {inv.length === 0 && <div className="text-sm muted">No invoice issued yet.</div>}
+          {inv.length === 0 && <div className="text-sm muted">{t("No invoice issued yet.", "Belum ada faktur diterbitkan.")}</div>}
           {inv.map((iv: any) => {
             const fp = fpForm[iv.id] ?? { no: "", file: null };
             return (
@@ -1154,25 +1230,29 @@ export default function ProjectDetailPage() {
                       iv.status === "approved" ? "bg-emerald-50 text-emerald-700"
                       : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
                       : iv.status === "rejected" ? "bg-red-50 text-red-700"
-                      : "bg-ink-50 text-ink-600")}>{iv.status}</span>
+                      : "bg-ink-50 text-ink-600")}>{sl(iv.status, INVOICE_STATUS_LABEL_ID)}</span>
                     {canFinanceApprove && (iv.paid_amount ?? 0) === 0 && (
                       <button
                         type="button"
                         className="btn-ghost text-red-600 text-[11px] px-2 py-0.5"
-                        title="Delete this invoice + its faktur pajak record. Blocked if a payment has been verified."
+                        title={t(
+                          "Delete this invoice + its faktur pajak record. Blocked if a payment has been verified.",
+                          "Hapus faktur ini + catatan faktur pajaknya. Diblokir jika ada pembayaran yang sudah diverifikasi.",
+                        )}
                         disabled={deleteInvoice.isPending}
                         onClick={() => {
                           const label = iv.faktur_pajak_no
                             ? `${iv.number} (FP ${iv.faktur_pajak_no})`
                             : iv.number;
-                          if (window.confirm(
+                          if (window.confirm(tt(
                             `Delete ${label}? This also drops any pending payment claims and file rows tied to it. Verified payments block deletion. This can't be undone.`,
-                          )) {
+                            `Hapus ${label}? Ini juga menghapus klaim pembayaran yang menunggu dan baris file yang terkait. Pembayaran terverifikasi memblokir penghapusan. Tindakan ini tidak bisa dibatalkan.`,
+                          ))) {
                             deleteInvoice.mutate(iv.id);
                           }
                         }}
                       >
-                        <Trash2 size={12} /> Delete
+                        <Trash2 size={12} /> {t("Delete", "Hapus")}
                       </button>
                     )}
                   </div>
@@ -1197,10 +1277,13 @@ export default function ProjectDetailPage() {
                 {canFinanceApprove && iv.status === "pending_finance" && (
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="text-[11px] uppercase tracking-wider muted">
-                      Finance approval — enter the faktur pajak yourself (admin doesn't set it)
+                      {t(
+                        "Finance approval — enter the faktur pajak yourself (admin doesn't set it)",
+                        "Persetujuan keuangan — masukkan faktur pajak sendiri (admin tidak mengisinya)",
+                      )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input className="input" placeholder="Faktur pajak no. *"
+                      <input className="input" placeholder={t("Faktur pajak no. *", "No. faktur pajak *")}
                         value={fp.no}
                         onChange={(e) => setFpForm((m) => ({
                           ...m, [iv.id]: { ...fp, no: e.target.value },
@@ -1216,7 +1299,7 @@ export default function ProjectDetailPage() {
                       onClick={() => approveInvoice.mutate({
                         invoiceId: iv.id, fpNo: fp.no.trim(), fpFile: fp.file,
                       })}>
-                      <CheckCircle size={14} /> Approve (finance)
+                      <CheckCircle size={14} /> {t("Approve (finance)", "Setujui (keuangan)")}
                     </button>
                   </div>
                 )}
@@ -1230,18 +1313,21 @@ export default function ProjectDetailPage() {
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="text-[11px] uppercase tracking-wider muted">
-                        Payments · {iv.claims?.length ?? 0} claim(s)
+                        {t("Payments", "Pembayaran")} · {iv.claims?.length ?? 0} {t("claim(s)", "klaim")}
                       </div>
                       {showMoney && iv.total != null && (
                         <div className="text-[11px] muted tabular-nums">
-                          Paid Rp {new Intl.NumberFormat("id-ID").format(Math.round(iv.paid_amount ?? 0))}
+                          {t("Paid", "Dibayar")} Rp {new Intl.NumberFormat("id-ID").format(Math.round(iv.paid_amount ?? 0))}
                           {" / "}
                           <span className={clsx(
                             (iv.outstanding ?? 0) === 0 ? "text-emerald-700 font-medium" : ""
                           )}>
                             {(iv.outstanding ?? 0) === 0
-                              ? "fully paid"
-                              : "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0)) + " left"}
+                              ? t("fully paid", "lunas penuh")
+                              : t(
+                                  "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0)) + " left",
+                                  "sisa Rp " + new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0)),
+                                )}
                           </span>
                         </div>
                       )}
@@ -1253,7 +1339,7 @@ export default function ProjectDetailPage() {
                             <span className={clsx("chip text-[10px]",
                               c.status === "verified" ? "bg-emerald-50 text-emerald-700"
                               : c.status === "rejected" ? "bg-red-50 text-red-700"
-                              : "bg-amber-50 text-amber-700")}>{c.status}</span>
+                              : "bg-amber-50 text-amber-700")}>{sl(c.status, CLAIM_STATUS_LABEL_ID)}</span>
                             <span className="tabular-nums font-medium">
                               Rp {new Intl.NumberFormat("id-ID").format(Math.round(c.amount || 0))}
                             </span>
@@ -1271,7 +1357,7 @@ export default function ProjectDetailPage() {
                     {(iv.outstanding ?? 0) > 0 && (
                       <details>
                         <summary className="cursor-pointer text-brand-700 hover:underline text-[11px]">
-                          Enter payment manually (record &amp; verify)
+                          {t("Enter payment manually (record & verify)", "Masukkan pembayaran manual (catat & verifikasi)")}
                         </summary>
                         {(() => {
                           const pf = payForm[iv.id] ?? {};
@@ -1279,7 +1365,10 @@ export default function ProjectDetailPage() {
                           return (
                             <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                               <input className="input" type="number"
-                                placeholder={`Amount (outstanding: Rp ${new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0))})`}
+                                placeholder={t(
+                                  `Amount (outstanding: Rp ${new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0))})`,
+                                  `Jumlah (sisa: Rp ${new Intl.NumberFormat("id-ID").format(Math.round(iv.outstanding ?? 0))})`,
+                                )}
                                 value={pf.amount ?? ""}
                                 onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, amount: e.target.value } }))} />
                               <input className="input" type="date"
@@ -1287,21 +1376,21 @@ export default function ProjectDetailPage() {
                                 onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, paidAt: e.target.value } }))} />
                               <select className="input" value={pf.method ?? "bank_transfer"}
                                 onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, method: e.target.value } }))}>
-                                <option value="bank_transfer">Bank transfer</option>
-                                <option value="cash">Cash</option>
-                                <option value="cheque">Cheque</option>
-                                <option value="other">Other</option>
+                                <option value="bank_transfer">{t("Bank transfer", "Transfer bank")}</option>
+                                <option value="cash">{t("Cash", "Tunai")}</option>
+                                <option value="cheque">{t("Cheque", "Cek")}</option>
+                                <option value="other">{t("Other", "Lainnya")}</option>
                               </select>
                               <input className="input"
-                                placeholder="Reference (transfer no., cheque no., etc.)"
+                                placeholder={t("Reference (transfer no., cheque no., etc.)", "Referensi (no. transfer, no. cek, dll.)")}
                                 value={pf.reference ?? ""}
                                 onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, reference: e.target.value } }))} />
                               <input className="input sm:col-span-2"
-                                placeholder="Notes (optional)"
+                                placeholder={t("Notes (optional)", "Catatan (opsional)")}
                                 value={pf.notes ?? ""}
                                 onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, notes: e.target.value } }))} />
                               <label className="sm:col-span-2 text-[11px] text-ink-600 flex items-center gap-2">
-                                Proof of payment (optional):
+                                {t("Proof of payment (optional):", "Bukti pembayaran (opsional):")}
                                 <input type="file"
                                   onChange={(e) => setPayForm((m) => ({ ...m, [iv.id]: { ...pf, file: e.target.files?.[0] ?? null } }))} />
                               </label>
@@ -1319,12 +1408,15 @@ export default function ProjectDetailPage() {
                                   },
                                   { onSuccess: () => setPayForm((m) => ({ ...m, [iv.id]: {} })) },
                                 )}>
-                                Record &amp; verify payment
+                                {t("Record & verify payment", "Catat & verifikasi pembayaran")}
                               </button>
                               {Number(pf.amount) > 0 && Number(pf.amount) < (iv.outstanding ?? 0) && (
                                 <div className="sm:col-span-2 text-[11px] text-amber-700">
-                                  Partial payment — the invoice stays open with Rp{" "}
-                                  {new Intl.NumberFormat("id-ID").format(Math.round((iv.outstanding ?? 0) - Number(pf.amount)))} remaining.
+                                  {t(
+                                    "Partial payment — the invoice stays open with Rp ",
+                                    "Pembayaran sebagian — faktur tetap terbuka dengan sisa Rp ",
+                                  )}
+                                  {new Intl.NumberFormat("id-ID").format(Math.round((iv.outstanding ?? 0) - Number(pf.amount)))}{t(" remaining.", ".")}
                                 </div>
                               )}
                             </div>
@@ -1341,13 +1433,13 @@ export default function ProjectDetailPage() {
           {canFinanceApprove && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider muted">
-                Issue invoice {invType === "final" ? "+ delivery order" : "(down-payment)"}
+                {t("Issue invoice", "Terbitkan faktur")} {invType === "final" ? t("+ delivery order", "+ surat jalan") : t("(down-payment)", "(down payment/DP)")}
               </div>
               <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
                 {([
-                  ["dp", "Down payment (before delivery)"],
-                  ["final", "Final invoice (after delivery)"],
-                ] as const).map(([k, label]) => (
+                  ["dp", t("Down payment (before delivery)", "Down payment (sebelum pengiriman)")],
+                  ["final", t("Final invoice (after delivery)", "Faktur final (setelah pengiriman)")],
+                ] as ["dp" | "final", string][]).map(([k, label]) => (
                   <button
                     key={k}
                     type="button"
@@ -1363,25 +1455,27 @@ export default function ProjectDetailPage() {
               </div>
               {invType === "final" && !p.qc_passed_at && (
                 <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                  Final invoice can only be issued after QC has passed. Use "Down payment"
-                  to bill before delivery, or wait for QC.
+                  {t(
+                    "Final invoice can only be issued after QC has passed. Use \"Down payment\" to bill before delivery, or wait for QC.",
+                    "Faktur final hanya bisa diterbitkan setelah QC lulus. Gunakan \"Down payment\" untuk menagih sebelum pengiriman, atau tunggu QC.",
+                  )}
                 </div>
               )}
               <div className={clsx(
                 "grid grid-cols-1 gap-2",
                 invType === "final" ? "sm:grid-cols-3" : "sm:grid-cols-2",
               )}>
-                <input className="input" placeholder="Amount (blank = quotation total)"
+                <input className="input" placeholder={t("Amount (blank = quotation total)", "Jumlah (kosong = total penawaran)")}
                   value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
                 <label className="block">
-                  <span className="block text-[10px] muted mb-1">Invoice file</span>
+                  <span className="block text-[10px] muted mb-1">{t("Invoice file", "File faktur")}</span>
                   <input type="file"
                     className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
                     onChange={(e) => setInvFile(e.target.files?.[0] ?? null)} />
                 </label>
                 {invType === "final" && (
                   <label className="block">
-                    <span className="block text-[10px] muted mb-1">Delivery-order file</span>
+                    <span className="block text-[10px] muted mb-1">{t("Delivery-order file", "File surat jalan")}</span>
                     <input type="file"
                       className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
                       onChange={(e) => setDoFile(e.target.files?.[0] ?? null)} />
@@ -1389,8 +1483,10 @@ export default function ProjectDetailPage() {
                 )}
               </div>
               <p className="text-[11px] muted">
-                Finance uploads the invoice here. Faktur pajak number is entered
-                by finance again during the approval step, not on upload.
+                {t(
+                  "Finance uploads the invoice here. Faktur pajak number is entered by finance again during the approval step, not on upload.",
+                  "Keuangan mengunggah faktur di sini. Nomor faktur pajak diisi keuangan lagi pada langkah persetujuan, bukan saat unggah.",
+                )}
               </p>
               <button className="btn-primary"
                 disabled={
@@ -1407,7 +1503,7 @@ export default function ProjectDetailPage() {
                   { onSuccess: () => { setInvAmount(""); setInvFile(null); setDoFile(null); } },
                 )}>
                 <FileText size={14} />
-                {invType === "dp" ? "Issue DP invoice" : "Issue invoice + DO"}
+                {invType === "dp" ? t("Issue DP invoice", "Terbitkan faktur DP") : t("Issue invoice + DO", "Terbitkan faktur + DO")}
               </button>
             </div>
           )}
@@ -1415,7 +1511,7 @@ export default function ProjectDetailPage() {
           {isAdmin && !p.customer_received_at && inv.some((iv: any) => iv.status === "approved") && (
             <button className="btn-ghost" disabled={customerReceived.isPending}
               onClick={() => customerReceived.mutate()}>
-              <CheckCircle size={14} /> Confirm customer received
+              <CheckCircle size={14} /> {t("Confirm customer received", "Konfirmasi pelanggan menerima")}
             </button>
           )}
         </div>
@@ -1427,22 +1523,22 @@ export default function ProjectDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
-            <Truck size={15} className="text-brand-600" /> Deliveries
+            <Truck size={15} className="text-brand-600" /> {t("Deliveries", "Pengiriman")}
           </div>
-          <div className="text-xs muted">{dos.length} shipment(s)</div>
+          <div className="text-xs muted">{dos.length} {t("shipment(s)", "kiriman")}</div>
         </div>
         {dos.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No deliveries yet.</div>
+          <div className="p-8 text-center muted text-sm">{t("No deliveries yet.", "Belum ada pengiriman.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
                 <th className="th">DO</th>
-                <th className="th">Split</th>
-                <th className="th">Courier</th>
-                <th className="th">Tracking</th>
+                <th className="th">{t("Split", "Bagian")}</th>
+                <th className="th">{t("Courier", "Kurir")}</th>
+                <th className="th">{t("Tracking", "Resi")}</th>
                 <th className="th">Status</th>
-                <th className="th text-right">Actions</th>
+                <th className="th text-right">{t("Actions", "Aksi")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1464,15 +1560,15 @@ export default function ProjectDetailPage() {
                         : (d.files ?? []).length > 0 ? "bg-amber-50 text-amber-700"
                         : "bg-ink-100 text-ink-700"
                       )}>
-                        {isDelivered ? "delivered"
-                          : isVerified ? "verified"
-                          : (d.files ?? []).length > 0 ? "awaiting verify"
-                          : "pending"}
+                        {isDelivered ? t("delivered", "terkirim")
+                          : isVerified ? t("verified", "terverifikasi")
+                          : (d.files ?? []).length > 0 ? t("awaiting verify", "menunggu verifikasi")
+                          : t("pending", "menunggu")}
                       </span>
                       {isVerified && (
                         <div className="text-[10px] muted">
-                          verified {new Date(d.verified_at).toLocaleDateString()}
-                          {d.verified_by_name && <> by {d.verified_by_name}</>}
+                          {t("verified", "diverifikasi")} {new Date(d.verified_at).toLocaleDateString()}
+                          {d.verified_by_name && <> {t("by", "oleh")} {d.verified_by_name}</>}
                         </div>
                       )}
                       {(d.files ?? []).length > 0 && (
@@ -1489,7 +1585,7 @@ export default function ProjectDetailPage() {
                       {isAdmin && !isDelivered && (
                         <details className="text-[11px]">
                           <summary className="cursor-pointer text-brand-700 hover:underline">
-                            {(d.files ?? []).length > 0 ? "Replace proof" : "Upload proof"}
+                            {(d.files ?? []).length > 0 ? t("Replace proof", "Ganti bukti") : t("Upload proof", "Unggah bukti")}
                           </summary>
                           <div className="mt-1.5 space-y-1.5 bg-ink-50/60 p-2 rounded">
                             <input type="file"
@@ -1498,13 +1594,13 @@ export default function ProjectDetailPage() {
                                 ...m, [d.id]: { ...proof, file: e.target.files?.[0] ?? null },
                               }))} />
                             <input className="input text-[11px] py-1"
-                              placeholder="Courier (optional)"
+                              placeholder={t("Courier (optional)", "Kurir (opsional)")}
                               defaultValue={d.courier ?? ""}
                               onChange={(e) => setDoProof((m) => ({
                                 ...m, [d.id]: { ...proof, courier: e.target.value },
                               }))} />
                             <input className="input text-[11px] py-1"
-                              placeholder="Tracking no. (optional)"
+                              placeholder={t("Tracking no. (optional)", "No. resi (opsional)")}
                               defaultValue={d.tracking_no ?? ""}
                               onChange={(e) => setDoProof((m) => ({
                                 ...m, [d.id]: { ...proof, tracking: e.target.value },
@@ -1516,7 +1612,7 @@ export default function ProjectDetailPage() {
                                   courier: proof.courier, tracking: proof.tracking },
                                 { onSuccess: () => setDoProof((m) => ({ ...m, [d.id]: {} })) },
                               )}>
-                              Upload — director will verify
+                              {t("Upload — director will verify", "Unggah — direktur akan verifikasi")}
                             </button>
                           </div>
                         </details>
@@ -1531,21 +1627,21 @@ export default function ProjectDetailPage() {
                             disabled={markDelivered.isPending || verifyDelivery.isPending}
                             onClick={() => markDelivered.mutate(d.id)}>
                             <CheckCircle size={13} />
-                            {isVerified ? "Mark delivered" : "Verify & mark delivered"}
+                            {isVerified ? t("Mark delivered", "Tandai terkirim") : t("Verify & mark delivered", "Verifikasi & tandai terkirim")}
                           </button>
                         ) : isVerified ? (
                           <button className="btn-ghost text-emerald-700"
                             disabled={markDelivered.isPending}
                             onClick={() => markDelivered.mutate(d.id)}>
-                            <CheckCircle size={13} /> Mark delivered
+                            <CheckCircle size={13} /> {t("Mark delivered", "Tandai terkirim")}
                           </button>
                         ) : (d.files ?? []).length === 0 ? (
                           // No proof uploaded yet — admin's next step is upload.
-                          <span className="muted text-xs">Upload proof to proceed</span>
+                          <span className="muted text-xs">{t("Upload proof to proceed", "Unggah bukti untuk lanjut")}</span>
                         ) : (
                           // Proof is in; just waiting on director to verify.
                           <span className="chip bg-amber-50 text-amber-700 text-[11px]">
-                            Awaiting director verification
+                            {t("Awaiting director verification", "Menunggu verifikasi direktur")}
                           </span>
                         )}
                     </td>
@@ -1564,19 +1660,19 @@ export default function ProjectDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
-            <Receipt size={15} className="text-brand-600" /> Invoices
+            <Receipt size={15} className="text-brand-600" /> {t("Invoices", "Faktur")}
           </div>
-          <div className="text-xs muted">{inv.length} invoice(s)</div>
+          <div className="text-xs muted">{inv.length} {t("invoice(s)", "faktur")}</div>
         </div>
         {inv.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No invoices yet.</div>
+          <div className="p-8 text-center muted text-sm">{t("No invoices yet.", "Belum ada faktur.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Number</th>
-                <th className="th">Type</th>
-                <th className="th">Due</th>
+                <th className="th">{t("Number", "Nomor")}</th>
+                <th className="th">{t("Type", "Tipe")}</th>
+                <th className="th">{t("Due", "Jatuh tempo")}</th>
                 <th className="th">Status</th>
                 {showMoney && <th className="th text-right">Total</th>}
               </tr>
@@ -1587,7 +1683,7 @@ export default function ProjectDetailPage() {
                   <td className="td font-mono text-xs">{i.number}</td>
                   <td className="td capitalize">{i.type}{i.termin_index ? ` #${i.termin_index}` : ""}</td>
                   <td className="td muted">{i.due_date ?? "—"}</td>
-                  <td className="td"><span className="chip bg-ink-100 text-ink-700">{i.status}</span></td>
+                  <td className="td"><span className="chip bg-ink-100 text-ink-700">{sl(i.status, INVOICE_STATUS_LABEL_ID)}</span></td>
                   {showMoney && (
                     <td className="td text-right font-medium tabular-nums">{idr(i.total)}</td>
                   )}
@@ -1605,24 +1701,24 @@ export default function ProjectDetailPage() {
         <div className="px-5 py-3 border-b border-ink-100 flex items-end justify-between gap-3 flex-wrap">
           <div>
             <div className="font-semibold flex items-center gap-2">
-              <Truck size={15} className="text-brand-600" /> Supplier purchase orders
+              <Truck size={15} className="text-brand-600" /> {t("Supplier purchase orders", "Purchase order ke supplier")}
             </div>
-            <div className="text-xs muted">{supplierPOs.length} PO(s) for this project</div>
+            <div className="text-xs muted">{supplierPOs.length} {t("PO(s) for this project", "PO untuk proyek ini")}</div>
           </div>
           <Link to="/purchase-orders" className="text-xs text-brand-700 hover:underline">
-            Open Purchasing PO →
+            {t("Open Purchasing PO →", "Buka PO Pembelian →")}
           </Link>
         </div>
         {supplierPOs.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No supplier POs yet for this project.</div>
+          <div className="p-8 text-center muted text-sm">{t("No supplier POs yet for this project.", "Belum ada PO supplier untuk proyek ini.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Number</th>
+                <th className="th">{t("Number", "Nomor")}</th>
                 <th className="th">Supplier</th>
-                <th className="th">PO date</th>
-                <th className="th">Lead</th>
+                <th className="th">{t("PO date", "Tanggal PO")}</th>
+                <th className="th">{t("Lead", "Lead")}</th>
                 <th className="th">Status</th>
                 {showMoney && <th className="th text-right">Total</th>}
               </tr>
@@ -1645,7 +1741,7 @@ export default function ProjectDetailPage() {
                       : po.status === "pending_approval" ? "bg-amber-50 text-amber-700"
                       : po.status === "cancelled" ? "bg-red-50 text-red-700"
                       : "bg-ink-100 text-ink-700")}>
-                      {(po.status ?? "").replace(/_/g, " ")}
+                      {sl(po.status ?? "", SUPPLIER_PO_STATUS_LABEL_ID)}
                     </span>
                   </td>
                   {showMoney && (
@@ -1667,16 +1763,16 @@ export default function ProjectDetailPage() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
-              <ShoppingCart size={15} className="text-brand-600" /> Purchase requests
+              <ShoppingCart size={15} className="text-brand-600" /> {t("Purchase requests", "Permintaan pembelian")}
             </div>
-            <div className="text-xs muted">{prs.length} PR(s) (legacy / inventory-raised)</div>
+            <div className="text-xs muted">{prs.length} {t("PR(s) (legacy / inventory-raised)", "PR (lama / dari inventori)")}</div>
           </div>
           <ul className="divide-y divide-ink-100">
             {prs.map((pr: any) => (
               <li key={pr.id} className="p-3 flex items-center gap-3">
                 <span className="font-mono text-xs">{pr.number}</span>
                 <span className="chip bg-ink-100 text-ink-700">{pr.status}</span>
-                <span className="text-xs muted">{(pr.items ?? []).length} item(s)</span>
+                <span className="text-xs muted">{(pr.items ?? []).length} {t("item(s)", "item")}</span>
                 <span className="ml-auto text-[11px] text-ink-400">
                   {new Date(pr.created_at).toLocaleDateString()}
                 </span>

@@ -3,14 +3,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useT, t as tt } from "@/store/lang";
 
-const FIELDS: { key: string; label: string }[] = [
-  { key: "est_ship_from_origin",      label: "Est. shipped from origin" },
-  { key: "act_ship_from_origin",      label: "Actual shipped from origin" },
-  { key: "est_arrive_our_warehouse",  label: "Est. arrival at our warehouse" },
-  { key: "act_arrive_our_warehouse",  label: "Actual arrival at our warehouse" },
-  { key: "est_arrive_customer",       label: "Est. arrival at customer's warehouse" },
-  { key: "act_arrive_customer",       label: "Actual arrival at customer's warehouse" },
+const FIELDS: { key: string; label: string; label_id: string }[] = [
+  { key: "est_ship_from_origin",      label: "Est. shipped from origin",               label_id: "Estimasi kirim dari asal" },
+  { key: "act_ship_from_origin",      label: "Actual shipped from origin",             label_id: "Aktual kirim dari asal" },
+  { key: "est_arrive_our_warehouse",  label: "Est. arrival at our warehouse",          label_id: "Estimasi tiba di gudang kami" },
+  { key: "act_arrive_our_warehouse",  label: "Actual arrival at our warehouse",        label_id: "Aktual tiba di gudang kami" },
+  { key: "est_arrive_customer",       label: "Est. arrival at customer's warehouse",   label_id: "Estimasi tiba di gudang pelanggan" },
+  { key: "act_arrive_customer",       label: "Actual arrival at customer's warehouse", label_id: "Aktual tiba di gudang pelanggan" },
 ];
 
 // Who may edit which shipping-timeline field.
@@ -36,6 +37,7 @@ function canEditField(role: string, key: string): boolean {
 export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
   const role = useAuthStore((s) => s.user?.role) ?? "";
+  const t = useT();
   const isDirector = role === "director";
   // is_import + origin location are metadata about the shipment as a whole;
   // purchasing books the leg from origin so they own those too. Admin
@@ -91,10 +93,16 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
       qc.invalidateQueries({ queryKey: ["project", projectId] });
       setFlash(data?.pending_approval ? {
         kind: "ok",
-        text: "Submitted to the director for approval — the dates apply once approved.",
+        text: tt(
+          "Submitted to the director for approval — the dates apply once approved.",
+          "Dikirim ke direktur untuk persetujuan — tanggal berlaku setelah disetujui.",
+        ),
       } : {
         kind: "ok",
-        text: "Saved. The customer can see the new dates immediately.",
+        text: tt(
+          "Saved. The customer can see the new dates immediately.",
+          "Tersimpan. Pelanggan langsung dapat melihat tanggal baru.",
+        ),
       });
     },
     onError: (e: any) => setFlash({
@@ -103,7 +111,7 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
         e?.response?.data?.errors?.[0]?.message
         ?? e?.response?.data?.detail
         ?? e?.message
-        ?? "Couldn't save timeline",
+        ?? tt("Couldn't save timeline", "Gagal menyimpan linimasa"),
     }),
   });
 
@@ -111,19 +119,25 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
     <div className="card p-5">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="font-semibold">Edit shipping timeline</div>
+          <div className="font-semibold">{t("Edit shipping timeline", "Ubah linimasa pengiriman")}</div>
           <div className="text-xs muted">
-            Visible to internal staff. The customer sees the same dates on
-            their portal — <b>you can save just the estimate</b>, no need to
-            wait for the actual arrival.
+            {t(
+              "Visible to internal staff. The customer sees the same dates on their portal — ",
+              "Terlihat oleh staf internal. Pelanggan melihat tanggal yang sama di portal mereka — ",
+            )}
+            <b>{t("you can save just the estimate", "Anda bisa menyimpan estimasinya saja")}</b>
+            {t(", no need to wait for the actual arrival.", ", tidak perlu menunggu kedatangan aktual.")}
             {!isDirector && (
-              <> Changes to shipping dates are sent to the director for approval.</>
+              <> {t(
+                "Changes to shipping dates are sent to the director for approval.",
+                "Perubahan tanggal pengiriman dikirim ke direktur untuk persetujuan.",
+              )}</>
             )}
           </div>
         </div>
         <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          Save
+          {t("Save", "Simpan")}
         </button>
       </div>
 
@@ -144,13 +158,13 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={isImport} onChange={(e) => setIsImport(e.target.checked)}
               className="h-4 w-4 rounded border-ink-300 text-brand-600" />
-            This is an international import
+            {t("This is an international import", "Ini impor internasional")}
           </label>
           <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">Origin location</span>
+            <span className="block text-xs font-medium text-ink-600 mb-1">{t("Origin location", "Lokasi asal")}</span>
             <input className="input" value={origin}
               onChange={(e) => setOrigin(e.target.value)}
-              placeholder="e.g. Shanghai, China" />
+              placeholder={t("e.g. Shanghai, China", "cth. Shanghai, Tiongkok")} />
           </label>
         </div>
       )}
@@ -161,10 +175,10 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
           return (
             <label key={f.key} className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">
-                {f.label}
+                {t(f.label, f.label_id)}
                 {!canEdit && (
                   <span className="ml-2 text-[10px] uppercase tracking-wider muted">
-                    read-only
+                    {t("read-only", "hanya baca")}
                   </span>
                 )}
               </span>
@@ -180,13 +194,21 @@ export function ShippingTimelineEditor({ projectId }: { projectId: string }) {
         })}
       </div>
       <div className="mt-3 text-[11px] muted">
-        Tip: blank fields are ignored on save (they don't erase existing dates).
-        Clearing a date you previously set: contact ops or use the API directly.
+        {t(
+          "Tip: blank fields are ignored on save (they don't erase existing dates). Clearing a date you previously set: contact ops or use the API directly.",
+          "Tips: kolom kosong diabaikan saat menyimpan (tidak menghapus tanggal yang sudah ada). Untuk mengosongkan tanggal yang pernah diisi: hubungi ops atau pakai API langsung.",
+        )}
         {role === "purchasing" && (
-          <> Purchasing edits the origin-shipment dates; arrival stamps are admin's job.</>
+          <> {t(
+            "Purchasing edits the origin-shipment dates; arrival stamps are admin's job.",
+            "Pembelian mengubah tanggal kirim dari asal; tanggal kedatangan adalah tugas admin.",
+          )}</>
         )}
         {role === "admin" && (
-          <> Admin owns the arrival legs — estimated and actual, at our warehouse and the customer's; origin-shipment dates are purchasing's.</>
+          <> {t(
+            "Admin owns the arrival legs — estimated and actual, at our warehouse and the customer's; origin-shipment dates are purchasing's.",
+            "Admin memegang tahap kedatangan — estimasi dan aktual, di gudang kami dan gudang pelanggan; tanggal kirim dari asal milik pembelian.",
+          )}</>
         )}
       </div>
     </div>
