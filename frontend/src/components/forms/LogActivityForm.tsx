@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 
 const TYPES = [
   "call", "presentation", "technical_meeting", "purchase_request",
@@ -9,12 +10,28 @@ const TYPES = [
   "email", "note",
 ];
 
+// Indonesian display labels for the activity type values. Display only —
+// the raw values are still what gets sent to the API.
+const TYPE_LABEL_ID: Record<string, string> = {
+  call: "telepon",
+  presentation: "presentasi",
+  technical_meeting: "meeting teknis",
+  purchase_request: "permintaan pembelian",
+  quotation_sent: "penawaran terkirim",
+  negotiation: "negosiasi",
+  follow_up: "tindak lanjut",
+  whatsapp_out: "WhatsApp keluar",
+  email: "email",
+  note: "catatan",
+};
+
 interface Props {
   customerId: string;
   onClose: () => void;
 }
 
 export function LogActivityForm({ customerId, onClose }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const [type, setType] = useState("call");
   const [direction, setDirection] = useState("outbound");
@@ -31,13 +48,17 @@ export function LogActivityForm({ customerId, onClose }: Props) {
       qc.invalidateQueries({ queryKey: ["approvals"] });
       // Sales follow-ups are held for director approval.
       if (data?.status === "pending_approval") {
-        setInfo(data?.message ?? "Follow-up sent to the director for approval.");
+        setInfo(data?.message ?? tt(
+          "Follow-up sent to the director for approval.",
+          "Tindak lanjut dikirim ke direktur untuk persetujuan.",
+        ));
         return;
       }
       onClose();
     },
     onError: (e: any) => {
-      setErr(e?.response?.data?.errors?.[0]?.message ?? "Failed to log activity");
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? tt("Failed to log activity", "Gagal mencatat aktivitas"));
     },
   });
 
@@ -47,25 +68,32 @@ export function LogActivityForm({ customerId, onClose }: Props) {
       className="space-y-4"
     >
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Type">
+        <Field label={t("Type", "Tipe")}>
           <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
-            {TYPES.map((t) => <option key={t}>{t}</option>)}
+            {TYPES.map((ty) => (
+              <option key={ty} value={ty}>
+                {t(ty.replace(/_/g, " "), TYPE_LABEL_ID[ty] ?? ty)}
+              </option>
+            ))}
           </select>
         </Field>
-        <Field label="Direction">
+        <Field label={t("Direction", "Arah")}>
           <select className="input" value={direction} onChange={(e) => setDirection(e.target.value)}>
-            <option value="outbound">outbound</option>
-            <option value="inbound">inbound</option>
-            <option value="internal">internal</option>
+            <option value="outbound">{t("outbound", "keluar")}</option>
+            <option value="inbound">{t("inbound", "masuk")}</option>
+            <option value="internal">{t("internal", "internal")}</option>
           </select>
         </Field>
       </div>
-      <Field label="Notes">
+      <Field label={t("Notes", "Catatan")}>
         <textarea
           className="input min-h-[100px]"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="What happened? Decisions, next steps…"
+          placeholder={t(
+            "What happened? Decisions, next steps…",
+            "Apa yang terjadi? Keputusan, langkah selanjutnya…",
+          )}
         />
       </Field>
 
@@ -83,13 +111,13 @@ export function LogActivityForm({ customerId, onClose }: Props) {
 
       <div className="flex justify-end gap-2">
         {info ? (
-          <button type="button" className="btn-primary" onClick={onClose}>Close</button>
+          <button type="button" className="btn-primary" onClick={onClose}>{t("Close", "Tutup")}</button>
         ) : (
           <>
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn-ghost" onClick={onClose}>{t("Cancel", "Batal")}</button>
             <button type="submit" className="btn-primary" disabled={create.isPending}>
               {create.isPending && <Loader2 size={14} className="animate-spin" />}
-              {create.isPending ? "Saving…" : "Save activity"}
+              {create.isPending ? t("Saving…", "Menyimpan…") : t("Save activity", "Simpan aktivitas")}
             </button>
           </>
         )}

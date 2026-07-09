@@ -178,6 +178,7 @@ function CreateForm({
   onCreated: (id: string) => void;
   initialCustomerId?: string;
 }) {
+  const t = useT();
   const [customerId, setCustomerId] = useState(initialCustomerId);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<any[]>([{ description: "", qty: 1, uom: "", spec: "" }]);
@@ -208,37 +209,37 @@ function CreateForm({
   return (
     <div className="card p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="font-semibold">New price request</div>
+        <div className="font-semibold">{t("New price request", "Permintaan harga baru")}</div>
         <button className="btn-ghost" onClick={onClose}><X size={15} /></button>
       </div>
       <div className="grid md:grid-cols-2 gap-3">
         <div>
-          <label className="block text-[11px] uppercase muted mb-1">Customer *</label>
+          <label className="block text-[11px] uppercase muted mb-1">{t("Customer", "Pelanggan")} *</label>
           <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-            <option value="">Select customer…</option>
+            <option value="">{t("Select customer…", "Pilih pelanggan…")}</option>
             {(customers.data ?? []).map((c: any) => (
               <option key={c.id} value={c.id}>{c.company_name}</option>
             ))}
           </select>
         </div>
         <div>
-          <label className="block text-[11px] uppercase muted mb-1">Notes</label>
-          <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
+          <label className="block text-[11px] uppercase muted mb-1">{t("Notes", "Catatan")}</label>
+          <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t("Optional", "Opsional")} />
         </div>
       </div>
 
       <div>
-        <div className="text-[11px] uppercase muted mb-1">Goods needed (no prices)</div>
+        <div className="text-[11px] uppercase muted mb-1">{t("Goods needed (no prices)", "Barang yang dibutuhkan (tanpa harga)")}</div>
         <div className="space-y-2">
           {items.map((it, i) => (
             <div key={i} className="flex gap-2 items-center">
-              <input className="input flex-1" placeholder="Description" value={it.description}
+              <input className="input flex-1" placeholder={t("Description", "Deskripsi")} value={it.description}
                 onChange={(e) => setItem(i, "description", e.target.value)} />
-              <input className="input w-20" type="number" placeholder="Qty" value={it.qty}
+              <input className="input w-20" type="number" placeholder={t("Qty", "Jml")} value={it.qty}
                 onChange={(e) => setItem(i, "qty", Number(e.target.value))} />
-              <input className="input w-24" placeholder="UoM" value={it.uom}
+              <input className="input w-24" placeholder={t("UoM", "Satuan")} value={it.uom}
                 onChange={(e) => setItem(i, "uom", e.target.value)} />
-              <input className="input flex-1" placeholder="Spec / notes" value={it.spec}
+              <input className="input flex-1" placeholder={t("Spec / notes", "Spesifikasi / catatan")} value={it.spec}
                 onChange={(e) => setItem(i, "spec", e.target.value)} />
               <button className="btn-ghost text-red-600"
                 onClick={() => setItems((arr) => arr.filter((_, idx) => idx !== i))}>
@@ -249,14 +250,14 @@ function CreateForm({
         </div>
         <button className="btn-ghost mt-2"
           onClick={() => setItems((a) => [...a, { description: "", qty: 1, uom: "", spec: "" }])}>
-          <Plus size={14} /> Add line
+          <Plus size={14} /> {t("Add line", "Tambah baris")}
         </button>
       </div>
 
       <div className="flex justify-end">
         <button className="btn-primary" disabled={!customerId || create.isPending}
           onClick={() => create.mutate()}>
-          {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create
+          {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {t("Create", "Buat")}
         </button>
       </div>
     </div>
@@ -264,6 +265,7 @@ function CreateForm({
 }
 
 function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; onBack: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const nav = useNavigate();
   const q = useQuery({
@@ -334,13 +336,15 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
           <select className="input w-[68px] px-1 text-xs" value={basis}
             onChange={(e) =>
               setVal(kind === "cost" ? { costBasis: e.target.value } : { sellBasis: e.target.value })}>
-            <option value="unit">/unit</option>
-            <option value="total">total</option>
+            <option value="unit">{t("/unit", "/satuan")}</option>
+            <option value="total">{t("total", "total")}</option>
           </select>
         </div>
         {amount != null && qty > 0 && (
           <span className="text-[10px] muted tabular-nums">
-            {basis === "total" ? `${idr(unit)} /unit` : `= ${idr(total)} total`}
+            {basis === "total"
+              ? `${idr(unit)} ${t("/unit", "/satuan")}`
+              : `= ${idr(total)} ${t("total", "total")}`}
           </span>
         )}
       </div>
@@ -350,14 +354,14 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const readCell = (unitPrice: any, lineTotal: any, qty: any) =>
     unitPrice == null ? "—" : (
       <div className="flex flex-col items-end leading-tight">
-        <span className="tabular-nums">{idr(unitPrice)} <span className="muted text-[10px]">/unit</span></span>
-        {Number(qty) > 1 && <span className="text-[10px] muted tabular-nums">{idr(lineTotal)} total</span>}
+        <span className="tabular-nums">{idr(unitPrice)} <span className="muted text-[10px]">{t("/unit", "/satuan")}</span></span>
+        {Number(qty) > 1 && <span className="text-[10px] muted tabular-nums">{idr(lineTotal)} {t("total", "total")}</span>}
       </div>
     );
 
-  if (q.isLoading) return <div className="muted text-sm">Loading…</div>;
+  if (q.isLoading) return <div className="muted text-sm">{t("Loading…", "Memuat…")}</div>;
   const pr = q.data;
-  if (!pr) return <div className="muted text-sm">Not found.</div>;
+  if (!pr) return <div className="muted text-sm">{t("Not found.", "Tidak ditemukan.")}</div>;
 
   const isPurchasing = role === "purchasing";
   const isDirector = role === "director";
@@ -368,7 +372,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
 
   return (
     <div className="space-y-5">
-      <button className="btn-ghost -ml-3" onClick={onBack}><ArrowLeft size={15} /> Back</button>
+      <button className="btn-ghost -ml-3" onClick={onBack}><ArrowLeft size={15} /> {t("Back", "Kembali")}</button>
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -408,7 +412,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 </>
               )}
               <span className={clsx("chip capitalize", STATUS_CHIP[pr.status] ?? "bg-ink-100")}>
-                {pr.status.replace(/_/g, " ")}
+                {sl(pr.status)}
               </span>
             </div>
             <div className="text-sm muted mt-1">{pr.customer_name}</div>
@@ -436,11 +440,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         <table className="w-full text-sm mt-4">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">#</th><th className="th">Description</th>
-              <th className="th text-right">Qty</th><th className="th">UoM</th>
-              <th className="th">Spec</th>
-              {pr.items?.[0] && "cost_price" in pr.items[0] && <th className="th text-right">Cost</th>}
-              {pr.items?.[0] && "sell_price" in pr.items[0] && <th className="th text-right">Sell</th>}
+              <th className="th">#</th><th className="th">{t("Description", "Deskripsi")}</th>
+              <th className="th text-right">{t("Qty", "Jml")}</th><th className="th">{t("UoM", "Satuan")}</th>
+              <th className="th">{t("Spec", "Spesifikasi")}</th>
+              {pr.items?.[0] && "cost_price" in pr.items[0] && <th className="th text-right">{t("Cost", "Biaya")}</th>}
+              {pr.items?.[0] && "sell_price" in pr.items[0] && <th className="th text-right">{t("Sell", "Jual")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -473,32 +477,32 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         {(canCost || canApprove || canSubmit) && (
           <div className="mt-4 flex items-center gap-2 flex-wrap">
             {(canCost || canApprove) && (
-              <input className="input flex-1 min-w-[200px]" placeholder="Notes (optional)"
+              <input className="input flex-1 min-w-[200px]" placeholder={t("Notes (optional)", "Catatan (opsional)")}
                 value={notes} onChange={(e) => setNotes(e.target.value)} />
             )}
             {canSubmit && (
               <button className="btn-primary" disabled={submit.isPending} onClick={() => submit.mutate()}>
-                <Send size={14} /> Submit to purchasing
+                <Send size={14} /> {t("Submit to purchasing", "Kirim ke pembelian")}
               </button>
             )}
             {canCost && (isPurchasing || isDirector) && (
               <button className="btn-primary" disabled={price.isPending} onClick={() => price.mutate()}>
-                <Check size={14} /> Submit costs
+                <Check size={14} /> {t("Submit costs", "Kirim biaya")}
               </button>
             )}
             {canApprove && (
               <button className="btn-primary" disabled={approve.isPending} onClick={() => approve.mutate()}>
-                <Check size={14} /> Set prices &amp; approve
+                <Check size={14} /> {t("Set prices & approve", "Tetapkan harga & setujui")}
               </button>
             )}
             {(isDirector || isPurchasing || role === "manager") && pr.status !== "approved" && pr.status !== "draft" && (
               <button className="btn-ghost text-red-600" disabled={reject.isPending} onClick={() => reject.mutate()}>
-                <X size={14} /> Send back
+                <X size={14} /> {t("Send back", "Kembalikan")}
               </button>
             )}
           </div>
         )}
-        {pr.decision_notes && <div className="mt-3 text-xs muted">Note: {pr.decision_notes}</div>}
+        {pr.decision_notes && <div className="mt-3 text-xs muted">{t("Note:", "Catatan:")} {pr.decision_notes}</div>}
       </div>
 
       {/* Spec sheets / customer RFQ files ride on the PR so purchasing can

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 
 interface Props {
   quotationId: string;
@@ -10,12 +11,13 @@ interface Props {
 }
 
 const CHANNELS = [
-  { value: "dashboard", label: "Dashboard" },
-  { value: "whatsapp",  label: "WhatsApp" },
-  { value: "email",     label: "Email" },
+  { value: "dashboard", label: "Dashboard", label_id: "Dasbor" },
+  { value: "whatsapp",  label: "WhatsApp",  label_id: "WhatsApp" },
+  { value: "email",     label: "Email",     label_id: "Email" },
 ];
 
 export function FollowupForm({ quotationId, customerId, onClose }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const [notes, setNotes] = useState("");
   const [scheduleNext, setScheduleNext] = useState(false);
@@ -47,13 +49,17 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
       // Sales follow-ups are held for director approval — keep the modal open
       // and show why nothing appeared in the timeline yet.
       if (data?.status === "pending_approval") {
-        setInfo(data?.message ?? "Follow-up sent to the director for approval.");
+        setInfo(data?.message ?? tt(
+          "Follow-up sent to the director for approval.",
+          "Tindak lanjut dikirim ke direktur untuk persetujuan.",
+        ));
         return;
       }
       onClose();
     },
     onError: (e: any) => {
-      setErr(e?.response?.data?.errors?.[0]?.message ?? "Failed to save follow-up");
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? tt("Failed to save follow-up", "Gagal menyimpan tindak lanjut"));
     },
   });
 
@@ -68,7 +74,8 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
       });
       if (r.data?.output) setNotes(r.data.output);
     } catch (e: any) {
-      setErr(e?.response?.data?.errors?.[0]?.message ?? "AI suggestion failed");
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? tt("AI suggestion failed", "Saran AI gagal"));
     } finally {
       setAiLoading(false);
     }
@@ -81,7 +88,7 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
     >
       <div>
         <div className="flex items-center justify-between mb-1">
-          <span className="block text-xs font-medium text-ink-600">Notes *</span>
+          <span className="block text-xs font-medium text-ink-600">{t("Notes *", "Catatan *")}</span>
           {customerId && (
             <button
               type="button"
@@ -90,7 +97,7 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
               className="btn-ghost text-xs"
             >
               {aiLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-              AI suggest
+              {t("AI suggest", "Saran AI")}
             </button>
           )}
         </div>
@@ -99,7 +106,10 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
           value={notes}
           required
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="What was discussed? Decisions, objections, next steps…"
+          placeholder={t(
+            "What was discussed? Decisions, objections, next steps…",
+            "Apa yang dibahas? Keputusan, keberatan, langkah selanjutnya…",
+          )}
         />
       </div>
 
@@ -112,24 +122,30 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
             onChange={(e) => setScheduleNext(e.target.checked)}
           />
           <div className="flex-1">
-            <div className="text-sm font-medium">Schedule next follow-up</div>
-            <div className="text-[11px] muted">Creates a reminder for the customer.</div>
+            <div className="text-sm font-medium">
+              {t("Schedule next follow-up", "Jadwalkan tindak lanjut berikutnya")}
+            </div>
+            <div className="text-[11px] muted">
+              {t("Creates a reminder for the customer.", "Membuat pengingat untuk pelanggan ini.")}
+            </div>
           </div>
         </label>
         {scheduleNext && (
           <div className="grid grid-cols-3 gap-2 mt-3">
             <div>
-              <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Date</span>
+              <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{t("Date", "Tanggal")}</span>
               <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div>
-              <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Time</span>
+              <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{t("Time", "Waktu")}</span>
               <input type="time" className="input" value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
             <div>
-              <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Channel</span>
+              <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{t("Channel", "Saluran")}</span>
               <select className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>
-                {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                {CHANNELS.map((c) => (
+                  <option key={c.value} value={c.value}>{t(c.label, c.label_id)}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -150,13 +166,13 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
 
       <div className="flex justify-end gap-2">
         {info ? (
-          <button type="button" className="btn-primary" onClick={onClose}>Close</button>
+          <button type="button" className="btn-primary" onClick={onClose}>{t("Close", "Tutup")}</button>
         ) : (
           <>
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn-ghost" onClick={onClose}>{t("Cancel", "Batal")}</button>
             <button type="submit" className="btn-primary" disabled={create.isPending}>
               {create.isPending && <Loader2 size={14} className="animate-spin" />}
-              {create.isPending ? "Saving…" : "Log follow-up"}
+              {create.isPending ? t("Saving…", "Menyimpan…") : t("Log follow-up", "Catat tindak lanjut")}
             </button>
           </>
         )}

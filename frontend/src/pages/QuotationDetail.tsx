@@ -441,32 +441,32 @@ export default function QuotationDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <Field label="Issued" icon={<Calendar size={13} />}>{Q.created_at?.slice?.(0,10) ?? "—"}</Field>
-          <Field label="Valid until" icon={<Calendar size={13} />}>
+          <Field label={t("Issued", "Diterbitkan")} icon={<Calendar size={13} />}>{Q.created_at?.slice?.(0,10) ?? "—"}</Field>
+          <Field label={t("Valid until", "Berlaku hingga")} icon={<Calendar size={13} />}>
             <ValidUntilCell
               value={Q.valid_until}
               canEdit={canEditMeta}
               onSave={(v) => patchMeta.mutate({ valid_until: v || null })}
             />
           </Field>
-          <Field label="Currency" icon={<Receipt size={13} />}>{Q.currency}</Field>
-          <Field label="Items" icon={<FileText size={13} />}>{(Q.items ?? []).length}</Field>
+          <Field label={t("Currency", "Mata uang")} icon={<Receipt size={13} />}>{Q.currency}</Field>
+          <Field label={t("Items", "Item")} icon={<FileText size={13} />}>{(Q.items ?? []).length}</Field>
         </div>
       </div>
 
       {/* Items + totals */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card lg:col-span-2 overflow-hidden">
-          <div className="px-5 py-3 border-b border-ink-100 font-semibold">Line items</div>
+          <div className="px-5 py-3 border-b border-ink-100 font-semibold">{t("Line items", "Item")}</div>
           <table className="w-full">
             <thead className="bg-ink-50/60">
               <tr>
                 <th className="th w-10">#</th>
-                <th className="th">Description</th>
-                <th className="th text-right">Qty</th>
-                <th className="th">UoM</th>
-                <th className="th text-right">Unit price</th>
-                <th className="th text-right">Line total</th>
+                <th className="th">{t("Description", "Deskripsi")}</th>
+                <th className="th text-right">{t("Qty", "Jml")}</th>
+                <th className="th">{t("UoM", "Satuan")}</th>
+                <th className="th text-right">{t("Unit price", "Harga satuan")}</th>
+                <th className="th text-right">{t("Line total", "Total baris")}</th>
               </tr>
             </thead>
             <tbody>
@@ -476,7 +476,7 @@ export default function QuotationDetailPage() {
                   <td className="td">
                     <div className="font-medium">{it.description}</div>
                     {it.source === "custom" && (
-                      <span className="chip bg-violet-50 text-violet-700 mt-1">custom</span>
+                      <span className="chip bg-violet-50 text-violet-700 mt-1">{t("custom", "kustom")}</span>
                     )}
                   </td>
                   <td className="td text-right tabular-nums">{Number(it.qty)}</td>
@@ -488,7 +488,7 @@ export default function QuotationDetailPage() {
                 </tr>
               ))}
               {!(Q.items ?? []).length && (
-                <tr><td colSpan={6} className="td text-center muted py-10">No items.</td></tr>
+                <tr><td colSpan={6} className="td text-center muted py-10">{t("No items.", "Tidak ada item.")}</td></tr>
               )}
             </tbody>
           </table>
@@ -496,7 +496,7 @@ export default function QuotationDetailPage() {
 
         <div className="card p-5 space-y-4">
           <div>
-            <div className="text-xs uppercase tracking-wider muted">Discount tier</div>
+            <div className="text-xs uppercase tracking-wider muted">{t("Discount tier", "Tingkat diskon")}</div>
             <div className="mt-1.5 flex items-center justify-between">
               <div className="text-2xl font-semibold tabular-nums">{Number(Q.discount_pct)}%</div>
               <span className={clsx("chip ring-1", TIER_META.cls)}>
@@ -506,17 +506,17 @@ export default function QuotationDetailPage() {
           </div>
 
           <div className="border-t border-ink-100 pt-4 space-y-1.5 text-sm">
-            <Row label="Subtotal" value={idr(Number(Q.subtotal))} />
-            <Row label={`Discount ${Number(Q.discount_pct)}%`} value={`− ${idr(Number(Q.discount_amount))}`} />
-            <Row label={`Tax ${Number(Q.tax_pct)}%`} value={idr(Number(Q.subtotal) - Number(Q.discount_amount)) === idr(Number(Q.total)) ? idr(0) : idr(Number(Q.total) - (Number(Q.subtotal) - Number(Q.discount_amount)))} />
+            <Row label={t("Subtotal", "Subtotal")} value={idr(Number(Q.subtotal))} />
+            <Row label={`${t("Discount", "Diskon")} ${Number(Q.discount_pct)}%`} value={`− ${idr(Number(Q.discount_amount))}`} />
+            <Row label={`${t("Tax", "Pajak")} ${Number(Q.tax_pct)}%`} value={idr(Number(Q.subtotal) - Number(Q.discount_amount)) === idr(Number(Q.total)) ? idr(0) : idr(Number(Q.total) - (Number(Q.subtotal) - Number(Q.discount_amount)))} />
             <div className="border-t border-ink-100 mt-2 pt-2 flex justify-between font-semibold text-base">
-              <span>Total</span>
+              <span>{t("Total", "Total")}</span>
               <span className="tabular-nums">{idr(Number(Q.total))}</span>
             </div>
           </div>
 
           {(submit.isPending || approve.isPending || reject.isPending || won.isPending || lost.isPending) && (
-            <div className="flex items-center gap-2 text-xs muted"><Loader2 size={12} className="animate-spin" /> Working…</div>
+            <div className="flex items-center gap-2 text-xs muted"><Loader2 size={12} className="animate-spin" /> {t("Working…", "Memproses…")}</div>
           )}
         </div>
       </div>
@@ -542,17 +542,18 @@ export default function QuotationDetailPage() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="font-semibold flex items-center gap-2">
-              <MessageCircle size={15} className="text-brand-600" /> Follow-ups
+              <MessageCircle size={15} className="text-brand-600" /> {t("Follow-ups", "Tindak lanjut")}
             </div>
             <div className="text-xs muted">
-              Conversations and reminders linked to this quotation.
+              {t("Conversations and reminders linked to this quotation.",
+                 "Percakapan dan pengingat yang terkait dengan penawaran ini.")}
             </div>
           </div>
           <button
             className="btn-primary"
             onClick={() => setOpenFollowup(true)}
           >
-            <Plus size={14} /> Log follow-up
+            <Plus size={14} /> {t("Log follow-up", "Catat tindak lanjut")}
           </button>
         </div>
 
@@ -560,7 +561,7 @@ export default function QuotationDetailPage() {
         {(followups.data?.reminders ?? []).length > 0 && (
           <div className="mb-4">
             <div className="text-[11px] uppercase tracking-wider muted mb-2 flex items-center gap-1">
-              <Bell size={11} /> Upcoming reminders
+              <Bell size={11} /> {t("Upcoming reminders", "Pengingat mendatang")}
             </div>
             <ul className="space-y-2">
               {(followups.data?.reminders ?? []).map((r: any) => {
@@ -597,10 +598,10 @@ export default function QuotationDetailPage() {
                       </div>
                       <div className="text-[11px] muted">
                         {due.toLocaleString()} · {r.channel}
-                        {overdue && <span className="ml-2 text-red-700 font-medium">OVERDUE</span>}
+                        {overdue && <span className="ml-2 text-red-700 font-medium">{t("OVERDUE", "TERLAMBAT")}</span>}
                         {blockedBeforeApproval && (
                           <span className="ml-2 text-amber-700 font-medium">
-                            Locked — quote not approved yet
+                            {t("Locked — quote not approved yet", "Terkunci — penawaran belum disetujui")}
                           </span>
                         )}
                       </div>
@@ -610,10 +611,11 @@ export default function QuotationDetailPage() {
                       onClick={() => completeReminder.mutate(r.id)}
                       disabled={completeReminder.isPending || blockedBeforeApproval}
                       title={blockedBeforeApproval
-                        ? "Quotation must be approved before it can be sent to the customer."
-                        : "Mark this reminder done"}
+                        ? t("Quotation must be approved before it can be sent to the customer.",
+                            "Penawaran harus disetujui sebelum dapat dikirim ke pelanggan.")
+                        : t("Mark this reminder done", "Tandai pengingat ini selesai")}
                     >
-                      <CheckCircle size={14} /> Done
+                      <CheckCircle size={14} /> {t("Done", "Selesai")}
                     </button>
                   </li>
                 );
@@ -624,12 +626,12 @@ export default function QuotationDetailPage() {
 
         {/* History */}
         <div className="text-[11px] uppercase tracking-wider muted mb-2 flex items-center gap-1">
-          <MessageCircle size={11} /> History
+          <MessageCircle size={11} /> {t("History", "Riwayat")}
         </div>
         {(followups.data?.activities ?? []).length === 0 ? (
           <div className="rounded-xl border border-dashed border-ink-200 p-6 text-center text-sm muted">
-            No follow-ups yet. Click "Log follow-up" to record what was discussed
-            and schedule the next touchpoint.
+            {t('No follow-ups yet. Click "Log follow-up" to record what was discussed and schedule the next touchpoint.',
+               'Belum ada tindak lanjut. Klik "Catat tindak lanjut" untuk mencatat apa yang dibahas dan menjadwalkan kontak berikutnya.')}
           </div>
         ) : (
           <ul className="space-y-2">
@@ -651,7 +653,7 @@ export default function QuotationDetailPage() {
                     <b>{a.type.replace(/_/g, " ")}</b>{" "}
                     <span className="muted">· {a.direction}</span>
                     {a.tagged && (
-                      <span className="ml-2 chip bg-brand-50 text-brand-700">linked to this quote</span>
+                      <span className="ml-2 chip bg-brand-50 text-brand-700">{t("linked to this quote", "terkait penawaran ini")}</span>
                     )}
                   </div>
                   {a.notes && (
@@ -670,7 +672,7 @@ export default function QuotationDetailPage() {
       {/* Notes */}
       {Q.notes && (
         <div className="card p-5">
-          <div className="font-semibold mb-2">Notes</div>
+          <div className="font-semibold mb-2">{t("Notes", "Catatan")}</div>
           <pre className="whitespace-pre-wrap text-sm text-ink-700 font-sans">{Q.notes}</pre>
         </div>
       )}
@@ -678,8 +680,11 @@ export default function QuotationDetailPage() {
       <Modal
         open={openFollowup}
         onClose={() => setOpenFollowup(false)}
-        title="Log follow-up"
-        subtitle={`Record what happened and (optionally) schedule the next touchpoint for ${Q.number}.`}
+        title={t("Log follow-up", "Catat tindak lanjut")}
+        subtitle={t(
+          `Record what happened and (optionally) schedule the next touchpoint for ${Q.number}.`,
+          `Catat apa yang terjadi dan (opsional) jadwalkan kontak berikutnya untuk ${Q.number}.`,
+        )}
         size="lg"
       >
         <FollowupForm
@@ -692,8 +697,11 @@ export default function QuotationDetailPage() {
       <Modal
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        title={`Edit ${Q.number}`}
-        subtitle="Adjust the details or line items — re-import from a file if you like. Changes are saved as a draft."
+        title={`${t("Edit", "Edit")} ${Q.number}`}
+        subtitle={t(
+          "Adjust the details or line items — re-import from a file if you like. Changes are saved as a draft.",
+          "Sesuaikan detail atau item — impor ulang dari file jika mau. Perubahan disimpan sebagai draft.",
+        )}
         size="xl"
       >
         <NewQuotationForm quote={Q} onClose={() => setEditOpen(false)} />
@@ -702,35 +710,42 @@ export default function QuotationDetailPage() {
       <Modal
         open={lostOpen}
         onClose={() => setLostOpen(false)}
-        title="Mark quotation as lost"
-        subtitle={`Tell us why ${Q.number} didn't close — write as much detail as you like.`}
+        title={t("Mark quotation as lost", "Tandai penawaran kalah")}
+        subtitle={t(
+          `Tell us why ${Q.number} didn't close — write as much detail as you like.`,
+          `Ceritakan mengapa ${Q.number} tidak berhasil — tulis sedetail yang Anda mau.`,
+        )}
         size="md"
       >
         <div className="space-y-3">
           <label className="block">
             <span className="block text-xs font-medium text-ink-600 mb-1">
-              Reason it was lost <span className="text-red-500">*</span>
+              {t("Reason it was lost", "Alasan kalah")} <span className="text-red-500">*</span>
             </span>
             <textarea
               className="input min-h-[120px]"
               autoFocus
               value={lostReason}
               onChange={(e) => setLostReason(e.target.value)}
-              placeholder="e.g. Lost on price — competitor came in 12% lower. Customer also wanted a 45-day lead time we couldn't meet…"
+              placeholder={t(
+                "e.g. Lost on price — competitor came in 12% lower. Customer also wanted a 45-day lead time we couldn't meet…",
+                "cth. Kalah harga — pesaing 12% lebih murah. Pelanggan juga minta lead time 45 hari yang tak bisa kami penuhi…",
+              )}
             />
             <span className="block text-[11px] text-ink-400 mt-1">
-              This is saved on the quotation and feeds the Lost-deal report.
+              {t("This is saved on the quotation and feeds the Lost-deal report.",
+                 "Ini disimpan pada penawaran dan menjadi sumber laporan penawaran kalah.")}
             </span>
           </label>
           <div className="flex justify-end gap-2">
-            <button className="btn-ghost" onClick={() => setLostOpen(false)}>Cancel</button>
+            <button className="btn-ghost" onClick={() => setLostOpen(false)}>{t("Cancel", "Batal")}</button>
             <button
               className="btn-danger"
               disabled={lost.isPending || !lostReason.trim()}
               onClick={() => lost.mutate(lostReason.trim())}
             >
               {lost.isPending ? <Loader2 size={14} className="animate-spin" /> : <Frown size={14} />}
-              Mark lost
+              {t("Mark lost", "Tandai kalah")}
             </button>
           </div>
         </div>
@@ -746,6 +761,7 @@ function ValidUntilCell({
   canEdit: boolean;
   onSave: (v: string) => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
   // Snap the editor's draft to the latest server value when we leave
@@ -766,13 +782,13 @@ function ValidUntilCell({
           className="text-brand-700 text-xs font-medium hover:underline"
           onClick={() => { onSave(draft); setEditing(false); }}
         >
-          save
+          {t("save", "simpan")}
         </button>
         <button
           className="text-ink-500 text-xs hover:underline"
           onClick={() => setEditing(false)}
         >
-          cancel
+          {t("cancel", "batal")}
         </button>
       </div>
     );
@@ -781,10 +797,10 @@ function ValidUntilCell({
     <button
       type="button"
       className="text-brand-700 hover:underline"
-      title="Click to edit"
+      title={t("Click to edit", "Klik untuk mengedit")}
       onClick={() => setEditing(true)}
     >
-      {value ?? "set date"}
+      {value ?? t("set date", "atur tanggal")}
     </button>
   );
 }

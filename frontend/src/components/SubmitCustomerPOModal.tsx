@@ -4,6 +4,7 @@ import {
   Loader2, CheckCircle2, AlertCircle, Upload, Paperclip,
 } from "lucide-react";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -45,6 +46,7 @@ interface Props {
 export function SubmitCustomerPOModal({
   customerId, preselectQuotationId, onClose, onCreated,
 }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const today = new Date().toISOString().slice(0, 10);
 
