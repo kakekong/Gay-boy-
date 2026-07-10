@@ -681,7 +681,7 @@ export default function CustomerDetailPage() {
                 <tr key={i.id} className="border-t border-ink-100">
                   <td className="td font-mono text-xs">{i.number}</td>
                   <td className="td capitalize muted">
-                    {i.type}{i.termin_index ? ` #${i.termin_index}` : ""}
+                    {sl(i.type)}{i.termin_index ? ` #${i.termin_index}` : ""}
                   </td>
                   <td className="td muted">{i.issue_date ?? "—"}</td>
                   <td className="td muted">{i.due_date ?? "—"}</td>
@@ -1145,10 +1145,10 @@ function StageChecklistRow({
               isOverdue ? "text-red-700 font-medium" : "muted",
             )}
           >
-            <Clock size={11} /> Due {dueLabel}
+            <Clock size={11} /> {t("Due", "Tenggat")} {dueLabel}
           </span>
           {item.status === "done" && (
-            <span className="text-emerald-700">Completed</span>
+            <span className="text-emerald-700">{t("Completed", "Selesai")}</span>
           )}
           {!editing && (
             <button
@@ -1156,15 +1156,15 @@ function StageChecklistRow({
               className="text-brand-700 hover:underline"
               onClick={() => setEditing(true)}
             >
-              {item.note ? "Edit note" : "+ Note / change due"}
+              {item.note ? t("Edit note", "Ubah catatan") : t("+ Note / change due", "+ Catatan / ubah tenggat")}
             </button>
           )}
           <Link
             to={`/calendar`}
             className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-            title="See this reminder on the calendar"
+            title={t("See this reminder on the calendar", "Lihat pengingat ini di kalender")}
           >
-            <CalendarDays size={11} /> On calendar
+            <CalendarDays size={11} /> {t("On calendar", "Di kalender")}
           </Link>
         </div>
       </div>
@@ -1174,9 +1174,9 @@ function StageChecklistRow({
           disabled={busy}
           onClick={() => onReopen(item.key)}
           className="btn-ghost text-xs"
-          title="Reopen task"
+          title={t("Reopen task", "Buka lagi tugas")}
         >
-          <RotateCcw size={12} /> Reopen
+          <RotateCcw size={12} /> {t("Reopen", "Buka lagi")}
         </button>
       )}
     </li>
@@ -1190,6 +1190,8 @@ function StageStepper({
   onMove: (stage: string) => void;
   busy: boolean;
 }) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   const stages = STAGE_ORDER;
   const idx = stages.indexOf(current as any);
   return (
@@ -1197,11 +1199,13 @@ function StageStepper({
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <ListChecks size={15} /> Deal pipeline
+            <ListChecks size={15} /> {t("Deal pipeline", "Pipeline deal")}
           </div>
           <div className="text-xs muted">
-            Click any stage to move the deal there. Each move auto-creates the
-            required checklist for that stage.
+            {t(
+              "Click any stage to move the deal there. Each move auto-creates the required checklist for that stage.",
+              "Klik tahap mana pun untuk memindahkan deal ke sana. Setiap perpindahan otomatis membuat daftar periksa wajib tahap itu."
+            )}
           </div>
         </div>
         {idx >= 0 && idx < stages.length - 1 && (
@@ -1210,7 +1214,7 @@ function StageStepper({
             disabled={busy}
             onClick={() => onMove(stages[idx + 1])}
           >
-            Advance to {stages[idx + 1].replace(/_/g, " ")} <ChevronRight size={14} />
+            {t("Advance to", "Lanjut ke")} {sl(stages[idx + 1])} <ChevronRight size={14} />
           </button>
         )}
       </div>
@@ -1232,9 +1236,9 @@ function StageStepper({
                     ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                     : "bg-white text-ink-600 border-ink-200 hover:border-brand-300 hover:text-brand-700",
                 )}
-                title={`Move to ${s.replace(/_/g, " ")}`}
+                title={t(`Move to ${s.replace(/_/g, " ")}`, `Pindah ke ${LABEL_ID[s] ?? s.replace(/_/g, " ")}`)}
               >
-                <div className="capitalize leading-tight">{s.replace(/_/g, " ")}</div>
+                <div className="capitalize leading-tight">{sl(s)}</div>
               </button>
               {i < stages.length - 1 && (
                 <ChevronRight
@@ -1253,7 +1257,7 @@ function StageStepper({
           onClick={() => onMove("closed_won")}
           className="chip bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
         >
-          Mark won
+          {t("Mark won", "Tandai menang")}
         </button>
         <button
           type="button"
@@ -1261,7 +1265,7 @@ function StageStepper({
           onClick={() => onMove("closed_lost")}
           className="chip bg-red-50 text-red-700 hover:bg-red-100"
         >
-          Mark lost
+          {t("Mark lost", "Tandai kalah")}
         </button>
       </div>
     </div>
@@ -1269,68 +1273,70 @@ function StageStepper({
 }
 
 function StageActions({ stage, customerId }: { stage: string; customerId: string }) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   // Stage-specific shortcuts to other modules
   const actions: { label: string; hint: string; to: string; icon: any }[] = [];
   switch (stage) {
     case "quotation":
     case "negotiation":
       actions.push({
-        label: "View all quotations",
-        hint: "Scroll down to draft, send, or follow up",
+        label: t("View all quotations", "Lihat semua penawaran"),
+        hint: t("Scroll down to draft, send, or follow up", "Gulir ke bawah untuk membuat draf, mengirim, atau menindaklanjuti"),
         to: "#quotations",
         icon: FileText,
       });
       break;
     case "po":
       actions.push({
-        label: "Upload signed PO",
-        hint: "Drop the PDF on Attachments below",
+        label: t("Upload signed PO", "Unggah PO yang ditandatangani"),
+        hint: t("Drop the PDF on Attachments below", "Letakkan PDF di Lampiran di bawah"),
         to: "#attachments",
         icon: Receipt,
       });
       actions.push({
-        label: "Create project",
-        hint: "Open Operations to spawn the project",
+        label: t("Create project", "Buat proyek"),
+        hint: t("Open Operations to spawn the project", "Buka Operasional untuk membuat proyeknya"),
         to: "/operation",
         icon: Briefcase,
       });
       break;
     case "drawing":
       actions.push({
-        label: "Open project drawings",
-        hint: "Submit drawings for customer approval",
+        label: t("Open project drawings", "Buka gambar proyek"),
+        hint: t("Submit drawings for customer approval", "Ajukan gambar untuk persetujuan pelanggan"),
         to: "/projects",
         icon: FileText,
       });
       break;
     case "purchasing":
       actions.push({
-        label: "Open Purchasing",
-        hint: "Raise a PR, issue RFQs, place a PO",
+        label: t("Open Purchasing", "Buka Pembelian"),
+        hint: t("Raise a PR, issue RFQs, place a PO", "Ajukan PR, terbitkan RFQ, tempatkan PO"),
         to: "/purchasing",
         icon: ShoppingCart,
       });
       break;
     case "delivery":
       actions.push({
-        label: "Update shipping timeline",
-        hint: "Origin → our warehouse → customer arrival",
+        label: t("Update shipping timeline", "Perbarui linimasa pengiriman"),
+        hint: t("Origin → our warehouse → customer arrival", "Asal → gudang kami → tiba di pelanggan"),
         to: "/projects",
         icon: Truck,
       });
       break;
     case "invoicing":
       actions.push({
-        label: "Open Finance",
-        hint: "Issue invoice from this customer's wins",
+        label: t("Open Finance", "Buka Keuangan"),
+        hint: t("Issue invoice from this customer's wins", "Terbitkan faktur dari kemenangan pelanggan ini"),
         to: "/finance",
         icon: Banknote,
       });
       break;
     case "payment":
       actions.push({
-        label: "Open Payment verification",
-        hint: "Match customer payments to invoices",
+        label: t("Open Payment verification", "Buka Verifikasi pembayaran"),
+        hint: t("Match customer payments to invoices", "Cocokkan pembayaran pelanggan dengan faktur"),
         to: "/finance/payment-verification",
         icon: Banknote,
       });
@@ -1342,9 +1348,9 @@ function StageActions({ stage, customerId }: { stage: string; customerId: string
   return (
     <div className="card p-4 lg:p-5">
       <div className="font-semibold flex items-center gap-2 mb-2">
-        <Building size={15} /> What to do in this stage
+        <Building size={15} /> {t("What to do in this stage", "Yang harus dilakukan di tahap ini")}
         <span className="chip bg-ink-100 text-ink-700 capitalize">
-          {stage.replace(/_/g, " ")}
+          {sl(stage)}
         </span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -1371,8 +1377,10 @@ function StageActions({ stage, customerId }: { stage: string; customerId: string
         })}
       </div>
       <p className="text-[11px] muted mt-2">
-        Reference for customer {customerId.slice(0, 8)} — open the module above
-        to take stage-specific actions.
+        {t("Reference for customer", "Referensi untuk pelanggan")} {customerId.slice(0, 8)} {t(
+          "— open the module above to take stage-specific actions.",
+          "— buka modul di atas untuk melakukan tindakan khusus tahap ini."
+        )}
       </p>
     </div>
   );
@@ -1388,6 +1396,8 @@ function StageMoveRequestModal({
   onClose: () => void;
   onSubmitted: (filesAttached: number) => void;
 }) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   const [reason, setReason] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -1411,7 +1421,7 @@ function StageMoveRequestModal({
       setErr(e?.response?.data?.errors?.[0]?.message
         ?? e?.response?.data?.detail
         ?? e?.message
-        ?? "Couldn't submit request"),
+        ?? tt("Couldn't submit request", "Gagal mengirim permintaan")),
   });
 
   return (
@@ -1421,19 +1431,20 @@ function StageMoveRequestModal({
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <ListChecks size={17} />
-            Request stage move
+            {t("Request stage move", "Ajukan perpindahan tahap")}
           </h2>
           <p className="text-sm muted mt-1">
             <span className="font-medium text-ink-900">{customerName}</span>
             <span className="muted"> · </span>
-            <span className="chip bg-ink-100 text-ink-700 capitalize">{fromStage.replace(/_/g, " ")}</span>
+            <span className="chip bg-ink-100 text-ink-700 capitalize">{sl(fromStage)}</span>
             <ChevronRight size={12} className="inline -mt-0.5 mx-0.5 text-ink-400" />
-            <span className="chip bg-brand-50 text-brand-700 capitalize">{toStage.replace(/_/g, " ")}</span>
+            <span className="chip bg-brand-50 text-brand-700 capitalize">{sl(toStage)}</span>
           </p>
           <p className="text-xs muted mt-2">
-            A manager or director will see this request in their Approvals
-            inbox. Either of them needs to click Approve before the stage
-            actually moves.
+            {t(
+              "A manager or director will see this request in their Approvals inbox. Either of them needs to click Approve before the stage actually moves.",
+              "Manajer atau direktur akan melihat permintaan ini di kotak masuk Persetujuan mereka. Salah satunya harus mengklik Setujui sebelum tahap benar-benar berpindah."
+            )}
           </p>
         </header>
 
@@ -1443,7 +1454,7 @@ function StageMoveRequestModal({
         >
           <label className="block">
             <span className="block text-xs font-medium text-ink-600 mb-1">
-              Why this move? *
+              {t("Why this move? *", "Mengapa pindah? *")}
             </span>
             <textarea
               required
@@ -1453,19 +1464,31 @@ function StageMoveRequestModal({
               onChange={(e) => setReason(e.target.value)}
               placeholder={
                 toStage === "po"
-                  ? "Customer signed the PO. PO number, amount, terms attached."
+                  ? t(
+                      "Customer signed the PO. PO number, amount, terms attached.",
+                      "Pelanggan menandatangani PO. Nomor PO, jumlah, dan syarat terlampir."
+                    )
                   : toStage === "negotiation"
-                  ? "Customer wants 10% off. I think 7% is defensible — see comparison attached."
+                  ? t(
+                      "Customer wants 10% off. I think 7% is defensible — see comparison attached.",
+                      "Pelanggan minta diskon 10%. Menurut saya 7% masih wajar — lihat perbandingan terlampir."
+                    )
                   : toStage === "quotation"
-                  ? "Tech spec finalized. Sending the quote at IDR 850M, 30-day terms."
-                  : `Tell the manager/director what's pushing this deal into "${toStage.replace(/_/g, " ")}" — be specific.`
+                  ? t(
+                      "Tech spec finalized. Sending the quote at IDR 850M, 30-day terms.",
+                      "Spesifikasi teknis final. Mengirim penawaran Rp 850 juta, termin 30 hari."
+                    )
+                  : t(
+                      `Tell the manager/director what's pushing this deal into "${toStage.replace(/_/g, " ")}" — be specific.`,
+                      `Jelaskan ke manajer/direktur apa yang mendorong deal ini masuk ke "${LABEL_ID[toStage] ?? toStage.replace(/_/g, " ")}" — spesifik.`
+                    )
               }
             />
           </label>
 
           <div>
             <span className="block text-xs font-medium text-ink-600 mb-1">
-              Supporting files (optional)
+              {t("Supporting files (optional)", "Berkas pendukung (opsional)")}
             </span>
             <input
               type="file"
@@ -1484,8 +1507,10 @@ function StageMoveRequestModal({
               </ul>
             )}
             <div className="text-[11px] muted mt-1">
-              Attach signed POs, PDFs, drawings, anything that helps the
-              manager/director decide. Max 20 MB per file.
+              {t(
+                "Attach signed POs, PDFs, drawings, anything that helps the manager/director decide. Max 20 MB per file.",
+                "Lampirkan PO bertanda tangan, PDF, gambar, apa pun yang membantu manajer/direktur memutuskan. Maks 20 MB per berkas."
+              )}
             </div>
           </div>
 
@@ -1498,7 +1523,7 @@ function StageMoveRequestModal({
 
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" className="btn-ghost" onClick={onClose}>
-              Cancel
+              {t("Cancel", "Batal")}
             </button>
             <button
               type="submit"
@@ -1508,7 +1533,7 @@ function StageMoveRequestModal({
               {submit.isPending
                 ? <Loader2 size={14} className="animate-spin" />
                 : <ChevronRight size={14} />}
-              Send for approval
+              {t("Send for approval", "Kirim untuk persetujuan")}
             </button>
           </div>
         </form>
@@ -1543,6 +1568,8 @@ const POSTATUS: Record<string, string> = {
 };
 
 function CustomerPOsSection({ customerId }: { customerId: string }) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   const q = useQuery({
     queryKey: ["customer-pos", customerId],
     queryFn: () =>
@@ -1562,9 +1589,9 @@ function CustomerPOsSection({ customerId }: { customerId: string }) {
       <div className="card p-5 text-sm text-red-700 flex items-start gap-2">
         <AlertCircle size={16} className="mt-0.5 shrink-0" />
         <div>
-          Couldn't load purchase orders.
+          {t("Couldn't load purchase orders.", "Gagal memuat purchase order.")}
           <div className="text-xs muted mt-0.5">
-            {(q.error as any)?.response?.data?.detail ?? "Request failed"}
+            {(q.error as any)?.response?.data?.detail ?? t("Request failed", "Permintaan gagal")}
           </div>
         </div>
       </div>
@@ -1579,37 +1606,39 @@ function CustomerPOsSection({ customerId }: { customerId: string }) {
       <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Truck size={15} className="text-brand-600" /> Supplier POs (outbound)
+            <Truck size={15} className="text-brand-600" /> {t("Supplier POs (outbound)", "PO Pemasok (keluar)")}
           </div>
           <div className="text-xs muted">
-            POs we issued to our suppliers for this customer's projects,
-            with the sales rep who owns each deal.
+            {t(
+              "POs we issued to our suppliers for this customer's projects, with the sales rep who owns each deal.",
+              "PO yang kami terbitkan ke pemasok untuk proyek pelanggan ini, beserta sales pemilik tiap deal."
+            )}
           </div>
         </div>
         <div className="text-[10px] uppercase tracking-wider muted">
-          {rows.length} PO{rows.length === 1 ? "" : "s"} · {idr(total)}
+          {rows.length} {t(`PO${rows.length === 1 ? "" : "s"}`, "PO")} · {idr(total)}
         </div>
       </header>
 
       {q.isLoading ? (
         <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading…
+          <Loader2 size={14} className="animate-spin" /> {t("Loading…", "Memuat…")}
         </div>
       ) : !rows.length ? (
         <div className="p-8 text-center text-sm muted">
-          No purchase orders yet for this customer.
+          {t("No purchase orders yet for this customer.", "Belum ada purchase order untuk pelanggan ini.")}
         </div>
       ) : (
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">PO number</th>
-              <th className="th">Supplier</th>
-              <th className="th">Project</th>
-              <th className="th">Sales rep</th>
-              <th className="th">PO date</th>
-              <th className="th">Status</th>
-              <th className="th text-right">Total</th>
+              <th className="th">{t("PO number", "Nomor PO")}</th>
+              <th className="th">{t("Supplier", "Pemasok")}</th>
+              <th className="th">{t("Project", "Proyek")}</th>
+              <th className="th">{t("Sales rep", "Sales")}</th>
+              <th className="th">{t("PO date", "Tanggal PO")}</th>
+              <th className="th">{t("Status", "Status")}</th>
+              <th className="th text-right">{t("Total", "Total")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1632,7 +1661,7 @@ function CustomerPOsSection({ customerId }: { customerId: string }) {
                     "chip capitalize",
                     POSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
                   )}>
-                    {p.status.replace(/_/g, " ")}
+                    {sl(p.status)}
                   </span>
                 </td>
                 <td className="td text-right tabular-nums">{idr(p.total)}</td>
@@ -1677,6 +1706,8 @@ const CPOSTATUS: Record<string, string> = {
 };
 
 function IncomingCustomerPOsSection({ customerId }: { customerId: string }) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   const [open, setOpen] = useState(false);
 
   const q = useQuery({
@@ -1694,37 +1725,38 @@ function IncomingCustomerPOsSection({ customerId }: { customerId: string }) {
       <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Receipt size={15} className="text-brand-600" /> Customer POs (incoming)
+            <Receipt size={15} className="text-brand-600" /> {t("Customer POs (incoming)", "PO Pelanggan (masuk)")}
           </div>
           <div className="text-xs muted max-w-xl leading-relaxed mt-0.5">
-            The signed POs the customer sent us. Each one needs director
-            approval; approving one creates the project automatically and
-            sets the project's PO number and date.
+            {t(
+              "The signed POs the customer sent us. Each one needs director approval; approving one creates the project automatically and sets the project's PO number and date.",
+              "PO bertanda tangan yang dikirim pelanggan kepada kami. Masing-masing perlu persetujuan direktur; menyetujui satu akan otomatis membuat proyek dan mengisi nomor serta tanggal PO proyeknya."
+            )}
           </div>
         </div>
         <button className="btn-primary" onClick={() => setOpen(true)}>
-          <Plus size={14} /> Submit customer PO
+          <Plus size={14} /> {t("Submit customer PO", "Ajukan PO pelanggan")}
         </button>
       </header>
 
       {q.isLoading ? (
         <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading…
+          <Loader2 size={14} className="animate-spin" /> {t("Loading…", "Memuat…")}
         </div>
       ) : !rows.length ? (
         <div className="p-8 text-center text-sm muted">
-          No customer POs yet for this customer.
+          {t("No customer POs yet for this customer.", "Belum ada PO pelanggan untuk pelanggan ini.")}
         </div>
       ) : (
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">PO number</th>
-              <th className="th">PO date</th>
-              <th className="th">From quotation</th>
-              <th className="th">Project</th>
-              <th className="th">Status</th>
-              <th className="th text-right">Total</th>
+              <th className="th">{t("PO number", "Nomor PO")}</th>
+              <th className="th">{t("PO date", "Tanggal PO")}</th>
+              <th className="th">{t("From quotation", "Dari penawaran")}</th>
+              <th className="th">{t("Project", "Proyek")}</th>
+              <th className="th">{t("Status", "Status")}</th>
+              <th className="th text-right">{t("Total", "Total")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1751,7 +1783,7 @@ function IncomingCustomerPOsSection({ customerId }: { customerId: string }) {
                     "chip capitalize",
                     CPOSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
                   )}>
-                    {p.status.replace(/_/g, " ")}
+                    {sl(p.status)}
                   </span>
                 </td>
                 <td className="td text-right tabular-nums">{idr(p.total)}</td>
