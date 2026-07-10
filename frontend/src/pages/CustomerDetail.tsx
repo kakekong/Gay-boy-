@@ -168,6 +168,14 @@ export default function CustomerDetailPage() {
   });
   const [stageFlash, setStageFlash] = useState<{ kind: "ok" | "wait" | "err"; text: string } | null>(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  // Clicking a stage the deal already passed shows the notes written when
+  // it moved through — the reasons from stage-move requests + direct moves.
+  const [historyStage, setHistoryStage] = useState<string | null>(null);
+  const stageHistory = useQuery({
+    queryKey: ["customer-stage-history", id],
+    queryFn: () => api.get(`/customers/${id}/stage-history`).then((r) => r.data as any[]),
+    enabled: !!id,
+  });
   // Director moves apply instantly with the direct PATCH; everyone else
   // opens the StageMoveRequestModal to provide reason + files.
   const moveStage = useMutation({
@@ -633,12 +641,34 @@ export default function CustomerDetailPage() {
         </div>
       )}
 
-      {/* Stage stepper — click any stage to move the customer there */}
+      {/* Stage stepper — click a future stage to move the customer there;
+          click a PAST stage to read the notes written when the deal moved
+          through it (with the option to move back). */}
       <StageStepper
         current={c.stage}
         onMove={(s) => onStagePicked(s)}
+        onShowHistory={(s) => setHistoryStage(s)}
         busy={moveStage.isPending}
       />
+
+      {historyStage && (
+        <Modal
+          open={!!historyStage}
+          onClose={() => setHistoryStage(null)}
+          title={`${t("Stage notes", "Catatan tahap")} — ${keyLabel(t, historyStage)}`}
+        >
+          <StageHistoryPanel
+            stage={historyStage}
+            entries={stageHistory.data ?? []}
+            loading={stageHistory.isLoading}
+            onMoveBack={() => {
+              const s = historyStage;
+              setHistoryStage(null);
+              if (s) onStagePicked(s);
+            }}
+          />
+        </Modal>
+      )}
 
       {/* Stage-specific quick actions */}
       <StageActions stage={c.stage} customerId={id!} />
@@ -1184,10 +1214,11 @@ function StageChecklistRow({
 }
 
 function StageStepper({
-  current, onMove, busy,
+  current, onMove, onShowHistory, busy,
 }: {
   current: string;
   onMove: (stage: string) => void;
+  onShowHistory: (stage: string) => void;
   busy: boolean;
 }) {
   const t = useT();
@@ -1203,8 +1234,8 @@ function StageStepper({
           </div>
           <div className="text-xs muted">
             {t(
-              "Click any stage to move the deal there. Each move auto-creates the required checklist for that stage.",
-              "Klik tahap mana pun untuk memindahkan deal ke sana. Setiap perpindahan otomatis membuat daftar periksa wajib tahap itu."
+              "Click a next stage to move the deal there (auto-creates that stage's checklist). Click a passed stage to read the notes written when the deal moved through it.",
+              "Klik tahap berikutnya untuk memindahkan deal ke sana (otomatis membuat daftar periksanya). Klik tahap yang sudah dilewati untuk membaca catatan saat deal melewatinya."
             )}
           </div>
         </div>
@@ -1227,7 +1258,7 @@ function StageStepper({
               <button
                 type="button"
                 disabled={busy || isCurrent}
-                onClick={() => onMove(s)}
+                onClick={() => (isPast ? onShowHistory(s) : onMove(s))}
                 className={clsx(
                   "flex-1 rounded-lg px-2 py-1.5 text-[11px] font-medium text-center transition border",
                   isCurrent
@@ -1236,7 +1267,10 @@ function StageStepper({
                     ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                     : "bg-white text-ink-600 border-ink-200 hover:border-brand-300 hover:text-brand-700",
                 )}
-                title={t(`Move to ${s.replace(/_/g, " ")}`, `Pindah ke ${LABEL_ID[s] ?? s.replace(/_/g, " ")}`)}
+                title={isPast
+                  ? t("Show the notes from when the deal moved through this stage",
+                      "Lihat catatan saat deal melewati tahap ini")
+                  : t(`Move to ${s.replace(/_/g, " ")}`, `Pindah ke ${LABEL_ID[s] ?? s.replace(/_/g, " ")}`)}
               >
                 <div className="capitalize leading-tight">{sl(s)}</div>
               </button>
@@ -1266,6 +1300,86 @@ function StageStepper({
           className="chip bg-red-50 text-red-700 hover:bg-red-100"
         >
           {t("Mark lost", "Tandai kalah")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// The paper trail for one stage: every move into/out of it, with the
+// reason written at request/apply time, who asked, who decided.
+function StageHistoryPanel({
+  stage, entries, loading, onMoveBack,
+}: {
+  stage: string;
+  entries: any[];
+  loading: boolean;
+  onMoveBack: () => void;
+}) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k ?? "");
+  const relevant = entries.filter(
+    (e) => e.to_stage === stage || e.from_stage === stage,
+  );
+  const STATUS_CHIP: Record<string, string> = {
+    applied:  "bg-emerald-50 text-emerald-700",
+    approved: "bg-emerald-50 text-emerald-700",
+    pending:  "bg-amber-50 text-amber-700",
+    rejected: "bg-red-50 text-red-700",
+  };
+  const STATUS_LABEL: Record<string, [string, string]> = {
+    applied:  ["applied", "diterapkan"],
+    approved: ["approved", "disetujui"],
+    pending:  ["pending", "menunggu"],
+    rejected: ["rejected", "ditolak"],
+  };
+  return (
+    <div className="space-y-3">
+      {loading ? (
+        <div className="text-sm muted">{t("Loading…", "Memuat…")}</div>
+      ) : relevant.length === 0 ? (
+        <div className="text-sm muted">
+          {t(
+            "No notes were recorded for this stage — it was moved through without a written reason (e.g. an automatic move from an approved document).",
+            "Tidak ada catatan untuk tahap ini — deal melewatinya tanpa alasan tertulis (mis. perpindahan otomatis dari dokumen yang disetujui).",
+          )}
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {relevant.map((e, i) => (
+            <li key={i} className="rounded-lg border border-ink-200 bg-white p-3">
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <span className="font-medium capitalize">
+                  {sl(e.from_stage)} → {sl(e.to_stage)}
+                </span>
+                <span className={clsx("chip text-[10px]", STATUS_CHIP[e.status] ?? "bg-ink-100")}>
+                  {t(...(STATUS_LABEL[e.status] ?? [e.status, e.status]))}
+                </span>
+                <span className="muted ml-auto">
+                  {e.at ? new Date(e.at).toLocaleString() : "—"}
+                </span>
+              </div>
+              {e.reason ? (
+                <div className="mt-2 text-sm whitespace-pre-wrap">{e.reason}</div>
+              ) : (
+                <div className="mt-2 text-sm muted">{t("(no note)", "(tanpa catatan)")}</div>
+              )}
+              <div className="mt-1.5 text-[11px] muted">
+                {e.requested_by_name && (
+                  <>{t("By", "Oleh")} <b>{e.requested_by_name}</b></>
+                )}
+                {e.decided_by_name && (
+                  <> · {t("decided by", "diputuskan oleh")} <b>{e.decided_by_name}</b></>
+                )}
+                {e.decision_notes && <> — “{e.decision_notes}”</>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex justify-end border-t border-ink-100 pt-3">
+        <button className="btn-ghost" onClick={onMoveBack}>
+          {t("Move the deal back to this stage", "Pindahkan deal kembali ke tahap ini")}
         </button>
       </div>
     </div>

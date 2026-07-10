@@ -806,6 +806,102 @@ async def request_stage_move(
     }
 
 
+@router.get("/{customer_id}/stage-history")
+async def stage_history(
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The paper trail of the deal pipeline: every stage move with the
+    reason that was written when it was requested/applied.
+
+    Sources:
+      • ApprovalRequests (sales-requested moves) — carry the narrative,
+        the requester, the decision and who made it.
+      • AuditLog rows (direct manager/director moves) — carry the reason
+        written at apply time.
+    Document-driven bumps (quotation approved → 'quotation', etc.) have
+    no narrative and appear as plain moves from the audit trail only if
+    they were audited with a stage change.
+    """
+    obj = await db.get(Customer, customer_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and obj.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+
+    from app.models.approval import ApprovalRequest
+    from app.models.audit import AuditLog
+
+    entries: list[dict] = []
+    user_ids: set[UUID] = set()
+
+    reqs = (await db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "customer",
+            ApprovalRequest.target_id == customer_id,
+        )
+    )).all()
+    for r in reqs:
+        p = r.payload or {}
+        if not p.get("to_stage"):
+            continue
+        if r.requested_by:
+            user_ids.add(r.requested_by)
+        if r.decided_by:
+            user_ids.add(r.decided_by)
+        entries.append({
+            "from_stage": p.get("from_stage"),
+            "to_stage": p.get("to_stage"),
+            "reason": p.get("narrative"),
+            "status": r.status,  # pending / approved / rejected
+            "requested_by": str(r.requested_by) if r.requested_by else None,
+            "decided_by": str(r.decided_by) if r.decided_by else None,
+            "decision_notes": r.decision_notes,
+            "at": (r.decided_at or r.created_at),
+            "source": "request",
+        })
+
+    audits = (await db.scalars(
+        select(AuditLog).where(
+            AuditLog.entity == "customer",
+            AuditLog.entity_id == customer_id,
+        ).order_by(AuditLog.occurred_at.asc())
+    )).all()
+    for a in audits:
+        after = a.after or {}
+        before = a.before or {}
+        if "stage" not in after or after.get("stage") == before.get("stage"):
+            continue
+        if a.actor_id:
+            user_ids.add(a.actor_id)
+        entries.append({
+            "from_stage": before.get("stage"),
+            "to_stage": after.get("stage"),
+            "reason": after.get("reason"),
+            "status": "applied",
+            "requested_by": str(a.actor_id) if a.actor_id else None,
+            "decided_by": None,
+            "decision_notes": None,
+            "at": a.occurred_at,
+            "source": "direct",
+        })
+
+    names: dict[str, str] = {}
+    if user_ids:
+        for u in (await db.scalars(
+            select(User).where(User.id.in_(list(user_ids)))
+        )).all():
+            names[str(u.id)] = u.full_name
+    for e in entries:
+        e["requested_by_name"] = names.get(e["requested_by"] or "")
+        e["decided_by_name"] = names.get(e["decided_by"] or "")
+
+    entries.sort(key=lambda e: e["at"] or datetime.min.replace(tzinfo=UTC),
+                 reverse=True)
+    return entries
+
+
 @router.get("/{customer_id}/summary")
 async def customer_summary(
     customer_id: UUID,
