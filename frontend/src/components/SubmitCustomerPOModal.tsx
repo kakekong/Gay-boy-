@@ -87,7 +87,10 @@ export function SubmitCustomerPOModal({
         selected: true,
       })));
     } catch {
-      setErr("Couldn't fetch the quotation's items. Try picking it again.");
+      setErr(tt(
+        "Couldn't fetch the quotation's items. Try picking it again.",
+        "Tidak dapat mengambil item penawaran. Coba pilih lagi.",
+      ));
     }
   }
 
@@ -136,11 +139,17 @@ export function SubmitCustomerPOModal({
           // The PO exists — surface the upload error so the user can
           // either re-upload or accept that the file's missing.
           throw new Error(
-            "Customer PO was filed, but the file upload failed: "
+            tt(
+              "Customer PO was filed, but the file upload failed: ",
+              "PO pelanggan sudah tercatat, tetapi unggahan file gagal: ",
+            )
             + (uploadErr?.response?.data?.detail
                 ?? uploadErr?.message
-                ?? "unknown error")
-            + ". Open the PO row to attach the file manually."
+                ?? tt("unknown error", "kesalahan tidak diketahui"))
+            + tt(
+              ". Open the PO row to attach the file manually.",
+              ". Buka baris PO untuk melampirkan file secara manual.",
+            )
           );
         }
       }
@@ -157,7 +166,7 @@ export function SubmitCustomerPOModal({
         e?.message
           ?? e?.response?.data?.errors?.[0]?.message
           ?? e?.response?.data?.detail
-          ?? "Failed to submit customer PO"
+          ?? tt("Failed to submit customer PO", "Gagal mengirim PO pelanggan")
       );
     },
   });
@@ -165,19 +174,28 @@ export function SubmitCustomerPOModal({
   function submit() {
     setErr(null);
     if (!quotationId) {
-      setErr("Pick the won quotation this PO is against — every customer PO must link to a quote.");
+      setErr(tt(
+        "Pick the won quotation this PO is against — every customer PO must link to a quote.",
+        "Pilih penawaran menang yang menjadi dasar PO ini — setiap PO pelanggan harus terhubung ke penawaran.",
+      ));
       return;
     }
     if (!poNumber.trim()) {
-      setErr("Type the customer's PO number.");
+      setErr(tt("Type the customer's PO number.", "Ketik nomor PO pelanggan."));
       return;
     }
     if (!file) {
-      setErr("Attach the customer's PO file. The director approves the PO based on the actual document.");
+      setErr(tt(
+        "Attach the customer's PO file. The director approves the PO based on the actual document.",
+        "Lampirkan file PO pelanggan. Direktur menyetujui PO berdasarkan dokumen aslinya.",
+      ));
       return;
     }
     if (!items.some((it) => it.selected && it.description.trim())) {
-      setErr("Pick at least one line item the customer ordered.");
+      setErr(tt(
+        "Pick at least one line item the customer ordered.",
+        "Pilih minimal satu item yang dipesan pelanggan.",
+      ));
       return;
     }
     create.mutate();
@@ -192,18 +210,19 @@ export function SubmitCustomerPOModal({
       <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
         <header className="px-5 py-4 border-b border-ink-100">
-          <h2 className="text-lg font-semibold">Submit customer PO</h2>
+          <h2 className="text-lg font-semibold">{t("Submit customer PO", "Kirim PO pelanggan")}</h2>
           <p className="text-sm muted mt-0.5">
-            File the PO the customer sent you, attach the actual PO document,
-            and pick the line items they ordered. The director approves the
-            submission and the project is created automatically on approval.
+            {t(
+              "File the PO the customer sent you, attach the actual PO document, and pick the line items they ordered. The director approves the submission and the project is created automatically on approval.",
+              "Catat PO yang dikirim pelanggan, lampirkan dokumen PO aslinya, dan pilih item yang mereka pesan. Direktur menyetujui pengajuan dan proyek dibuat otomatis setelah disetujui.",
+            )}
           </p>
         </header>
         <div className="flex-1 overflow-auto p-5 space-y-4">
           {/* Quotation picker (required) */}
           <label className="block">
             <span className="block text-xs font-medium text-ink-600 mb-1">
-              Against quotation <span className="text-red-500">*</span>
+              {t("Against quotation", "Berdasarkan penawaran")} <span className="text-red-500">*</span>
             </span>
             <select
               className="input"
@@ -211,7 +230,7 @@ export function SubmitCustomerPOModal({
               disabled={!!preselectQuotationId}
               onChange={(e) => loadQuotation(e.target.value)}
             >
-              <option value="">— pick a Won quotation —</option>
+              <option value="">{t("— pick a Won quotation —", "— pilih penawaran Menang —")}</option>
               {(wonQuotes.data ?? []).map((qx) => (
                 <option key={qx.id} value={qx.id}>
                   {qx.number} · {idr(qx.total)}
@@ -219,9 +238,10 @@ export function SubmitCustomerPOModal({
               ))}
             </select>
             <span className="block text-[11px] text-ink-500 mt-1">
-              Only Won quotations can have a customer PO. Picking one fills
-              its line items below; untick the ones the customer didn't
-              actually order in this PO.
+              {t(
+                "Only Won quotations can have a customer PO. Picking one fills its line items below; untick the ones the customer didn't actually order in this PO.",
+                "Hanya penawaran Menang yang bisa memiliki PO pelanggan. Memilih satu akan mengisi item-nya di bawah; hapus centang item yang tidak benar-benar dipesan pelanggan dalam PO ini.",
+              )}
             </span>
           </label>
 
@@ -236,14 +256,13 @@ export function SubmitCustomerPOModal({
               />
               <span>
                 <span className="block text-sm font-medium">
-                  This PO is a down payment (DP)
+                  {t("This PO is a down payment (DP)", "PO ini adalah down payment (DP)")}
                 </span>
                 <span className="block text-[11px] muted mt-0.5">
-                  DP POs route to finance first (they issue the DP invoice and
-                  verify the deposit landed). Once finance approves, you'll get
-                  notified to confirm the deposit has cleared — that's what
-                  spawns the project. Leave unchecked for a regular PO that goes
-                  straight to the director.
+                  {t(
+                    "DP POs route to finance first (they issue the DP invoice and verify the deposit landed). Once finance approves, you'll get notified to confirm the deposit has cleared — that's what spawns the project. Leave unchecked for a regular PO that goes straight to the director.",
+                    "PO DP dialihkan ke keuangan terlebih dahulu (mereka menerbitkan invoice DP dan memverifikasi setoran sudah masuk). Setelah keuangan menyetujui, Anda akan diberi tahu untuk mengonfirmasi setoran sudah cair — itulah yang memulai proyek. Biarkan tidak dicentang untuk PO biasa yang langsung ke direktur.",
+                  )}
                 </span>
               </span>
             </label>
@@ -253,18 +272,21 @@ export function SubmitCustomerPOModal({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">
-                PO number <span className="text-red-500">*</span>
+                {t("PO number", "Nomor PO")} <span className="text-red-500">*</span>
               </span>
               <input
                 className="input font-mono"
                 value={poNumber}
                 onChange={(e) => setPoNumber(e.target.value)}
-                placeholder="Whatever number the customer printed on the PO"
+                placeholder={t(
+                  "Whatever number the customer printed on the PO",
+                  "Nomor apa pun yang dicetak pelanggan pada PO",
+                )}
               />
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">
-                PO date
+                {t("PO date", "Tanggal PO")}
               </span>
               <input
                 type="date"
@@ -278,7 +300,7 @@ export function SubmitCustomerPOModal({
           {/* PO file (required) */}
           <div>
             <span className="block text-xs font-medium text-ink-600 mb-1">
-              PO file <span className="text-red-500">*</span>
+              {t("PO file", "File PO")} <span className="text-red-500">*</span>
             </span>
             <label
               className={
@@ -300,16 +322,16 @@ export function SubmitCustomerPOModal({
               )}
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">
-                  {file ? file.name : "Click to pick the customer's PO file"}
+                  {file ? file.name : t("Click to pick the customer's PO file", "Klik untuk memilih file PO pelanggan")}
                 </div>
                 <div className="text-[11px] muted">
                   {file
-                    ? `${(file.size / 1024).toFixed(1)} KB · ready to upload`
-                    : "PDF, image, doc — max 20 MB"}
+                    ? `${(file.size / 1024).toFixed(1)} KB · ${t("ready to upload", "siap diunggah")}`
+                    : t("PDF, image, doc — max 20 MB", "PDF, gambar, dokumen — maks 20 MB")}
                 </div>
               </div>
               <span className="text-xs font-semibold text-brand-700">
-                {file ? "Change" : "Browse"}
+                {file ? t("Change", "Ubah") : t("Browse", "Pilih file")}
               </span>
             </label>
           </div>
@@ -317,32 +339,32 @@ export function SubmitCustomerPOModal({
           {/* Items */}
           <div className="card overflow-hidden">
             <div className="px-3 py-2 border-b border-ink-100 bg-ink-50/60 text-xs font-semibold flex justify-between items-center">
-              <span>Items ({items.filter((it) => it.selected).length} of {items.length} selected)</span>
+              <span>{t("Items", "Item")} ({items.filter((it) => it.selected).length} {t("of", "dari")} {items.length} {t("selected", "dipilih")})</span>
               {quotationId && (
                 <button
                   type="button"
                   className="text-brand-700 hover:underline"
                   onClick={() => loadQuotation(quotationId)}
                 >
-                  Reset to quotation
+                  {t("Reset to quotation", "Kembalikan ke penawaran")}
                 </button>
               )}
             </div>
             {items.length === 0 ? (
               <div className="p-6 text-center text-sm muted">
                 {quotationId
-                  ? "This quotation has no line items."
-                  : "Pick a quotation above to load its items."}
+                  ? t("This quotation has no line items.", "Penawaran ini tidak memiliki item.")
+                  : t("Pick a quotation above to load its items.", "Pilih penawaran di atas untuk memuat item-nya.")}
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="text-[10px] uppercase muted">
                   <tr>
                     <th className="px-2 py-1 w-8"></th>
-                    <th className="text-left px-2 py-1">Description</th>
-                    <th className="text-right px-2 py-1 w-20">Qty</th>
-                    <th className="text-right px-2 py-1 w-32">Unit price</th>
-                    <th className="text-right px-2 py-1 w-32">Line total</th>
+                    <th className="text-left px-2 py-1">{t("Description", "Deskripsi")}</th>
+                    <th className="text-right px-2 py-1 w-20">{t("Qty", "Jml")}</th>
+                    <th className="text-right px-2 py-1 w-32">{t("Unit price", "Harga satuan")}</th>
+                    <th className="text-right px-2 py-1 w-32">{t("Line total", "Total baris")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -401,7 +423,7 @@ export function SubmitCustomerPOModal({
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-ink-100 bg-ink-50/40">
-                    <td colSpan={4} className="px-2 py-1 text-right font-semibold">PO total</td>
+                    <td colSpan={4} className="px-2 py-1 text-right font-semibold">{t("PO total", "Total PO")}</td>
                     <td className="px-2 py-1 text-right font-semibold tabular-nums">
                       {idr(total)}
                     </td>
@@ -412,12 +434,15 @@ export function SubmitCustomerPOModal({
           </div>
 
           <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">Notes</span>
+            <span className="block text-xs font-medium text-ink-600 mb-1">{t("Notes", "Catatan")}</span>
             <textarea
               className="input min-h-[60px]"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Special instructions, exclusions, delivery terms…"
+              placeholder={t(
+                "Special instructions, exclusions, delivery terms…",
+                "Instruksi khusus, pengecualian, syarat pengiriman…",
+              )}
             />
           </label>
 
@@ -429,7 +454,7 @@ export function SubmitCustomerPOModal({
           )}
         </div>
         <footer className="px-5 py-3 border-t border-ink-100 flex justify-end gap-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{t("Cancel", "Batal")}</button>
           <button
             type="button"
             className="btn-primary"
@@ -439,7 +464,9 @@ export function SubmitCustomerPOModal({
             {create.isPending
               ? <Loader2 size={14} className="animate-spin" />
               : <CheckCircle2 size={14} />}
-            {isDp ? "Submit for finance approval" : "Submit for director approval"}
+            {isDp
+              ? t("Submit for finance approval", "Kirim untuk persetujuan keuangan")
+              : t("Submit for director approval", "Kirim untuk persetujuan direktur")}
           </button>
         </footer>
       </div>

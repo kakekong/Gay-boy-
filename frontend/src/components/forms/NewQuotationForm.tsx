@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 import type { Customer } from "@/types";
 
 interface Props {
@@ -32,6 +33,7 @@ function capLines(text: string, max: number): string {
 }
 
 export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const editing = !!quote;
 
@@ -84,8 +86,8 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
 
   const selectedCustomer = (customers.data ?? []).find((c) => c.id === customerId);
   const primaryPicLabel = selectedCustomer?.pic_name
-    ? `${selectedCustomer.pic_name} (primary on customer record)`
-    : "Primary PIC on customer record";
+    ? `${selectedCustomer.pic_name} ${t("(primary on customer record)", "(utama pada data pelanggan)")}`
+    : t("Primary PIC on customer record", "PIC utama pada data pelanggan");
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((s, it) => s + it.qty * it.unit_price, 0);
@@ -99,9 +101,9 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
              : discountPct <= 15 ? "manager"
              : "director";
   const TIER_META = {
-    auto:     { label: "Auto-approved",    cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", Icon: ShieldCheck },
-    manager:  { label: "Manager approval", cls: "bg-amber-50 text-amber-700 ring-amber-200",       Icon: ShieldAlert },
-    director: { label: "Director approval",cls: "bg-red-50 text-red-700 ring-red-200",             Icon: Crown },
+    auto:     { label: t("Auto-approved", "Disetujui otomatis"),        cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", Icon: ShieldCheck },
+    manager:  { label: t("Manager approval", "Persetujuan manajer"),    cls: "bg-amber-50 text-amber-700 ring-amber-200",       Icon: ShieldAlert },
+    director: { label: t("Director approval", "Persetujuan direktur"),  cls: "bg-red-50 text-red-700 ring-red-200",             Icon: Crown },
   }[tier];
 
   const create = useMutation({
@@ -116,14 +118,19 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       // the backend queues it for the director and answers 202.
       if (editing && data?.status === "pending_approval") {
         alert(data?.message
-          ?? "Edit sent to the director for approval — the quotation updates once they approve.");
+          ?? tt(
+            "Edit sent to the director for approval — the quotation updates once they approve.",
+            "Perubahan dikirim ke direktur untuk disetujui — penawaran diperbarui setelah mereka menyetujui.",
+          ));
       }
       onClose();
     },
     onError: (e: any) => {
       setErr(
         e?.response?.data?.errors?.[0]?.message ??
-        (editing ? "Failed to save changes" : "Failed to create quotation")
+        (editing
+          ? tt("Failed to save changes", "Gagal menyimpan perubahan")
+          : tt("Failed to create quotation", "Gagal membuat penawaran"))
       );
     },
   });
@@ -155,11 +162,17 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       }
       const warns: string[] = data.warnings ?? [];
       setImportMsg(
-        `${parsed.length} line${parsed.length === 1 ? "" : "s"} imported` +
-        (warns.length ? ` · ${warns.join(" ")}` : ". Review and edit below.")
+        tt(
+          `${parsed.length} line${parsed.length === 1 ? "" : "s"} imported`,
+          `${parsed.length} baris diimpor`,
+        ) +
+        (warns.length
+          ? ` · ${warns.join(" ")}`
+          : tt(". Review and edit below.", ". Periksa dan edit di bawah."))
       );
     } catch (e: any) {
-      setErr(e?.response?.data?.errors?.[0]?.message ?? "Couldn't read that file.");
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? tt("Couldn't read that file.", "Tidak dapat membaca file tersebut."));
     } finally {
       setImporting(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -169,9 +182,9 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (!customerId) return setErr("Pick a customer.");
+    if (!customerId) return setErr(tt("Pick a customer.", "Pilih pelanggan."));
     if (!items.length || items.some((it) => !it.description.trim())) {
-      return setErr("Every line item needs a description.");
+      return setErr(tt("Every line item needs a description.", "Setiap item memerlukan deskripsi."));
     }
     create.mutate({
       customer_id: customerId,
@@ -202,21 +215,23 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
     <form onSubmit={submit} className="space-y-5">
       {/* Header fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Customer *">
+        <Field label={t("Customer *", "Pelanggan *")}>
           <select className="input" value={customerId} required
             disabled={editing}
-            title={editing ? "Customer can't be changed on an existing quotation" : undefined}
+            title={editing
+              ? t("Customer can't be changed on an existing quotation", "Pelanggan tidak dapat diubah pada penawaran yang sudah ada")
+              : undefined}
             onChange={(e) => {
               setCustomerId(e.target.value);
               setContactId("");  // reset PIC when switching customer
             }}>
-            <option value="">— select customer —</option>
+            <option value="">{t("— select customer —", "— pilih pelanggan —")}</option>
             {(customers.data ?? []).map((c) => (
               <option key={c.id} value={c.id}>{c.company_name}</option>
             ))}
           </select>
         </Field>
-        <Field label="Addressed to (PIC)">
+        <Field label={t("Addressed to (PIC)", "Ditujukan kepada (PIC)")}>
           <select
             className="input"
             value={contactId}
@@ -231,7 +246,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
             ))}
           </select>
         </Field>
-        <Field label="Variant">
+        <Field label={t("Variant", "Varian")}>
           <select className="input" value={variant}
             onChange={(e) => {
               const v = e.target.value as "short" | "detailed";
@@ -242,20 +257,20 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
                 ...it, description: capLines(it.description, cap),
               })));
             }}>
-            <option value="detailed">detailed (max 20 lines / item)</option>
-            <option value="short">short (max 5 lines / item)</option>
+            <option value="detailed">{t("detailed (max 20 lines / item)", "detail (maks 20 baris / item)")}</option>
+            <option value="short">{t("short (max 5 lines / item)", "singkat (maks 5 baris / item)")}</option>
           </select>
         </Field>
-        <Field label="Valid until">
+        <Field label={t("Valid until", "Berlaku sampai")}>
           <input type="date" className="input" value={validUntil}
             onChange={(e) => setValidUntil(e.target.value)} />
         </Field>
-        <Field label="Quotation number">
+        <Field label={t("Quotation number", "Nomor penawaran")}>
           <input className="input font-mono" value={number}
             onChange={(e) => setNumber(e.target.value)}
-            placeholder="Auto (leave blank for company number)" />
+            placeholder={t("Auto (leave blank for company number)", "Otomatis (kosongkan untuk nomor perusahaan)")} />
         </Field>
-        <Field label="Tax %">
+        <Field label={t("Tax %", "Pajak %")}>
           <input type="number" min={0} max={50} step={0.1} className="input"
             value={taxPct} onChange={(e) => setTaxPct(parseFloat(e.target.value || "0"))} />
         </Field>
@@ -264,7 +279,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       {/* Line items */}
       <div className="card p-3">
         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-          <div className="font-semibold text-sm">Line items</div>
+          <div className="font-semibold text-sm">{t("Line items", "Item")}</div>
           <div className="flex items-center gap-1">
             <input
               ref={fileRef}
@@ -276,18 +291,21 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
             <button
               type="button"
               className="btn-ghost"
-              title="Import line items from an Excel (.xlsx) or CSV file"
+              title={t(
+                "Import line items from an Excel (.xlsx) or CSV file",
+                "Impor item dari file Excel (.xlsx) atau CSV",
+              )}
               onClick={() => fileRef.current?.click()}
               disabled={importing}
             >
               {importing
                 ? <Loader2 size={14} className="animate-spin" />
                 : <Upload size={14} />}
-              {importing ? "Reading…" : "Import Excel/CSV"}
+              {importing ? t("Reading…", "Membaca…") : t("Import Excel/CSV", "Impor Excel/CSV")}
             </button>
             <button type="button" className="btn-ghost"
               onClick={() => setItems((cur) => [...cur, { description: "", qty: 1, uom: "pcs", unit_price: 0, source: "custom" }])}>
-              <Plus size={14} /> Add line
+              <Plus size={14} /> {t("Add line", "Tambah baris")}
             </button>
           </div>
         </div>
@@ -302,9 +320,9 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
             <div key={i} className="grid grid-cols-12 gap-2 items-end">
               <div className="col-span-12 md:col-span-5">
                 <span className="text-[10px] uppercase text-ink-500 flex items-center justify-between">
-                  <span>Description</span>
+                  <span>{t("Description", "Deskripsi")}</span>
                   <span className="normal-case text-ink-400">
-                    {it.description.split("\n").length}/{maxLines} lines
+                    {it.description.split("\n").length}/{maxLines} {t("lines", "baris")}
                   </span>
                 </span>
                 <textarea
@@ -312,20 +330,23 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
                   rows={Math.min(maxLines, Math.max(1, it.description.split("\n").length))}
                   value={it.description}
                   onChange={(e) => update(i, "description", capLines(e.target.value, maxLines))}
-                  placeholder="e.g. Custom transition chute, carbon steel 3mm" />
+                  placeholder={t(
+                    "e.g. Custom transition chute, carbon steel 3mm",
+                    "cth. Chute transisi custom, baja karbon 3mm",
+                  )} />
               </div>
               <div className="col-span-3 md:col-span-1">
-                <span className="text-[10px] uppercase text-ink-500">Qty</span>
+                <span className="text-[10px] uppercase text-ink-500">{t("Qty", "Jml")}</span>
                 <input type="number" min={0} step="any" className="input" value={it.qty}
                   onChange={(e) => update(i, "qty", parseFloat(e.target.value || "0"))} />
               </div>
               <div className="col-span-3 md:col-span-1">
-                <span className="text-[10px] uppercase text-ink-500">UoM</span>
+                <span className="text-[10px] uppercase text-ink-500">{t("UoM", "Satuan")}</span>
                 <input className="input" value={it.uom}
                   onChange={(e) => update(i, "uom", e.target.value)} />
               </div>
               <div className="col-span-6 md:col-span-3">
-                <span className="text-[10px] uppercase text-ink-500">Unit price (IDR)</span>
+                <span className="text-[10px] uppercase text-ink-500">{t("Unit price (IDR)", "Harga satuan (IDR)")}</span>
                 <input type="number" min={0} step="any" className="input" value={it.unit_price}
                   onChange={(e) => update(i, "unit_price", parseFloat(e.target.value || "0"))} />
               </div>
@@ -347,7 +368,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
         <div className="md:col-span-2 card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xs uppercase tracking-wider text-ink-500">Discount</div>
+              <div className="text-xs uppercase tracking-wider text-ink-500">{t("Discount", "Diskon")}</div>
               <div className="text-2xl font-semibold tabular-nums">{discountPct}%</div>
             </div>
             <span className={clsx("chip ring-1", TIER_META.cls)}>
@@ -367,19 +388,19 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
           </div>
         </div>
         <div className="card p-4 text-sm">
-          <Row label="Subtotal" value={idr(totals.subtotal)} />
-          <Row label={`Discount ${discountPct}%`} value={`− ${idr(totals.discount_amount)}`} />
-          <Row label={`Tax ${taxPct}%`} value={idr(totals.tax)} />
+          <Row label={t("Subtotal", "Subtotal")} value={idr(totals.subtotal)} />
+          <Row label={`${t("Discount", "Diskon")} ${discountPct}%`} value={`− ${idr(totals.discount_amount)}`} />
+          <Row label={`${t("Tax", "Pajak")} ${taxPct}%`} value={idr(totals.tax)} />
           <div className="border-t border-ink-100 mt-2 pt-2 flex justify-between font-semibold text-base">
-            <span>Total</span><span className="tabular-nums">{idr(totals.total)}</span>
+            <span>{t("Total", "Total")}</span><span className="tabular-nums">{idr(totals.total)}</span>
           </div>
         </div>
       </div>
 
-      <Field label="Notes">
+      <Field label={t("Notes", "Catatan")}>
         <textarea className="input min-h-[60px]" value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Scope, exclusions, delivery terms…" />
+          placeholder={t("Scope, exclusions, delivery terms…", "Lingkup, pengecualian, syarat pengiriman…")} />
       </Field>
 
       {err && (
@@ -389,12 +410,12 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       )}
 
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onClose}>{t("Cancel", "Batal")}</button>
         <button type="submit" className="btn-primary" disabled={create.isPending}>
           {create.isPending && <Loader2 size={14} className="animate-spin" />}
           {create.isPending
-            ? (editing ? "Saving…" : "Creating…")
-            : (editing ? "Save changes" : "Create draft")}
+            ? (editing ? t("Saving…", "Menyimpan…") : t("Creating…", "Membuat…"))
+            : (editing ? t("Save changes", "Simpan perubahan") : t("Create draft", "Buat draf"))}
         </button>
       </div>
     </form>

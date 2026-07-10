@@ -16,6 +16,23 @@ import type { Customer } from "@/types";
 
 type ViewMode = "table" | "pipeline";
 
+// Display labels for backend stage keys. Display only — the keys themselves
+// are still what is sent to the API as filter values.
+const STAGE_LABEL_EN: Record<string, string> = {
+  lead: "Lead", presentation: "Presentation", engineering: "Engineering",
+  quotation: "Quotation", negotiation: "Negotiation", po: "PO",
+  drawing: "Drawing", purchasing: "Purchasing", delivery: "Delivery",
+  invoicing: "Invoicing", payment: "Payment",
+  closed_won: "Won", closed_lost: "Lost",
+};
+const STAGE_LABEL_ID: Record<string, string> = {
+  lead: "Prospek", presentation: "Presentasi", engineering: "Engineering",
+  quotation: "Penawaran", negotiation: "Negosiasi", po: "PO",
+  drawing: "Gambar", purchasing: "Pembelian", delivery: "Pengiriman",
+  invoicing: "Penagihan", payment: "Pembayaran",
+  closed_won: "Menang", closed_lost: "Kalah",
+};
+
 export default function CustomersPage() {
   const t = useT();
   const [view, setView] = useState<ViewMode>(() => {
@@ -117,23 +134,23 @@ export default function CustomersPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={view === "table"
-              ? "Search by company name…"
-              : "Search the board (client-side)…"}
+              ? t("Search by company name…", "Cari berdasarkan nama perusahaan…")
+              : t("Search the board (client-side)…", "Cari di papan (sisi klien)…")}
             className="input pl-9"
           />
         </div>
         {view === "table" && (
           <select value={stage} onChange={(e) => setStage(e.target.value)} className="input max-w-[200px]">
-            <option value="">All stages</option>
+            <option value="">{t("All stages", "Semua tahap")}</option>
             {["lead", "presentation", "engineering", "quotation", "negotiation",
               "po", "drawing", "purchasing", "delivery", "invoicing", "payment",
               "closed_won", "closed_lost"].map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>{t(STAGE_LABEL_EN[s] ?? s, STAGE_LABEL_ID[s] ?? s)}</option>
             ))}
           </select>
         )}
         {view === "table" && (
-          <button className="btn-ghost"><Filter size={15} /> More filters</button>
+          <button className="btn-ghost"><Filter size={15} /> {t("More filters", "Filter lainnya")}</button>
         )}
       </div>
 
@@ -142,17 +159,17 @@ export default function CustomersPage() {
           <AlertCircle size={16} className="mt-0.5 shrink-0" />
           <div className="flex-1">
             <div className="font-medium">
-              Couldn't load customers
+              {t("Couldn't load customers", "Gagal memuat pelanggan")}
               {(q.error as any)?.response?.status ? ` (HTTP ${(q.error as any).response.status})` : ""}.
             </div>
             <div className="text-xs mt-0.5 break-all">
               {(q.error as any)?.response?.data?.errors?.[0]?.message
                 ?? (q.error as any)?.response?.data?.detail
                 ?? (q.error as any)?.message
-                ?? "Request failed"}
+                ?? t("Request failed", "Permintaan gagal")}
             </div>
             <button onClick={() => q.refetch()} className="mt-2 text-xs underline hover:no-underline">
-              Retry
+              {t("Retry", "Coba lagi")}
             </button>
           </div>
         </div>
@@ -164,12 +181,12 @@ export default function CustomersPage() {
             <table className="w-full">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Company</th>
-                  <th className="th">Industry</th>
+                  <th className="th">{t("Company", "Perusahaan")}</th>
+                  <th className="th">{t("Industry", "Industri")}</th>
                   <th className="th">PIC</th>
-                  <th className="th">Sales</th>
-                  <th className="th">Stage</th>
-                  <th className="th text-right">Lifetime value</th>
+                  <th className="th">{t("Sales", "Sales")}</th>
+                  <th className="th">{t("Stage", "Tahap")}</th>
+                  <th className="th text-right">{t("Lifetime value", "Nilai seumur hidup")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -193,7 +210,7 @@ export default function CustomersPage() {
                 {!rows.length && (
                   <tr>
                     <td colSpan={6} className="td text-center muted py-12">
-                      No customers match your filter.
+                      {t("No customers match your filter.", "Tidak ada pelanggan yang cocok dengan filter Anda.")}
                     </td>
                   </tr>
                 )}

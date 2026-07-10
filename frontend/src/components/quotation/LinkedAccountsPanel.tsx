@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 
 interface Props {
   quotationId: string;
@@ -28,17 +29,6 @@ interface LinkRow {
   amount_to_post: number;
 }
 
-const ROLE_META: Record<LinkRow["role"], { label: string; hint: string; tone: string }> = {
-  receivable: { label: "Receivable (DR)",   hint: "Customer owes you the total amount",
-                tone: "bg-brand-50 text-brand-700" },
-  revenue:    { label: "Revenue (CR)",      hint: "Net sales after discount",
-                tone: "bg-emerald-50 text-emerald-700" },
-  discount:   { label: "Discount (DR)",     hint: "Contra-revenue: the discount given",
-                tone: "bg-amber-50 text-amber-700" },
-  tax:        { label: "Tax Payable (CR)",  hint: "PPN/output tax owed to the state",
-                tone: "bg-violet-50 text-violet-700" },
-};
-
 const idr = (n: number | null | undefined) => {
   if (n === null || n === undefined) return "—";
   if (n === 0) return "0";
@@ -50,7 +40,23 @@ const idr = (n: number | null | undefined) => {
 };
 
 export function LinkedAccountsPanel({ quotationId }: Props) {
+  const t = useT();
   const qc = useQueryClient();
+
+  const ROLE_META: Record<LinkRow["role"], { label: string; hint: string; tone: string }> = {
+    receivable: { label: t("Receivable (DR)", "Piutang (DR)"),
+                  hint: t("Customer owes you the total amount", "Pelanggan berutang jumlah total kepada Anda"),
+                  tone: "bg-brand-50 text-brand-700" },
+    revenue:    { label: t("Revenue (CR)", "Pendapatan (CR)"),
+                  hint: t("Net sales after discount", "Penjualan bersih setelah diskon"),
+                  tone: "bg-emerald-50 text-emerald-700" },
+    discount:   { label: t("Discount (DR)", "Diskon (DR)"),
+                  hint: t("Contra-revenue: the discount given", "Kontra-pendapatan: diskon yang diberikan"),
+                  tone: "bg-amber-50 text-amber-700" },
+    tax:        { label: t("Tax Payable (CR)", "Utang Pajak (CR)"),
+                  hint: t("PPN/output tax owed to the state", "PPN/pajak keluaran yang terutang ke negara"),
+                  tone: "bg-violet-50 text-violet-700" },
+  };
 
   const links = useQuery({
     queryKey: ["account-links", quotationId],
@@ -133,7 +139,7 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
 
   if (links.isLoading) {
     return (
-      <div className="card p-5 text-sm muted">Loading account links…</div>
+      <div className="card p-5 text-sm muted">{t("Loading account links…", "Memuat tautan akun…")}</div>
     );
   }
 
@@ -146,21 +152,24 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
         <div>
           <div className="font-semibold flex items-center gap-2">
             <Link2 size={15} className="text-brand-600" />
-            Linked Accounts
+            {t("Linked Accounts", "Akun Tertaut")}
             {isPosted ? (
               <span className="chip bg-emerald-50 text-emerald-700">
-                <CheckCircle size={11} /> Posted
+                <CheckCircle size={11} /> {t("Posted", "Diposting")}
               </span>
             ) : (
               <span className="chip bg-amber-50 text-amber-700">
-                <AlertCircle size={11} /> Not posted
+                <AlertCircle size={11} /> {t("Not posted", "Belum diposting")}
               </span>
             )}
           </div>
           <div className="text-xs muted">
             {isPosted
-              ? `Balances updated at ${new Date(links.data!.posted_at!).toLocaleString()}. Click Reverse to roll back.`
-              : "When this quotation is marked Won, the linked accounts auto-update. You can also post manually."}
+              ? `${t("Balances updated at", "Saldo diperbarui pada")} ${new Date(links.data!.posted_at!).toLocaleString()}. ${t("Click Reverse to roll back.", "Klik Balik untuk membatalkannya.")}`
+              : t(
+                  "When this quotation is marked Won, the linked accounts auto-update. You can also post manually.",
+                  "Saat penawaran ini ditandai Menang, akun tertaut diperbarui otomatis. Anda juga bisa memposting secara manual.",
+                )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -171,7 +180,7 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
               disabled={save.isPending}
             >
               {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save links
+              {t("Save links", "Simpan tautan")}
             </button>
           )}
           {!isPosted && (
@@ -179,23 +188,28 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
               onClick={() => post.mutate()}
               className="btn-success"
               disabled={post.isPending || dirty}
-              title={dirty ? "Save link changes first" : "Post amounts to the ledger"}
+              title={dirty
+                ? t("Save link changes first", "Simpan perubahan tautan terlebih dahulu")
+                : t("Post amounts to the ledger", "Posting jumlah ke ledger")}
             >
               {post.isPending ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-              Post to ledger
+              {t("Post to ledger", "Posting ke ledger")}
             </button>
           )}
           {isPosted && (
             <button
               onClick={() => {
-                if (window.confirm("Reverse this posting from the ledger?"))
+                if (window.confirm(tt(
+                  "Reverse this posting from the ledger?",
+                  "Balik posting ini dari ledger?",
+                )))
                   reverse.mutate();
               }}
               className="btn-ghost text-red-600 hover:bg-red-50"
               disabled={reverse.isPending}
             >
               {reverse.isPending ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
-              Reverse posting
+              {t("Reverse posting", "Balik posting")}
             </button>
           )}
         </div>
@@ -205,10 +219,10 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Role</th>
-              <th className="th">Account</th>
-              <th className="th text-right">Current balance</th>
-              <th className="th text-right">Amount to post</th>
+              <th className="th">{t("Role", "Peran")}</th>
+              <th className="th">{t("Account", "Akun")}</th>
+              <th className="th text-right">{t("Current balance", "Saldo saat ini")}</th>
+              <th className="th text-right">{t("Amount to post", "Jumlah diposting")}</th>
             </tr>
           </thead>
           <tbody>
@@ -229,7 +243,7 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
                         disabled={isPosted}
                         onChange={(e) => setDraft({ ...draft, [l.role]: e.target.value })}
                       >
-                        <option value="">— pick account —</option>
+                        <option value="">{t("— pick account —", "— pilih akun —")}</option>
                         {Object.entries(byType).map(([type, accs]) => (
                           <optgroup key={type} label={type}>
                             {accs.map((a) => (
@@ -243,7 +257,7 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
                     ) : (
                       <div className="text-sm">
                         <span className="font-mono text-xs text-ink-500">{l.account_no ?? "—"}</span>
-                        <div>{l.account_name ?? <span className="muted italic">CoA access restricted</span>}</div>
+                        <div>{l.account_name ?? <span className="muted italic">{t("CoA access restricted", "Akses CoA dibatasi")}</span>}</div>
                       </div>
                     )}
                   </td>
@@ -261,9 +275,9 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
             <tfoot className="bg-ink-50/40">
               <tr>
                 <td colSpan={3} className="td text-right text-xs uppercase tracking-wider muted">
-                  DR Receivable {idr(links.data.amounts.receivable)}
+                  {t("DR Receivable", "DR Piutang")} {idr(links.data.amounts.receivable)}
                   &nbsp;=&nbsp;
-                  CR Revenue {idr(links.data.amounts.revenue)} + CR Tax {idr(links.data.amounts.tax)} + DR Discount {idr(links.data.amounts.discount)}
+                  {t("CR Revenue", "CR Pendapatan")} {idr(links.data.amounts.revenue)} + {t("CR Tax", "CR Pajak")} {idr(links.data.amounts.tax)} + {t("DR Discount", "DR Diskon")} {idr(links.data.amounts.discount)}
                 </td>
                 <td className="td text-right font-semibold">
                   {idr(links.data.amounts.receivable)}

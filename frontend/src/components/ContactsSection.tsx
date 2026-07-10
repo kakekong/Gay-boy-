@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { useT, t as tt } from "@/store/lang";
 
 interface Contact {
   id: string;
@@ -35,6 +36,7 @@ const EMPTY: ContactForm = {
 };
 
 export function ContactsSection({ customerId }: { customerId: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -52,14 +54,14 @@ export function ContactsSection({ customerId }: { customerId: string }) {
     kind: "err",
     text: e?.response?.data?.errors?.[0]?.message
       ?? e?.response?.data?.detail
-      ?? "Save failed",
+      ?? tt("Save failed", "Gagal menyimpan"),
   });
 
   const create = useMutation({
     mutationFn: () => api.post(`/customers/${customerId}/contacts`, form),
     onSuccess: () => {
       refresh(); setAdding(false); setForm(EMPTY);
-      setFlash({ kind: "ok", text: "Contact added." });
+      setFlash({ kind: "ok", text: tt("Contact added.", "PIC ditambahkan.") });
     },
     onError: onErr,
   });
@@ -67,13 +69,13 @@ export function ContactsSection({ customerId }: { customerId: string }) {
     mutationFn: (id: string) => api.patch(`/customers/${customerId}/contacts/${id}`, form),
     onSuccess: () => {
       refresh(); setEditing(null); setForm(EMPTY);
-      setFlash({ kind: "ok", text: "Contact updated." });
+      setFlash({ kind: "ok", text: tt("Contact updated.", "PIC diperbarui.") });
     },
     onError: onErr,
   });
   const del = useMutation({
     mutationFn: (id: string) => api.delete(`/customers/${customerId}/contacts/${id}`),
-    onSuccess: () => { refresh(); setFlash({ kind: "ok", text: "Contact removed." }); },
+    onSuccess: () => { refresh(); setFlash({ kind: "ok", text: tt("Contact removed.", "PIC dihapus.") }); },
     onError: onErr,
   });
 
@@ -96,10 +98,13 @@ export function ContactsSection({ customerId }: { customerId: string }) {
       <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Users size={15} /> Contacts (PICs)
+            <Users size={15} /> {t("Contacts (PICs)", "Kontak (PIC)")}
           </div>
           <div className="text-xs muted">
-            Every person at this company you talk to. Mark one as primary.
+            {t(
+              "Every person at this company you talk to. Mark one as primary.",
+              "Semua orang di perusahaan ini yang Anda hubungi. Tandai satu sebagai utama."
+            )}
           </div>
         </div>
         {!adding && !editing && (
@@ -107,7 +112,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
             className="btn-primary"
             onClick={() => { setForm(EMPTY); setAdding(true); }}
           >
-            <Plus size={14} /> Add contact
+            <Plus size={14} /> {t("Add contact", "Tambah PIC")}
           </button>
         )}
       </header>
@@ -130,19 +135,19 @@ export function ContactsSection({ customerId }: { customerId: string }) {
       {(adding || editing) && (
         <div className="mx-5 mt-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
           <div className="text-xs font-semibold uppercase muted mb-2">
-            {editing ? "Edit contact" : "New contact"}
+            {editing ? t("Edit contact", "Ubah PIC") : t("New contact", "PIC baru")}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Full name *">
+            <Field label={t("Full name *", "Nama lengkap *")}>
               <input className="input" required value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
-            <Field label="Position / title">
+            <Field label={t("Position / title", "Posisi / jabatan")}>
               <input className="input" value={form.position}
                 onChange={(e) => setForm({ ...form, position: e.target.value })}
-                placeholder="Procurement Manager" />
+                placeholder={t("Procurement Manager", "Manajer Pengadaan")} />
             </Field>
-            <Field label="Phone">
+            <Field label={t("Phone", "Telepon")}>
               <input className="input" value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </Field>
@@ -161,13 +166,16 @@ export function ContactsSection({ customerId }: { customerId: string }) {
                 onChange={(e) => setForm({ ...form, is_primary: e.target.checked })}
                 className="h-4 w-4 rounded border-ink-300 text-brand-600"
               />
-              Primary contact
+              {t("Primary contact", "PIC utama")}
             </label>
             <div className="md:col-span-2">
-              <Field label="Notes">
+              <Field label={t("Notes", "Catatan")}>
                 <textarea className="input" rows={2} value={form.notes}
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  placeholder="Best time to reach them, preferences, etc." />
+                  placeholder={t(
+                    "Best time to reach them, preferences, etc.",
+                    "Waktu terbaik menghubungi, preferensi, dll."
+                  )} />
               </Field>
             </div>
           </div>
@@ -175,7 +183,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
             <button className="btn-ghost" onClick={() => {
               setAdding(false); setEditing(null); setForm(EMPTY);
             }}>
-              Cancel
+              {t("Cancel", "Batal")}
             </button>
             <button
               className="btn-primary"
@@ -185,7 +193,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
               {create.isPending || patch.isPending
                 ? <Loader2 size={14} className="animate-spin" />
                 : <Save size={14} />}
-              {editing ? "Save changes" : "Add contact"}
+              {editing ? t("Save changes", "Simpan perubahan") : t("Add contact", "Tambah PIC")}
             </button>
           </div>
         </div>
@@ -193,11 +201,14 @@ export function ContactsSection({ customerId }: { customerId: string }) {
 
       {list.isLoading ? (
         <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading…
+          <Loader2 size={14} className="animate-spin" /> {t("Loading…", "Memuat…")}
         </div>
       ) : !list.data?.length ? (
         <div className="p-8 text-center text-sm muted">
-          No additional contacts yet. The primary PIC on the customer header is enough — add more people here.
+          {t(
+            "No additional contacts yet. The primary PIC on the customer header is enough — add more people here.",
+            "Belum ada kontak tambahan. PIC utama di header pelanggan sudah cukup — tambahkan orang lain di sini."
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-ink-100">
@@ -211,7 +222,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
                   <span className="font-medium">{c.name}</span>
                   {c.is_primary && (
                     <span className="chip bg-amber-50 text-amber-700 inline-flex items-center gap-1">
-                      <Star size={11} /> Primary
+                      <Star size={11} /> {t("Primary", "Utama")}
                     </span>
                   )}
                   {c.position && <span className="text-xs muted">· {c.position}</span>}
@@ -246,18 +257,21 @@ export function ContactsSection({ customerId }: { customerId: string }) {
                 <button
                   className="btn-ghost"
                   onClick={() => startEdit(c)}
-                  title="Edit"
+                  title={t("Edit", "Ubah")}
                 >
                   <Pencil size={13} />
                 </button>
                 <button
                   className="btn-ghost text-red-600 hover:bg-red-50"
                   onClick={() => {
-                    if (window.confirm(`Remove ${c.name} from this customer's contacts?`)) {
+                    if (window.confirm(tt(
+                      `Remove ${c.name} from this customer's contacts?`,
+                      `Hapus ${c.name} dari daftar kontak pelanggan ini?`
+                    ))) {
                       del.mutate(c.id);
                     }
                   }}
-                  title="Remove"
+                  title={t("Remove", "Hapus")}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -282,6 +296,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // KTP / passport / other ID cards attached to a specific contact. Reuses the
 // generic /attachments endpoints with owner_type='customer_contact'.
 function ContactIdCards({ contactId }: { contactId: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const list = useQuery({
@@ -302,12 +317,12 @@ function ContactIdCards({ contactId }: { contactId: string }) {
       return api.post("/attachments", fd);
     },
     onSuccess: refresh,
-    onError: (e: any) => alert(e?.response?.data?.detail ?? "Upload failed"),
+    onError: (e: any) => alert(e?.response?.data?.detail ?? tt("Upload failed", "Gagal mengunggah")),
   });
   const del = useMutation({
     mutationFn: (id: string) => api.delete(`/attachments/${id}`),
     onSuccess: refresh,
-    onError: (e: any) => alert(e?.response?.data?.detail ?? "Delete failed"),
+    onError: (e: any) => alert(e?.response?.data?.detail ?? tt("Delete failed", "Gagal menghapus")),
   });
 
   const viewFile = async (id: string) => {
@@ -317,14 +332,14 @@ function ContactIdCards({ contactId }: { contactId: string }) {
       window.open(url, "_blank", "noopener");
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "Could not open file");
+      alert(e?.response?.data?.detail ?? tt("Could not open file", "Tidak dapat membuka berkas"));
     }
   };
 
   const files = list.data ?? [];
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-      <span className="uppercase tracking-wider muted">ID cards</span>
+      <span className="uppercase tracking-wider muted">{t("ID cards", "Kartu identitas")}</span>
       {files.map((f: any) => (
         <span key={f.id}
           className="inline-flex items-center gap-1 rounded-full bg-ink-50 border border-ink-200 px-2 py-0.5">
@@ -332,10 +347,10 @@ function ContactIdCards({ contactId }: { contactId: string }) {
             className="text-brand-700 hover:underline inline-flex items-center gap-1">
             <FileText size={10} /> {f.filename}
           </button>
-          <button type="button" title="Remove"
+          <button type="button" title={t("Remove", "Hapus")}
             className="text-red-600 hover:opacity-80"
             onClick={() => {
-              if (window.confirm(`Remove ${f.filename}?`)) del.mutate(f.id);
+              if (window.confirm(tt(`Remove ${f.filename}?`, `Hapus ${f.filename}?`))) del.mutate(f.id);
             }}>
             <X size={10} />
           </button>
@@ -352,7 +367,7 @@ function ContactIdCards({ contactId }: { contactId: string }) {
         disabled={upload.isPending}
         onClick={() => inputRef.current?.click()}>
         {upload.isPending ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-        Upload ID
+        {t("Upload ID", "Unggah KTP/ID")}
       </button>
     </div>
   );

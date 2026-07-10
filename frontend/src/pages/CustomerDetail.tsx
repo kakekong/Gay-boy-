@@ -17,6 +17,43 @@ import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { ContactsSection } from "@/components/ContactsSection";
+import { useT, t as tt } from "@/store/lang";
+
+// Indonesian display labels for backend stage/status keys. Display only —
+// the keys themselves are still what the code compares and sends.
+const LABEL_ID: Record<string, string> = {
+  // CRM stages
+  lead: "prospek", presentation: "presentasi", engineering: "engineering",
+  quotation: "penawaran", negotiation: "negosiasi", po: "PO",
+  drawing: "gambar", purchasing: "pembelian", delivery: "pengiriman",
+  invoicing: "penagihan", payment: "pembayaran",
+  closed_won: "menang", closed_lost: "kalah",
+  // quotation / approval statuses
+  draft: "draf", pending_approval: "menunggu persetujuan",
+  approved: "disetujui", rejected: "ditolak", sent: "terkirim",
+  won: "menang", lost: "kalah",
+  // price-request statuses
+  pending_purchasing: "menunggu purchasing", pending_director: "menunggu direktur",
+  // project statuses
+  new: "baru", drawing_approved: "gambar disetujui", production: "produksi",
+  qc: "QC", packaging: "pengemasan", delivered: "terkirim", invoiced: "ditagih",
+  paid: "lunas", closed: "selesai",
+  // invoice statuses
+  issued: "diterbitkan", partial: "sebagian", overdue: "jatuh tempo", void: "batal",
+  // supplier PO statuses
+  open: "terbuka", received: "diterima", cancelled: "dibatalkan",
+  // quotation variants
+  short: "singkat", detailed: "rinci",
+  // activity types & directions
+  call: "telepon", meeting: "rapat", note: "catatan", email: "email",
+  visit: "kunjungan", inbound: "masuk", outbound: "keluar",
+};
+// Humanised display label for a backend key: English fallback is the key
+// with underscores replaced; Indonesian comes from the map above.
+const keyLabel = (t: (en: string, id: string) => string, key: string) => {
+  const en = String(key ?? "").replace(/_/g, " ");
+  return t(en, LABEL_ID[key] ?? en);
+};
 
 const QSTATUS: Record<string, string> = {
   draft:             "bg-ink-100 text-ink-700",
@@ -58,6 +95,8 @@ const idrCompact = (n: number) => {
 };
 
 export default function CustomerDetailPage() {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
@@ -138,13 +177,19 @@ export default function CustomerDetailPage() {
       qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["notifications"] });
-      setStageFlash({ kind: "ok", text: `Moved to ${stage.replace(/_/g, " ")}.` });
+      setStageFlash({
+        kind: "ok",
+        text: tt(
+          `Moved to ${stage.replace(/_/g, " ")}.`,
+          `Dipindah ke ${LABEL_ID[stage] ?? stage.replace(/_/g, " ")}.`
+        ),
+      });
     },
     onError: (e: any) => setStageFlash({
       kind: "err",
       text: e?.response?.data?.errors?.[0]?.message
         ?? e?.response?.data?.detail
-        ?? "Failed to move stage",
+        ?? tt("Failed to move stage", "Gagal memindahkan tahap"),
     }),
   });
   const isDirector = me?.role === "director";
@@ -175,7 +220,7 @@ export default function CustomerDetailPage() {
       })
       .catch(async (e) => {
         // blob error bodies need reading as text
-        let detail = "Export failed";
+        let detail = tt("Export failed", "Gagal mengekspor");
         try { detail = JSON.parse(await e?.response?.data?.text())?.detail ?? detail; } catch {}
         alert(detail);
       });
@@ -189,7 +234,7 @@ export default function CustomerDetailPage() {
   });
 
   const c = customer.data;
-  if (!c) return <div className="muted">Loading…</div>;
+  if (!c) return <div className="muted">{t("Loading…", "Memuat…")}</div>;
 
   const s: number = score.data?.score ?? 0;
   const ring = `conic-gradient(#3a5cf5 ${s * 3.6}deg, #eef0f4 0deg)`;
@@ -197,7 +242,10 @@ export default function CustomerDetailPage() {
   function openWhatsApp() {
     const phone = (c.whatsapp || c.phone || "").replace(/[^\d]/g, "");
     if (!phone) {
-      alert("No WhatsApp/phone number on file for this customer.");
+      alert(tt(
+        "No WhatsApp/phone number on file for this customer.",
+        "Tidak ada nomor WhatsApp/telepon tersimpan untuk pelanggan ini."
+      ));
       return;
     }
     window.open(`https://wa.me/${phone}`, "_blank");
@@ -222,13 +270,13 @@ export default function CustomerDetailPage() {
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button className="btn-ghost" onClick={() => exportAs("pdf")} title="Download a complete customer report as PDF">
+            <button className="btn-ghost" onClick={() => exportAs("pdf")} title={t("Download a complete customer report as PDF", "Unduh laporan lengkap pelanggan sebagai PDF")}>
               <Download size={15} /> PDF
             </button>
-            <button className="btn-ghost" onClick={() => exportAs("xlsx")} title="Download a complete customer report as Excel">
+            <button className="btn-ghost" onClick={() => exportAs("xlsx")} title={t("Download a complete customer report as Excel", "Unduh laporan lengkap pelanggan sebagai Excel")}>
               <Download size={15} /> Excel
             </button>
-            <button className="btn-ghost" onClick={() => exportAs("csv")} title="Download a complete customer report as CSV">
+            <button className="btn-ghost" onClick={() => exportAs("csv")} title={t("Download a complete customer report as CSV", "Unduh laporan lengkap pelanggan sebagai CSV")}>
               <Download size={15} /> CSV
             </button>
             <button className="btn-ghost" onClick={openWhatsApp}>
@@ -240,16 +288,16 @@ export default function CustomerDetailPage() {
               disabled={aiSuggest.isPending}
             >
               {aiSuggest.isPending ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-              AI suggest
+              {t("AI suggest", "Saran AI")}
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <Field icon={<Phone size={14} />} label="Phone" value={c.phone} />
+          <Field icon={<Phone size={14} />} label={t("Phone", "Telepon")} value={c.phone} />
           <Field icon={<MessageCircle size={14} />} label="WhatsApp" value={c.whatsapp} />
           <Field icon={<Mail size={14} />} label="Email" value={c.email} />
-          <Field icon={<MapPin size={14} />} label="Address" value={c.company_address} />
+          <Field icon={<MapPin size={14} />} label={t("Address", "Alamat")} value={c.company_address} />
         </div>
       </div>
 
@@ -268,36 +316,38 @@ export default function CustomerDetailPage() {
             <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="font-semibold text-ink-900 flex items-center gap-2">
-                  <Tag size={15} className="text-brand-600" /> Price requests
+                  <Tag size={15} className="text-brand-600" /> {t("Price requests", "Permintaan harga")}
                 </div>
                 <div className="text-xs muted">
-                  {prs.length} request{prs.length === 1 ? "" : "s"} for this customer ·
-                  filed before the quote so purchasing can cost it and the
-                  director can set the selling price.
+                  {prs.length} {t(
+                    `request${prs.length === 1 ? "" : "s"} for this customer · filed before the quote so purchasing can cost it and the director can set the selling price.`,
+                    "permintaan untuk pelanggan ini · diajukan sebelum penawaran agar purchasing dapat menghitung biayanya dan direktur menetapkan harga jual."
+                  )}
                 </div>
               </div>
               <Link
                 to={`/price-requests?customer=${id}`}
                 className="btn-primary"
               >
-                <Plus size={14} /> New price request
+                <Plus size={14} /> {t("New price request", "Permintaan harga baru")}
               </Link>
             </div>
             {prs.length === 0 ? (
               <div className="p-8 text-center text-sm muted">
-                No price requests yet — file one so purchasing can cost the
-                order and the director can set the sell price. Once approved
-                the resulting quotation auto-fills.
+                {t(
+                  "No price requests yet — file one so purchasing can cost the order and the director can set the sell price. Once approved the resulting quotation auto-fills.",
+                  "Belum ada permintaan harga — ajukan satu agar purchasing dapat menghitung biaya pesanan dan direktur menetapkan harga jual. Setelah disetujui, penawarannya terisi otomatis."
+                )}
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="bg-ink-50/60">
                   <tr>
-                    <th className="th">Number</th>
-                    <th className="th">Status</th>
-                    <th className="th text-right">Lines</th>
-                    <th className="th">Filed</th>
-                    <th className="th">Quotation</th>
+                    <th className="th">{t("Number", "Nomor")}</th>
+                    <th className="th">{t("Status", "Status")}</th>
+                    <th className="th text-right">{t("Lines", "Baris")}</th>
+                    <th className="th">{t("Filed", "Diajukan")}</th>
+                    <th className="th">{t("Quotation", "Penawaran")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -317,7 +367,7 @@ export default function CustomerDetailPage() {
                           : pr.status === "rejected" ? "bg-red-50 text-red-700"
                           : "bg-ink-100 text-ink-700",
                         )}>
-                          {String(pr.status ?? "").replace(/_/g, " ")}
+                          {sl(String(pr.status ?? ""))}
                         </span>
                       </td>
                       <td className="td text-right tabular-nums">
@@ -333,7 +383,7 @@ export default function CustomerDetailPage() {
                             onClick={(e) => e.stopPropagation()}
                             className="font-mono text-xs text-brand-700 hover:underline"
                           >
-                            open
+                            {t("open", "buka")}
                           </Link>
                         ) : (
                           <span className="muted text-xs">—</span>
@@ -353,10 +403,13 @@ export default function CustomerDetailPage() {
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
           <div>
             <div className="font-semibold text-ink-900 flex items-center gap-2">
-              <FileText size={15} /> Quotations
+              <FileText size={15} /> {t("Quotations", "Penawaran")}
             </div>
             <div className="text-xs muted">
-              {(quotations.data ?? []).length} document{(quotations.data ?? []).length === 1 ? "" : "s"} for this customer
+              {(quotations.data ?? []).length} {t(
+                `document${(quotations.data ?? []).length === 1 ? "" : "s"} for this customer`,
+                "dokumen untuk pelanggan ini"
+              )}
             </div>
           </div>
           {/* Sales can't create quotations directly anymore — every
@@ -367,34 +420,38 @@ export default function CustomerDetailPage() {
               case. */}
           {(me?.role === "director" || me?.role === "manager" || me?.role === "admin") ? (
             <button className="btn-primary" onClick={() => setOpenQuote(true)}>
-              <Plus size={14} /> New quotation
+              <Plus size={14} /> {t("New quotation", "Penawaran baru")}
             </button>
           ) : (
             <Link
               to={`/price-requests?customer=${id}`}
               className="btn-primary"
-              title="Sales files a price request first; the quotation is generated once the director approves the sell price."
+              title={t(
+                "Sales files a price request first; the quotation is generated once the director approves the sell price.",
+                "Sales mengajukan permintaan harga dulu; penawaran dibuat setelah direktur menyetujui harga jual."
+              )}
             >
-              <Plus size={14} /> New price request
+              <Plus size={14} /> {t("New price request", "Permintaan harga baru")}
             </Link>
           )}
         </div>
         {(quotations.data ?? []).length === 0 ? (
           <div className="p-8 text-center text-sm muted">
-            No quotations yet. File a price request first — the quotation
-            is generated automatically once the director approves the
-            sell price.
+            {t(
+              "No quotations yet. File a price request first — the quotation is generated automatically once the director approves the sell price.",
+              "Belum ada penawaran. Ajukan permintaan harga dulu — penawaran dibuat otomatis setelah direktur menyetujui harga jual."
+            )}
           </div>
         ) : (
           <table className="w-full">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Number</th>
-                <th className="th">Variant</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Discount</th>
-                <th className="th text-right">Total</th>
-                <th className="th">Valid until</th>
+                <th className="th">{t("Number", "Nomor")}</th>
+                <th className="th">{t("Variant", "Varian")}</th>
+                <th className="th">{t("Status", "Status")}</th>
+                <th className="th text-right">{t("Discount", "Diskon")}</th>
+                <th className="th text-right">{t("Total", "Total")}</th>
+                <th className="th">{t("Valid until", "Berlaku sampai")}</th>
               </tr>
             </thead>
             <tbody>
@@ -413,10 +470,10 @@ export default function CustomerDetailPage() {
                       {qt.number}
                     </Link>
                   </td>
-                  <td className="td capitalize muted">{qt.variant}</td>
+                  <td className="td capitalize muted">{sl(qt.variant)}</td>
                   <td className="td">
                     <span className={clsx("chip", QSTATUS[qt.status] ?? "bg-ink-100 text-ink-600")}>
-                      {qt.status.replace(/_/g, " ")}
+                      {sl(qt.status)}
                     </span>
                   </td>
                   <td className="td text-right tabular-nums">{Number(qt.discount_pct)}%</td>
@@ -440,20 +497,20 @@ export default function CustomerDetailPage() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
-              <Briefcase size={15} className="text-brand-600" /> Projects
+              <Briefcase size={15} className="text-brand-600" /> {t("Projects", "Proyek")}
             </div>
-            <div className="text-xs muted">{summary.data.projects.length} record(s)</div>
+            <div className="text-xs muted">{summary.data.projects.length} {t("record(s)", "data")}</div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Code</th>
-                  <th className="th">Status</th>
-                  <th className="th">PO Number</th>
-                  <th className="th text-right">PO Value</th>
-                  <th className="th">Target delivery</th>
-                  <th className="th text-right">Margin (est / act)</th>
+                  <th className="th">{t("Code", "Kode")}</th>
+                  <th className="th">{t("Status", "Status")}</th>
+                  <th className="th">{t("PO Number", "Nomor PO")}</th>
+                  <th className="th text-right">{t("PO Value", "Nilai PO")}</th>
+                  <th className="th">{t("Target delivery", "Target pengiriman")}</th>
+                  <th className="th text-right">{t("Margin (est / act)", "Margin (est. / akt.)")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -473,7 +530,7 @@ export default function CustomerDetailPage() {
                     <td className="td">
                       <span className={clsx("chip capitalize",
                         PSTATUS[p.status] ?? "bg-ink-100 text-ink-700")}>
-                        {p.status.replace(/_/g, " ")}
+                        {sl(p.status)}
                       </span>
                     </td>
                     <td className="td muted">{p.po_number ?? "—"}</td>
@@ -494,7 +551,7 @@ export default function CustomerDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
-            <Sparkles size={12} /> AI Lead score
+            <Sparkles size={12} /> {t("AI Lead score", "Skor prospek AI")}
           </div>
           <div className="mt-3 flex items-center gap-4">
             <div
@@ -508,14 +565,14 @@ export default function CustomerDetailPage() {
             </div>
             <div className="flex-1">
               <div className="text-sm font-medium">{score.data?.recommended_action ?? "—"}</div>
-              <div className="text-xs muted mt-1">Model {score.data?.model_version ?? "—"}</div>
+              <div className="text-xs muted mt-1">{t("Model", "Model")} {score.data?.model_version ?? "—"}</div>
             </div>
           </div>
         </div>
 
         <div className="card p-5 lg:col-span-2">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
-            <Activity size={12} /> Top score drivers
+            <Activity size={12} /> {t("Top score drivers", "Pendorong skor teratas")}
           </div>
           <ul className="mt-3 space-y-2">
             {(score.data?.drivers ?? []).slice(0, 5).map((d: any) => (
@@ -538,25 +595,25 @@ export default function CustomerDetailPage() {
       {summary.data && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Kpi label="Lifetime value" value={idrCompact(c.lifetime_value)} Icon={Wallet} tone="brand" />
-            <Kpi label="Won revenue"    value={idrCompact(summary.data.stats.won_revenue)} Icon={TrendingUp} tone="emerald" />
-            <Kpi label="Pipeline"       value={idrCompact(summary.data.stats.pipeline_value)} Icon={FileText} tone="violet" />
-            <Kpi label="Outstanding AR" value={idrCompact(summary.data.stats.outstanding_ar)}
+            <Kpi label={t("Lifetime value", "Nilai seumur hidup")} value={idrCompact(c.lifetime_value)} Icon={Wallet} tone="brand" />
+            <Kpi label={t("Won revenue", "Pendapatan menang")}    value={idrCompact(summary.data.stats.won_revenue)} Icon={TrendingUp} tone="emerald" />
+            <Kpi label={t("Pipeline", "Pipeline")}       value={idrCompact(summary.data.stats.pipeline_value)} Icon={FileText} tone="violet" />
+            <Kpi label={t("Outstanding AR", "Piutang berjalan")} value={idrCompact(summary.data.stats.outstanding_ar)}
                  Icon={AlertCircle} tone={summary.data.stats.outstanding_ar > 0 ? "amber" : "ink"} />
-            <Kpi label="Active projects" value={String(summary.data.stats.active_projects)}
+            <Kpi label={t("Active projects", "Proyek aktif")} value={String(summary.data.stats.active_projects)}
                  Icon={Briefcase} tone="brand" />
-            <Kpi label="Win rate" value={`${Math.round((summary.data.stats.win_rate ?? 0) * 100)}%`}
+            <Kpi label={t("Win rate", "Tingkat kemenangan")} value={`${Math.round((summary.data.stats.win_rate ?? 0) * 100)}%`}
                  Icon={TrendingUp} tone="emerald" />
           </div>
           {summary.data.stats.last_activity_at && (
             <div className="text-xs muted flex items-center gap-1.5">
-              <Clock size={12} /> Last contact:{" "}
+              <Clock size={12} /> {t("Last contact:", "Kontak terakhir:")}{" "}
               <b className="text-ink-700">
                 {new Date(summary.data.stats.last_activity_at).toLocaleString()}
               </b>
-              {" · "}known {summary.data.stats.days_known} day(s) ·{" "}
-              {summary.data.stats.total_quotations} quotation(s) ever ·{" "}
-              {summary.data.stats.completed_projects} completed project(s)
+              {" · "}{t("known", "dikenal")} {summary.data.stats.days_known} {t("day(s)", "hari")} ·{" "}
+              {summary.data.stats.total_quotations} {t("quotation(s) ever", "penawaran total")} ·{" "}
+              {summary.data.stats.completed_projects} {t("completed project(s)", "proyek selesai")}
             </div>
           )}
         </>
@@ -602,21 +659,21 @@ export default function CustomerDetailPage() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
-              <Receipt size={15} className="text-brand-600" /> Invoices
+              <Receipt size={15} className="text-brand-600" /> {t("Invoices", "Faktur")}
             </div>
             <div className="text-xs muted">
-              {summary.data.invoices.length} invoice(s) · {summary.data.stats.overdue_invoices} overdue
+              {summary.data.invoices.length} {t("invoice(s)", "faktur")} · {summary.data.stats.overdue_invoices} {t("overdue", "jatuh tempo")}
             </div>
           </div>
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Number</th>
-                <th className="th">Type</th>
-                <th className="th">Issued</th>
-                <th className="th">Due</th>
-                <th className="th text-right">Total</th>
-                <th className="th">Status</th>
+                <th className="th">{t("Number", "Nomor")}</th>
+                <th className="th">{t("Type", "Jenis")}</th>
+                <th className="th">{t("Issued", "Diterbitkan")}</th>
+                <th className="th">{t("Due", "Jatuh tempo")}</th>
+                <th className="th text-right">{t("Total", "Total")}</th>
+                <th className="th">{t("Status", "Status")}</th>
               </tr>
             </thead>
             <tbody>
@@ -632,7 +689,7 @@ export default function CustomerDetailPage() {
                   <td className="td">
                     <span className={clsx("chip capitalize",
                       ISTATUS[i.status] ?? "bg-ink-100 text-ink-700")}>
-                      {i.status}
+                      {sl(i.status)}
                     </span>
                   </td>
                 </tr>
@@ -650,20 +707,20 @@ export default function CustomerDetailPage() {
           <div className="card overflow-hidden">
             <div className="px-5 py-3 border-b border-ink-100">
               <div className="font-semibold flex items-center gap-2">
-                <Wallet size={15} className="text-brand-600" /> Payments received
+                <Wallet size={15} className="text-brand-600" /> {t("Payments received", "Pembayaran diterima")}
               </div>
               <div className="text-xs muted">
-                {summary.data.payments.length} payment(s) · total {idr(summary.data.stats.total_paid)}
+                {summary.data.payments.length} {t("payment(s)", "pembayaran")} · {t("total", "total")} {idr(summary.data.stats.total_paid)}
               </div>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Invoice</th>
-                  <th className="th">Paid at</th>
-                  <th className="th">Method</th>
-                  <th className="th">Reference</th>
-                  <th className="th text-right">Amount</th>
+                  <th className="th">{t("Invoice", "Faktur")}</th>
+                  <th className="th">{t("Paid at", "Dibayar pada")}</th>
+                  <th className="th">{t("Method", "Metode")}</th>
+                  <th className="th">{t("Reference", "Referensi")}</th>
+                  <th className="th text-right">{t("Amount", "Jumlah")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -690,14 +747,17 @@ export default function CustomerDetailPage() {
       {/* Activity timeline */}
       <div className="card p-5">
         <div className="flex items-center justify-between mb-3">
-          <div className="font-semibold text-ink-900">Activity timeline</div>
+          <div className="font-semibold text-ink-900">{t("Activity timeline", "Linimasa aktivitas")}</div>
           <button className="btn-ghost" onClick={() => setOpenLog(true)}>
-            <Activity size={15} /> Log activity
+            <Activity size={15} /> {t("Log activity", "Catat aktivitas")}
           </button>
         </div>
         {(activities.data ?? []).length === 0 ? (
           <div className="rounded-xl border border-dashed border-ink-200 p-8 text-center text-sm muted">
-            No activity yet. Click "Log activity" to add one, or incoming WhatsApp will appear here automatically.
+            {t(
+              'No activity yet. Click "Log activity" to add one, or incoming WhatsApp will appear here automatically.',
+              'Belum ada aktivitas. Klik "Catat aktivitas" untuk menambahkan, atau WhatsApp masuk akan muncul di sini otomatis.'
+            )}
           </div>
         ) : (
           <ul className="space-y-3">
@@ -708,8 +768,8 @@ export default function CustomerDetailPage() {
                 </div>
                 <div className="flex-1">
                   <div className="text-sm capitalize">
-                    <b>{a.type.replace(/_/g, " ")}</b>{" "}
-                    <span className="muted">· {a.direction}</span>
+                    <b>{sl(a.type)}</b>{" "}
+                    <span className="muted">· {sl(a.direction)}</span>
                   </div>
                   {a.notes && <div className="text-xs muted mt-0.5">{a.notes}</div>}
                   <div className="text-[11px] text-ink-400 mt-0.5">
@@ -725,8 +785,11 @@ export default function CustomerDetailPage() {
       <Modal
         open={openLog}
         onClose={() => setOpenLog(false)}
-        title="Log activity"
-        subtitle="Record a call, meeting, or note for this customer."
+        title={t("Log activity", "Catat aktivitas")}
+        subtitle={t(
+          "Record a call, meeting, or note for this customer.",
+          "Catat telepon, rapat, atau catatan untuk pelanggan ini."
+        )}
       >
         <LogActivityForm customerId={id!} onClose={() => setOpenLog(false)} />
       </Modal>
@@ -744,8 +807,14 @@ export default function CustomerDetailPage() {
             setStageFlash({
               kind: "wait",
               text: filesAttached
-                ? `Request sent for manager/director approval with ${filesAttached} file(s).`
-                : "Request sent for manager/director approval.",
+                ? tt(
+                    `Request sent for manager/director approval with ${filesAttached} file(s).`,
+                    `Permintaan dikirim untuk persetujuan manajer/direktur dengan ${filesAttached} berkas.`
+                  )
+                : tt(
+                    "Request sent for manager/director approval.",
+                    "Permintaan dikirim untuk persetujuan manajer/direktur."
+                  ),
             });
           }}
         />
@@ -754,8 +823,8 @@ export default function CustomerDetailPage() {
       <Modal
         open={openQuote}
         onClose={() => { setOpenQuote(false); quotations.refetch(); }}
-        title="New quotation"
-        subtitle={`For ${c.company_name}.`}
+        title={t("New quotation", "Penawaran baru")}
+        subtitle={t(`For ${c.company_name}.`, `Untuk ${c.company_name}.`)}
         size="xl"
       >
         <NewQuotationForm
@@ -767,13 +836,16 @@ export default function CustomerDetailPage() {
       <Modal
         open={openAI}
         onClose={() => setOpenAI(false)}
-        title="AI follow-up suggestion"
-        subtitle="Generated by the Sales AI Assistant."
+        title={t("AI follow-up suggestion", "Saran tindak lanjut AI")}
+        subtitle={t("Generated by the Sales AI Assistant.", "Dibuat oleh Asisten AI Sales.")}
         size="lg"
         footer={
           <div className="flex justify-between items-center">
             <span className="text-xs muted">
-              Tip: copy and edit before sending. Never paste prices the AI invented.
+              {t(
+                "Tip: copy and edit before sending. Never paste prices the AI invented.",
+                "Tips: salin dan sunting sebelum dikirim. Jangan pernah menempel harga karangan AI."
+              )}
             </span>
             <button
               className="btn-primary"
@@ -782,14 +854,14 @@ export default function CustomerDetailPage() {
                 navigator.clipboard.writeText(aiSuggest.data?.output ?? "");
               }}
             >
-              Copy to clipboard
+              {t("Copy to clipboard", "Salin ke papan klip")}
             </button>
           </div>
         }
       >
         {aiSuggest.isPending && (
           <div className="py-8 text-center muted text-sm flex items-center justify-center gap-2">
-            <Loader2 size={16} className="animate-spin" /> Thinking…
+            <Loader2 size={16} className="animate-spin" /> {t("Thinking…", "Berpikir…")}
           </div>
         )}
         {!aiSuggest.isPending && aiSuggest.data && (
@@ -798,7 +870,7 @@ export default function CustomerDetailPage() {
               {aiSuggest.data.output}
             </div>
             <details className="text-xs">
-              <summary className="cursor-pointer muted hover:text-ink-700">Context used</summary>
+              <summary className="cursor-pointer muted hover:text-ink-700">{t("Context used", "Konteks yang dipakai")}</summary>
               <pre className="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 font-mono text-ink-600 overflow-x-auto">
                 {JSON.stringify(aiSuggest.data.context_used, null, 2)}
               </pre>
@@ -807,8 +879,10 @@ export default function CustomerDetailPage() {
         )}
         {!aiSuggest.isPending && aiSuggest.isError && (
           <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
-            Failed to get a suggestion. Make sure OPENAI_API_KEY is set in .env, or the
-            assistant will fall back to a template.
+            {t(
+              "Failed to get a suggestion. Make sure OPENAI_API_KEY is set in .env, or the assistant will fall back to a template.",
+              "Gagal mendapatkan saran. Pastikan OPENAI_API_KEY diatur di .env, atau asisten akan memakai templat."
+            )}
           </div>
         )}
       </Modal>
@@ -883,6 +957,8 @@ function StageChecklist({
   onPatch: (key: string, body: Record<string, any>) => void;
   busy: boolean;
 }) {
+  const t = useT();
+  const sl = (k: string) => keyLabel(t, k);
   const now = Date.now();
   const done = items.filter((i) => i.status === "done").length;
   const overdue = items.filter(
@@ -895,20 +971,22 @@ function StageChecklist({
       <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <ListChecks size={15} /> Stage checklist
+            <ListChecks size={15} /> {t("Stage checklist", "Daftar periksa tahap")}
             <span className="chip bg-brand-50 text-brand-700 capitalize">
-              {stage.replace(/_/g, " ")}
+              {sl(stage)}
             </span>
           </div>
           <div className="text-xs muted">
-            Required actions for this stage — keep these green to keep the
-            deal on track.
+            {t(
+              "Required actions for this stage — keep these green to keep the deal on track.",
+              "Tindakan wajib untuk tahap ini — jaga tetap hijau agar deal tetap berjalan."
+            )}
           </div>
         </div>
         <div className="text-xs muted flex items-center gap-3">
-          <span><b className="text-ink-900">{done}</b>/{items.length} done</span>
+          <span><b className="text-ink-900">{done}</b>/{items.length} {t("done", "selesai")}</span>
           {overdue > 0 && (
-            <span className="text-red-700 font-medium">{overdue} overdue</span>
+            <span className="text-red-700 font-medium">{overdue} {t("overdue", "terlambat")}</span>
           )}
         </div>
       </header>
@@ -925,11 +1003,11 @@ function StageChecklist({
       <div className="p-5">
         {loading ? (
           <div className="text-sm muted flex items-center gap-2">
-            <Loader2 size={14} className="animate-spin" /> Loading…
+            <Loader2 size={14} className="animate-spin" /> {t("Loading…", "Memuat…")}
           </div>
         ) : items.length === 0 ? (
           <div className="text-sm muted">
-            No required actions for this stage. 🎉
+            {t("No required actions for this stage. 🎉", "Tidak ada tindakan wajib untuk tahap ini. 🎉")}
           </div>
         ) : (
           <ul className="space-y-2">
@@ -965,6 +1043,7 @@ function StageChecklistRow({
   onReopen: (key: string) => void;
   onPatch: (key: string, body: Record<string, any>) => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState(item.note ?? "");
   const [due, setDue] = useState(
@@ -1003,8 +1082,8 @@ function StageChecklistRow({
           item.status === "done" ? onReopen(item.key) : onComplete(item.key)
         }
         className="shrink-0 mt-0.5"
-        aria-label={item.status === "done" ? "Reopen" : "Mark done"}
-        title={item.status === "done" ? "Reopen" : "Mark done"}
+        aria-label={item.status === "done" ? t("Reopen", "Buka lagi") : t("Mark done", "Tandai selesai")}
+        title={item.status === "done" ? t("Reopen", "Buka lagi") : t("Mark done", "Tandai selesai")}
       >
         {item.status === "done" ? (
           <CheckCircle2 size={20} className="text-emerald-600" />
@@ -1024,7 +1103,7 @@ function StageChecklistRow({
         <div className="text-xs muted mt-0.5">{item.hint}</div>
         {item.note && !editing && (
           <div className="text-xs mt-1 rounded-md bg-white border border-ink-200 px-2 py-1">
-            <span className="muted">Note: </span>{item.note}
+            <span className="muted">{t("Note: ", "Catatan: ")}</span>{item.note}
           </div>
         )}
         {editing && (
@@ -1034,10 +1113,13 @@ function StageChecklistRow({
               rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note (e.g. waiting on customer drawings)…"
+              placeholder={t(
+                "Add a note (e.g. waiting on customer drawings)…",
+                "Tambahkan catatan (mis. menunggu gambar dari pelanggan)…"
+              )}
             />
             <div className="flex items-center gap-2 flex-wrap">
-              <label className="text-[11px] muted">Due:</label>
+              <label className="text-[11px] muted">{t("Due:", "Tenggat:")}</label>
               <input
                 type="date"
                 className="input max-w-[160px]"
@@ -1045,13 +1127,13 @@ function StageChecklistRow({
                 onChange={(e) => setDue(e.target.value)}
               />
               <button className="btn-primary text-xs" onClick={save} disabled={busy}>
-                Save
+                {t("Save", "Simpan")}
               </button>
               <button
                 className="btn-ghost text-xs"
                 onClick={() => { setEditing(false); setNote(item.note ?? ""); }}
               >
-                Cancel
+                {t("Cancel", "Batal")}
               </button>
             </div>
           </div>
