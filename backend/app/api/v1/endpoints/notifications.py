@@ -369,6 +369,26 @@ async def list_notifications(
                 "at": now,
             })
 
+    # 6b2. Director: unread user feedback (any account can write in).
+    if role == Role.DIRECTOR:
+        from app.models.feedback import Feedback
+        fresh_fb = (await db.scalars(
+            select(Feedback).where(Feedback.status == "new")
+            .order_by(Feedback.created_at.desc()).limit(20)
+        )).all()
+        if fresh_fb:
+            newest = fresh_fb[0]
+            items.append({
+                "id": f"feedback:{len(fresh_fb)}:{newest.id}",
+                "kind": "feedback",
+                "severity": "medium",
+                "title": f"{len(fresh_fb)} new feedback message"
+                         + ("" if len(fresh_fb) == 1 else "s"),
+                "body": (newest.message or "")[:120],
+                "link": "/feedback",
+                "at": newest.created_at,
+            })
+
     # 6c. Director: HR/manager-started cross-department chats (silent oversight).
     if role == Role.DIRECTOR:
         overseers = (await db.execute(

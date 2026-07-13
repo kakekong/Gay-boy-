@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     customer_pos,
     customers,
     dashboards,
+    feedback,
     finance,
     financial_reports,
     inventory,
@@ -47,6 +48,7 @@ api_router.include_router(approvals.router, prefix="/approvals", tags=["approval
 api_router.include_router(purchasing.router, prefix="/purchasing", tags=["purchasing"])
 api_router.include_router(push.router, prefix="/push", tags=["push"])
 api_router.include_router(operation.router, prefix="/operation", tags=["operation"])
+api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 api_router.include_router(finance.router, prefix="/finance", tags=["finance"])
 api_router.include_router(financial_reports.router, prefix="/finance/reports", tags=["finance-reports"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])

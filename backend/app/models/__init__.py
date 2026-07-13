@@ -7,6 +7,7 @@ from app.models.attendance import Attendance  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage  # noqa: F401
 from app.models.comment import EntityComment  # noqa: F401
+from app.models.feedback import Feedback  # noqa: F401
 from app.models.push import PushDelivered, PushSubscription, VapidKeypair  # noqa: F401
 from app.models.custom_role import CustomRole  # noqa: F401
 from app.models.crm import Activity, Customer, Reminder  # noqa: F401

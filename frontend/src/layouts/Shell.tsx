@@ -14,6 +14,7 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useLangStore, useT } from "@/store/lang";
 import { NotificationsBell } from "@/components/NotificationsBell";
+import { FeedbackButton } from "@/components/FeedbackButton";
 import { NotificationBanner, NotificationStripe } from "@/components/NotificationBanner";
 import { exitViewAs } from "@/lib/viewAs";
 
@@ -102,6 +103,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/audit", label: "Audit log", label_id: "Log audit", icon: Shield,
         roles: ["admin", "director"] },
       { to: "/attachments", label: "All files", label_id: "Semua file", icon: FileText,
+        roles: ["director"] },
+      { to: "/feedback", label: "Feedback", label_id: "Masukan", icon: MessageCircle,
         roles: ["director"] },
       { to: "/role-guide", label: "Role guide", label_id: "Panduan peran", icon: Map },
       { to: "/help", label: "Help", label_id: "Bantuan", icon: HelpCircle },
@@ -373,6 +376,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 {user?.custom_role_name ?? user?.role}
               </div>
             </div>
+            <FeedbackButton compact />
             <button
               onClick={logout}
               title={t("Logout", "Keluar")}
