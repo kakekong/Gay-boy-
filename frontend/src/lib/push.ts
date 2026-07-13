@@ -10,13 +10,13 @@ export function isPushSupported(): boolean {
   return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
-function urlBase64ToUint8Array(base64: string): Uint8Array {
+function urlBase64ToUint8Array(base64: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
   const raw = window.atob(b64);
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-  return out;
+  return out.buffer;
 }
 
 async function registration(): Promise<ServiceWorkerRegistration> {
