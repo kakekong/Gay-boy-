@@ -2,11 +2,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bell, CheckSquare, AlertTriangle, AlertCircle, Truck, MessageCircle,
+  Bell, BellRing, CheckSquare, AlertTriangle, AlertCircle, Truck, MessageCircle,
   ChevronRight, Loader2, ListChecks,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { t as tt } from "@/store/lang";
+import { isPushSupported, subscribePush, unsubscribePush } from "@/lib/push";
 
 interface NotificationItem {
   id: string;
@@ -33,6 +35,118 @@ const SEVERITY_RING: Record<string, string> = {
   medium: "bg-amber-50 text-amber-700",
   low:    "bg-ink-100 text-ink-700",
 };
+
+// Permanent home for the device-notification switch (the banner-stack
+// icons only show while a banner is on screen — invisible most of the
+// time). Enabling asks for browser permission, registers the service
+// worker, and subscribes this device for Web Push so notifications
+// arrive even when no tab is open.
+const OS_KEY = "notif.os.enabled";
+
+function PushToggleRow() {
+  const [enabled, setEnabled] = useState(
+    () => typeof Notification !== "undefined"
+      && Notification.permission === "granted"
+      && localStorage.getItem(OS_KEY) === "true",
+  );
+  const [busy, setBusy] = useState(false);
+  const [testState, setTestState] = useState<"idle" | "sending" | "ok">("idle");
+  if (!isPushSupported()) return null;
+
+  const enable = async () => {
+    if (Notification.permission === "denied") {
+      alert(tt(
+        "Notifications are blocked for this site. Enable them in the browser's site settings (padlock icon in the URL bar), then try again.",
+        "Notifikasi diblokir untuk situs ini. Aktifkan di pengaturan situs browser (ikon gembok di bilah URL), lalu coba lagi.",
+      ));
+      return;
+    }
+    setBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") return;
+      const ok = await subscribePush();
+      if (!ok) {
+        alert(tt(
+          "Could not register this device for push — the server may still be deploying. Try again in a minute.",
+          "Tidak bisa mendaftarkan perangkat ini untuk push — server mungkin masih deploy. Coba lagi sebentar lagi.",
+        ));
+        return;
+      }
+      localStorage.setItem(OS_KEY, "true");
+      setEnabled(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const disable = async () => {
+    setBusy(true);
+    try {
+      await unsubscribePush();
+      localStorage.setItem(OS_KEY, "false");
+      setEnabled(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sendTest = async () => {
+    setTestState("sending");
+    try {
+      await api.post("/push/test");
+      setTestState("ok");
+      setTimeout(() => setTestState("idle"), 4000);
+    } catch (e: any) {
+      setTestState("idle");
+      alert(e?.response?.data?.errors?.[0]?.message
+        ?? tt("Test push failed.", "Uji notifikasi gagal."));
+    }
+  };
+
+  return (
+    <div className="border-t border-ink-100 px-4 py-2.5 flex items-center gap-2">
+      <BellRing size={14} className={enabled ? "text-emerald-600" : "text-ink-400"} />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium">
+          {enabled
+            ? tt("Device notifications on", "Notifikasi perangkat aktif")
+            : tt("Get notifications on this device", "Terima notifikasi di perangkat ini")}
+        </div>
+        <div className="text-[10px] muted">
+          {tt("Works even when this page is closed.", "Tetap masuk walau halaman ini ditutup.")}
+        </div>
+      </div>
+      {enabled && (
+        <button
+          className="text-[11px] text-brand-700 hover:underline disabled:opacity-50"
+          onClick={sendTest}
+          disabled={testState === "sending"}
+        >
+          {testState === "ok"
+            ? tt("Sent ✓", "Terkirim ✓")
+            : testState === "sending"
+            ? tt("Sending…", "Mengirim…")
+            : tt("Send test", "Kirim uji")}
+        </button>
+      )}
+      <button
+        className={clsx(
+          "text-xs px-2.5 py-1 rounded-lg border font-medium",
+          enabled
+            ? "bg-ink-100 text-ink-600 border-ink-200 hover:bg-ink-200"
+            : "bg-brand-600 text-white border-brand-600 hover:bg-brand-700",
+        )}
+        onClick={enabled ? disable : enable}
+        disabled={busy}
+      >
+        {busy
+          ? tt("…", "…")
+          : enabled
+          ? tt("Turn off", "Matikan")
+          : tt("Enable", "Aktifkan")}
+      </button>
+    </div>
+  );
+}
 
 function relativeTime(iso: string): string {
   const t = new Date(iso).getTime();
@@ -129,6 +243,8 @@ export function NotificationsBell() {
                 })}
               </ul>
             </div>
+
+            <PushToggleRow />
 
             <div className="border-t border-ink-100 px-4 py-2 text-[11px] muted text-center">
               Auto-refreshes every 30 seconds. Click any item to act on it.
