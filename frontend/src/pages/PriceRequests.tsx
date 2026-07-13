@@ -182,6 +182,10 @@ function CreateForm({
   const [customerId, setCustomerId] = useState(initialCustomerId);
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<any[]>([{ description: "", qty: 1, uom: "", spec: "" }]);
+  // Attach the customer's RFQ / spec sheets right at creation — they're
+  // uploaded against the new PR as soon as it exists, so purchasing can
+  // cost from the source documents.
+  const [files, setFiles] = useState<File[]>([]);
 
   const customers = useQuery({
     queryKey: ["customers"],
@@ -195,10 +199,33 @@ function CreateForm({
   });
 
   const create = useMutation({
-    mutationFn: () => api.post("/price-requests", {
-      customer_id: customerId, notes,
-      items: items.filter((it) => it.description.trim()),
-    }).then((r) => r.data),
+    mutationFn: async () => {
+      const d = await api.post("/price-requests", {
+        customer_id: customerId, notes,
+        items: items.filter((it) => it.description.trim()),
+      }).then((r) => r.data);
+      // The PR exists — now attach the chosen files to it. A failed upload
+      // shouldn't lose the PR: warn and continue (files can be re-added on
+      // the detail page).
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("owner_type", "price_request");
+        fd.append("owner_id", d.id);
+        fd.append("description", "customer RFQ / spec");
+        fd.append("file", f);
+        try {
+          await api.post("/attachments", fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+        } catch (e: any) {
+          alert(tt(
+            `"${f.name}" failed to upload — the price request was created; re-attach the file on its page.`,
+            `"${f.name}" gagal diunggah — permintaan harga sudah dibuat; lampirkan ulang file di halamannya.`,
+          ));
+        }
+      }
+      return d;
+    },
     onSuccess: (d) => onCreated(d.id),
     onError: onErr,
   });
@@ -254,10 +281,50 @@ function CreateForm({
         </button>
       </div>
 
+      <div>
+        <div className="text-[11px] uppercase muted mb-1">
+          {t("Attachments (customer RFQ / spec sheets — optional)",
+             "Lampiran (RFQ pelanggan / lembar spesifikasi — opsional)")}
+        </div>
+        <label className="btn-ghost cursor-pointer inline-flex">
+          <Plus size={14} /> {t("Add files", "Tambah file")}
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []);
+              if (picked.length) setFiles((cur) => [...cur, ...picked]);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {files.length > 0 && (
+          <ul className="mt-2 space-y-1 text-sm">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${i}`} className="flex items-center gap-2">
+                <FileText size={13} className="text-ink-400 shrink-0" />
+                <span className="truncate">{f.name}</span>
+                <span className="muted text-xs">({Math.ceil(f.size / 1024)} KB)</span>
+                <button
+                  className="btn-ghost text-red-600 p-1 ml-auto"
+                  onClick={() => setFiles((cur) => cur.filter((_, idx) => idx !== i))}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="flex justify-end">
         <button className="btn-primary" disabled={!customerId || create.isPending}
           onClick={() => create.mutate()}>
-          {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {t("Create", "Buat")}
+          {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          {create.isPending && files.length
+            ? t("Creating + uploading…", "Membuat + mengunggah…")
+            : t("Create", "Buat")}
         </button>
       </div>
     </div>
