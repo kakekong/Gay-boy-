@@ -5,6 +5,7 @@ import {
   Volume2, VolumeX,
 } from "lucide-react";
 import clsx from "clsx";
+import { isPushSupported, resyncPush, subscribePush, unsubscribePush } from "@/lib/push";
 
 interface Banner {
   id: number;
@@ -153,10 +154,16 @@ export function NotificationBanner({ sources }: { sources: BadgeSource[] }) {
     }
   }, [sources, sfxOn, osOn, nav]);
 
-  // OS-notify toggle: request browser permission on enable.
+  // OS-notify toggle: request browser permission on enable, AND register
+  // this device for Web Push so notifications arrive even when no tab is
+  // open (the backend sweeper delivers the same role-routed items).
   const enableOs = async () => {
     if (!("Notification" in window)) return;
-    if (Notification.permission === "granted") { setOsOn(true); return; }
+    if (Notification.permission === "granted") {
+      setOsOn(true);
+      if (isPushSupported()) subscribePush();
+      return;
+    }
     if (Notification.permission === "denied") {
       alert(
         "Browser notifications are blocked for this site. Enable them in "
@@ -165,14 +172,29 @@ export function NotificationBanner({ sources }: { sources: BadgeSource[] }) {
       return;
     }
     const perm = await Notification.requestPermission();
-    if (perm === "granted") setOsOn(true);
+    if (perm === "granted") {
+      setOsOn(true);
+      if (isPushSupported()) subscribePush();
+    }
   };
+  const disableOs = () => {
+    setOsOn(false);
+    // Also stop closed-tab pushes for this device — one toggle, one truth.
+    if (isPushSupported()) unsubscribePush();
+  };
+
+  // On app load, silently keep this device's push subscription alive and
+  // attached to the current account (handles re-logins + expiry).
+  useEffect(() => {
+    if (osOn) resyncPush();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (banners.length === 0) return (
     <div className="fixed z-50 top-16 right-4 pointer-events-none">
       <NotifPrefs
         sfxOn={sfxOn} onSfx={() => setSfxOn((v) => !v)}
-        osOn={osOn}   onOs={() => (osOn ? setOsOn(false) : enableOs())}
+        osOn={osOn}   onOs={() => (osOn ? disableOs() : enableOs())}
         collapsed
       />
     </div>
@@ -182,7 +204,7 @@ export function NotificationBanner({ sources }: { sources: BadgeSource[] }) {
     <div className="fixed z-50 top-16 right-4 flex flex-col gap-2 max-w-sm w-[calc(100vw-1rem)]">
       <NotifPrefs
         sfxOn={sfxOn} onSfx={() => setSfxOn((v) => !v)}
-        osOn={osOn}   onOs={() => (osOn ? setOsOn(false) : enableOs())}
+        osOn={osOn}   onOs={() => (osOn ? disableOs() : enableOs())}
       />
       {banners.map((b) => (
         <BannerCard

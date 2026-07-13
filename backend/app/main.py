@@ -51,7 +51,23 @@ async def lifespan(_app: FastAPI):
         print("[boot] giving up on the schema check — starting API anyway; "
               "requests needing missing columns may error until the DB is back.",
               flush=True)
+
+    # Web-push sweeper: delivers role-routed notifications to subscribed
+    # devices even when no tab is open. Safe under multiple workers (a PG
+    # advisory lock elects a single runner) and fully optional — with no
+    # subscriptions it wakes, finds nothing, and sleeps.
+    sweeper_task = None
+    try:
+        from app.services.webpush import sweeper_loop
+        sweeper_task = asyncio.create_task(sweeper_loop())
+        print("[boot] web-push sweeper started.", flush=True)
+    except Exception:
+        logging.getLogger(__name__).exception("web-push sweeper failed to start")
+
     yield
+
+    if sweeper_task:
+        sweeper_task.cancel()
 
 
 def _enforce_prod_safety() -> None:
