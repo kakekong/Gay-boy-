@@ -35,39 +35,52 @@ const EMPTY_CONTACT: Contact = {
 
 interface Props {
   onClose: () => void;
+  /** When set, the SAME wizard edits this existing customer: every field
+   *  pre-fills, saving PATCHes instead of creating. Stage isn't edited
+   *  here (stage moves have their own approval flow) and extra contacts
+   *  are managed by the Contacts card on the customer page. */
+  customer?: any;
 }
 
-export function NewCustomerForm({ onClose }: Props) {
+export function NewCustomerForm({ onClose, customer }: Props) {
   const t = useT();
   const qc = useQueryClient();
+  const editing = !!customer;
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [basic, setBasic] = useState({
-    company_name: "",
-    industry: "mining",
-    pic_name: "",
-    pic_position: "",
-    phone: "",
-    whatsapp: "",
-    email: "",
-    company_address: "",
-    delivery_address: "",
-    stage: "lead",
+    company_name: customer?.company_name ?? "",
+    industry: customer?.industry ?? "mining",
+    pic_name: customer?.pic_name ?? "",
+    pic_position: customer?.pic_position ?? "",
+    phone: customer?.phone ?? "",
+    whatsapp: customer?.whatsapp ?? "",
+    email: customer?.email ?? "",
+    company_address: customer?.company_address ?? "",
+    delivery_address: customer?.delivery_address ?? "",
+    stage: customer?.stage ?? "lead",
   });
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tax, setTax] = useState({
-    tax_id: "",
-    tax_name: "",
-    tax_address: "",
-    is_pkp: false,
-    nppkp_no: "",
-    tax_notes: "",
+    tax_id: customer?.tax_id ?? "",
+    tax_name: customer?.tax_name ?? "",
+    tax_address: customer?.tax_address ?? "",
+    is_pkp: customer?.is_pkp ?? false,
+    nppkp_no: customer?.nppkp_no ?? "",
+    tax_notes: customer?.tax_notes ?? "",
   });
   const [err, setErr] = useState<string | null>(null);
 
   const create = useMutation({
-    mutationFn: () =>
-      api.post("/customers", {
+    mutationFn: () => {
+      if (editing) {
+        // Stage is deliberately excluded — the pipeline has its own
+        // approval-gated flow on the customer page.
+        const { stage: _stage, ...rest } = basic;
+        return api.patch(`/customers/${customer.id}`, { ...rest, ...tax })
+          .then((r) => r.data);
+      }
+      return api.post("/customers", {
         ...basic,
         ...tax,
         contacts: contacts
@@ -81,16 +94,30 @@ export function NewCustomerForm({ onClose }: Props) {
             is_primary: c.is_primary,
             notes: c.notes || null,
           })),
-      }).then((r) => r.data),
-    onSuccess: () => {
+      }).then((r) => r.data);
+    },
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["customers"] });
+      if (editing) {
+        qc.invalidateQueries({ queryKey: ["customer", customer.id] });
+        qc.invalidateQueries({ queryKey: ["customer-summary", customer.id] });
+        // Some roles' data changes queue for approval instead of applying.
+        if (data?.status === "pending_approval") {
+          alert(t(
+            "Change submitted — it applies once a manager/director approves.",
+            "Perubahan diajukan — berlaku setelah manajer/direktur menyetujui.",
+          ));
+        }
+      }
       onClose();
     },
     onError: (e: any) => {
       setErr(
         e?.response?.data?.errors?.[0]?.message
           ?? e?.response?.data?.detail
-          ?? t("Failed to create customer", "Gagal membuat pelanggan")
+          ?? (editing
+            ? t("Failed to save changes", "Gagal menyimpan perubahan")
+            : t("Failed to create customer", "Gagal membuat pelanggan"))
       );
     },
   });
@@ -171,12 +198,14 @@ export function NewCustomerForm({ onClose }: Props) {
             <input className="input" type="email" value={basic.email}
               onChange={(e) => setBasic({ ...basic, email: e.target.value })} />
           </Field>
-          <Field label={t("Stage", "Tahap")}>
-            <select className="input" value={basic.stage}
-              onChange={(e) => setBasic({ ...basic, stage: e.target.value })}>
-              {STAGES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </Field>
+          {!editing && (
+            <Field label={t("Stage", "Tahap")}>
+              <select className="input" value={basic.stage}
+                onChange={(e) => setBasic({ ...basic, stage: e.target.value })}>
+                {STAGES.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </Field>
+          )}
           <div className="md:col-span-2">
             <Field label={t("Company address", "Alamat perusahaan")}>
               <textarea className="input min-h-[60px]" value={basic.company_address}
@@ -192,7 +221,15 @@ export function NewCustomerForm({ onClose }: Props) {
         </div>
       )}
 
-      {step === 2 && (
+      {step === 2 && editing && (
+        <div className="rounded-xl border border-dashed border-ink-200 p-6 text-center text-sm muted">
+          {t(
+            "The primary PIC is edited in step 1. Additional contacts (and their ID cards) are managed on the customer page's Contacts card — edits there apply instantly.",
+            "PIC utama diedit di langkah 1. Kontak tambahan (dan KTP-nya) dikelola di kartu Kontak pada halaman pelanggan — perubahan di sana langsung berlaku.",
+          )}
+        </div>
+      )}
+      {step === 2 && !editing && (
         <div className="space-y-3">
           <div className="text-sm muted">
             {t(
@@ -361,7 +398,9 @@ export function NewCustomerForm({ onClose }: Props) {
                 ? <Loader2 size={14} className="animate-spin" />
                 : <Check size={14} />}
               {create.isPending
-                ? t("Creating…", "Menyimpan…")
+                ? t("Saving…", "Menyimpan…")
+                : editing
+                ? t("Save changes", "Simpan perubahan")
                 : t("Create customer", "Simpan pelanggan")}
             </button>
           )}

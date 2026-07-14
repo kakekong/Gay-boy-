@@ -5,10 +5,11 @@ import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
   Clock, ListChecks, CheckCircle2, Circle, RotateCcw, ChevronRight, Truck,
-  ShoppingCart, Banknote, Building, CalendarDays, Tag,
+  ShoppingCart, Banknote, Building, CalendarDays, Tag, Pencil,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
 import { useAuthStore } from "@/store/auth";
 import { StageBadge } from "@/components/StageBadge";
 import { Modal } from "@/components/Modal";
@@ -171,6 +172,7 @@ export default function CustomerDetailPage() {
   // Clicking a stage the deal already passed shows the notes written when
   // it moved through — the reasons from stage-move requests + direct moves.
   const [historyStage, setHistoryStage] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const stageHistory = useQuery({
     queryKey: ["customer-stage-history", id],
     queryFn: () => api.get(`/customers/${id}/stage-history`).then((r) => r.data as any[]),
@@ -278,6 +280,16 @@ export default function CustomerDetailPage() {
             </div>
           </div>
           <div className="flex gap-2 flex-wrap">
+            <button
+              className="btn-ghost"
+              onClick={() => setEditOpen(true)}
+              title={t(
+                "Edit this customer — same form as when it was created, pre-filled (basics, addresses, tax info).",
+                "Edit pelanggan ini — form yang sama seperti saat dibuat, sudah terisi (data dasar, alamat, data pajak).",
+              )}
+            >
+              <Pencil size={15} /> {t("Edit", "Edit")}
+            </button>
             <button className="btn-ghost" onClick={() => exportAs("pdf")} title={t("Download a complete customer report as PDF", "Unduh laporan lengkap pelanggan sebagai PDF")}>
               <Download size={15} /> PDF
             </button>
@@ -650,6 +662,16 @@ export default function CustomerDetailPage() {
         onShowHistory={(s) => setHistoryStage(s)}
         busy={moveStage.isPending}
       />
+
+      {editOpen && (
+        <Modal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          title={`${t("Edit customer", "Edit pelanggan")} — ${c.company_name}`}
+        >
+          <NewCustomerForm customer={c} onClose={() => setEditOpen(false)} />
+        </Modal>
+      )}
 
       {historyStage && (
         <Modal
