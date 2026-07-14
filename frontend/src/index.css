@@ -81,6 +81,12 @@
    (bg-white cards, ink-50 table heads, pastel status chips) so every screen
    inherits dark mode without touching each page. */
 
+/* Native form-control chrome (number spinners, select chevrons, date
+   picker icons, checkbox glyphs) ignores CSS colors but follows
+   color-scheme — without this the arrows render black-on-dark. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
 .dark body { background-color: #0b0e14; color: #d5d9e2; }
 
 .dark .card        { background-color: #151a23; border-color: rgba(255,255,255,0.07); }
