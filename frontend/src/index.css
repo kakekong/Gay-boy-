@@ -74,3 +74,81 @@
     @apply rounded border border-ink-200 bg-ink-50 px-1.5 py-0.5 text-[10px] font-mono text-ink-600;
   }
 }
+
+/* ─── Dark mode ───────────────────────────────────────────────────────────
+   Class-based (html.dark). Component classes get first-class dark styles;
+   the block below then remaps the hardcoded light utilities that pages use
+   (bg-white cards, ink-50 table heads, pastel status chips) so every screen
+   inherits dark mode without touching each page. */
+
+.dark body { background-color: #0b0e14; color: #d5d9e2; }
+
+.dark .card        { background-color: #151a23; border-color: rgba(255,255,255,0.07); }
+.dark .input       { background-color: #10141c; border-color: rgba(255,255,255,0.10); color: #e6e9ef; }
+.dark .input::placeholder { color: #5b6372; }
+.dark .input:focus { border-color: #6366f1; }
+.dark .btn-ghost   { color: #b7bdc9; }
+.dark .btn-ghost:hover { background-color: rgba(255,255,255,0.06); color: #fff; }
+.dark .muted       { color: #878f9f; }
+.dark .section-title { color: #f6f7f9; }
+.dark .th          { color: #878f9f; }
+.dark .td          { color: #d5d9e2; }
+.dark .tr-hover:hover { background-color: rgba(255,255,255,0.03); }
+.dark .kbd         { background-color: #10141c; border-color: rgba(255,255,255,0.1); color: #878f9f; }
+.dark ::-webkit-scrollbar-thumb { background: #2a303d; border: 2px solid transparent; background-clip: padding-box; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #3f4654; }
+
+/* Surfaces + text that pages hardcode. */
+.dark .bg-white         { background-color: #151a23; }
+.dark .bg-white\/80,
+.dark .bg-white\/70     { background-color: rgba(21,26,35,0.75); }
+.dark .bg-ink-50        { background-color: rgba(255,255,255,0.04); }
+.dark .bg-ink-50\/60,
+.dark .bg-ink-50\/40    { background-color: rgba(255,255,255,0.03); }
+.dark .bg-ink-100       { background-color: rgba(255,255,255,0.06); }
+.dark .bg-ink-100\/60   { background-color: rgba(255,255,255,0.05); }
+.dark .hover\:bg-ink-50:hover   { background-color: rgba(255,255,255,0.04); }
+.dark .hover\:bg-ink-100:hover  { background-color: rgba(255,255,255,0.07); }
+.dark .hover\:bg-ink-50\/40:hover { background-color: rgba(255,255,255,0.03); }
+.dark .text-ink-900     { color: #f6f7f9; }
+.dark .text-ink-800     { color: #e6e9ef; }
+.dark .text-ink-700     { color: #cfd4dd; }
+.dark .text-ink-600     { color: #aeb5c2; }
+.dark .border-ink-100   { border-color: rgba(255,255,255,0.06); }
+.dark .border-ink-200,
+.dark .border-ink-200\/60,
+.dark .border-ink-200\/70 { border-color: rgba(255,255,255,0.09); }
+.dark .divide-ink-100 > * + * { border-color: rgba(255,255,255,0.06); }
+.dark .border-dashed.border-ink-200 { border-color: rgba(255,255,255,0.12); }
+
+/* Pastel status chips → translucent tints that read on dark. */
+.dark .bg-emerald-50,  .dark .bg-emerald-100 { background-color: rgba(16,185,129,0.14); }
+.dark .bg-amber-50,    .dark .bg-amber-100   { background-color: rgba(245,158,11,0.14); }
+.dark .bg-red-50,      .dark .bg-red-100     { background-color: rgba(239,68,68,0.14); }
+.dark .bg-blue-50,     .dark .bg-blue-100    { background-color: rgba(59,130,246,0.14); }
+.dark .bg-violet-50,   .dark .bg-violet-100  { background-color: rgba(139,92,246,0.14); }
+.dark .bg-orange-50,   .dark .bg-orange-100  { background-color: rgba(249,115,22,0.14); }
+.dark .bg-cyan-50                             { background-color: rgba(6,182,212,0.14); }
+.dark .bg-brand-50,    .dark .bg-brand-100   { background-color: rgba(99,102,241,0.16); }
+.dark .bg-ink-200      { background-color: rgba(255,255,255,0.10); }
+.dark .text-emerald-700, .dark .text-emerald-800 { color: #34d399; }
+.dark .text-amber-700,   .dark .text-amber-800   { color: #fbbf24; }
+.dark .text-red-700,     .dark .text-red-800     { color: #f87171; }
+.dark .text-blue-700,    .dark .text-blue-800    { color: #60a5fa; }
+.dark .text-violet-700,  .dark .text-violet-800  { color: #a78bfa; }
+.dark .text-orange-700                            { color: #fb923c; }
+.dark .text-cyan-700                              { color: #22d3ee; }
+.dark .text-brand-700                             { color: #a5b4fc; }
+.dark .text-brand-600                             { color: #818cf8; }
+.dark .border-emerald-200 { border-color: rgba(16,185,129,0.35); }
+.dark .border-amber-200   { border-color: rgba(245,158,11,0.35); }
+.dark .border-red-200, .dark .border-red-300 { border-color: rgba(239,68,68,0.35); }
+.dark .border-blue-200    { border-color: rgba(59,130,246,0.35); }
+.dark .border-violet-200  { border-color: rgba(139,92,246,0.35); }
+.dark .border-brand-200   { border-color: rgba(99,102,241,0.35); }
+.dark .bg-emerald-50\/60  { background-color: rgba(16,185,129,0.10); }
+.dark .bg-amber-50\/60    { background-color: rgba(245,158,11,0.10); }
+
+/* Banner/flash panels that pair pastel bg with -800/-900 text. */
+.dark .text-emerald-900, .dark .text-amber-900, .dark .text-red-900,
+.dark .text-violet-900,  .dark .text-brand-900, .dark .text-blue-900 { color: #e6e9ef; }

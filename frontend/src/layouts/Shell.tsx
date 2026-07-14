@@ -6,13 +6,14 @@ import {
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList, Eye, Tag,
+  Receipt, ClipboardList, Eye, Tag, Sun, Moon,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useLangStore, useT } from "@/store/lang";
+import { useThemeStore } from "@/store/theme";
 import { NotificationsBell } from "@/components/NotificationsBell";
 import { FeedbackButton } from "@/components/FeedbackButton";
 import { NotificationBanner, NotificationStripe } from "@/components/NotificationBanner";
@@ -436,6 +437,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </span>
             )}
           </button>
+          <ThemeToggle />
           <LangToggle />
           <NotificationsBell />
           <div className="hidden md:flex items-center gap-2 pl-2 border-l border-ink-200 ml-1">
@@ -546,6 +548,24 @@ function ImpersonationBanner() {
         <LogOut size={13} /> Exit view-as
       </button>
     </div>
+  );
+}
+
+function ThemeToggle() {
+  const theme = useThemeStore((s) => s.theme);
+  const toggle = useThemeStore((s) => s.toggle);
+  const t = useT();
+  return (
+    <button
+      onClick={toggle}
+      title={theme === "dark"
+        ? t("Switch to light mode", "Ganti ke mode terang")
+        : t("Switch to dark mode", "Ganti ke mode gelap")}
+      className="p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
+      aria-label="Toggle dark mode"
+    >
+      {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+    </button>
   );
 }
 
