@@ -152,3 +152,8 @@
 /* Banner/flash panels that pair pastel bg with -800/-900 text. */
 .dark .text-emerald-900, .dark .text-amber-900, .dark .text-red-900,
 .dark .text-violet-900,  .dark .text-brand-900, .dark .text-blue-900 { color: #e6e9ef; }
+
+/* The sidebar keeps its own deeper dark surface (the generic .bg-white
+   remap above would flatten it to the card color). Element+class beats
+   the class-only remap on specificity. */
+.dark aside.bg-white { background-color: #0d1117; }

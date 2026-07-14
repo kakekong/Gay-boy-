@@ -37,7 +37,7 @@ export function FeedbackButton({ compact = false }: { compact?: boolean }) {
         type="button"
         onClick={() => setOpen(true)}
         className={compact
-          ? "p-1.5 rounded text-ink-400 hover:bg-white/10 hover:text-white"
+          ? "p-1.5 rounded text-ink-400 hover:text-ink-700 hover:bg-ink-100 dark:hover:text-white dark:hover:bg-white/10"
           : "w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-600 hover:bg-ink-100"}
         title={t("Send feedback to the director", "Kirim masukan ke direktur")}
       >
