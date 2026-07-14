@@ -274,26 +274,28 @@ export function Shell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Sidebar */}
+      {/* Dark sidebar — the app chrome recedes so the content carries the
+          light. All nav states are tuned for the ink-900 surface. */}
       <aside
         className={clsx(
           "fixed lg:static z-40 h-full w-64 shrink-0",
-          "bg-white border-r border-ink-200 flex flex-col",
+          "bg-ink-900 flex flex-col",
           "transition-transform duration-200",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        <div className="px-5 h-16 flex items-center gap-2 border-b border-ink-100">
+        <div className="px-5 h-16 flex items-center gap-2 border-b border-white/[0.06]">
           <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-soft">
             <Factory size={18} className="text-white" />
           </div>
           <div>
-            <div className="font-semibold text-ink-900 leading-tight">Transmisi Eng</div>
+            <div className="font-semibold text-white leading-tight">Transmisi Eng</div>
             <div className="text-[10px] uppercase tracking-wider text-ink-400">
               {t("Project ERP · v0.1", "ERP Proyek · v0.1")}
             </div>
           </div>
           <button
-            className="ml-auto lg:hidden text-ink-500"
+            className="ml-auto lg:hidden text-ink-400 hover:text-white"
             onClick={() => setMobileOpen(false)}
             aria-label="Close menu"
           >
@@ -319,7 +321,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             if (!items.length) return null;
             return (
               <div key={g.label}>
-                <div className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+                <div className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-500">
                   {lang === "id" ? g.label_id : g.label}
                 </div>
                 <div className="space-y-0.5">
@@ -335,8 +337,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
                           isActive
                             ? n.accent
                               ? "bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-soft"
-                              : "bg-brand-50 text-brand-700"
-                            : "text-ink-600 hover:bg-ink-100 hover:text-ink-900"
+                              : "bg-white/10 text-white"
+                            : "text-ink-400 hover:bg-white/5 hover:text-white"
                         )
                       }
                     >
@@ -363,16 +365,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="p-3 border-t border-ink-100">
+        <div className="p-3 border-t border-white/[0.06]">
           <div className="flex items-center gap-3 px-2 py-2">
-            <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-semibold text-sm">
+            <div className="h-9 w-9 rounded-full bg-brand-500/25 text-brand-200 flex items-center justify-center font-semibold text-sm">
               {(user?.full_name ?? "U").slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-ink-900">
+              <div className="truncate text-sm font-medium text-white">
                 {user?.full_name ?? "—"}
               </div>
-              <div className="text-[11px] uppercase tracking-wide text-ink-400">
+              <div className="text-[11px] uppercase tracking-wide text-ink-500">
                 {user?.custom_role_name ?? user?.role}
               </div>
             </div>
@@ -380,7 +382,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <button
               onClick={logout}
               title={t("Logout", "Keluar")}
-              className="text-ink-400 hover:text-ink-700 p-1.5 rounded hover:bg-ink-100"
+              className="text-ink-400 hover:text-white p-1.5 rounded hover:bg-white/10"
             >
               <LogOut size={15} />
             </button>
@@ -390,7 +392,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white/80 backdrop-blur border-b border-ink-200 flex items-center px-4 lg:px-6 gap-3 sticky top-0 z-20">
+        <header className="h-16 bg-white/70 backdrop-blur-md border-b border-ink-200/60 flex items-center px-4 lg:px-6 gap-3 sticky top-0 z-20">
           <button
             className="lg:hidden text-ink-600"
             onClick={() => setMobileOpen(true)}
