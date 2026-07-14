@@ -55,11 +55,15 @@ async def get_or_create_vapid(db: AsyncSession) -> VapidKeypair:
     return kp
 
 
-def _send_one(sub: PushSubscription, payload: dict, private_pem: str) -> bool:
-    """Send one push (sync — called via to_thread). Returns False when the
-    subscription is dead (410/404) and should be deleted."""
-    from pywebpush import WebPushException, webpush
+def _send_one(sub: PushSubscription, payload: dict, private_pem: str) -> dict:
+    """Send one push (sync — called via to_thread).
+
+    Returns {"ok": bool, "dead": bool, "detail": str|None} so callers can
+    tell a real delivery from a swallowed failure — the test endpoint
+    surfaces `detail` to the user instead of silently claiming success.
+    """
     try:
+        from pywebpush import WebPushException, webpush
         webpush(
             subscription_info={
                 "endpoint": sub.endpoint,
@@ -70,37 +74,48 @@ def _send_one(sub: PushSubscription, payload: dict, private_pem: str) -> bool:
             vapid_claims={"sub": VAPID_SUBJECT},
             ttl=3600,
         )
-        return True
-    except WebPushException as e:
+        return {"ok": True, "dead": False, "detail": None}
+    except Exception as e:
         code = getattr(getattr(e, "response", None), "status_code", None)
-        if code in (404, 410):
-            return False  # endpoint gone — unsubscribe it
-        log.warning("webpush failed (%s): %s", code, e)
-        return True
-    except Exception as e:  # network problems etc. — keep the subscription
-        log.warning("webpush error: %s", e)
-        return True
+        body = getattr(getattr(e, "response", None), "text", "") or str(e)
+        log.warning("webpush failed (%s): %s", code, body[:300])
+        return {
+            "ok": False,
+            "dead": code in (404, 410),  # endpoint gone — unsubscribe it
+            "detail": f"HTTP {code}: {body[:200]}" if code else str(e)[:200],
+        }
 
 
 async def push_to_user(db: AsyncSession, user_id, title: str, body: str,
                        url: str = "/") -> int:
-    """Push to every device of one user. Returns how many sends attempted."""
+    """Push to every device of one user. Returns how many sends SUCCEEDED."""
+    results = await push_to_user_detailed(db, user_id, title, body, url)
+    return sum(1 for r in results if r["ok"])
+
+
+async def push_to_user_detailed(db: AsyncSession, user_id, title: str,
+                                body: str, url: str = "/") -> list[dict]:
+    """Push to every device of one user; return per-device delivery results.
+
+    Dead subscriptions (push service says 404/410) are removed. Each result
+    is {"ok": bool, "detail": str|None} — `detail` carries the push
+    service's rejection so /push/test can show the user WHY nothing arrived.
+    """
     subs = (await db.scalars(
         select(PushSubscription).where(PushSubscription.user_id == user_id)
     )).all()
     if not subs:
-        return 0
+        return []
     kp = await get_or_create_vapid(db)
     payload = {"title": title, "body": body, "url": url}
-    sent = 0
+    results: list[dict] = []
     for sub in subs:
-        alive = await asyncio.to_thread(_send_one, sub, payload, kp.private_pem)
-        if not alive:
+        res = await asyncio.to_thread(_send_one, sub, payload, kp.private_pem)
+        if res["dead"]:
             await db.delete(sub)
-        else:
-            sent += 1
+        results.append({"ok": res["ok"], "detail": res["detail"]})
     await db.flush()
-    return sent
+    return results
 
 
 async def sweep_once(db: AsyncSession) -> int:

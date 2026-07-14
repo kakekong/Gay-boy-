@@ -382,7 +382,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
             <FeedbackButton compact />
             <button
-              onClick={logout}
+              onClick={() => logout()}
               title={t("Logout", "Keluar")}
               className="text-ink-400 hover:text-ink-700 hover:bg-ink-100 dark:hover:text-white dark:hover:bg-white/10 p-1.5 rounded"
             >

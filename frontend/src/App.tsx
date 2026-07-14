@@ -117,7 +117,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
         <div className="ml-auto flex items-center gap-3 text-sm">
           <span className="text-ink-600 hidden sm:inline">{user?.full_name}</span>
           <button
-            onClick={logout}
+            onClick={() => logout()}
             className="px-3 py-1.5 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 text-xs"
           >
             Sign out

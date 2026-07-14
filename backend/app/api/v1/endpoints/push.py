@@ -15,7 +15,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.models.push import PushSubscription
 from app.models.user import User
-from app.services.webpush import get_or_create_vapid, push_to_user
+from app.services.webpush import get_or_create_vapid, push_to_user_detailed
 
 router = APIRouter()
 
@@ -93,15 +93,24 @@ async def send_test(
 ):
     """Fire a test push to the caller's own devices so they can confirm
     the whole chain works with the tab closed."""
-    sent = await push_to_user(
+    results = await push_to_user_detailed(
         db, me.id,
         title="Transmisi Eng",
         body="Push notifications are working on this device. 🎉",
         url="/",
     )
-    if not sent:
+    if not results:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             "No push subscription for this account yet — enable notifications first.",
         )
-    return {"sent": sent}
+    sent = sum(1 for r in results if r["ok"])
+    if not sent:
+        # Every device rejected the push — tell the user why instead of
+        # pretending it worked.
+        first_error = next((r["detail"] for r in results if r["detail"]), "unknown error")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Push service rejected the notification: {first_error}",
+        )
+    return {"sent": sent, "devices": len(results), "results": results}

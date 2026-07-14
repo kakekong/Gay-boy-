@@ -92,12 +92,33 @@ function PushToggleRow() {
   const sendTest = async () => {
     setTestState("sending");
     try {
-      await api.post("/push/test");
+      const { data } = await api.post("/push/test");
       setTestState("ok");
       setTimeout(() => setTestState("idle"), 4000);
+      const failed = (data?.devices ?? 0) - (data?.sent ?? 0);
+      // The push service accepted it — if nothing pops up, the block is on
+      // the device itself. Point the user at the usual suspects.
+      setTimeout(() => {
+        const parts = [tt(
+          `Test accepted by the push service (${data?.sent ?? 1} device${(data?.sent ?? 1) > 1 ? "s" : ""}).`,
+          `Uji diterima layanan push (${data?.sent ?? 1} perangkat).`,
+        )];
+        if (failed > 0) {
+          parts.push(tt(
+            `${failed} other device(s) rejected it — probably stale; re-enable there.`,
+            `${failed} perangkat lain menolak — kemungkinan kedaluwarsa; aktifkan ulang di sana.`,
+          ));
+        }
+        parts.push(tt(
+          "If no notification appeared: check your OS notification settings for this browser (macOS: System Settings → Notifications; Windows: Settings → Notifications) and make sure Focus / Do Not Disturb is off.",
+          "Jika tidak muncul: cek pengaturan notifikasi OS untuk browser ini (macOS: System Settings → Notifications; Windows: Settings → Notifications) dan pastikan Focus / Jangan Ganggu mati.",
+        ));
+        alert(parts.join("\n\n"));
+      }, 300);
     } catch (e: any) {
       setTestState("idle");
       alert(e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
         ?? tt("Test push failed.", "Uji notifikasi gagal."));
     }
   };
