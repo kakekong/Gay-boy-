@@ -157,3 +157,16 @@
    remap above would flatten it to the card color). Element+class beats
    the class-only remap on specificity. */
 .dark aside.bg-white { background-color: #0d1117; }
+
+/* Fractional-opacity light tints (bg-x-50/NN). Unmapped, a light tint at
+   30–60% over a dark canvas renders as a muddy gray slab (e.g. the chat
+   thread). Map every variant in use to its dark translucent equivalent. */
+.dark .bg-ink-50\/30, .dark .bg-ink-50\/50 { background-color: rgba(255,255,255,0.03); }
+.dark .bg-ink-100\/70 { background-color: rgba(255,255,255,0.06); }
+.dark .bg-brand-50\/30, .dark .bg-brand-50\/40 { background-color: rgba(99,102,241,0.10); }
+.dark .bg-brand-50\/60 { background-color: rgba(99,102,241,0.14); }
+.dark .bg-amber-50\/40, .dark .bg-amber-50\/70 { background-color: rgba(245,158,11,0.10); }
+.dark .bg-emerald-50\/40, .dark .bg-emerald-50\/50 { background-color: rgba(16,185,129,0.10); }
+.dark .bg-red-50\/40, .dark .bg-red-50\/60, .dark .bg-red-50\/70 { background-color: rgba(239,68,68,0.10); }
+.dark .bg-blue-50\/60 { background-color: rgba(59,130,246,0.10); }
+.dark .bg-violet-50\/60 { background-color: rgba(139,92,246,0.10); }
