@@ -412,7 +412,9 @@ async def list_notifications(
                     late += 1
             if missing:
                 items.append({
-                    "id": "attendance-missing",
+                    # Day+count-scoped so a dismissal only lasts while
+                    # nothing changes (and never beyond today).
+                    "id": f"attendance-missing:{today.isoformat()}:{missing}",
                     "kind": "attendance",
                     "severity": "medium",
                     "title": f"{missing} employee(s) not clocked in today",
@@ -422,7 +424,7 @@ async def list_notifications(
                 })
             if late:
                 items.append({
-                    "id": "attendance-late",
+                    "id": f"attendance-late:{today.isoformat()}:{late}",
                     "kind": "attendance",
                     "severity": "low",
                     "title": f"{late} employee(s) clocked in late today",
@@ -578,7 +580,9 @@ async def list_notifications(
         total_unread += await db.scalar(stmt) or 0
     if total_unread:
         items.append({
-            "id": "chat-unread",
+            # Count-scoped id: dismissing hides THIS state; new messages
+            # change the id so the row comes back.
+            "id": f"chat-unread:{total_unread}",
             "kind": "chat",
             "severity": "low",
             "title": f"{total_unread} unread message" + ("" if total_unread == 1 else "s"),
@@ -586,6 +590,18 @@ async def list_notifications(
             "link": "/chat",
             "at": now,
         })
+
+    # Drop items this user dismissed (X button on the bell). Dismissals are
+    # per item-id, so a dismissed item stays gone until it resolves — or,
+    # for aggregate rows whose id encodes state (chat count, attendance),
+    # until the state changes and mints a new id.
+    from app.models.push import NotificationDismissed
+    dismissed = {row[0] for row in (await db.execute(
+        select(NotificationDismissed.item_id)
+        .where(NotificationDismissed.user_id == me.id)
+    )).all()}
+    if dismissed:
+        items = [i for i in items if i["id"] not in dismissed]
 
     # Order: high → medium → low; within tier, newest first
     SEVERITY = {"high": 0, "medium": 1, "low": 2}
@@ -599,3 +615,47 @@ async def list_notifications(
             "low": sum(1 for i in items if i["severity"] == "low"),
         },
     }
+
+
+@router.post("/dismiss")
+async def dismiss_notification(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Hide one bell item for this user (the X button)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.push import NotificationDismissed
+
+    item_id = str(payload.get("item_id") or "")[:120]
+    if not item_id:
+        from fastapi import HTTPException, status
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "item_id required")
+    await db.execute(
+        pg_insert(NotificationDismissed)
+        .values(user_id=me.id, item_id=item_id)
+        .on_conflict_do_nothing(constraint="uq_notif_dismissed")
+    )
+    return {"ok": True}
+
+
+@router.post("/dismiss-all")
+async def dismiss_all_notifications(
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Hide everything currently in this user's bell (Clear all)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.push import NotificationDismissed
+
+    data = await list_notifications(db=db, me=me)
+    ids = [i["id"] for i in data.get("items", [])]
+    for item_id in ids:
+        await db.execute(
+            pg_insert(NotificationDismissed)
+            .values(user_id=me.id, item_id=item_id)
+            .on_conflict_do_nothing(constraint="uq_notif_dismissed")
+        )
+    return {"ok": True, "dismissed": len(ids)}

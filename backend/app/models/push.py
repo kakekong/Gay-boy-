@@ -56,6 +56,26 @@ class PushDelivered(Base, UUIDPK):
     )
 
 
+class NotificationDismissed(Base, UUIDPK):
+    """Bell items a user swiped away. The bell is computed live, so a
+    dismissal is a per-user filter on item ids — the item disappears from
+    that user's bell (and future pushes) until it resolves on its own.
+    Rows are pruned after 30 days by the sweeper."""
+    __tablename__ = "notification_dismissed"
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_id", name="uq_notif_dismissed"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    item_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class VapidKeypair(Base, UUIDPK):
     __tablename__ = "vapid_keypair"
 

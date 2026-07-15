@@ -188,9 +188,14 @@ async def sweeper_loop(interval: int = 90) -> None:
                         await db.commit()
                         if n:
                             log.info("webpush sweep: %s push(es) sent", n)
-                        # prune delivery ledger so it doesn't grow forever
+                        # prune delivery + dismissal ledgers so they don't
+                        # grow forever
+                        from app.models.push import NotificationDismissed
                         await db.execute(delete(PushDelivered).where(
                             text("sent_at < now() - interval '30 days'")
+                        ))
+                        await db.execute(delete(NotificationDismissed).where(
+                            text("created_at < now() - interval '30 days'")
                         ))
                         await db.commit()
                     finally:

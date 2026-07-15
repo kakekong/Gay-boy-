@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell, BellRing, CheckSquare, AlertTriangle, AlertCircle, Truck, MessageCircle,
-  ChevronRight, Loader2, ListChecks,
+  ChevronRight, Loader2, ListChecks, X,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -182,6 +182,7 @@ function relativeTime(iso: string): string {
 
 export function NotificationsBell() {
   const nav = useNavigate();
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
 
   const q = useQuery({
@@ -192,6 +193,37 @@ export function NotificationsBell() {
     }),
     refetchInterval: 30_000,
   });
+
+  // Optimistically remove item(s) from the cached payload so the row
+  // vanishes instantly; the backend records the dismissal for every device.
+  const removeFromCache = (ids: string[]) => {
+    qc.setQueryData(["notifications"], (old: any) => {
+      if (!old?.items) return old;
+      const items = old.items.filter((i: NotificationItem) => !ids.includes(i.id));
+      return {
+        ...old,
+        items,
+        counts: {
+          total: items.length,
+          high: items.filter((i: NotificationItem) => i.severity === "high").length,
+          medium: items.filter((i: NotificationItem) => i.severity === "medium").length,
+          low: items.filter((i: NotificationItem) => i.severity === "low").length,
+        },
+      };
+    });
+  };
+  const dismissOne = (id: string) => {
+    removeFromCache([id]);
+    api.post("/notifications/dismiss", { item_id: id }).catch(() => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    });
+  };
+  const dismissAll = () => {
+    removeFromCache((q.data?.items ?? []).map((i) => i.id));
+    api.post("/notifications/dismiss-all").catch(() => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    });
+  };
 
   const total = q.data?.counts.total ?? 0;
   const hasHigh = (q.data?.counts.high ?? 0) > 0;
@@ -226,7 +258,18 @@ export function NotificationsBell() {
                   {total === 0 ? "All clear" : `${total} active alert${total === 1 ? "" : "s"}`}
                 </div>
               </div>
-              {q.isFetching && <Loader2 size={14} className="animate-spin text-ink-400" />}
+              <div className="flex items-center gap-2">
+                {q.isFetching && <Loader2 size={14} className="animate-spin text-ink-400" />}
+                {total > 0 && (
+                  <button
+                    onClick={dismissAll}
+                    className="text-[11px] font-medium text-ink-500 hover:text-red-600 hover:underline"
+                    title={tt("Hide all current alerts", "Sembunyikan semua notifikasi saat ini")}
+                  >
+                    {tt("Clear all", "Bersihkan semua")}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="max-h-[60vh] overflow-y-auto">
@@ -243,10 +286,10 @@ export function NotificationsBell() {
                 {(q.data?.items ?? []).map((n) => {
                   const Icon = ICON[n.kind] ?? Bell;
                   return (
-                    <li key={n.id}>
+                    <li key={n.id} className="relative group border-b border-ink-100 last:border-b-0">
                       <button
                         onClick={() => { nav(n.link); setOpen(false); }}
-                        className="w-full text-left p-3 flex items-start gap-3 hover:bg-ink-50 border-b border-ink-100 last:border-b-0 group"
+                        className="w-full text-left p-3 pr-9 flex items-start gap-3 hover:bg-ink-50"
                       >
                         <div className={clsx("h-8 w-8 rounded-lg grid place-items-center shrink-0",
                           SEVERITY_RING[n.severity])}>
@@ -258,6 +301,14 @@ export function NotificationsBell() {
                           <div className="text-[10px] text-ink-400 mt-0.5">{relativeTime(n.at)}</div>
                         </div>
                         <ChevronRight size={14} className="text-ink-300 group-hover:text-ink-600 shrink-0 mt-1" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); dismissOne(n.id); }}
+                        className="absolute top-2 right-2 p-1 rounded text-ink-300 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/15"
+                        aria-label="Dismiss notification"
+                        title={tt("Dismiss", "Hapus")}
+                      >
+                        <X size={13} />
                       </button>
                     </li>
                   );
