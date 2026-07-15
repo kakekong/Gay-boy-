@@ -151,6 +151,90 @@ async def list_notifications(
             "at": a.decided_at,
         })
 
+    # 1c. Price requests. They run their own pipeline (pending_purchasing →
+    # pending_director → approved/rejected) OUTSIDE the approvals queue, so
+    # without this section every handoff was silent. Routed to whoever
+    # holds the ball: purchasing costs it, the director prices it, and the
+    # requesting sales rep hears the outcome.
+    from app.models.price_request import PriceRequest
+    if role in (Role.PURCHASING, Role.MANAGER, Role.DIRECTOR):
+        pr_cost = (await db.execute(
+            select(PriceRequest, Customer)
+            .join(Customer, PriceRequest.customer_id == Customer.id)
+            .where(
+                PriceRequest.is_deleted.is_(False),
+                PriceRequest.status == "pending_purchasing",
+            )
+            .order_by(PriceRequest.updated_at.asc())
+            .limit(20)
+        )).all()
+        for pr, c in pr_cost:
+            items.append({
+                "id": f"pr-cost:{pr.id}",
+                "kind": "price_request",
+                "severity": "high" if role == Role.PURCHASING else "medium",
+                "title": f"Price request awaiting costing: {pr.number}",
+                # Purchasing stays customer-blind — no company name.
+                "body": ("Fill the procurement cost per line"
+                         if role == Role.PURCHASING else c.company_name),
+                "link": f"/price-requests?open={pr.id}",
+                "at": pr.updated_at or pr.created_at,
+            })
+    if role in (Role.MANAGER, Role.DIRECTOR):
+        pr_price = (await db.execute(
+            select(PriceRequest, Customer)
+            .join(Customer, PriceRequest.customer_id == Customer.id)
+            .where(
+                PriceRequest.is_deleted.is_(False),
+                PriceRequest.status == "pending_director",
+            )
+            .order_by(PriceRequest.priced_at.asc().nullslast())
+            .limit(20)
+        )).all()
+        for pr, c in pr_price:
+            items.append({
+                "id": f"pr-price:{pr.id}",
+                "kind": "price_request",
+                "severity": "high" if role == Role.DIRECTOR else "medium",
+                "title": f"Price request awaiting sell price: {pr.number}",
+                "body": f"{c.company_name} · costed by purchasing — set the "
+                        "sell price and approve",
+                "link": f"/price-requests?open={pr.id}",
+                "at": pr.priced_at or pr.updated_at or pr.created_at,
+            })
+    # Outcome goes to the REQUESTER, whatever their role.
+    pr_done_stmt = (
+        select(PriceRequest, Customer)
+        .join(Customer, PriceRequest.customer_id == Customer.id)
+        .where(
+            PriceRequest.is_deleted.is_(False),
+            PriceRequest.status.in_(["approved", "rejected"]),
+            PriceRequest.updated_at >= now - timedelta(days=7),
+            (PriceRequest.sales_pic_id == me.id)
+            | (PriceRequest.created_by == me.id),
+            # ...but not to the person who made the decision
+            (PriceRequest.approved_by.is_(None))
+            | (PriceRequest.approved_by != me.id),
+        )
+        .order_by(PriceRequest.updated_at.desc())
+        .limit(20)
+    )
+    for pr, c in (await db.execute(pr_done_stmt)).all():
+        ok = pr.status == "approved"
+        reason = (pr.decision_notes or "").strip()
+        items.append({
+            "id": f"pr-decided:{pr.id}:{pr.status}",
+            "kind": "price_request_decided",
+            "severity": "low" if ok else "medium",
+            "title": f"Price request {pr.number} "
+                     + ("approved — quote it" if ok else "sent back"),
+            "body": (f"{c.company_name}"
+                     + (f" · {reason}" if reason else
+                        ("" if ok else " · revise and resubmit"))),
+            "link": f"/price-requests?open={pr.id}",
+            "at": pr.approved_at or pr.updated_at,
+        })
+
     # 2. At-risk open quotations — a sales concern. Sales sees their own
     # deals, manager/director see all. Other departments can't act on a
     # stalled quotation, so they don't get nagged about it.
