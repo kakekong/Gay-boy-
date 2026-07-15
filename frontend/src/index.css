@@ -124,8 +124,23 @@
 .dark .border-ink-200,
 .dark .border-ink-200\/60,
 .dark .border-ink-200\/70 { border-color: rgba(255,255,255,0.09); }
-.dark .divide-ink-100 > * + * { border-color: rgba(255,255,255,0.06); }
+/* Tailwind's divide rule is `.divide-ink-100 > :not([hidden]) ~ :not([hidden])`
+   (specificity 0,3,0) — the override must match it or the light-gray
+   divider wins and rows get bright white edges in dark mode. */
+.dark .divide-ink-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255,255,255,0.06);
+}
 .dark .border-dashed.border-ink-200 { border-color: rgba(255,255,255,0.12); }
+
+/* Preflight sets every element's default border-color to light gray, so
+   any `border-b` / `divide-y` WITHOUT an explicit color utility renders a
+   bright edge on dark. :where() keeps specificity at zero so every real
+   color utility still wins — this only replaces the fallback. */
+:where(.dark) *,
+:where(.dark) ::before,
+:where(.dark) ::after {
+  border-color: rgba(255,255,255,0.07);
+}
 
 /* Pastel status chips → translucent tints that read on dark. */
 .dark .bg-emerald-50,  .dark .bg-emerald-100 { background-color: rgba(16,185,129,0.14); }
