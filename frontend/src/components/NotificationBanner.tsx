@@ -65,7 +65,7 @@ const WRITE_PREF = (k: string, v: boolean) => {
   try { localStorage.setItem(k, String(v)); } catch { /* noop */ }
 };
 
-const AUTO_DISMISS_MS = 9_000;
+const AUTO_DISMISS_MS = 25_000;
 
 function chime(vol = 0.06) {
   // Two-note ascending arpeggio. Kept short + soft so it doesn't
@@ -137,6 +137,8 @@ export function NotificationBanner({ sources }: { sources: BadgeSource[] }) {
     setBanners((cur) => [...cur, ...next].slice(-5));
     // Ping the user out-of-band.
     if (sfxOn) chime(next.some((n) => n.severity === "high") ? 0.09 : 0.05);
+    // Buzz phones/tablets that support it (Android; iOS ignores this).
+    try { navigator.vibrate?.([150, 80, 150]); } catch { /* noop */ }
     if (osOn && document.visibilityState !== "visible" && "Notification" in window
         && Notification.permission === "granted") {
       for (const n of next) {

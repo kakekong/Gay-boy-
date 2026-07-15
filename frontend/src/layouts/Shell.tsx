@@ -264,6 +264,34 @@ export function Shell({ children }: { children: React.ReactNode }) {
     "dp-pending": pendingDp.data ?? 0,
   };
 
+  // Generic per-section badges: every bell item carries a link, so any nav
+  // entry WITHOUT a dedicated queue counter gets a badge from the number
+  // of active alerts living under its path (longest prefix wins, same rule
+  // as requiredRolesForPath). Shares the bell's query cache — no extra
+  // polling.
+  const notif = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => api.get("/notifications").then((r) => r.data),
+    refetchInterval: 30_000,
+    enabled: !!user,
+  });
+  const pathCounts: Record<string, number> = {};
+  if (notif.data?.items) {
+    const navPaths = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.to));
+    for (const item of notif.data.items as { link?: string }[]) {
+      const link = item.link || "";
+      let best = "";
+      for (const p of navPaths) {
+        const hit = link === p
+          || (p !== "/" && (link.startsWith(p + "/") || link.startsWith(p + "?")));
+        if (hit && p.length > best.length) best = p;
+      }
+      if (best) pathCounts[best] = (pathCounts[best] ?? 0) + 1;
+    }
+  }
+  const badgeCountFor = (n: NavItem): number =>
+    n.badgeQuery ? (badges[n.badgeQuery] ?? 0) : (pathCounts[n.to] ?? 0);
+
   return (
     <div className="flex h-full bg-ink-50">
       {/* Mobile backdrop */}
@@ -351,11 +379,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
                           AI
                         </span>
                       )}
-                      {n.badgeQuery && badges[n.badgeQuery] > 0 && (
+                      {badgeCountFor(n) > 0 && (
                         <span className="relative inline-flex items-center">
                           <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60 animate-ping" />
                           <span className="relative text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500 text-white min-w-[18px] text-center">
-                            {badges[n.badgeQuery]}
+                            {badgeCountFor(n)}
                           </span>
                         </span>
                       )}
@@ -394,7 +422,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white/70 backdrop-blur-md border-b border-ink-200/60 flex items-center px-4 lg:px-6 gap-3 sticky top-0 z-20">
+        <header className="h-16 bg-white/70 backdrop-blur-md border-b border-ink-200/60 flex items-center px-3 lg:px-6 gap-2 lg:gap-3 sticky top-0 z-20">
           <button
             className="lg:hidden text-ink-600"
             onClick={() => setMobileOpen(true)}
@@ -414,7 +442,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               });
               document.dispatchEvent(ev);
             }}
-            className="relative flex-1 max-w-xl text-left rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm shadow-soft hover:border-brand-300 transition-colors flex items-center gap-2 text-ink-500"
+            className="relative flex-1 min-w-0 max-w-xl text-left rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm shadow-soft hover:border-brand-300 transition-colors flex items-center gap-2 text-ink-500"
           >
             <Search size={15} className="text-ink-400" />
             <span className="flex-1 truncate">
@@ -426,7 +454,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </span>
           </button>
           <button
-            className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
+            className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800 hidden sm:block shrink-0"
             aria-label="Chat"
             title="Open chat"
             onClick={() => nav("/chat")}
@@ -516,7 +544,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         })()}
 
         <main className="flex-1 overflow-auto">
-          <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
+          <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
             {children}
           </div>
         </main>

@@ -94,7 +94,7 @@ export default function CustomersPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* View toggle */}
           <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
             <button

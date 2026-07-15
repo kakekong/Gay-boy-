@@ -279,3 +279,18 @@
 .dark .to-ink-50\/40   { --tw-gradient-to: rgba(255,255,255,0.02) var(--tw-gradient-to-position); }
 .dark .to-emerald-50\/60 { --tw-gradient-to: rgba(16,185,129,0.08) var(--tw-gradient-to-position); }
 .dark .to-cyan-50\/60  { --tw-gradient-to: rgba(6,182,212,0.08) var(--tw-gradient-to-position); }
+
+/* ── Mobile fit (phones / small tablets) ─────────────────────────────────
+   Wide data tables scroll INSIDE their card instead of stretching the
+   page, and toolbar rows wrap instead of clipping off the right edge. */
+@media (max-width: 1023px) {
+  .card:has(table),
+  .table-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .card table,
+  .table-shell table {
+    min-width: 560px; /* keep columns readable; the card scrolls */
+  }
+}

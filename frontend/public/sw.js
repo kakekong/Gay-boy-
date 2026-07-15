@@ -15,9 +15,16 @@ self.addEventListener("push", (event) => {
   const options = {
     body: data.body || "",
     data: { url: data.url || "/" },
-    icon: "/vite.svg",
-    badge: "/vite.svg",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
     tag: data.tag || undefined,
+    // Stay on screen until the user dismisses it (desktop Chrome/Edge;
+    // mobile OSes keep it in the tray regardless).
+    requireInteraction: true,
+    // Buzz on devices that support it (Android). iOS controls its own
+    // sound/vibration from the system notification settings.
+    vibrate: [200, 100, 200],
+    silent: false,
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
