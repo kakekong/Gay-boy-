@@ -72,7 +72,7 @@ async def list_notifications(
     # sales rep owns the deposit confirmation. Without these two sections
     # both DP handoffs were silent.
     from app.models.customer_po import CustomerPO
-    if role in (Role.FINANCE, Role.DIRECTOR):
+    if role == Role.FINANCE:
         dp_wait_fin = (await db.execute(
             select(CustomerPO, Customer)
             .join(Customer, CustomerPO.customer_id == Customer.id)
@@ -93,7 +93,7 @@ async def list_notifications(
                 "link": f"/customer-pos/{po.id}",
                 "at": po.created_at,
             })
-    if role in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+    if role in (Role.SALES, Role.MANAGER):
         dp_wait_sales_stmt = (
             select(CustomerPO, Customer)
             .join(Customer, CustomerPO.customer_id == Customer.id)
@@ -157,7 +157,7 @@ async def list_notifications(
     # holds the ball: purchasing costs it, the director prices it, and the
     # requesting sales rep hears the outcome.
     from app.models.price_request import PriceRequest
-    if role in (Role.PURCHASING, Role.MANAGER, Role.DIRECTOR):
+    if role in (Role.PURCHASING, Role.MANAGER):
         pr_cost = (await db.execute(
             select(PriceRequest, Customer)
             .join(Customer, PriceRequest.customer_id == Customer.id)
@@ -236,9 +236,9 @@ async def list_notifications(
         })
 
     # 2. At-risk open quotations — a sales concern. Sales sees their own
-    # deals, manager/director see all. Other departments can't act on a
-    # stalled quotation, so they don't get nagged about it.
-    if role in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+    # deals, the manager sees all for day-to-day oversight. The director
+    # gets a single roll-up (see 7) instead of one row per stalled deal.
+    if role in (Role.SALES, Role.MANAGER):
         seven_days_ago = now - timedelta(days=7)
         q_stmt = (
             select(Quotation, Customer)
@@ -268,10 +268,10 @@ async def list_notifications(
                 })
 
     # 3. Overdue / due-soon invoices — collections is finance's job;
-    # sales chases their own customers; manager/director oversee. Ops
-    # roles (admin/purchasing/hr) can't do anything about an unpaid
-    # invoice, so it never reaches them.
-    if role in (Role.FINANCE, Role.SALES, Role.MANAGER, Role.DIRECTOR):
+    # sales chases their own customers; the manager oversees. Ops roles
+    # (admin/purchasing/hr) can't do anything about an unpaid invoice, so
+    # it never reaches them; the director gets the roll-up (see 7).
+    if role in (Role.FINANCE, Role.SALES, Role.MANAGER):
         soon = today + timedelta(days=3)
         inv_stmt = (
             select(Invoice, Customer)
@@ -303,10 +303,11 @@ async def list_notifications(
     # work, not broadcast to everyone. Each playbook task declares its
     # owning roles ("Issue invoice" → finance, "Raise purchase request" →
     # purchasing, "Schedule delivery" → admin, deal chores → sales).
-    # Sales additionally only sees tasks for their own customers;
-    # manager/director see everything for oversight. HR never gets these.
+    # Sales additionally only sees tasks for their own customers; the
+    # manager sees everything for oversight. HR never gets these, and the
+    # director gets the roll-up (see 7) instead of one row per chore.
     if role in (Role.SALES, Role.FINANCE, Role.PURCHASING, Role.ADMIN,
-                Role.MANAGER, Role.DIRECTOR):
+                Role.MANAGER):
         soon_dt = now + timedelta(days=2)
         stage_stmt = (
             select(Reminder, Customer)
@@ -332,8 +333,7 @@ async def list_notifications(
             task_owner_roles = set(
                 (playbook_item.get("roles") if playbook_item else None) or ["sales"]
             )
-            if role not in (Role.MANAGER, Role.DIRECTOR) \
-                    and role.value not in task_owner_roles:
+            if role != Role.MANAGER and role.value not in task_owner_roles:
                 continue
             title = playbook_item["title"] if playbook_item else rem.message or task_key
             overdue = rem.due_at <= now
@@ -505,6 +505,59 @@ async def list_notifications(
                         "link": "/chat",
                         "at": ch.created_at,
                     })
+
+    # 7. Director team-workload roll-up. The director's bell only carries
+    # items the DIRECTOR acts on (approvals, PR pricing, drawings, missed
+    # deadlines, attendance, feedback). Everyone else's chores — stage
+    # tasks, collections, stalled deals — compress into this single row so
+    # the count is visible without 50 rows of other people's work.
+    if role == Role.DIRECTOR:
+        overdue_tasks = await db.scalar(
+            select(func.count(Reminder.id)).where(
+                Reminder.status == "pending",
+                Reminder.kind.like("stage:%"),
+                Reminder.due_at <= now,
+            )
+        ) or 0
+        overdue_inv = await db.scalar(
+            select(func.count(Invoice.id)).where(
+                Invoice.status.in_(["issued", "partial", "overdue"]),
+                Invoice.due_date.is_not(None),
+                Invoice.due_date < today,
+            )
+        ) or 0
+        stalled = 0
+        seven_days_ago = now - timedelta(days=7)
+        open_qs = (await db.scalars(
+            select(Quotation)
+            .where(Quotation.status.in_(["sent", "pending_approval", "approved"]))
+            .limit(50)
+        )).all()
+        for q in open_qs:
+            last_act = await db.scalar(
+                select(func.max(Activity.occurred_at))
+                .where(Activity.customer_id == q.customer_id)
+            )
+            if (last_act or q.created_at) < seven_days_ago:
+                stalled += 1
+        if overdue_tasks or overdue_inv or stalled:
+            parts = []
+            if overdue_tasks:
+                parts.append(f"{overdue_tasks} overdue team task(s)")
+            if overdue_inv:
+                parts.append(f"{overdue_inv} overdue invoice(s)")
+            if stalled:
+                parts.append(f"{stalled} stalled deal(s)")
+            items.append({
+                "id": f"team-rollup:{today.isoformat()}",
+                "kind": "team_rollup",
+                "severity": "low",
+                "title": "Team workload: " + ", ".join(parts),
+                "body": "Owned by sales / finance / purchasing / admin — "
+                        "the manager tracks the detail",
+                "link": "/calendar",
+                "at": now,
+            })
 
     # 5. Chat unread (single roll-up row if any)
     members = (await db.scalars(
