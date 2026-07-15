@@ -63,14 +63,20 @@ def _send_one(sub: PushSubscription, payload: dict, private_pem: str) -> dict:
     surfaces `detail` to the user instead of silently claiming success.
     """
     try:
-        from pywebpush import WebPushException, webpush
+        from py_vapid import Vapid
+        from pywebpush import webpush
+
+        # pywebpush treats a plain string as base64 raw/DER — handing it
+        # our PEM makes it fail with "Could not deserialize key data".
+        # Parse the PEM ourselves and pass a Vapid instance.
+        vapid = Vapid.from_pem(private_pem.encode())
         webpush(
             subscription_info={
                 "endpoint": sub.endpoint,
                 "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
             },
             data=json.dumps(payload),
-            vapid_private_key=private_pem,
+            vapid_private_key=vapid,
             vapid_claims={"sub": VAPID_SUBJECT},
             ttl=3600,
         )
