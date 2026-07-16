@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   MessageCircle, Send, Plus, Search, Loader2, MoreVertical, Trash2, Pencil, X,
+  ChevronLeft,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -208,7 +209,13 @@ export default function ChatPage() {
 
       <div className="card overflow-hidden flex flex-col lg:flex-row h-[calc(100vh-13rem)] min-h-[480px]">
         {/* Conversation list */}
-        <aside className="lg:w-72 shrink-0 border-b lg:border-b-0 lg:border-r border-ink-100 flex flex-col">
+        {/* Mobile is WhatsApp-style: the list OR the thread, never both
+            stacked (stacking pushed the newest messages + composer below
+            the fold). Desktop keeps the two-pane layout. */}
+        <aside className={clsx(
+          "lg:w-72 shrink-0 border-b lg:border-b-0 lg:border-r border-ink-100 flex-col min-h-0",
+          active ? "hidden lg:flex" : "flex",
+        )}>
           <div className="p-3 border-b border-ink-100 space-y-2">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -295,7 +302,10 @@ export default function ChatPage() {
         </aside>
 
         {/* Thread */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className={clsx(
+          "flex-1 flex-col min-w-0 min-h-0",
+          active ? "flex" : "hidden lg:flex",
+        )}>
           {!active ? (
             <div className="flex-1 grid place-items-center text-center muted text-sm p-8">
               <div>
@@ -305,9 +315,17 @@ export default function ChatPage() {
             </div>
           ) : (
             <>
-              <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold">{activeChannel?.title ?? "Conversation"}</div>
+              <header className="px-3 lg:px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActive(null)}
+                  className="lg:hidden p-1.5 -ml-1 rounded-lg text-ink-500 hover:bg-ink-100 shrink-0"
+                  aria-label="Back to conversations"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold truncate">{activeChannel?.title ?? "Conversation"}</div>
                   {activeChannel?.members?.[0] && (
                     <div className="text-[11px] muted uppercase tracking-wider">
                       {activeChannel.members[0].role}
