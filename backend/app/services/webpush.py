@@ -166,6 +166,90 @@ async def notify_chat_message(channel_id, sender_id, sender_name: str,
         log.warning("chat push failed for channel %s: %s", channel_id, e)
 
 
+_DISCUSSION_LINKS = {
+    "price_request": "/price-requests?open={id}",
+    "quotation": "/quotations/{id}",
+    "customer_po": "/customer-pos/{id}",
+    "supplier_po": "/purchase-orders",
+}
+
+
+async def notify_discussion_comment(owner_type: str, owner_id, sender_id,
+                                    sender_name: str, text: str) -> None:
+    """Instant push for entity discussion threads (price requests, POs,
+    quotations). Fire-and-forget from the comment endpoint.
+
+    Recipients = everyone who commented on the thread before + the
+    entity's natural stakeholders (requester / coster / approver), minus
+    the sender — so the FIRST comment already reaches the right people,
+    not just repliers.
+    """
+    from app.core.db import SessionLocal
+    from app.models.comment import EntityComment
+
+    try:
+        async with SessionLocal() as db:
+            recipients: set = set()
+            for row in (await db.execute(
+                select(EntityComment.author_id).distinct().where(
+                    EntityComment.owner_type == owner_type,
+                    EntityComment.owner_id == owner_id,
+                    EntityComment.author_id.is_not(None),
+                )
+            )).all():
+                recipients.add(row[0])
+
+            number = None
+            if owner_type == "price_request":
+                from app.models.price_request import PriceRequest
+                pr = await db.get(PriceRequest, owner_id)
+                if pr:
+                    number = pr.number
+                    for uid in (pr.created_by, pr.sales_pic_id,
+                                pr.priced_by, pr.approved_by):
+                        if uid:
+                            recipients.add(uid)
+            elif owner_type == "quotation":
+                from app.models.quotation import Quotation
+                q = await db.get(Quotation, owner_id)
+                if q:
+                    number = q.number
+                    for uid in (q.created_by, q.sales_pic_id):
+                        if uid:
+                            recipients.add(uid)
+            elif owner_type == "customer_po":
+                from app.models.customer_po import CustomerPO
+                po = await db.get(CustomerPO, owner_id)
+                if po:
+                    number = po.number
+                    if po.created_by:
+                        recipients.add(po.created_by)
+
+            recipients.discard(sender_id)
+            if not recipients:
+                return
+
+            link = _DISCUSSION_LINKS.get(owner_type, "/")
+            title = f"{sender_name} · {number or owner_type.replace('_', ' ')}"
+            body = text if len(text) <= 140 else text[:137] + "…"
+            payload = {"title": title, "body": body,
+                       "url": link.format(id=owner_id),
+                       "tag": f"disc:{owner_type}:{owner_id}"}
+            kp = await get_or_create_vapid(db)
+            for uid in recipients:
+                subs = (await db.scalars(
+                    select(PushSubscription).where(PushSubscription.user_id == uid)
+                )).all()
+                for sub in subs:
+                    res = await asyncio.to_thread(
+                        _send_one, sub, payload, kp.private_pem)
+                    if res["dead"]:
+                        await db.delete(sub)
+            await db.commit()
+    except Exception as e:
+        log.warning("discussion push failed (%s %s): %s", owner_type, owner_id, e)
+
+
 async def sweep_once(db: AsyncSession) -> int:
     """Compute fresh notifications per subscribed user and push the new ones.
 
