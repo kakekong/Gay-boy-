@@ -315,6 +315,9 @@ async def list_notifications(
             .where(
                 Reminder.status == "pending",
                 Reminder.kind.like("stage:%"),
+                # Dateless stage tasks are checklist-only — they never
+                # notify until someone explicitly sets a due date.
+                Reminder.due_at.is_not(None),
                 Reminder.due_at <= soon_dt,
             )
             .order_by(Reminder.due_at.asc())
@@ -518,6 +521,7 @@ async def list_notifications(
             select(func.count(Reminder.id)).where(
                 Reminder.status == "pending",
                 Reminder.kind.like("stage:%"),
+                Reminder.due_at.is_not(None),
                 Reminder.due_at <= now,
             )
         ) or 0

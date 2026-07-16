@@ -1197,7 +1197,10 @@ function StageChecklistRow({
               isOverdue ? "text-red-700 font-medium" : "muted",
             )}
           >
-            <Clock size={11} /> {t("Due", "Tenggat")} {dueLabel}
+            <Clock size={11} />
+            {dueMs
+              ? <>{t("Due", "Tenggat")} {dueLabel}</>
+              : t("No deadline — set a date to get reminders", "Tanpa tenggat — atur tanggal untuk diingatkan")}
           </span>
           {item.status === "done" && (
             <span className="text-emerald-700">{t("Completed", "Selesai")}</span>
@@ -1208,16 +1211,20 @@ function StageChecklistRow({
               className="text-brand-700 hover:underline"
               onClick={() => setEditing(true)}
             >
-              {item.note ? t("Edit note", "Ubah catatan") : t("+ Note / change due", "+ Catatan / ubah tenggat")}
+              {dueMs || item.note
+                ? t("Edit note / due", "Ubah catatan / tenggat")
+                : t("+ Set deadline / note", "+ Atur tenggat / catatan")}
             </button>
           )}
-          <Link
-            to={`/calendar`}
-            className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-            title={t("See this reminder on the calendar", "Lihat pengingat ini di kalender")}
-          >
-            <CalendarDays size={11} /> {t("On calendar", "Di kalender")}
-          </Link>
+          {dueMs !== null && (
+            <Link
+              to={`/calendar`}
+              className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+              title={t("See this reminder on the calendar", "Lihat pengingat ini di kalender")}
+            >
+              <CalendarDays size={11} /> {t("On calendar", "Di kalender")}
+            </Link>
+          )}
         </div>
       </div>
       {item.status === "done" && !editing && (

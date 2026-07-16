@@ -88,7 +88,9 @@ class Reminder(Base, UUIDPK, TimestampMixin):
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[str] = mapped_column(String(80), nullable=False)
-    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Nullable: stage-playbook tasks start with NO deadline — they only hit
+    # the calendar + notifications once someone sets a date explicitly.
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ai_optimal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     channel: Mapped[str] = mapped_column(String(20), nullable=False, default="whatsapp")

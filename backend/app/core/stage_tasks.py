@@ -56,7 +56,6 @@ async def ensure_stage_tasks(
     )).all()
     have = {r.kind for r in existing}
 
-    now = datetime.now(UTC)
     created: list[Reminder] = []
     for t in tasks:
         k = stage_task_kind(stage, t["key"])
@@ -66,7 +65,10 @@ async def ensure_stage_tasks(
             customer_id=customer.id,
             user_id=customer.sales_pic_id,
             kind=k,
-            due_at=now + timedelta(days=int(t["due_after_days"])),
+            # No automatic deadline: the task appears on the checklist only.
+            # It reaches the calendar + notifications when a user sets a
+            # date on it (PATCH /customers/{id}/stage-tasks/{key}).
+            due_at=None,
             status="pending",
             channel="in_app",
             message=t["title"],

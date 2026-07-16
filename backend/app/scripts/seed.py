@@ -51,6 +51,20 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE reminders ADD COLUMN IF NOT EXISTS parent_reminder_id UUID',
     # Stage-task kinds like "stage:negotiation:second_follow_up" can exceed 30
     'ALTER TABLE reminders ALTER COLUMN kind TYPE VARCHAR(80)',
+    # One-shot: relax due_at AND clear the auto-generated deadlines on
+    # existing stage tasks (they flooded the bell/calendar). Guarded on the
+    # column still being NOT NULL so re-boots never wipe user-set dates.
+    """DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_attribute a
+                 JOIN pg_class c ON c.oid = a.attrelid
+                 WHERE c.relname = 'reminders'
+                   AND a.attname = 'due_at' AND a.attnotnull) THEN
+        ALTER TABLE reminders ALTER COLUMN due_at DROP NOT NULL;
+        UPDATE reminders SET due_at = NULL
+          WHERE kind LIKE 'stage:%' AND status = 'pending';
+      END IF;
+    END $$""",
 
     # CustomerContact table is created by create_all; nothing to migrate.
 
