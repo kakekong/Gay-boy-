@@ -124,6 +124,48 @@ async def push_to_user_detailed(db: AsyncSession, user_id, title: str,
     return results
 
 
+async def notify_chat_message(channel_id, sender_id, sender_name: str,
+                              channel_name: str | None, text: str) -> None:
+    """Instant chat push — fire-and-forget from the send-message endpoint.
+
+    Unlike the 90s sweeper, messages push immediately to every OTHER
+    member of the channel who has device notifications on. One tag per
+    channel so a burst of messages collapses into one notification per
+    conversation instead of stacking.
+    """
+    from app.core.db import SessionLocal
+    from app.models.chat import ChatChannelMember
+
+    try:
+        async with SessionLocal() as db:
+            member_ids = [row[0] for row in (await db.execute(
+                select(ChatChannelMember.user_id).where(
+                    ChatChannelMember.channel_id == channel_id,
+                    ChatChannelMember.user_id != sender_id,
+                )
+            )).all()]
+            if not member_ids:
+                return
+            title = (f"{sender_name} · {channel_name}"
+                     if channel_name else sender_name)
+            body = text if len(text) <= 140 else text[:137] + "…"
+            payload = {"title": title, "body": body, "url": "/chat",
+                       "tag": f"chat:{channel_id}"}
+            kp = await get_or_create_vapid(db)
+            for uid in member_ids:
+                subs = (await db.scalars(
+                    select(PushSubscription).where(PushSubscription.user_id == uid)
+                )).all()
+                for sub in subs:
+                    res = await asyncio.to_thread(
+                        _send_one, sub, payload, kp.private_pem)
+                    if res["dead"]:
+                        await db.delete(sub)
+            await db.commit()
+    except Exception as e:
+        log.warning("chat push failed for channel %s: %s", channel_id, e)
+
+
 async def sweep_once(db: AsyncSession) -> int:
     """Compute fresh notifications per subscribed user and push the new ones.
 

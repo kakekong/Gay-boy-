@@ -18,6 +18,9 @@ self.addEventListener("push", (event) => {
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
     tag: data.tag || undefined,
+    // A reused tag (e.g. several chat messages in one conversation)
+    // replaces the previous notification but still alerts.
+    renotify: !!data.tag,
     // Stay on screen until the user dismisses it (desktop Chrome/Edge;
     // mobile OSes keep it in the tray regardless).
     requireInteraction: true,
