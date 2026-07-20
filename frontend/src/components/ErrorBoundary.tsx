@@ -10,6 +10,21 @@ interface State {
   error: Error | null;
 }
 
+const STALE_BUILD_RE =
+  /chunk|dynamically imported module|valid JavaScript MIME type|import|failed to fetch/i;
+
+function autoReloadForStaleBuild(): boolean {
+  // One automatic reload per minute: enough to silently recover from a
+  // fresh deploy, without loops when the failure is something else.
+  const last = Number(sessionStorage.getItem("stale-build-reload") || 0);
+  if (Date.now() - last > 60_000) {
+    sessionStorage.setItem("stale-build-reload", String(Date.now()));
+    window.location.reload();
+    return true;
+  }
+  return false;
+}
+
 /**
  * Catches both render errors and lazy-chunk-load failures. Without this,
  * a network blip during a React.lazy fetch leaves you with a blank page
@@ -31,12 +46,24 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     // eslint-disable-next-line no-console
     console.error("[ErrorBoundary]", error, info.componentStack);
+    if (STALE_BUILD_RE.test(error.message)) autoReloadForStaleBuild();
   }
 
   render() {
     if (!this.state.error) return this.props.children;
-    const isChunk = /chunk|dynamically imported module|loading|failed to fetch/i
-      .test(this.state.error.message);
+    const isChunk = STALE_BUILD_RE.test(this.state.error.message);
+    // A reload is already in flight — show a quiet updating note, not an
+    // alarming error card, for the split second before the page refreshes.
+    const reloadedAt = Number(sessionStorage.getItem("stale-build-reload") || 0);
+    if (isChunk && Date.now() - reloadedAt < 5_000) {
+      return (
+        <div className="min-h-[40vh] grid place-items-center p-6">
+          <div className="flex items-center gap-2 text-sm text-ink-500">
+            <RefreshCw size={14} className="animate-spin" /> Updating to the latest version…
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-[40vh] grid place-items-center p-6">
         <div className="card max-w-md p-6 text-center space-y-3">
