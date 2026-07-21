@@ -24,7 +24,7 @@ router = APIRouter()
 ALLOWED_OWNERS = {
     "customer", "quotation", "project", "approval_request",
     "supplier_po", "customer_po", "invoice", "delivery_order",
-    "customer_contact", "employee", "price_request",
+    "customer_contact", "employee", "price_request", "daily_log",
 }
 MAX_FILE_SIZE_MB = 20
 
@@ -79,6 +79,11 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         return role in (
             Role.HR, Role.MANAGER, Role.DIRECTOR, Role.FINANCE,
         )
+    if owner_type == "daily_log":
+        # Work-journal attachments. The whole point of a daily log is
+        # transparency of work, so any internal staffer may open them;
+        # external portal users never touch them.
+        return role not in (Role.CUSTOMER, Role.SUPPLIER)
     return role == Role.DIRECTOR
 
 

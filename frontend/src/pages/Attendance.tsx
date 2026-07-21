@@ -6,6 +6,9 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import {
+  DailyLogSection, DailyLogHistory, TeamDailyLogs,
+} from "@/components/DailyLogSection";
 
 interface AttendanceRow {
   id: string;
@@ -189,6 +192,13 @@ export default function AttendancePage() {
           </button>
         </div>
       </div>
+
+      {/* Daily log */}
+      <DailyLogSection />
+      <DailyLogHistory />
+
+      {/* Team logs — HR / manager / director oversight */}
+      {["hr", "manager", "director"].includes(me?.role ?? "") && <TeamDailyLogs />}
 
       {/* My history */}
       <div className="card overflow-hidden">
