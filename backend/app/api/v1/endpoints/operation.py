@@ -1133,7 +1133,7 @@ async def _save_attachment(
 # Finance owns invoice issuance now — admin used to be able to file the
 # invoice + DO, but the admin scope is projects/ops/inventory only. Manager
 # gets no direct issuance either; director stays as backstop.
-_INVOICE_ISSUER_ROLES = {Role.FINANCE, Role.DIRECTOR}
+_INVOICE_ISSUER_ROLES = {Role.FINANCE, Role.DIRECTOR, Role.ADMIN}
 
 
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)

@@ -79,17 +79,21 @@ PROJECT_STATUS_ORDER: list[str] = [
 
 
 def advance_project_status(project: "Project", to_status: str) -> bool:
-    """Move `project` forward by one stage toward `to_status`.
+    """Move `project` forward to the milestone `to_status` an event represents.
 
-    One-stage-at-a-time rule: an event can only advance the project by a
-    single step. If the target is further ahead, we only walk the project
-    to the immediate next stage — the next real event bumps the one after,
-    and so on. This keeps the pipeline strictly sequential and stops any
-    single action from jumping multiple stages.
+    Each caller passes the stage its event actually completes (supplier PO →
+    'purchasing', drawing approved → 'drawing_approved', confirm-delivery →
+    'production', …). We jump straight to that stage — the project reflects the
+    FURTHEST milestone reached, regardless of the order events fire in. This
+    keeps the pipeline order-independent: doing the drawing before the supplier
+    PO (or vice-versa) both land the project correctly instead of lagging a
+    stage behind and blocking downstream gates (e.g. the QC work order).
 
-    Never regresses (already-past-target is a no-op). A status outside
-    PROJECT_STATUS_ORDER is left untouched — safe on unknown / legacy
-    values.
+    Forward-only: a target at or behind the current stage is a no-op (never
+    regresses). A status outside PROJECT_STATUS_ORDER is left untouched — safe
+    on unknown / legacy values. The real "not too early" protection lives in the
+    work-order stage gates, which check the project has reached the required
+    stage independently of this walk.
     """
     order = PROJECT_STATUS_ORDER
     try:
@@ -99,9 +103,7 @@ def advance_project_status(project: "Project", to_status: str) -> bool:
         return False
     if nxt <= cur:
         return False
-    # Cap advance to one step so the pipeline walks stage-by-stage.
-    target = order[cur + 1] if nxt > cur + 1 else to_status
-    project.status = target
+    project.status = to_status
     return True
 
 

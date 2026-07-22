@@ -82,6 +82,8 @@ A precise, phase-by-phase script to test the whole system end to end, with exact
 
 ---
 
+> **Note:** Phases D (Drawing) and E (Supplier PO) can be done in **either order** — the project stage tracks the furthest milestone reached, so neither sequence blocks the later QC/production steps.
+
 ## Phase D — Drawing (NEW: internal upload + director sign-off)
 
 * **Purchasing / Sales / Ops → Projects → open the project → Drawings card.**
@@ -129,8 +131,8 @@ A precise, phase-by-phase script to test the whole system end to end, with exact
 
 ## Phase H — Invoice, DO & faktur pajak
 
-1. **Admin → project → Invoice & faktur pajak → issue the invoice + delivery order.**
-   * ✓ Expect: the invoice is created; the **faktur pajak number is left blank at issue** (finance fills it on approval).
+1. **Admin (or finance/director) → project → Invoice & faktur pajak → issue the invoice + delivery order.**
+   * ✓ Expect: the invoice is created; the **faktur pajak number is left blank at issue** (finance fills it on approval). Admin, finance, and director can all issue.
 2. **Finance → Invoices (pending) → approve the invoice**, entering the **faktur pajak number** (+ file).
    * ✓ Expect: **faktur pajak status → issued**, **invoice status → approved**. This is **document approval only — it does NOT post to the ledger** (invoicing stays decoupled from the journal).
    * ✓ Expect: approval is **blocked without a faktur pajak number**.
