@@ -192,9 +192,10 @@ async def apply_to_target(
         # Approving a customer PO spawns a Project; rejecting it parks
         # the PO at status='rejected' so the sales team can file a new
         # one if the paperwork changes.
-        from datetime import UTC
-        from datetime import datetime as _dt
-
+        # NOTE: use the module-level `UTC`/`datetime` (imported at top). A
+        # local `from datetime import UTC` here would make UTC a function-
+        # local for the WHOLE function, so other branches (e.g. follow-up)
+        # that reference UTC before this line would raise UnboundLocalError.
         from app.api.v1.endpoints.customer_pos import _spawn_project
         from app.models.customer_po import CustomerPO
         po = await db.get(CustomerPO, req.target_id)
@@ -220,7 +221,7 @@ async def apply_to_target(
 
             decider = await db.get(__import__("app.models.user", fromlist=["User"]).User, req.decided_by) if req.decided_by else None
             po.decided_by = req.decided_by
-            po.decided_at = req.decided_at or _dt.now(UTC)
+            po.decided_at = req.decided_at or datetime.now(UTC)
             po.decision_notes = req.decision_notes
             if approve:
                 if is_dp_request:
@@ -230,7 +231,7 @@ async def apply_to_target(
                     if po.status == "pending_finance":
                         po.status = "pending_sales_confirm"
                         po.dp_finance_approved_by = req.decided_by
-                        po.dp_finance_approved_at = req.decided_at or _dt.now(UTC)
+                        po.dp_finance_approved_at = req.decided_at or datetime.now(UTC)
                     applied["dp"] = "finance approval applied; awaiting sales deposit confirmation"
                 else:
                     po.status = "approved"
