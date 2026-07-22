@@ -342,11 +342,9 @@ async def send_message(
 
     # Instant device push to the other members (fire-and-forget so the
     # send stays snappy — the task opens its own DB session).
-    import asyncio as _asyncio
-
-    from app.services.webpush import notify_chat_message
+    from app.services.webpush import fire_and_forget, notify_chat_message
     channel = await db.get(ChatChannel, channel_id)
-    _asyncio.create_task(notify_chat_message(
+    fire_and_forget(notify_chat_message(
         channel_id=channel_id,
         sender_id=me.id,
         sender_name=me.full_name,

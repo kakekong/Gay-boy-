@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -322,6 +323,11 @@ class LogLink(BaseModel):
     label: str = ""
     url: str
 
+    @field_validator("label")
+    @classmethod
+    def _cap_label(cls, v: str) -> str:
+        return (v or "")[:200]
+
     @field_validator("url")
     @classmethod
     def _http_only(cls, v: str) -> str:
@@ -407,6 +413,22 @@ async def save_daily_log(
     else:
         log = DailyLog(user_id=me.id, date=payload.date, body=body, links=links)
         db.add(log)
+        try:
+            # Savepoint so a unique-collision (concurrent double-submit for the
+            # same user+date) rolls back just this insert, not the whole txn.
+            async with db.begin_nested():
+                await db.flush()
+        except IntegrityError:
+            # The other write won — update its row instead of failing.
+            log = await db.scalar(
+                select(DailyLog).where(
+                    DailyLog.user_id == me.id, DailyLog.date == payload.date)
+            )
+            if log is None:  # shouldn't happen, but never 500 on it
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    "Log is being saved elsewhere; retry")
+            log.body = body
+            log.links = links
     await db.flush()
     # updated_at is a server-side timestamp — reload it before serializing so
     # attribute access doesn't lazy-fetch outside the async greenlet context.

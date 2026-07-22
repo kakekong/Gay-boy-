@@ -87,6 +87,22 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
     return role == Role.DIRECTOR
 
 
+async def _daily_log_read_ok(db: AsyncSession, me: User, owner_id) -> bool:
+    """Daily-log files: readable by the log's owner or an overseer only.
+
+    The generic role rule (any internal staffer) is a coarse gate; this
+    row-level check matches the /team endpoint that actually surfaces log
+    ids, so a leaked/guessed id can't expose a peer's journal files.
+    """
+    from app.models.daily_log import DailyLog
+    log = await db.get(DailyLog, owner_id)
+    if log is None:
+        return True  # nothing to protect; list simply returns empty
+    if log.user_id == me.id:
+        return True
+    return Role(me.role) in (Role.HR, Role.MANAGER, Role.DIRECTOR)
+
+
 def _safe_filename(name: str) -> str:
     name = name.strip().replace("\\", "/").split("/")[-1]
     name = re.sub(r"[^A-Za-z0-9._\- ]+", "_", name)[:200]
@@ -131,6 +147,8 @@ async def list_attachments(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
     if not _attachment_visible_to(owner_type, Role(me.role)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view these files")
+    if owner_type == "daily_log" and not await _daily_log_read_ok(db, me, owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
     rows = (await db.scalars(
         select(Attachment)
         .where(Attachment.owner_type == owner_type, Attachment.owner_id == owner_id)
@@ -175,6 +193,13 @@ async def upload_attachment(
 ):
     if owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
+    if owner_type == "daily_log":
+        # Only the log's owner may attach to it (overseers can read, not add).
+        from app.models.daily_log import DailyLog
+        log = await db.get(DailyLog, owner_id)
+        if log is None or log.user_id != me.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "You can only attach files to your own daily log")
     # Read into memory to check size (small projects ok)
     data = await file.read()
     size = len(data)
@@ -221,6 +246,8 @@ async def download_attachment(
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if not _attachment_visible_to(a.owner_type, Role(me.role)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
+    if a.owner_type == "daily_log" and not await _daily_log_read_ok(db, me, a.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
     if not os.path.exists(a.storage_path):
         raise HTTPException(status.HTTP_410_GONE, "File missing from storage")
     media_type = a.content_type or "application/octet-stream"

@@ -31,8 +31,37 @@ _PUSH_SEVERITIES = {"high", "medium"}
 _SWEEP_LOCK_KEY = 774_421_001
 
 
+# Hold strong references to in-flight fire-and-forget pushes. asyncio keeps
+# only a weak reference to tasks, so without this a push suspended at an await
+# can be GC'd mid-flight ("Task was destroyed but it is pending").
+_bg_tasks: set = set()
+
+
+def fire_and_forget(coro) -> None:
+    """Schedule a background coroutine that outlives the request, keeping a
+    reference until it finishes so the event loop can't drop it."""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
 async def get_or_create_vapid(db: AsyncSession) -> VapidKeypair:
-    kp = await db.scalar(select(VapidKeypair).limit(1))
+    # Always read the OLDEST row deterministically: even if a race ever left
+    # two keypairs, every caller (public-key endpoint + signing sweeper) then
+    # agrees on the same one, so the served public key can't mismatch the
+    # private key we sign with.
+    kp = await db.scalar(
+        select(VapidKeypair).order_by(VapidKeypair.created_at.asc()).limit(1)
+    )
+    if kp:
+        return kp
+    # Serialize first-time creation across concurrent callers/workers so two
+    # of them can't each insert a keypair. A transaction-scoped advisory lock
+    # is released automatically on commit/rollback.
+    await db.execute(text("SELECT pg_advisory_xact_lock(429173001)"))
+    kp = await db.scalar(
+        select(VapidKeypair).order_by(VapidKeypair.created_at.asc()).limit(1)
+    )
     if kp:
         return kp
     from cryptography.hazmat.primitives import serialization

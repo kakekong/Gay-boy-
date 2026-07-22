@@ -86,10 +86,8 @@ async def add_comment(
 
     # Instant device push to the thread's participants + stakeholders
     # (fire-and-forget; the task uses its own DB session).
-    import asyncio
-
-    from app.services.webpush import notify_discussion_comment
-    asyncio.create_task(notify_discussion_comment(
+    from app.services.webpush import fire_and_forget, notify_discussion_comment
+    fire_and_forget(notify_discussion_comment(
         owner_type=payload.owner_type,
         owner_id=payload.owner_id,
         sender_id=me.id,

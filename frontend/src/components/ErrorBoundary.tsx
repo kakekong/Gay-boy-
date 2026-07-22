@@ -10,8 +10,11 @@ interface State {
   error: Error | null;
 }
 
+// Match only genuine stale-build / chunk-load signatures. Deliberately does
+// NOT include bare "import" or "failed to fetch" — those match unrelated
+// errors ("important", ordinary network blips) and would reload spuriously.
 const STALE_BUILD_RE =
-  /chunk|dynamically imported module|valid JavaScript MIME type|import|failed to fetch/i;
+  /dynamically imported module|valid JavaScript MIME type|importing a module script failed|ChunkLoadError|Loading chunk [\w-]+ failed/i;
 
 function autoReloadForStaleBuild(): boolean {
   // One automatic reload per minute: enough to silently recover from a
