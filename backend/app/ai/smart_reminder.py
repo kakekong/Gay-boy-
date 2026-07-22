@@ -16,6 +16,9 @@ async def top_actions_for(db: AsyncSession, *, user_id: UUID, limit: int = 10) -
         select(Reminder).where(
             Reminder.user_id == user_id,
             Reminder.status == "pending",
+            # Dateless stage tasks have no schedule to rank or subtract —
+            # skip them so due_at is always present below.
+            Reminder.due_at.is_not(None),
         ).order_by(Reminder.due_at.asc()).limit(50)
     )).all()
 
