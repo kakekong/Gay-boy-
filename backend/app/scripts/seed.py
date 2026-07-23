@@ -333,6 +333,9 @@ COLUMN_MIGRATIONS: list[str] = [
      WHERE p.status = 'purchasing'
        AND EXISTS (SELECT 1 FROM drawings d WHERE d.project_id = p.id)
     """,
+    # Attachments can be an external link instead of an uploaded file
+    # (durable across Space rebuilds, which wipe local file storage).
+    "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS external_url VARCHAR(1000)",
 ]
 
 

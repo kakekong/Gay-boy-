@@ -7,7 +7,8 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,6 +122,7 @@ def _resolve_uploader(db: AsyncSession, uploader_id):
 
 async def _to_out(db: AsyncSession, a: Attachment) -> dict:
     uploader = await db.get(User, a.uploaded_by) if a.uploaded_by else None
+    is_link = bool(a.external_url)
     return {
         "id": str(a.id),
         "owner_type": a.owner_type,
@@ -132,7 +134,11 @@ async def _to_out(db: AsyncSession, a: Attachment) -> dict:
         "uploaded_by": str(a.uploaded_by) if a.uploaded_by else None,
         "uploaded_by_name": uploader.full_name if uploader else None,
         "uploaded_at": a.created_at,
-        "download_url": f"/api/v1/attachments/{a.id}/download",
+        "is_link": is_link,
+        "external_url": a.external_url,
+        # Links open directly; files stream through the download route.
+        "download_url": a.external_url if is_link
+        else f"/api/v1/attachments/{a.id}/download",
     }
 
 
@@ -234,6 +240,55 @@ async def upload_attachment(
     return await _to_out(db, a)
 
 
+class LinkIn(BaseModel):
+    owner_type: str
+    owner_id: UUID
+    url: str
+    label: str | None = None
+
+
+@router.post("/link", status_code=201)
+async def add_link(
+    payload: LinkIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Attach an external LINK (Google Drive, Dropbox, …) instead of a file.
+
+    Same owner types and permissions as file upload — the difference is the
+    'attachment' is a URL, so it survives Space rebuilds that wipe uploaded
+    files.
+    """
+    if payload.owner_type not in ALLOWED_OWNERS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
+    if payload.owner_type == "daily_log":
+        from app.models.daily_log import DailyLog
+        log = await db.get(DailyLog, payload.owner_id)
+        if log is None or log.user_id != me.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "You can only attach to your own daily log")
+    url = (payload.url or "").strip()
+    if not url:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Link URL cannot be empty")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = "https://" + url
+    url = url[:1000]
+    label = (payload.label or "").strip() or url
+    a = Attachment(
+        owner_type=payload.owner_type,
+        owner_id=payload.owner_id,
+        filename=label[:255],
+        content_type="link",
+        size=0,
+        storage_path="",        # no file on disk for a link
+        external_url=url,
+        uploaded_by=me.id,
+    )
+    db.add(a)
+    await db.flush()
+    return await _to_out(db, a)
+
+
 @router.get("/{attachment_id}/download")
 async def download_attachment(
     attachment_id: UUID,
@@ -248,6 +303,9 @@ async def download_attachment(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
     if a.owner_type == "daily_log" and not await _daily_log_read_ok(db, me, a.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
+    # Link attachments have no file on disk — send the caller to the URL.
+    if a.external_url:
+        return RedirectResponse(a.external_url)
     if not os.path.exists(a.storage_path):
         raise HTTPException(status.HTTP_410_GONE, "File missing from storage")
     media_type = a.content_type or "application/octet-stream"
