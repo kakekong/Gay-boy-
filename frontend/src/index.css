@@ -280,6 +280,44 @@
 .dark .to-emerald-50\/60 { --tw-gradient-to: rgba(16,185,129,0.08) var(--tw-gradient-to-position); }
 .dark .to-cyan-50\/60  { --tw-gradient-to: rgba(6,182,212,0.08) var(--tw-gradient-to-position); }
 
+/* ── Audit follow-up: remaining dark-mode gaps ───────────────────────────
+   Full-codebase pass turned up a few utilities still unmapped: the pink
+   pastel family, the ink text ramp below -600, an amber KPI gradient stop,
+   and the PipelineView industry-tint card gradients. */
+
+/* SURFACES */
+.dark .bg-pink-50 { background-color: rgba(236,72,153,0.14); }
+
+/* TEXT — continue the ink ramp below -600 (keeps 500 > 400 > 300 order) */
+.dark .text-ink-500 { color: #878f9f; }
+.dark .text-ink-400 { color: #707886; }
+.dark .text-ink-300 { color: #5b6372; }
+.dark .text-pink-700 { color: #f472b6; }
+
+/* GRADIENTS — KPI amber tile */
+.dark .to-amber-100 { --tw-gradient-to: rgba(245,158,11,0.12) var(--tw-gradient-to-position); }
+
+/* GRADIENTS — PipelineView industry-tint cards (from-* light stops) */
+.dark .from-amber-100\/60   { --tw-gradient-from: rgba(245,158,11,0.12) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-orange-100\/60  { --tw-gradient-from: rgba(249,115,22,0.12) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-emerald-100\/60 { --tw-gradient-from: rgba(16,185,129,0.12) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-pink-100\/60    { --tw-gradient-from: rgba(236,72,153,0.12) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-slate-200\/70   { --tw-gradient-from: rgba(255,255,255,0.06) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-teal-100\/60    { --tw-gradient-from: rgba(20,184,166,0.12) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-lime-100\/60    { --tw-gradient-from: rgba(132,204,22,0.12) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .from-ink-100\/60     { --tw-gradient-from: rgba(255,255,255,0.05) var(--tw-gradient-from-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+
+/* GRADIENTS — PipelineView industry-tint cards (to-* light stops) */
+.dark .to-amber-50\/60   { --tw-gradient-to: rgba(245,158,11,0.08) var(--tw-gradient-to-position); }
+.dark .to-yellow-50\/60  { --tw-gradient-to: rgba(234,179,8,0.08)  var(--tw-gradient-to-position); }
+.dark .to-green-50\/60   { --tw-gradient-to: rgba(34,197,94,0.08)  var(--tw-gradient-to-position); }
+.dark .to-rose-50\/60    { --tw-gradient-to: rgba(244,63,94,0.08)  var(--tw-gradient-to-position); }
+.dark .to-slate-50\/70   { --tw-gradient-to: rgba(255,255,255,0.04) var(--tw-gradient-to-position); }
+
+/* Hover text consistency */
+.dark .hover\:text-red-600:hover   { color: #f87171; }
+.dark .hover\:text-brand-700:hover { color: #a5b4fc; }
+
 /* ── Mobile fit (phones / small tablets) ─────────────────────────────────
    Wide data tables scroll INSIDE their card instead of stretching the
    page, and toolbar rows wrap instead of clipping off the right edge. */
