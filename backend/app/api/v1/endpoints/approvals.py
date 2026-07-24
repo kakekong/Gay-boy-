@@ -35,12 +35,18 @@ async def pending_documents(
     from app.models.price_request import PriceRequest
 
     items: list[dict] = []
+    # Once a project is delivered/paid/closed, its documents are historical —
+    # a still-"pending" drawing / shipping doc / unverified delivery proof is
+    # stale and should drop out of the decision queue (this is why a delivery
+    # proof kept showing after the project closed).
+    DONE_PROJECT = ("delivered", "paid", "closed")
 
     # 1. Drawings awaiting sign-off (decided on the project page).
     drows = (await db.execute(
         select(Drawing, Project)
         .join(Project, Drawing.project_id == Project.id)
-        .where(Drawing.status == "submitted")
+        .where(Drawing.status == "submitted",
+               Project.status.not_in(DONE_PROJECT))
         .order_by(Drawing.created_at.asc())
         .limit(50)
     )).all()
@@ -57,6 +63,7 @@ async def pending_documents(
     lrows = (await db.scalars(
         select(Project).where(
             Project.is_deleted.is_(False),
+            Project.status.not_in(DONE_PROJECT),
         ).limit(500)
     )).all()
     for p in lrows:
@@ -78,7 +85,8 @@ async def pending_documents(
     dorows = (await db.execute(
         select(DeliveryOrder, Project)
         .join(Project, DeliveryOrder.project_id == Project.id)
-        .where(DeliveryOrder.verified_at.is_(None))
+        .where(DeliveryOrder.verified_at.is_(None),
+               Project.status.not_in(DONE_PROJECT))
         .order_by(DeliveryOrder.created_at.asc())
         .limit(50)
     )).all()
