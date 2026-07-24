@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   Banknote, LineChart, BarChart3, CheckCircle, FileText, Loader2, XCircle,
+  Download, ReceiptText,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -36,9 +37,62 @@ export default function FinancePage() {
         </div>
       </div>
 
+      <EFakturExport />
       <PendingInvoiceApprovals />
       <PendingPaymentClaims />
       <ArAging />
+    </div>
+  );
+}
+
+function EFakturExport() {
+  const now = new Date();
+  const [period, setPeriod] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function download() {
+    setBusy(true); setErr(null);
+    try {
+      const resp = await api.get("/finance/efaktur.csv", {
+        params: { period }, responseType: "blob",
+      });
+      const url = URL.createObjectURL(new Blob([resp.data], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `efaktur-${period}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      setErr(e?.response?.data?.errors?.[0]?.message ?? "Export failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card p-4 flex items-center gap-3 flex-wrap">
+      <div className="flex-1 min-w-[220px]">
+        <div className="font-semibold flex items-center gap-2">
+          <ReceiptText size={15} className="text-brand-600" /> e-Faktur export
+        </div>
+        <div className="text-xs muted">
+          Approved invoices with a faktur pajak number, as an e-Faktur import CSV for the chosen masa pajak.
+        </div>
+      </div>
+      <input
+        type="month"
+        value={period}
+        max={`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`}
+        onChange={(e) => setPeriod(e.target.value)}
+        className="input max-w-[170px]"
+      />
+      <button className="btn-primary" onClick={download} disabled={busy || !period}>
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        Export CSV
+      </button>
+      {err && <div className="w-full text-sm text-red-700">{err}</div>}
     </div>
   );
 }

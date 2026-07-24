@@ -1,9 +1,12 @@
 """Finance: invoice, payment, AR/AP, tax."""
 
+import csv
+import io
+import re
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
+from app.models.crm import Customer
 from app.models.finance import Invoice, Payment
 from app.models.user import User
 
@@ -236,6 +240,102 @@ async def delete_invoice(
                 "total": float(inv.total or 0)},
     )
     return None
+
+
+@router.get("/efaktur.csv")
+async def efaktur_export(
+    period: str | None = Query(None, description="Masa pajak YYYY-MM (default: current month)"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Export approved output invoices with a Faktur Pajak number as an
+    e-Faktur bulk-import CSV (FK/OF layout) for one masa pajak.
+
+    Only invoices that finance has approved AND that carry a faktur number
+    are included. Amounts are whole rupiah (e-Faktur has no decimals). DPP
+    comes from the invoice amount, PPN from tax_amount.
+
+    NOTE: e-Faktur's exact import schema varies by app version — verify the
+    column set against your installed e-Faktur before importing; ping me to
+    adjust separators/columns/KODE_JENIS if it differs.
+    """
+    # Resolve masa pajak window.
+    today = date.today()
+    if period:
+        try:
+            y, m = period.split("-")
+            year, month = int(y), int(m)
+            if not (1 <= month <= 12):
+                raise ValueError
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "period must be YYYY-MM")
+    else:
+        year, month = today.year, today.month
+    start = date(year, month, 1)
+    end = date(year + (month == 12), (month % 12) + 1, 1)
+
+    rows = (await db.scalars(
+        select(Invoice).where(
+            Invoice.status == "approved",
+            Invoice.faktur_pajak_no.is_not(None),
+        )
+    )).all()
+
+    def in_masa(inv: Invoice) -> bool:
+        d = inv.issue_date or (inv.approved_at.date() if inv.approved_at else None)
+        return bool(d and start <= d <= end - timedelta(days=1))
+
+    rows = [r for r in rows if in_masa(r)]
+
+    # Preload customers for NPWP / name / address.
+    cust_ids = {r.customer_id for r in rows if r.customer_id}
+    customers: dict = {}
+    if cust_ids:
+        for cst in (await db.scalars(select(Customer).where(Customer.id.in_(cust_ids)))).all():
+            customers[cst.id] = cst
+
+    def digits(s: str | None) -> str:
+        return re.sub(r"\D", "", s or "")
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    # Schema declaration rows (the e-Faktur importer reads these headers).
+    w.writerow(["FK", "KD_JENIS_TRANSAKSI", "FG_PENGGANTI", "NOMOR_FAKTUR",
+                "MASA_PAJAK", "TAHUN_PAJAK", "TANGGAL_FAKTUR", "NPWP", "NAMA",
+                "ALAMAT_LENGKAP", "JUMLAH_DPP", "JUMLAH_PPN", "JUMLAH_PPNBM",
+                "ID_KETERANGAN_TAMBAHAN", "FG_UANG_MUKA", "UANG_MUKA_DPP",
+                "UANG_MUKA_PPN", "UANG_MUKA_PPNBM", "REFERENSI"])
+    w.writerow(["LT", "NPWP", "NAMA", "JALAN", "BLOK", "NOMOR", "RT", "RW",
+                "KECAMATAN", "KELURAHAN", "KABUPATEN", "PROPINSI", "KODE_POS",
+                "NOMOR_TELEPON"])
+    w.writerow(["OF", "KODE_OBJEK", "NAMA", "HARGA_SATUAN", "JUMLAH_BARANG",
+                "HARGA_TOTAL", "DISKON", "DPP", "PPN", "TARIF_PPNBM", "PPNBM"])
+
+    for inv in rows:
+        cst = customers.get(inv.customer_id)
+        d = inv.issue_date or (inv.approved_at.date() if inv.approved_at else today)
+        dpp = int(round(float(inv.amount or 0)))
+        ppn = int(round(float(inv.tax_amount or 0)))
+        npwp = digits(cst.tax_id if cst else None)
+        nama = (cst.tax_name if cst and cst.tax_name else
+                (cst.company_name if cst else "")) or ""
+        alamat = (cst.tax_address if cst and cst.tax_address else
+                  (cst.company_address if cst else "")) or ""
+        # FK header row for this invoice.
+        w.writerow(["FK", "01", "0", digits(inv.faktur_pajak_no),
+                    str(month), str(year), d.strftime("%d/%m/%Y"),
+                    npwp, nama, alamat, dpp, ppn, 0, "", "0", 0, 0, 0,
+                    inv.number])
+        # Single OF line = the whole invoice (line-level detail isn't stored).
+        obj = (inv.notes or "Barang/Jasa").splitlines()[0][:80]
+        w.writerow(["OF", "", obj, dpp, 1, dpp, 0, dpp, ppn, 0, 0])
+
+    fname = f"efaktur-{year}-{month:02d}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 @router.get("/ar/aging")
