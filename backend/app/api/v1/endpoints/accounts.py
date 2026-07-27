@@ -12,11 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user  # noqa: F401  (kept for symmetry)
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.models.account import Account
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 # Writes (create / edit / delete / seed) stay restricted to admin and the
 # director — they shape the books. Reads (list / detail / types / export) are

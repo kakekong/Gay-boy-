@@ -17,7 +17,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.crm import Customer
-from app.models.finance import Invoice
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.quotation import Quotation
 from app.models.user import User
 
@@ -119,7 +119,7 @@ async def ar_aging_detail(
     rows = (await db.execute(
         select(Invoice, Customer)
         .join(Customer, Invoice.customer_id == Customer.id)
-        .where(Invoice.status.in_(["issued", "partial", "overdue"]))
+        .where(Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES))
         .order_by(Invoice.due_date.asc().nullslast())
     )).all()
 

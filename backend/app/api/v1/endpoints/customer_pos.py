@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.approval import request_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.crm import Customer
 from app.models.customer_po import CustomerPO
@@ -29,7 +29,12 @@ from app.schemas.customer_po import (
     CustomerPOPatch,
 )
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 _any_internal = require(
     Role.SALES, Role.PURCHASING, Role.MANAGER, Role.ADMIN, Role.HR, Role.DIRECTOR,

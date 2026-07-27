@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.core.security import hash_password
 from app.models.attendance import Attendance
 from app.models.crm import Activity, Customer
@@ -61,7 +61,12 @@ def _validate_pages(pages: list[str] | None) -> None:
     if bad:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown pages: {bad}")
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 _hr_or_director = require(Role.HR, Role.DIRECTOR)
 

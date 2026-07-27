@@ -10,16 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role
+from app.core.permissions import Role, require_min
 from app.core.stage_playbook import playbook_for
 from app.core.stage_tasks import parse_stage_task_kind
 from app.models.crm import Activity, Customer, Reminder
-from app.models.finance import Invoice
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 
 # ─── Calendar event aggregation ──────────────────────────────────────────────
@@ -144,7 +149,7 @@ async def list_events(
             Invoice.due_date.is_not(None),
             Invoice.due_date >= range_from,
             Invoice.due_date <= range_to,
-            Invoice.status.in_(["draft", "issued", "partial", "overdue"]),
+            Invoice.status.in_(("draft",) + OUTSTANDING_INVOICE_STATUSES),
         )
         if sales_only:
             inv_stmt = inv_stmt.where(Customer.sales_pic_id == user.id)
@@ -157,7 +162,7 @@ async def list_events(
                 "at": datetime.combine(inv.due_date, time(12, 0)),
                 "status": inv.status,
                 "link": None,
-                "color": "red" if inv.status == "overdue" else "amber",
+                "color": "red" if inv.due_date < date.today() else "amber",
             })
 
     # Project target deliveries — everyone who works projects, but the

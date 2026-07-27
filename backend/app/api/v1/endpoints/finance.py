@@ -15,7 +15,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.models.crm import Customer
-from app.models.finance import Invoice, Payment
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.user import User
 
 # Finance data (AR aging, tax, payments) is confidential — restrict the whole
@@ -352,7 +352,7 @@ async def ar_aging(db: AsyncSession = Depends(get_db),
     buckets = {"0-30": 0.0, "31-60": 0.0, "61-90": 0.0, "90+": 0.0, "current": 0.0}
     rows = (await db.scalars(
         select(Invoice).where(
-            Invoice.status.in_(["issued", "approved", "partial", "overdue"])
+            Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES)
         )
     )).all()
     if not rows:
@@ -397,7 +397,7 @@ async def run_payment_reminders(db: AsyncSession = Depends(get_db),
     upcoming = today + timedelta(days=3)
     rows = (await db.scalars(
         select(Invoice).where(
-            Invoice.status.in_(["issued", "partial"]),
+            Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES),
             Invoice.due_date <= upcoming,
         )
     )).all()

@@ -42,7 +42,13 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
       is director-only.
     """
     if role in (Role.CUSTOMER, Role.SUPPLIER):
-        return True
+        # Externals may only ever touch the owner types their portal shows.
+        # Which specific ROW is theirs is enforced by _external_owns_attachment
+        # below — this blanket used to `return True` for every owner type, which
+        # let a portal login read employee HR docs, supplier POs and other
+        # customers' files if it knew an id.
+        return owner_type in ("project", "quotation", "invoice",
+                              "delivery_order", "supplier_po", "customer")
     if owner_type == "supplier_po":
         return role in (Role.DIRECTOR, Role.PURCHASING)
     if owner_type == "approval_request":
@@ -86,6 +92,51 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         # external portal users never touch them.
         return role not in (Role.CUSTOMER, Role.SUPPLIER)
     return role == Role.DIRECTOR
+
+
+async def _external_owns_attachment(db: AsyncSession, me: User,
+                                    owner_type: str, owner_id) -> bool:
+    """Row-level scope for customer/supplier portal accounts.
+
+    A portal login may only open files that belong to ITS OWN customer (or, for
+    suppliers, its own supplier POs). Without this, knowing a UUID was enough to
+    read another company's documents.
+    """
+    role = Role(me.role)
+    if role not in (Role.CUSTOMER, Role.SUPPLIER):
+        return True
+    from app.models.finance import Invoice
+    from app.models.operation import DeliveryOrder, Project
+    from app.models.purchasing import SupplierPO
+    from app.models.quotation import Quotation
+
+    if role == Role.SUPPLIER:
+        if owner_type != "supplier_po" or not me.linked_supplier_id:
+            return False
+        po = await db.get(SupplierPO, owner_id)
+        return bool(po and po.supplier_id == me.linked_supplier_id)
+
+    cid = me.linked_customer_id
+    if not cid:
+        return False
+    if owner_type == "customer":
+        return owner_id == cid
+    if owner_type == "project":
+        p = await db.get(Project, owner_id)
+        return bool(p and p.customer_id == cid)
+    if owner_type == "quotation":
+        q = await db.get(Quotation, owner_id)
+        return bool(q and q.customer_id == cid)
+    if owner_type == "invoice":
+        inv = await db.get(Invoice, owner_id)
+        return bool(inv and inv.customer_id == cid)
+    if owner_type == "delivery_order":
+        do = await db.get(DeliveryOrder, owner_id)
+        if not do:
+            return False
+        p = await db.get(Project, do.project_id) if do.project_id else None
+        return bool(p and p.customer_id == cid)
+    return False
 
 
 async def _daily_log_read_ok(db: AsyncSession, me: User, owner_id) -> bool:
@@ -155,6 +206,8 @@ async def list_attachments(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view these files")
     if owner_type == "daily_log" and not await _daily_log_read_ok(db, me, owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
+    if not await _external_owns_attachment(db, me, owner_type, owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view these files")
     rows = (await db.scalars(
         select(Attachment)
         .where(Attachment.owner_type == owner_type, Attachment.owner_id == owner_id)
@@ -199,6 +252,10 @@ async def upload_attachment(
 ):
     if owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
+    if not _attachment_visible_to(owner_type, Role(me.role)) or \
+            not await _external_owns_attachment(db, me, owner_type, owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not allowed to attach files here")
     if owner_type == "daily_log":
         # Only the log's owner may attach to it (overseers can read, not add).
         from app.models.daily_log import DailyLog
@@ -303,6 +360,8 @@ async def download_attachment(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
     if a.owner_type == "daily_log" and not await _daily_log_read_ok(db, me, a.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
+    if not await _external_owns_attachment(db, me, a.owner_type, a.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
     # Link attachments have no file on disk — send the caller to the URL.
     if a.external_url:
         return RedirectResponse(a.external_url)

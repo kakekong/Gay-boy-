@@ -20,12 +20,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import record as audit_record
 from app.core.db import get_db
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.models.account import Account
 from app.models.salary import Salary
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 _director = require(Role.DIRECTOR)
 
 

@@ -18,7 +18,7 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
-from app.models.finance import Invoice, Payment
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.payment_claim import PaymentClaim
 from app.models.user import User
 
@@ -168,7 +168,7 @@ async def open_invoices(
 
     rows = (await db.scalars(
         select(Invoice).where(
-            Invoice.status.in_(["issued", "approved", "partial", "overdue"])
+            Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES)
         ).order_by(Invoice.issue_date.asc().nullslast())
     )).all()
     if not rows:

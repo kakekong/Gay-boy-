@@ -11,7 +11,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
 from app.models.crm import Customer
-from app.models.finance import Invoice
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
@@ -90,7 +90,7 @@ async def finance_kpi(db: AsyncSession = Depends(get_db),
     is_sales = Role(user.role) == Role.SALES
     paid_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.status == "paid")
     out_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(
-        Invoice.status.in_(["issued", "partial", "overdue"])
+        Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES)
     )
     if is_sales:
         # Sales only sees the AR / collected for their own customers.

@@ -9,6 +9,18 @@ from app.core.db import Base
 from app.models.base import TimestampMixin, UUIDPK
 
 
+# Invoice lifecycle actually written by the app:
+#   pending_finance → approved → partial → paid   (or → rejected)
+# "issued"/"overdue" are legacy values no code sets any more; they stay in the
+# filter below so any historical rows still count as receivables.
+#
+# USE THIS everywhere an "unpaid receivable" is selected. Several queries used
+# to hardcode ("issued","partial","overdue") — which silently excluded every
+# finance-approved unpaid invoice, emptying the collections queue, the payment
+# reminders, AR reports, the KPI outstanding figure and the calendar.
+OUTSTANDING_INVOICE_STATUSES = ("approved", "partial", "issued", "overdue")
+
+
 class Invoice(Base, UUIDPK, TimestampMixin):
     __tablename__ = "invoices"
 

@@ -18,14 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role
+from app.core.permissions import Role, require_min
 from app.core.stage_playbook import playbook_for
 from app.core.stage_tasks import parse_stage_task_kind
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.attendance import Attendance
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage
 from app.models.crm import Activity, Customer, Reminder
-from app.models.finance import Invoice
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.operation import Drawing, Project
 from app.models.quotation import Quotation
 from app.models.user import User
@@ -34,7 +34,12 @@ from app.models.user import User
 _WIB = timezone(timedelta(hours=7))
 _LATE_CUTOFF = time(9, 15)
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 
 @router.get("")
@@ -277,7 +282,7 @@ async def list_notifications(
             select(Invoice, Customer)
             .join(Customer, Invoice.customer_id == Customer.id)
             .where(
-                Invoice.status.in_(["issued", "partial", "overdue"]),
+                Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES),
                 Invoice.due_date.is_not(None),
                 Invoice.due_date <= soon,
             )
@@ -527,7 +532,7 @@ async def list_notifications(
         ) or 0
         overdue_inv = await db.scalar(
             select(func.count(Invoice.id)).where(
-                Invoice.status.in_(["issued", "partial", "overdue"]),
+                Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES),
                 Invoice.due_date.is_not(None),
                 Invoice.due_date < today,
             )

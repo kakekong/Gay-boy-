@@ -14,11 +14,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.models.custom_role import CustomRole
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 _director = require(Role.DIRECTOR)
 
 # The catalogue of pages a custom role can be granted. Keep `path` in

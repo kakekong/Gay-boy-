@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,7 +12,7 @@ from app.core.approval import evaluate_data_change, request_approval
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, can_view_customer, filter_to_role_scope
+from app.core.permissions import Role, can_view_customer, filter_to_role_scope, require_min
 from app.core.stage_playbook import is_forward_skip
 from app.core.stage_tasks import (
     ensure_stage_tasks,
@@ -20,14 +20,19 @@ from app.core.stage_tasks import (
     stage_task_kind,
 )
 from app.models.crm import Activity, Customer, CustomerContact, Reminder
-from app.models.finance import Invoice, Payment
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.customer import CustomerCreate, CustomerOut, CustomerUpdate
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 
 @router.get("", response_model=Page[CustomerOut])
@@ -456,9 +461,15 @@ async def _build_summary(db: AsyncSession, c: Customer) -> dict:
     total_paid     = float(sum(float(p.amount or 0) for p in payments))
     outstanding    = float(sum(
         float(i.total or 0) for i in invoices
-        if i.status in ("issued", "partial", "overdue")
+        if i.status in OUTSTANDING_INVOICE_STATUSES
     ))
-    overdue_count = sum(1 for i in invoices if i.status == "overdue")
+    # "overdue" is not a status the app sets — it's a due date in the past on
+    # an unpaid invoice.
+    overdue_count = sum(
+        1 for i in invoices
+        if i.status in OUTSTANDING_INVOICE_STATUSES
+        and i.due_date and i.due_date < date.today()
+    )
 
     # Activities
     activities = (await db.scalars(

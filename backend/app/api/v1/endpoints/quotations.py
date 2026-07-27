@@ -16,7 +16,7 @@ from app.core.approval import (
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, can_approve_quotation, require
+from app.core.permissions import Role, can_approve_quotation, require, require_min
 from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.crm import Activity, Customer, CustomerContact, Reminder
@@ -32,7 +32,12 @@ from app.schemas.quotation import (
 from app.services import ledger, quote_import
 from app.services.numbering import next_quotation_number
 
-router = APIRouter()
+router = APIRouter(
+    # Internal-only surface. External portal accounts (customer /
+    # supplier, hierarchy tier 0) must never reach the CRM, pricing,
+    # calendar or notification data — they have /portal/* instead.
+    dependencies=[Depends(require_min(Role.SALES))]
+)
 
 # The ledger / chart-of-accounts is back-office only — sales never see it.
 _ledger_viewer = require(Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)

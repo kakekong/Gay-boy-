@@ -176,6 +176,13 @@ async def project_full(project_id: UUID,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
 
     customer = await db.get(Customer, p.customer_id) if p.customer_id else None
+    # Sales may only open their OWN customers' projects — the same scope
+    # get_project enforces. Without this, /full (what the detail page actually
+    # calls) leaked another rep's margins, invoices and supplier POs.
+    if Role(user.role) == Role.SALES and (
+        not customer or customer.sales_pic_id != user.id
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
     quotation = await db.get(Quotation, p.quotation_id) if p.quotation_id else None
 
     work_orders = (await db.scalars(
@@ -492,7 +499,20 @@ async def update_project(project_id: UUID,
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    # Sales may only edit their OWN customers' projects (mirrors get_project).
+    if Role(user.role) == Role.SALES:
+        _cust = await db.get(Customer, p.customer_id) if p.customer_id else None
+        if not _cust or _cust.sales_pic_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN)
     data = payload.model_dump(exclude_unset=True)
+    # The project status is driven by real events (advance_project_status),
+    # never by a dropdown — writing it here would skip stages or move the
+    # pipeline backwards. Only the director may force it as an escape hatch.
+    if "status" in data and Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Project status follows the workflow — it can't be set directly.",
+        )
 
     # Per-role shipping-leg ownership. Manager + director stay unrestricted
     # (they're the fallback for anything that goes sideways in ops).
