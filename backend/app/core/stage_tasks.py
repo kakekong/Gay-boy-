@@ -31,6 +31,46 @@ def parse_stage_task_kind(kind: str) -> tuple[str, str] | None:
     return parts[1], parts[2]
 
 
+async def close_superseded_stage_tasks(
+    db: AsyncSession, customer: Customer, stage: str,
+) -> int:
+    """Close pending tasks belonging to stages the deal has already left.
+
+    The customer page only renders the checklist for the CURRENT stage, and
+    the complete/reopen endpoints derive the reminder kind from the current
+    stage too. So a task left pending on an earlier stage could never be
+    ticked again — it just kept firing "Overdue: …" in the bell, the calendar
+    and the AI queue forever. Worst case is closed_won / closed_lost, which
+    have no playbook at all.
+
+    Anything from a strictly earlier stage is marked done (the deal moved on).
+    Backward moves are safe: a task for the stage you returned to, or any
+    later one, is left alone.
+    """
+    from app.core.stage_playbook import stage_index
+    here = stage_index(stage)
+    if here < 0:
+        return 0
+    rows = (await db.scalars(
+        select(Reminder).where(
+            Reminder.customer_id == customer.id,
+            Reminder.kind.like("stage:%"),
+            Reminder.status == "pending",
+        )
+    )).all()
+    closed = 0
+    for r in rows:
+        parsed = parse_stage_task_kind(r.kind)
+        if not parsed:
+            continue
+        task_stage, _key = parsed
+        idx = stage_index(task_stage)
+        if 0 <= idx < here:
+            r.status = "done"
+            closed += 1
+    return closed
+
+
 async def ensure_stage_tasks(
     db: AsyncSession, customer: Customer, stage: str,
 ) -> list[Reminder]:
@@ -40,6 +80,11 @@ async def ensure_stage_tasks(
     are left alone. Returns the list of *newly created* reminders so the
     caller can audit them.
     """
+    # Always retire earlier-stage leftovers first — this must run even when
+    # the new stage has no playbook (closed_won / closed_lost), which is why
+    # it sits above the early returns below.
+    await close_superseded_stage_tasks(db, customer, stage)
+
     if not customer.sales_pic_id:
         return []  # nothing to assign
 

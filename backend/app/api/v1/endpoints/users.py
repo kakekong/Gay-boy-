@@ -252,7 +252,9 @@ async def employee_stats(
     proj_rows = (await db.execute(
         select(Project.status, Project.target_delivery, Project.actual_delivery)
         .join(Customer, Project.customer_id == Customer.id)
-        .where(Customer.sales_pic_id == user_id)
+        # A deleted project must not keep counting against an employee's
+        # overdue tally — deleting it IS the resolution.
+        .where(Customer.sales_pic_id == user_id, Project.is_deleted.is_(False))
     )).all()
     today = date_t.today()
     projects_total = len(proj_rows)
@@ -304,7 +306,7 @@ async def employee_projects(
     rows = (await db.execute(
         select(Project, Customer)
         .join(Customer, Project.customer_id == Customer.id)
-        .where(Customer.sales_pic_id == user_id)
+        .where(Customer.sales_pic_id == user_id, Project.is_deleted.is_(False))
         .order_by(Project.created_at.desc())
         .limit(limit)
     )).all()

@@ -412,8 +412,32 @@ async def run_payment_reminders(db: AsyncSession = Depends(get_db),
 async def tax_report(period: str = "current_month",
                      db: AsyncSession = Depends(get_db),
                      _user: User = Depends(get_current_user)):
-    total_tax = await db.scalar(select(func.coalesce(func.sum(Invoice.tax_amount), 0)))
-    return {"period": period, "tax_collected": float(total_tax or 0)}
+    # Previously summed EVERY invoice in every status (including rejected and
+    # draft) while echoing back the requested period — a period-scoped number
+    # that wasn't period-scoped at all.
+    today = date.today()
+    if period in (None, "", "current_month"):
+        start = today.replace(day=1)
+        end = date(today.year + (today.month == 12),
+                   (today.month % 12) + 1, 1)
+    else:
+        try:
+            y, m = period.split("-")
+            start = date(int(y), int(m), 1)
+            end = date(int(y) + (int(m) == 12), (int(m) % 12) + 1, 1)
+        except (ValueError, AttributeError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "period must be 'current_month' or YYYY-MM")
+    total_tax = await db.scalar(
+        select(func.coalesce(func.sum(Invoice.tax_amount), 0)).where(
+            Invoice.status == "approved",
+            Invoice.issue_date.is_not(None),
+            Invoice.issue_date >= start,
+            Invoice.issue_date < end,
+        )
+    )
+    return {"period": period, "from": start, "to": end - timedelta(days=1),
+            "tax_collected": float(total_tax or 0)}
 
 
 @router.post("/payments")

@@ -336,6 +336,19 @@ COLUMN_MIGRATIONS: list[str] = [
     # Attachments can be an external link instead of an uploaded file
     # (durable across Space rebuilds, which wipe local file storage).
     "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS external_url VARCHAR(1000)",
+    # One-shot cleanup: stage tasks left pending on a stage the deal has
+    # already left could never be ticked (the checklist only renders the
+    # CURRENT stage), so they nagged forever in the bell/calendar/AI queue.
+    # Retire every pending stage task for a customer that has since closed.
+    """
+    UPDATE reminders r
+       SET status = 'done'
+      FROM customers c
+     WHERE r.customer_id = c.id
+       AND r.kind LIKE 'stage:%'
+       AND r.status = 'pending'
+       AND c.stage IN ('closed_won', 'closed_lost')
+    """,
 ]
 
 

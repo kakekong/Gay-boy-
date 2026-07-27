@@ -252,10 +252,15 @@ async def upload_attachment(
 ):
     if owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
-    if not _attachment_visible_to(owner_type, Role(me.role)) or \
-            not await _external_owns_attachment(db, me, owner_type, owner_id):
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Not allowed to attach files here")
+    # External portal accounts may only attach to their own rows. Internal
+    # staff keep the previous behaviour — _attachment_visible_to governs who
+    # may VIEW a file (customer files are director-only to read), which must
+    # NOT gate uploading: sales legitimately attach files to their customers.
+    if Role(me.role) in (Role.CUSTOMER, Role.SUPPLIER):
+        if not _attachment_visible_to(owner_type, Role(me.role)) or \
+                not await _external_owns_attachment(db, me, owner_type, owner_id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Not allowed to attach files here")
     if owner_type == "daily_log":
         # Only the log's owner may attach to it (overseers can read, not add).
         from app.models.daily_log import DailyLog

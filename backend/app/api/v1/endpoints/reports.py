@@ -68,6 +68,7 @@ async def pnl(
     )
     committed_projects = (await db.scalars(
         select(Project).where(
+            Project.is_deleted.is_(False),
             Project.status.in_(COMMITTED_PROJECT_STATUSES),
             Project.price_request_id.is_not(None),
         )

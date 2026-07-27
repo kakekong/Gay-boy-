@@ -766,6 +766,14 @@ async def update_pr(
     if "status" in data and data["status"]:
         if data["status"] not in ("open", "closed"):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "status must be open or closed")
+        # A PR awaiting the director's approval can't be opened from here —
+        # that would bypass the gate require_pr_approval put it behind.
+        if pr.status == "pending_approval" and Role(_u.role) != Role.DIRECTOR:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This purchase request is awaiting director approval — it "
+                "can't be opened or closed until that decision is made.",
+            )
         pr.status = data["status"]
     if "items" in data and data["items"] is not None:
         pr.items = data["items"]

@@ -131,9 +131,16 @@ async def get_customer(customer_id: UUID,
     from app.core.stage_playbook import sync_customer_stage_from_projects
     from app.models.operation import Project
     proj_statuses = (await db.scalars(
-        select(Project.status).where(Project.customer_id == customer_id)
+        select(Project.status).where(
+            Project.customer_id == customer_id, Project.is_deleted.is_(False)
+        )
     )).all()
     if sync_customer_stage_from_projects(obj, list(proj_statuses)):
+        # Entering a new stage retires the previous stage's leftovers, which
+        # otherwise stay pending forever (the checklist only renders the
+        # CURRENT stage, so they could never be ticked) and keep firing in
+        # the bell, calendar and AI queue.
+        await ensure_stage_tasks(db, obj, obj.stage)
         await db.flush()
     return obj
 

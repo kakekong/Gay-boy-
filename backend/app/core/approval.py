@@ -262,6 +262,14 @@ async def apply_to_target(
         po = await db.get(SupplierPO, req.target_id)
         if po:
             action = (req.payload or {}).get("action")
+            if action == "create" and po.status != "pending_approval":
+                # Already decided elsewhere (or goods received against it) —
+                # don't overwrite the live status with open/cancelled.
+                applied["skipped"] = (
+                    f"supplier PO already '{po.status}' — decision recorded "
+                    "but not re-applied"
+                )
+                return applied
             if action == "create":
                 po.status = "open" if approve else "cancelled"
                 applied["new_status"] = po.status
@@ -288,6 +296,12 @@ async def apply_to_target(
         # cancels it so purchasing knows not to source against it.
         from app.models.purchasing import PurchaseRequest
         pr = await db.get(PurchaseRequest, req.target_id)
+        if pr and pr.status != "pending_approval":
+            applied["skipped"] = (
+                f"purchase request already '{pr.status}' — decision recorded "
+                "but not re-applied"
+            )
+            return applied
         if pr:
             pr.status = "open" if approve else "cancelled"
             applied["new_status"] = pr.status
@@ -380,6 +394,16 @@ async def apply_to_target(
         # to 'won' and posts to the ledger (idempotent, best-effort).
         from app.models.quotation import Quotation
         q = await db.get(Quotation, req.target_id)
+        if q and q.status in ("won", "lost", "cancelled", "superseded"):
+            # Stale request: the quote already settled (e.g. the director
+            # marked it Won directly, or a revision superseded it). Record
+            # the decision but don't re-apply — re-winning a superseded quote
+            # would post its revenue a second time alongside the live one.
+            applied["skipped"] = (
+                f"quotation already '{q.status}' — decision recorded "
+                "but not re-applied"
+            )
+            return applied
         if q and approve:
             q.status = "won"
             # Fused pipeline: the Won approval is also the sign-off that the

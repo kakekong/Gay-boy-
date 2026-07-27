@@ -220,7 +220,7 @@ async def create_price_request(
     user: User = Depends(get_current_user),
 ):
     if Role(user.role) not in (Role.SALES, Role.DIRECTOR, Role.MANAGER, Role.ADMIN):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only sales can raise a price request")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only sales, a manager, admin or the director can raise a price request")
     cust = await db.get(Customer, payload.customer_id)
     if not cust:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Customer not found")
@@ -358,7 +358,7 @@ async def fill_pricing(
 ):
     """Purchasing fills the procurement cost per line, then it goes to the director."""
     if Role(user.role) not in _PURCHASING:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only purchasing may fill costs")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only purchasing, an admin, manager or the director may fill costs")
     pr = await db.get(PriceRequest, pr_id)
     if not pr or pr.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND)

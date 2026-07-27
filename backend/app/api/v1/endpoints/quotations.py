@@ -499,6 +499,19 @@ async def revise_quotation(
             "A draft is directly editable and a pending quotation should be "
             "unsubmitted — revisions are for approved/sent/rejected/lost quotes.",
         )
+    _won_pending = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "quotation_won",
+            ApprovalRequest.target_id == q.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )
+    if _won_pending:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A Mark-won request is pending with the director — wait for that "
+            "decision before posting a revision.",
+        )
     if q.status in ("won", "cancelled", "superseded"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -583,7 +596,11 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if q.status not in ("pending_approval", "draft", "rejected"):
+    # Only a SUBMITTED quotation can be approved. Allowing draft/rejected
+    # meant no ApprovalRequest existed, so decide() never ran and the
+    # director-approval gate (QUOTATION_ALWAYS_DIRECTOR_APPROVAL) was
+    # bypassable by approving the quote before it was submitted.
+    if q.status != "pending_approval":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Cannot approve a quotation in status '{q.status}'",
@@ -1428,9 +1445,14 @@ async def followup_reminder_done(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    await _scoped_quote(q_id, db, user)
+    q = await _scoped_quote(q_id, db, user)
     rem = await db.get(Reminder, reminder_id)
     if not rem:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
+    # The reminder has to belong to THIS quotation's customer — otherwise
+    # owning one quote let you close any other rep's follow-ups and stage
+    # tasks just by knowing an id.
+    if rem.customer_id != q.customer_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
     rem.status = "done"
     return {"ok": True}

@@ -316,6 +316,16 @@ async def verify_claim(
     if c.status != "pending":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Claim is already {c.status}")
+    # Same invoice-state guard the manual path enforces — verifying against a
+    # draft / pending / already-paid invoice still posted to the ledger and
+    # could overpay the invoice.
+    _inv = await db.get(Invoice, c.invoice_id)
+    if _inv is not None and _inv.status in ("paid", "rejected", "draft", "pending_finance"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Invoice is '{_inv.status}' — payments can only be verified on an "
+            "approved, unpaid invoice.",
+        )
     # Create a real Payment row
     payment = Payment(
         invoice_id=c.invoice_id,

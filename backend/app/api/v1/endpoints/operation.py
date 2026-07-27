@@ -1443,8 +1443,8 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
                   stage=payload.stage, notes=payload.notes)
     db.add(w)
     # The WO is now legitimately at-or-just-past the project's stage, so
-    # advance the project by AT MOST one step — advance_project_status
-    # caps at cur+1 regardless. A qc WO on a production project bumps
+    # advance the project to the milestone the event represents — advance_project_status
+    # is forward-only (it never regresses). A qc WO on a production project bumps
     # to qc; a packaging WO on a qc project bumps to packaging.
     bump = _WO_STAGE_TO_PROJECT_STATUS.get((payload.stage or "").lower())
     if bump:
@@ -1515,7 +1515,16 @@ async def list_work_orders(
     Used by the Operation board's per-stage screens — pass ?stage=receiving
     to render a focused view of just that column."""
     from app.models.crm import Customer
-    stmt = select(WorkOrder).order_by(WorkOrder.created_at.desc())
+    # Work orders on a deleted project are gone; on a finished project an
+    # incomplete WO is historical, not open work.
+    stmt = (
+        select(WorkOrder)
+        .join(Project, WorkOrder.project_id == Project.id)
+        .where(Project.is_deleted.is_(False))
+        .order_by(WorkOrder.created_at.desc())
+    )
+    if completed is False:
+        stmt = stmt.where(Project.status.not_in(("delivered", "paid", "closed")))
     if stage:
         stmt = stmt.where(WorkOrder.stage == stage)
     if project_id:
@@ -1534,6 +1543,7 @@ async def list_work_orders(
             select(Project).where(Project.id.in_(project_ids))
         )).all():
             projects[p.id] = p
+    _show_customer = _can_see_project_customer(_user)
     customer_ids = {p.customer_id for p in projects.values() if p.customer_id}
     customers: dict[UUID, Customer] = {}
     if customer_ids:
@@ -1558,8 +1568,11 @@ async def list_work_orders(
             "project_code": proj.code if proj else None,
             "project_status": proj.status if proj else None,
             "project_target_delivery": proj.target_delivery if proj else None,
-            "customer_id": str(cust.id) if cust else None,
-            "customer_name": cust.company_name if cust else None,
+            # Purchasing stays customer-blind here like everywhere else —
+            # this list was the one surface still leaking the company name.
+            "customer_id": str(cust.id) if (cust and _show_customer) else None,
+            "customer_name": (cust.company_name if (cust and _show_customer)
+                              else (f"Order {proj.code}" if proj else None)),
         })
     return out
 
@@ -1611,7 +1624,7 @@ async def mark_delivered(do_id: UUID,
     await db.flush()
 
     # When every delivery order on the project is delivered, nudge the project
-    # forward one stage (advance is now one-step-at-a-time, so a project at
+    # forward one stage (advance is forward-only to the milestone the event represents, so a project at
     # 'invoiced' → 'delivered', while 'qc' or earlier would walk one step only).
     if d.project_id:
         remaining = await db.scalar(

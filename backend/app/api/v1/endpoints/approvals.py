@@ -51,6 +51,7 @@ async def pending_documents(
         select(Drawing, Project)
         .join(Project, Drawing.project_id == Project.id)
         .where(Drawing.status == "submitted",
+               Project.is_deleted.is_(False),
                Project.status.not_in(DONE_PROJECT))
         .order_by(Drawing.created_at.asc())
         .limit(50)
@@ -91,6 +92,7 @@ async def pending_documents(
         select(DeliveryOrder, Project)
         .join(Project, DeliveryOrder.project_id == Project.id)
         .where(DeliveryOrder.verified_at.is_(None),
+               Project.is_deleted.is_(False),
                Project.status.not_in(DONE_PROJECT))
         .order_by(DeliveryOrder.created_at.asc())
         .limit(50)
@@ -139,7 +141,7 @@ async def pending_documents(
 @router.get("")
 async def inbox(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
+    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR, Role.FINANCE)),
 ):
     stmt = select(ApprovalRequest).where(
         ApprovalRequest.status == ApprovalStatus.PENDING.value
@@ -147,6 +149,11 @@ async def inbox(
     if Role(user.role) == Role.MANAGER:
         # manager sees manager-level approvals; director sees all
         stmt = stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
+    elif Role(user.role) == Role.FINANCE:
+        # DP customer-PO approvals are addressed to finance (decide() already
+        # enforces it) — without this they were filed to a queue finance
+        # couldn't open.
+        stmt = stmt.where(ApprovalRequest.required_role == Role.FINANCE.value)
     rows = (await db.scalars(stmt.order_by(ApprovalRequest.created_at.asc()))).all()
     if not rows:
         return []
@@ -339,7 +346,7 @@ async def approve(
     req_id: UUID,
     notes: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
+    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR, Role.FINANCE)),
 ):
     try:
         req = await decide(
@@ -365,7 +372,7 @@ async def reject(
     req_id: UUID,
     notes: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
+    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR, Role.FINANCE)),
 ):
     try:
         req = await decide(

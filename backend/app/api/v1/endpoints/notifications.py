@@ -324,6 +324,9 @@ async def list_notifications(
                 # notify until someone explicitly sets a due date.
                 Reminder.due_at.is_not(None),
                 Reminder.due_at <= soon_dt,
+                # A closed deal's leftovers aren't actionable.
+                Customer.stage.not_in(("closed_won", "closed_lost")),
+                Customer.is_deleted.is_(False),
             )
             .order_by(Reminder.due_at.asc())
             .limit(50)
@@ -375,9 +378,16 @@ async def list_notifications(
     # item (sales/purchasing/finance can't act on it), and the link goes
     # straight to the owning project instead of the bare list.
     if role in (Role.MANAGER, Role.DIRECTOR, Role.ADMIN):
+        # A drawing on a deleted or already-finished project is historical —
+        # without this join it kept notifying forever with nothing to decide.
         d_stmt = (
             select(Drawing)
-            .where(Drawing.status == "submitted")
+            .join(Project, Drawing.project_id == Project.id)
+            .where(
+                Drawing.status == "submitted",
+                Project.is_deleted.is_(False),
+                Project.status.not_in(("delivered", "paid", "closed")),
+            )
             .order_by(Drawing.created_at.desc())
             .limit(20)
         )
@@ -444,6 +454,7 @@ async def list_notifications(
         # 6b. Projects past their promised delivery without an actual delivery
         overdue_proj = (await db.scalars(
             select(Project).where(
+                Project.is_deleted.is_(False),
                 Project.target_delivery.is_not(None),
                 Project.target_delivery < today,
                 Project.actual_delivery.is_(None),
@@ -487,7 +498,8 @@ async def list_notifications(
     if role == Role.DIRECTOR:
         overseers = (await db.execute(
             select(User.id, User.role, User.full_name)
-            .where(User.role.in_([Role.HR.value, Role.MANAGER.value]))
+            .where(User.role.in_([Role.HR.value, Role.MANAGER.value]),
+                   User.is_active.is_(True))
         )).all()
         if overseers:
             by_id = {u[0]: (u[1], u[2]) for u in overseers}

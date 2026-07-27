@@ -170,6 +170,7 @@ async def list_events(
     proj_stmt = select(Project, Customer).join(
         Customer, Project.customer_id == Customer.id
     ).where(
+        Project.is_deleted.is_(False),
         Project.target_delivery.is_not(None),
         Project.target_delivery >= range_from,
         Project.target_delivery <= range_to,
