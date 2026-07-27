@@ -417,14 +417,29 @@ async def tax_report(period: str = "current_month",
 
 
 @router.post("/payments")
-async def record_payment(invoice_id: str, amount: float, method: str | None = None,
+async def record_payment(invoice_id: UUID, amount: float, method: str | None = None,
                          reference: str | None = None,
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(get_current_user)):
-    p = Payment(invoice_id=invoice_id, amount=amount, method=method, reference=reference)
-    db.add(p)
-    await db.flush()
-    return {"id": str(p.id), "ok": True}
+                         user: User = Depends(get_current_user)):
+    """Legacy payment entry — delegates to the real manual-payment flow.
+
+    This used to insert a bare Payment row: no invoice validation, no ledger
+    post, no invoice-status recompute and no project advance. That produced
+    "ghost" payments — the project page and AR aging counted them as paid while
+    Cash/Piutang never moved and the invoice never reached 'paid'. It now runs
+    the exact same code as POST /payments/manual so both paths behave
+    identically.
+    """
+    from app.api.v1.endpoints.payments import (
+        ManualPaymentIn, record_manual_payment,
+    )
+    return await record_manual_payment(
+        payload=ManualPaymentIn(
+            invoice_id=invoice_id, amount=amount,
+            method=method, reference=reference,
+        ),
+        db=db, me=user,
+    )
 
 
 # ─── Estimated finance ───────────────────────────────────────────────────────

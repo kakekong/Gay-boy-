@@ -1221,10 +1221,24 @@ async def issue_invoice(
                                 "due_date must be YYYY-MM-DD") from e
 
     quotation = await db.get(Quotation, p.quotation_id) if p.quotation_id else None
-    inv_amount = amount if amount is not None else float(
-        (quotation.total if quotation else None) or p.po_value or 0
-    )
-    inv_tax = tax_amount or 0.0
+    # Invoice.amount is the DPP (net, pre-tax) everywhere else — the e-Faktur
+    # export files it as JUMLAH_DPP with tax_amount as JUMLAH_PPN, and the DP
+    # sibling defaults from the PO total (Σ qty × unit_price, net).
+    # Quotation.total is GROSS (after_discount + PPN), so defaulting from it
+    # put tax inside the DPP and then added PPN again on top.
+    if amount is not None:
+        inv_amount = float(amount)
+    elif quotation is not None:
+        inv_amount = float(quotation.subtotal or 0) - float(quotation.discount_amount or 0)
+    else:
+        inv_amount = float(p.po_value or 0)
+    # Default the PPN from the quotation's tax rate when finance didn't type one.
+    if tax_amount is not None:
+        inv_tax = float(tax_amount)
+    elif quotation is not None:
+        inv_tax = inv_amount * float(quotation.tax_pct or 0) / 100.0
+    else:
+        inv_tax = 0.0
     total = inv_amount + inv_tax
 
     inv = Invoice(
@@ -1475,7 +1489,12 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
                 advance_project_status(p, bump)
                 # Completing a QC work order also counts as "QC passed" so
                 # finance can issue the invoice — issue_invoice gates on this.
-                if bump == "qc" and completed and not p.qc_passed_at:
+                # NEVER when QC was explicitly failed: that would forge a pass
+                # (qc_passed_at set while qc_decision stays "fail") and unlock
+                # billing for goods that failed inspection. A failed QC has to
+                # be re-recorded via POST /projects/{id}/qc.
+                if (bump == "qc" and completed and not p.qc_passed_at
+                        and p.qc_decision != "fail"):
                     p.qc_passed_at = datetime.now(UTC)
                     if not p.qc_decision:
                         p.qc_decision = "pass"
