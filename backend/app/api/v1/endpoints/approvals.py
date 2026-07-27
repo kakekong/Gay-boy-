@@ -194,6 +194,63 @@ async def inbox(
         )).all()
         supplier_pos = {p.id: p for p in sporows}
 
+    # ── Drop requests whose target already moved past needing a decision ──
+    # A pending request can be orphaned when the same transition happens
+    # outside the approval flow (e.g. the director marks a quote Won straight
+    # from the quotation page, or a PO is decided on its own detail page).
+    # Nothing is left to decide, so it should not clutter the queue. The
+    # deciding endpoints close their own requests; this is the safety net that
+    # also hides rows orphaned before that fix existed.
+    from app.models.customer_po import CustomerPO
+    all_quote_ids = {r.target_id for r in rows
+                     if r.target_type in ("quotation", "discount",
+                                          "quotation_edit", "quotation_won")}
+    all_quotes: dict[UUID, Quotation] = {}
+    if all_quote_ids:
+        all_quotes = {q.id: q for q in (await db.scalars(
+            select(Quotation).where(Quotation.id.in_(all_quote_ids)))).all()}
+    cpo_ids = {r.target_id for r in rows if r.target_type == "customer_po"}
+    cpos: dict[UUID, CustomerPO] = {}
+    if cpo_ids:
+        cpos = {p.id: p for p in (await db.scalars(
+            select(CustomerPO).where(CustomerPO.id.in_(cpo_ids)))).all()}
+
+    _QUOTE_CLOSED = ("won", "lost", "cancelled", "superseded")
+    _CPO_OPEN = ("pending_approval", "pending_finance", "pending_sales_confirm")
+
+    def _stale(r) -> bool:
+        t = r.target_type
+        if t == "quotation_won":
+            q = all_quotes.get(r.target_id)
+            return bool(q and q.status in _QUOTE_CLOSED)
+        if t in ("quotation", "discount"):
+            # Only a draft/pending quote still needs an approve/reject.
+            q = all_quotes.get(r.target_id)
+            return bool(q and q.status not in ("draft", "pending_approval"))
+        if t == "quotation_edit":
+            q = all_quotes.get(r.target_id)
+            return bool(q and q.status in ("cancelled", "superseded"))
+        if t == "customer_po":
+            po = cpos.get(r.target_id)
+            return bool(po and po.status not in _CPO_OPEN)
+        if t == "supplier_po":
+            spo = supplier_pos.get(r.target_id)
+            return bool(spo and spo.status != "pending_approval")
+        if t == "purchase_request":
+            pr = prs.get(r.target_id)
+            return bool(pr and pr.status != "pending_approval")
+        if t == "project":
+            p = projects.get(r.target_id)
+            return bool(p and p.is_deleted)
+        if t in ("customer", "followup"):
+            cst = customers.get(r.target_id)
+            return bool(cst and cst.is_deleted)
+        return False
+
+    rows = [r for r in rows if not _stale(r)]
+    if not rows:
+        return []
+
     # Bulk-load requester names
     requester_ids = {r.requested_by for r in rows}
     requesters: dict[UUID, User] = {}

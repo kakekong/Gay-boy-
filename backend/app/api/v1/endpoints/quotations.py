@@ -717,6 +717,21 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
             },
         )
     q.status = "won"
+    # The director may mark Won directly while sales' own mark-won request is
+    # still pending. Close it here — otherwise it sits in the approvals inbox
+    # forever with nothing left to decide.
+    stale = (await db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "quotation_won",
+            ApprovalRequest.target_id == q.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )).all()
+    for req in stale:
+        req.status = ApprovalStatus.APPROVED.value
+        req.decided_by = user.id
+        req.decided_at = datetime.now(UTC)
+        req.decision_notes = "Marked Won directly by the director."
     # Projects no longer auto-spawn from a Won quotation — a Customer PO
     # has to be filed and approved by the director first. The Won flag
     # just means "the customer said yes, we're waiting for paperwork."
