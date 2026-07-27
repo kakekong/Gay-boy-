@@ -1,6 +1,7 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Briefcase, User as UserIcon } from "lucide-react";
+import { Briefcase, CheckCircle2, Loader2, User as UserIcon } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { UserLink } from "@/components/UserLink";
@@ -20,8 +21,11 @@ const STATUS_COLOR: Record<string, string> = {
   closed:            "bg-emerald-100 text-emerald-800",
 };
 
+// A project is finished once it's closed. Everything earlier — including
+// 'paid', which auto-advances to closed — is still live work.
+const CLOSED_STATUSES = ["closed"];
+
 export default function ProjectsPage() {
-  const nav = useNavigate();
   const role = useAuthStore((s) => s.user?.role);
   // Purchasing sees projects for procurement context but not deal
   // economics and not the customer identity — same customer-blindness
@@ -32,10 +36,17 @@ export default function ProjectsPage() {
     queryKey: ["projects"],
     queryFn: () => api.get("/operation/projects").then((r) => r.data),
   });
-  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
+
+  const { ongoing, closed } = useMemo(() => {
+    const all: any[] = q.data ?? [];
+    return {
+      ongoing: all.filter((p) => !CLOSED_STATUSES.includes(p.status)),
+      closed: all.filter((p) => CLOSED_STATUSES.includes(p.status)),
+    };
+  }, [q.data]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
@@ -45,7 +56,65 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      <div className="table-shell">
+      <ProjectSection
+        title="Ongoing"
+        subtitle="Still in production, shipping or billing."
+        icon={<Loader2 size={15} className="text-brand-600" />}
+        rows={ongoing}
+        emptyText={q.isLoading ? "Loading…" : "No ongoing projects."}
+        showMoney={showMoney}
+        showCustomer={showCustomer}
+      />
+
+      <ProjectSection
+        title="Closed"
+        subtitle="Delivered, paid and wrapped up."
+        icon={<CheckCircle2 size={15} className="text-emerald-600" />}
+        rows={closed}
+        emptyText={q.isLoading ? "Loading…" : "No closed projects yet."}
+        showMoney={showMoney}
+        showCustomer={showCustomer}
+        muted
+      />
+    </div>
+  );
+}
+
+function ProjectSection({
+  title, subtitle, icon, rows, emptyText, showMoney, showCustomer, muted,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  rows: any[];
+  emptyText: string;
+  showMoney: boolean;
+  showCustomer: boolean;
+  muted?: boolean;
+}) {
+  const nav = useNavigate();
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
+  const cols = 2 + (showMoney ? 1 : 0) + (showCustomer ? 2 : 0);
+  const total = rows.reduce((s, p) => s + Number(p.po_value || 0), 0);
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="font-semibold flex items-center gap-2">
+            {icon} {title}
+            <span className="chip bg-ink-100 text-ink-700">{rows.length}</span>
+          </h2>
+          <p className="text-xs muted">{subtitle}</p>
+        </div>
+        {showMoney && rows.length > 0 && (
+          <div className="text-xs muted tabular-nums">
+            Total PO value <span className="font-medium text-ink-700">{idr(total)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className={clsx("table-shell", muted && "opacity-90")}>
         <table className="w-full">
           <thead className="bg-ink-50/60">
             <tr>
@@ -57,7 +126,7 @@ export default function ProjectsPage() {
             </tr>
           </thead>
           <tbody>
-            {(q.data ?? []).map((p: any) => (
+            {rows.map((p: any) => (
               <tr
                 key={p.id}
                 className="tr-hover border-t border-ink-100 cursor-pointer"
@@ -106,20 +175,16 @@ export default function ProjectsPage() {
                 )}
               </tr>
             ))}
-            {!q.data?.length && (
+            {rows.length === 0 && (
               <tr>
-                <td
-                  colSpan={2 + (showMoney ? 1 : 0) + (showCustomer ? 2 : 0)}
-                  className="td text-center muted py-12"
-                >
-                  No projects yet.
+                <td colSpan={cols} className="td text-center muted py-10">
+                  {emptyText}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }
-
