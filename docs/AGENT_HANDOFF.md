@@ -157,6 +157,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_pending_docs.py` | stale delivery orders / documents on closed projects |
 | `test_stale_approvals.py` | approval requests whose target already moved on |
 | `test_batch_fixes.py` | stage-task retirement, approval gates, scoping, tax period |
+| `test_partial_payment_ar.py` | a partially-paid invoice is owed only its remainder, on all four AR surfaces |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -269,6 +270,14 @@ invisible in AR — that was a real bug.
 **Invoice `amount` is the net DPP** (tax base), not the gross. Tax is computed
 on top. A previous bug treated a tax-inclusive figure as DPP and overcharged.
 
+**"Outstanding" always means face value minus verified payments.** `Payment`
+rows only exist once verified (portal claims live in `PaymentClaim`), so
+`SUM(Payment.amount)` per invoice is the banked figure. Summing `Invoice.total`
+over the outstanding statuses counts a half-paid invoice at full value — that
+bug lived in `/reports/ar-aging-detail`, `/kpi/finance` and the customer
+summary card while `/finance/ar/aging` was already netting correctly.
+`test_partial_payment_ar.py` pins all four to the same number.
+
 **Project stages are order-independent going forward.**
 `advance_project_status()` in `app/models/operation.py` jumps straight to the
 target milestone rather than stepping one stage at a time, and never moves
@@ -324,6 +333,8 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Count only what is still owed as outstanding AR
+docs: handoff brief so a new chat picks up with the same context
 Preserve the end-to-end audit drivers as a runnable suite
 Projects: split the list into Ongoing and Closed sections
 Fix the remaining audited bugs: stale queues, approval gates, scoping
@@ -350,7 +361,16 @@ Ongoing/Closed project sections.
 
 - **The Hugging Face Space still needs a manual rebuild.** A large batch of
   backend fixes (security lockdown, money integrity, stale queues, approval
-  gates) is pushed but **not live** until the user rebuilds. Remind them.
+  gates, outstanding-AR netting) is pushed but **not live** until the user
+  rebuilds. Remind them.
+- **Rebuilding the local scratch environment.** A fresh container has neither
+  the Postgres data directory nor the Python packages. Before any driver runs:
+  `initdb -D /tmp/pgdata_test -U postgres -A trust` (as `nobody`) then the
+  `pg_ctl` line in §4, and
+  `grep -vi "pywebpush\|http-ece" backend/requirements.txt > /tmp/req.txt &&
+  pip install --ignore-installed -r /tmp/req.txt` — `pywebpush` fails to build
+  (§8) and `--ignore-installed` is needed because pip cannot uninstall the
+  distro-provided PyJWT.
 - `docs/TEST_WORKFLOW.md` is the phase-by-phase manual test script (Phases A–H
   with `✓ Expect` lines) written for the user to walk through in the live app.
   Keep it current when workflows change.

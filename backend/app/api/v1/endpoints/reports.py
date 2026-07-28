@@ -17,7 +17,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.crm import Customer
-from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.quotation import Quotation
 from app.models.user import User
 
@@ -124,6 +124,20 @@ async def ar_aging_detail(
         .order_by(Invoice.due_date.asc().nullslast())
     )).all()
 
+    # Age what is still *owed*, not the face value: a partially-paid invoice
+    # must only carry its remainder into the buckets, the same way the finance
+    # AR aging does. Counting the full total here overstated receivables by
+    # every rupiah already banked.
+    paid_by_inv: dict = {}
+    inv_ids = [inv.id for inv, _ in rows]
+    if inv_ids:
+        for row in (await db.execute(
+            select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+            .where(Payment.invoice_id.in_(inv_ids))
+            .group_by(Payment.invoice_id)
+        )).all():
+            paid_by_inv[row[0]] = float(row[1] or 0)
+
     def bucket(due: date | None) -> str:
         if not due:
             return "no-due"
@@ -137,9 +151,14 @@ async def ar_aging_detail(
     items = []
     buckets: dict[str, float] = defaultdict(float)
     for inv, c in rows:
-        b = bucket(inv.due_date)
         total = float(inv.total or 0)
-        buckets[b] += total
+        paid = paid_by_inv.get(inv.id, 0.0)
+        outstanding = max(0.0, total - paid)
+        if outstanding <= 0:
+            # Fully covered by verified payments — nothing left to age.
+            continue
+        b = bucket(inv.due_date)
+        buckets[b] += outstanding
         items.append({
             "invoice_id": str(inv.id),
             "number": inv.number,
@@ -148,6 +167,8 @@ async def ar_aging_detail(
             "due_date": inv.due_date,
             "days_overdue": (today - inv.due_date).days if inv.due_date else None,
             "total": total,
+            "paid": paid,
+            "outstanding": outstanding,
             "status": inv.status,
             "bucket": b,
         })

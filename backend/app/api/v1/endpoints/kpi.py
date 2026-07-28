@@ -11,7 +11,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
 from app.models.crm import Customer
-from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
+from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
@@ -88,18 +88,30 @@ async def purchasing_kpi(_user: User = Depends(get_current_user)):
 async def finance_kpi(db: AsyncSession = Depends(get_db),
                       user: User = Depends(get_current_user)):
     is_sales = Role(user.role) == Role.SALES
-    paid_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(Invoice.status == "paid")
-    out_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(
+    # Collected is what actually landed in the bank — every verified payment,
+    # not just the totals of invoices that happen to be fully settled. And AR
+    # is the *remainder* on each open invoice; billing a partially-paid
+    # invoice at face value counted money we already have as still owed.
+    paid_q = select(func.coalesce(func.sum(Payment.amount), 0)).join(
+        Invoice, Payment.invoice_id == Invoice.id
+    )
+    billed_q = select(func.coalesce(func.sum(Invoice.total), 0)).where(
         Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES)
     )
+    settled_q = select(func.coalesce(func.sum(Payment.amount), 0)).join(
+        Invoice, Payment.invoice_id == Invoice.id
+    ).where(Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES))
     if is_sales:
         # Sales only sees the AR / collected for their own customers.
         own = select(Customer.id).where(Customer.sales_pic_id == user.id)
         paid_q = paid_q.where(Invoice.customer_id.in_(own))
-        out_q = out_q.where(Invoice.customer_id.in_(own))
+        billed_q = billed_q.where(Invoice.customer_id.in_(own))
+        settled_q = settled_q.where(Invoice.customer_id.in_(own))
     paid = await db.scalar(paid_q)
-    outstanding = await db.scalar(out_q)
-    return {"collected": float(paid or 0), "outstanding": float(outstanding or 0)}
+    billed = await db.scalar(billed_q)
+    settled = await db.scalar(settled_q)
+    outstanding = max(0.0, float(billed or 0) - float(settled or 0))
+    return {"collected": float(paid or 0), "outstanding": outstanding}
 
 
 # ─── Export (PDF / Excel) — director only ───────────────────────────────────

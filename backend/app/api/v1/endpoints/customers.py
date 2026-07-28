@@ -466,8 +466,15 @@ async def _build_summary(db: AsyncSession, c: Customer) -> dict:
         )).all()
     total_invoiced = float(sum(float(i.total or 0) for i in invoices))
     total_paid     = float(sum(float(p.amount or 0) for p in payments))
+    # Net each open invoice against its verified payments — a half-paid
+    # invoice owes half, not its face value. Without this the card contradicted
+    # itself: invoiced ≠ paid + outstanding whenever a payment was partial.
+    paid_by_inv: dict = {}
+    for p in payments:
+        paid_by_inv[p.invoice_id] = paid_by_inv.get(p.invoice_id, 0.0) + float(p.amount or 0)
     outstanding    = float(sum(
-        float(i.total or 0) for i in invoices
+        max(0.0, float(i.total or 0) - paid_by_inv.get(i.id, 0.0))
+        for i in invoices
         if i.status in OUTSTANDING_INVOICE_STATUSES
     ))
     # "overdue" is not a status the app sets — it's a due date in the past on

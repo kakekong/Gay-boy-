@@ -55,21 +55,32 @@ async def main():
     c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://t/api/v1",timeout=40)
     H={"d":await login(c,"director@demo.local"),"s":await login(c,"sales1@demo.local"),"p":await login(c,"purchasing@demo.local"),"a":await login(c,"admin@demo.local")}
 
+    ok=[0,0]
+    def check(label,cond):
+        ok[0 if cond else 1]+=1
+        print(f"  {'PASS' if cond else 'FAIL'}  {label}")
+
     print("\n### ORDER 1 (DOCUMENTED): drawing BEFORE supplier PO ###")
     p1=await build_project(c,H); print("  spawn:",await stat(c,H,p1))
     await drawing(c,H,p1); print("  after drawing upload+approve:",await stat(c,H,p1))
     await supplier_po(c,H,p1); print("  after supplier PO:",await stat(c,H,p1))
-    await confirm(c,H,p1); print("  after confirm-delivery:",await stat(c,H,p1))
+    await confirm(c,H,p1); s1=await stat(c,H,p1)
+    check(f"reaches production after confirm-delivery (got {s1})", s1=="production")
     r=await c.post(f"/operation/projects/{p1}/work-orders",headers=H["a"],json={"code":"WO-QC","stage":"qc"})
-    print(f"  >>> create QC work order: HTTP {r.status_code}", "BLOCKED" if r.status_code>=400 else "OK")
+    check(f"QC work order accepted (HTTP {r.status_code})", r.status_code<400)
 
     print("\n### ORDER 2 (CODE'S EXPECTED): supplier PO BEFORE drawing ###")
     p2=await build_project(c,H); print("  spawn:",await stat(c,H,p2))
     await supplier_po(c,H,p2); print("  after supplier PO:",await stat(c,H,p2))
     await drawing(c,H,p2); print("  after drawing upload+approve:",await stat(c,H,p2))
-    await confirm(c,H,p2); print("  after confirm-delivery:",await stat(c,H,p2))
+    await confirm(c,H,p2); s2=await stat(c,H,p2)
+    check(f"reaches production after confirm-delivery (got {s2})", s2=="production")
     r=await c.post(f"/operation/projects/{p2}/work-orders",headers=H["a"],json={"code":"WO-QC","stage":"qc"})
-    print(f"  >>> create QC work order: HTTP {r.status_code}", "BLOCKED" if r.status_code>=400 else "OK")
+    check(f"QC work order accepted (HTTP {r.status_code})", r.status_code<400)
     await c.aclose()
+
+    # run_all.sh reads this line to decide pass/fail — keep the wording.
+    print(f"\n{ok[0]} passed, {ok[1]} failed")
+    sys.exit(1 if ok[1] else 0)
 
 asyncio.run(main())

@@ -194,9 +194,11 @@ function ArAgingReport() {
     const items = q.data?.items ?? [];
     exportCsv(
       "ar-aging-detail.csv",
-      ["Invoice", "Customer", "Due date", "Days overdue", "Bucket", "Total", "Status"],
+      ["Invoice", "Customer", "Due date", "Days overdue", "Bucket", "Invoiced", "Paid",
+       "Outstanding", "Status"],
       items.map((i: any) => [i.number, i.customer_name, i.due_date ?? "", i.days_overdue ?? "",
-                              i.bucket, i.total, i.status]),
+                              i.bucket, i.total, i.paid ?? 0, i.outstanding ?? i.total,
+                              i.status]),
     );
   }
   const chartData = AR_BUCKETS.map((b) => ({
@@ -231,7 +233,9 @@ function ArAgingReport() {
               <th className="th">Due date</th>
               <th className="th text-right">Days overdue</th>
               <th className="th">Bucket</th>
-              <th className="th text-right">Total</th>
+              <th className="th text-right">Invoiced</th>
+              <th className="th text-right">Paid</th>
+              <th className="th text-right">Outstanding</th>
             </tr>
           </thead>
           <tbody>
@@ -245,11 +249,15 @@ function ArAgingReport() {
                   {i.days_overdue ?? "—"}
                 </td>
                 <td className="td"><span className="chip bg-ink-100 text-ink-700">{i.bucket}</span></td>
-                <td className="td text-right font-medium tabular-nums">{idrFull(i.total)}</td>
+                <td className="td text-right tabular-nums muted">{idrFull(i.total)}</td>
+                <td className="td text-right tabular-nums muted">{idrFull(i.paid ?? 0)}</td>
+                <td className="td text-right font-medium tabular-nums">
+                  {idrFull(i.outstanding ?? i.total)}
+                </td>
               </tr>
             ))}
             {!items.length && (
-              <tr><td colSpan={6} className="td text-center muted py-10">
+              <tr><td colSpan={8} className="td text-center muted py-10">
                 No outstanding receivables 🎉
               </td></tr>
             )}
