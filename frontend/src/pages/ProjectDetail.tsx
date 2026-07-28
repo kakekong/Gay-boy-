@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
-  Loader2, Hammer, User as UserIcon, Trash2, Tag,
+  Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -37,6 +37,109 @@ const PIPELINE_STAGES = [
   "production", "qc", "packaging", "invoiced", "delivered", "paid", "closed",
 ];
 
+// What actually moves a project out of each stage. Every line mirrors the
+// real trigger in the backend — the event that calls advance_project_status —
+// not the idealised workflow, so nobody waits on a step the code never checks.
+// `needs` is a hard gate the API enforces; `note` is context, not a blocker.
+type StageGuide = {
+  who: [string, string];
+  action: [string, string];
+  where: [string, string];
+  needs?: [string, string];
+  note?: [string, string];
+};
+
+const STAGE_GUIDE: Record<string, StageGuide> = {
+  new: {
+    who: ["Purchasing files it, the director approves",
+          "Pembelian yang membuat, direktur menyetujui"],
+    action: ["Raise the supplier PO for this project and get it approved.",
+             "Buat PO supplier untuk proyek ini lalu mintakan persetujuan."],
+    where: ["Purchasing → Purchase orders (the director decides in /approvals)",
+            "Pembelian → Purchase order (direktur memutuskan di /approvals)"],
+  },
+  purchasing: {
+    who: ["Supplier, purchasing, admin or the director",
+          "Supplier, pembelian, admin atau direktur"],
+    action: ["Upload the technical drawing. Any submitted drawing moves the project here.",
+             "Unggah gambar teknis. Gambar apa pun yang diajukan memindahkan proyek ke tahap ini."],
+    where: ["The Drawings card below — or the supplier uploads it from their portal",
+            "Kartu Gambar di bawah — atau supplier mengunggah dari portalnya"],
+  },
+  drawing: {
+    who: ["The director — or the customer on their portal",
+          "Direktur — atau pelanggan lewat portalnya"],
+    action: ["Approve the submitted drawing. A rejection sends it back for revision instead.",
+             "Setujui gambar yang diajukan. Penolakan mengembalikannya untuk revisi."],
+    where: ["The Drawings card below (Approve / Request revision)",
+            "Kartu Gambar di bawah (Setujui / Minta revisi)"],
+    needs: ["A drawing must be uploaded and awaiting a decision.",
+            "Harus ada gambar yang sudah diunggah dan menunggu keputusan."],
+  },
+  drawing_approved: {
+    who: ["Purchasing, a manager or the director",
+          "Pembelian, manajer atau direktur"],
+    action: ["Confirm the goods have shipped — that is what opens the ops board.",
+             "Konfirmasi barang sudah dikirim — itulah yang membuka papan operasi."],
+    where: ["The Logistics card below → Confirm delivery",
+            "Kartu Logistik di bawah → Konfirmasi pengiriman"],
+    needs: ["Every required import document must be director-approved first.",
+            "Semua dokumen impor yang diwajibkan harus disetujui direktur lebih dulu."],
+  },
+  production: {
+    who: ["Purchasing, admin or the director",
+          "Pembelian, admin atau direktur"],
+    action: ["Record the QC result as a pass, or file a QC work order on the ops board.",
+             "Catat hasil QC sebagai lulus, atau buat work order QC di papan operasi."],
+    where: ["The QC card below, or Work orders → new QC work order",
+            "Kartu QC di bawah, atau Work order → work order QC baru"],
+    note: ["A QC fail keeps the project here — and blocks the final invoice.",
+           "QC gagal menahan proyek di sini — dan memblokir faktur final."],
+  },
+  qc: {
+    who: ["Purchasing, admin or the director",
+          "Pembelian, admin atau direktur"],
+    action: ["File the packaging work order once the goods are ready to pack.",
+             "Buat work order pengemasan begitu barang siap dikemas."],
+    where: ["Work orders → new work order, stage 'packaging'",
+            "Work order → work order baru, tahap 'pengemasan'"],
+  },
+  packaging: {
+    who: ["Finance (the director is the backstop)",
+          "Keuangan (direktur sebagai cadangan)"],
+    action: ["Approve the invoice with its faktur pajak number — approval is the trigger, not issuing.",
+             "Setujui faktur dengan nomor faktur pajaknya — persetujuan itu pemicunya, bukan penerbitan."],
+    where: ["Finance → Pending invoices",
+            "Keuangan → Faktur menunggu"],
+    needs: ["The final invoice has to be issued first, and issuing it needs QC recorded as a pass.",
+            "Faktur final harus diterbitkan dulu, dan penerbitannya butuh QC tercatat lulus."],
+  },
+  invoiced: {
+    who: ["Admin", "Admin"],
+    action: ["Confirm the customer received the goods. This also closes any open delivery orders.",
+             "Konfirmasi pelanggan sudah menerima barang. Ini juga menutup semua surat jalan terbuka."],
+    where: ["The Delivery card below → Customer received",
+            "Kartu Pengiriman di bawah → Pelanggan menerima"],
+    note: ["Upload the delivery proof and let the director verify it before confirming.",
+           "Unggah bukti pengiriman dan minta direktur memverifikasinya sebelum konfirmasi."],
+  },
+  delivered: {
+    who: ["Finance", "Keuangan"],
+    action: ["Verify the customer's payment claim, or record the payment manually. Paying in full closes the project outright.",
+             "Verifikasi klaim pembayaran pelanggan, atau catat pembayaran manual. Pelunasan penuh langsung menutup proyek."],
+    where: ["Finance → Payment verification, or the invoice card → Enter payment manually",
+            "Keuangan → Verifikasi pembayaran, atau kartu faktur → Catat pembayaran manual"],
+    note: ["A part payment leaves the invoice 'partial' and the project here until the rest lands.",
+           "Pembayaran sebagian membuat faktur 'sebagian' dan proyek tetap di sini sampai sisanya masuk."],
+  },
+  paid: {
+    who: ["Nobody — it is automatic", "Tidak ada — otomatis"],
+    action: ["The payment that settles the invoice closes the project in the same step.",
+             "Pembayaran yang melunasi faktur menutup proyek pada langkah yang sama."],
+    where: ["No action needed", "Tidak perlu tindakan"],
+  },
+};
+
 const WO_STAGES = ["receiving", "warehousing", "qc", "packaging", "delivery"];
 
 // Mirror of the backend's _WO_STAGE_MIN_PROJECT_STATUS. The WO board can't
@@ -66,6 +169,9 @@ const STATUS_LABEL_ID: Record<string, string> = {
   packaging: "pengemasan", invoiced: "difakturkan", delivered: "terkirim",
   paid: "lunas", closed: "tutup",
 };
+// "qc" humanises to "Qc" under the CSS capitalize the stage chips use, which
+// reads wrong for an initialism. Only the English side needs the override.
+const STATUS_LABEL_EN: Record<string, string> = { qc: "QC" };
 const WO_STAGE_LABEL_ID: Record<string, string> = {
   receiving: "penerimaan", warehousing: "pergudangan", qc: "QC",
   packaging: "pengemasan", delivery: "pengiriman",
@@ -107,6 +213,9 @@ export default function ProjectDetailPage() {
     const en = (key ?? "").replace(/_/g, " ");
     return t(en, map[key] ?? en);
   };
+  // Project stage label — same as sl() but honours the English overrides.
+  const stageLabel = (key: string) =>
+    t(STATUS_LABEL_EN[key] ?? (key ?? "").replace(/_/g, " "), STATUS_LABEL_ID[key] ?? key);
   // Purchasing sees the project's procurement detail (items, work orders,
   // drawings, deliveries) but not its deal economics — PO value, margins,
   // or invoice amounts. The backend nulls these for purchasing too.
@@ -150,6 +259,10 @@ export default function ProjectDetailPage() {
   const [newWoCode, setNewWoCode] = useState("");
   const [newWoStage, setNewWoStage] = useState("receiving");
   const [flashErr, setFlashErr] = useState<string | null>(null);
+  // Which stage's "how do I move on" guide is open. Null = follow the project's
+  // own stage, so the card is always answering the question you actually have;
+  // clicking another chip lets you read ahead without changing anything.
+  const [guideStage, setGuideStage] = useState<string | null>(null);
 
   // Auto-fill the WO code field as WO-{project}-{stage-suffix} so ops doesn't
   // have to type it. Re-syncs whenever stage changes or the project data
@@ -456,6 +569,9 @@ export default function ProjectDetailPage() {
 
   const marginDelta = (p.margin_actual || 0) - (p.margin_estimate || 0);
   const stageIdx = PIPELINE_STAGES.indexOf(p.status);
+  const shownStage = guideStage ?? p.status;
+  const guide = STAGE_GUIDE[shownStage];
+  const nextStage = PIPELINE_STAGES[PIPELINE_STAGES.indexOf(shownStage) + 1] ?? null;
 
   return (
     <div className="space-y-6">
@@ -475,7 +591,7 @@ export default function ProjectDetailPage() {
                 <h1 className="text-2xl font-semibold tracking-tight font-mono">{p.code}</h1>
                 <span className={clsx("chip capitalize",
                   STATUS_CHIP[p.status] ?? "bg-ink-100 text-ink-700")}>
-                  {sl(p.status, STATUS_LABEL_ID)}
+                  {stageLabel(p.status)}
                 </span>
                 {role === "director" && (
                   <button
@@ -542,22 +658,79 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        {/* Stage pipeline */}
+        {/* Stage pipeline — each chip opens that stage's "how to move on" guide */}
         <div className="mt-6 flex flex-wrap items-center gap-1.5">
           {PIPELINE_STAGES.map((s, i) => (
-            <span key={s}
+            <button key={s} type="button"
+              onClick={() => setGuideStage(s === shownStage ? null : s)}
+              title={t("What moves this stage forward?", "Apa yang memajukan tahap ini?")}
               className={clsx(
-                "chip capitalize",
+                "chip capitalize transition-shadow",
                 i < stageIdx        ? "bg-emerald-100 text-emerald-700"
                 : i === stageIdx    ? STATUS_CHIP[s] ?? "bg-ink-100 text-ink-700"
-                                    : "bg-ink-100/60 text-ink-400"
+                                    : "bg-ink-100/60 text-ink-400",
+                s === shownStage && "ring-2 ring-brand-300"
               )}
             >
               {i < stageIdx && <CheckCircle size={10} />}
-              {sl(s, STATUS_LABEL_ID)}
-            </span>
+              {stageLabel(s)}
+            </button>
           ))}
         </div>
+
+        {/* How to move to the next stage */}
+        {guide && (
+          <div className="mt-3 card p-4 bg-brand-50/40 border-brand-200">
+            <div className="flex items-start gap-2">
+              <HelpCircle size={15} className="text-brand-700 mt-0.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
+                  <span className="capitalize">{stageLabel(shownStage)}</span>
+                  <ArrowRight size={13} className="muted" />
+                  <span className="capitalize">
+                    {nextStage ? stageLabel(nextStage) : t("done", "selesai")}
+                  </span>
+                  {shownStage !== p.status && (
+                    <span className="chip bg-ink-100 text-ink-600">
+                      {stageIdx > PIPELINE_STAGES.indexOf(shownStage)
+                        ? t("already passed", "sudah dilewati")
+                        : t("coming up", "berikutnya")}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-sm">{t(guide.action[0], guide.action[1])}</p>
+                <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2 text-xs">
+                  <div className="flex gap-1.5">
+                    <dt className="muted shrink-0">{t("Who", "Siapa")}:</dt>
+                    <dd>{t(guide.who[0], guide.who[1])}</dd>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <dt className="muted shrink-0">{t("Where", "Di mana")}:</dt>
+                    <dd>{t(guide.where[0], guide.where[1])}</dd>
+                  </div>
+                </dl>
+                {guide.needs && (
+                  <p className="mt-2 text-xs text-amber-700 flex gap-1.5">
+                    <ShieldCheck size={13} className="mt-px shrink-0" />
+                    <span>
+                      <b>{t("Required first", "Wajib lebih dulu")}:</b>{" "}
+                      {t(guide.needs[0], guide.needs[1])}
+                    </span>
+                  </p>
+                )}
+                {guide.note && (
+                  <p className="mt-1 text-xs muted">{t(guide.note[0], guide.note[1])}</p>
+                )}
+              </div>
+              {shownStage !== p.status && (
+                <button type="button" className="btn-ghost text-xs shrink-0"
+                  onClick={() => setGuideStage(null)}>
+                  {t("Current stage", "Tahap saat ini")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
           <EditableTextField

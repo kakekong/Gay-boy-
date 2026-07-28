@@ -222,6 +222,7 @@ The director still sees DP POs in the approvals feed for visibility; a decision 
 `new → purchasing → drawing → drawing_approved → production → qc → packaging → invoiced → delivered → paid → closed`
 
 - Advancement is **one stage at a time, forward-only**; boot-time repairs guarantee a Space restart can never regress a project's stage.
+- **Every stage carries a "how to move on" guide.** The card under the stage chips names the exact action that advances the project, who may do it, where the button lives, and any hard prerequisite the API enforces (e.g. import documents must be director-approved before Confirm delivery). It follows the project's own stage by default; clicking any chip reads that stage's guide instead, so you can look ahead without changing anything.
 - The project header links the whole traceability chain: customer → quotation → customer PO → **PR number** — all clickable (role-permitting).
 - Only the **director can delete a project** (soft-delete; the PO/quotation/invoice history stays; the customer PO is unlinked for potential re-approval).
 - Editable header dates are role-gated; **target delivery is the promise**, actual delivery the measured outcome — the gap drives on-time reporting and missed-deadline alerts to management.
