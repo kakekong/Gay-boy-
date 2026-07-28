@@ -37,6 +37,8 @@ answering and building the same way. For *what the product does*, read
 - Decisions they've already made (don't re-ask):
   - Project phases D/E (production vs purchasing) **can happen in any order**.
   - **Admin, not just finance/director, may issue invoices.**
+  - **All work goes on `claude/enterprise-crm-erp-ai-IMGRg`**, whatever branch
+    the session was opened on (§2).
 
 ---
 
@@ -54,9 +56,14 @@ answering and building the same way. For *what the product does*, read
 
 **The branch matters.** `infra/hfspace/Dockerfile:21` pins
 `ARG GIT_BRANCH=claude/enterprise-crm-erp-ai-IMGRg`; the Space clones *that*
-branch at build time. Pushing anywhere else deploys nothing. If a session is
-started on a different branch (e.g. a fresh `claude/...` name), move the work
-onto the IMGRg branch before pushing.
+branch at build time, and it is also the repo's default branch. Pushing
+anywhere else deploys nothing.
+
+**A session that opens on some other `claude/...` branch should check out IMGRg
+and work there — the user confirmed this explicitly, so don't ask again.**
+Those auto-generated per-session branches (e.g. `claude/agent-handoff-…`) are
+left where they are; nothing is deleted, and no PR is needed. Just
+`git checkout claude/enterprise-crm-erp-ai-IMGRg` and commit onto it.
 
 **Always tell the user when a change is backend-side**, because a push alone
 does not deploy it: they must open the Space and hit rebuild. The Dockerfile
