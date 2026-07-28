@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Run every end-to-end driver against a scratch Postgres.
+#
+#   bash backend/tests/e2e/run_all.sh            # run all
+#   bash backend/tests/e2e/run_all.sh --fresh    # recreate the DB first
+#
+# These drive the REAL ASGI app in-process (no mocks) with real role logins.
+# Several use hardcoded document numbers (PO-CUST-A1, DP-001, INV-EF-001), so
+# re-running them on a dirty DB produces "already exists" 409s that are test
+# artifacts, NOT product bugs — use --fresh when in doubt.
+set -uo pipefail
+cd "$(dirname "$0")/../.."          # -> backend/
+
+export DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test"
+export APP_ENV=dev
+export DEMO_SEED_PASSWORD=test-pass-123
+export STORAGE_LOCAL_DIR=/tmp/storage_test
+export JWT_SECRET=e2e-test-secret
+
+pg_isready -h 127.0.0.1 -p 55432 -q || {
+  echo "starting scratch postgres…"
+  su -s /bin/bash nobody -c "/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/pgdata_test \
+    -o '-p 55432 -k /tmp -c listen_addresses=127.0.0.1' -l /tmp/pg_test.log start" >/dev/null 2>&1
+  sleep 2
+}
+
+if [ "${1:-}" = "--fresh" ]; then
+  su -s /bin/bash nobody -c "/usr/lib/postgresql/16/bin/psql -h /tmp -p 55432 -U postgres \
+    -c 'DROP DATABASE IF EXISTS transmisi_test' -c 'CREATE DATABASE transmisi_test'" >/dev/null 2>&1
+  rm -rf /tmp/storage_test/* 2>/dev/null
+  python -m app.scripts.seed >/dev/null 2>&1
+  # the seed only creates 6 demo users; these two are needed by the drivers
+  python - <<'PY' >/dev/null 2>&1
+import asyncio
+from sqlalchemy import select
+from app.core.db import SessionLocal
+from app.core.security import hash_password
+from app.models.user import User
+async def m():
+    async with SessionLocal() as db:
+        for e, n, r in [("purchasing@demo.local", "Purchasing Demo", "purchasing"),
+                        ("finance@demo.local", "Finance Demo", "finance")]:
+            if not await db.scalar(select(User).where(User.email == e)):
+                db.add(User(email=e, full_name=n, role=r,
+                            password_hash=hash_password("test-pass-123"), is_active=True))
+        await db.commit()
+asyncio.run(m())
+PY
+  echo "fresh DB seeded"
+fi
+
+fail=0
+for f in tests/e2e/*.py; do
+  name=$(basename "$f" .py)
+  printf '%-24s ' "$name"
+  out=$(python "$f" 2>&1)
+  line=$(echo "$out" | grep -E "PROBLEMS:|passed, [0-9]+ failed|CONFIRMED HOLES" | tail -1)
+  echo "${line:-NO RESULT (see below)}"
+  echo "$line" | grep -qE "PROBLEMS: 0|0 failed|CONFIRMED HOLES: 0" || { fail=1; echo "$out" | tail -5; }
+done
+
+echo
+echo "=== pytest unit suites ==="
+PYTHONPATH=. python -m pytest tests/test_permissions.py tests/test_discount_rules.py \
+  tests/test_financials.py -q 2>&1 | tail -2
+echo "=== DP flow ==="
+python tests/e2e_dp_flow.py 2>&1 | grep RESULT
+
+exit $fail
