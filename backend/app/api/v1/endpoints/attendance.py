@@ -37,6 +37,14 @@ _log_overseer = require(Role.HR, Role.MANAGER, Role.DIRECTOR)
 VALID_STATUSES = {"present", "absent", "half_day", "leave", "wfh", "sick", "holiday"}
 
 
+class ClockIn(BaseModel):
+    """Optional note typed at the moment of clocking in or out — 'stuck in
+    traffic on the toll road', 'leaving early for the site visit'. Shares the
+    day's single `notes` column with HR's manual entries, so each line is
+    labelled rather than overwriting what is already there."""
+    note: str | None = None
+
+
 class ManualIn(BaseModel):
     user_id: UUID
     date: date_t
@@ -66,8 +74,21 @@ async def _serialize(db: AsyncSession, a: Attendance) -> dict:
     }
 
 
+def _append_note(existing: str | None, label: str, note: str | None) -> str | None:
+    """Add one labelled line to the day's notes, keeping whatever is there.
+
+    Clocking out must never wipe the note written at clock-in, and HR's manual
+    note has to survive both — one column, three possible authors, so append.
+    """
+    line = (note or "").strip()
+    if not line:
+        return existing
+    return f"{(existing or '').rstrip()}\n{label}: {line}".strip()
+
+
 @router.post("/clock-in", status_code=201)
 async def clock_in(
+    payload: ClockIn | None = None,
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
@@ -79,12 +100,15 @@ async def clock_in(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Already clocked in at {existing.clock_in.strftime('%H:%M')}")
     now = datetime.now(UTC)
+    note = payload.note if payload else None
     if existing:
         existing.clock_in = now
         existing.status = "present"
+        existing.notes = _append_note(existing.notes, "In", note)
         a = existing
     else:
-        a = Attendance(user_id=me.id, date=today, clock_in=now, status="present")
+        a = Attendance(user_id=me.id, date=today, clock_in=now, status="present",
+                       notes=_append_note(None, "In", note))
         db.add(a)
     await db.flush()
     return await _serialize(db, a)
@@ -92,6 +116,7 @@ async def clock_in(
 
 @router.post("/clock-out", status_code=200)
 async def clock_out(
+    payload: ClockIn | None = None,
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
@@ -108,6 +133,8 @@ async def clock_out(
     a.clock_out = datetime.now(UTC)
     delta = (a.clock_out - a.clock_in).total_seconds() / 3600
     a.hours = round(max(0, delta), 2)
+    a.notes = _append_note(a.notes, "Out", payload.note if payload else None)
+    await db.flush()
     return await _serialize(db, a)
 
 

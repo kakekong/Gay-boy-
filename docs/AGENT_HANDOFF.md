@@ -168,6 +168,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
+| `test_clock_note.py` | clock-in/out notes; nobody overwrites HR's note or each other's |
 | `test_efaktur.py` | e-Faktur CSV export |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`

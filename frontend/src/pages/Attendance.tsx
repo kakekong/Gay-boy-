@@ -68,9 +68,14 @@ export default function AttendancePage() {
     enabled: !!canManage,
   });
 
+  // One note box serving both buttons — whichever you press carries whatever
+  // is typed. Cleared on success so the next punch starts blank.
+  const [clockNote, setClockNote] = useState("");
+
   const clockIn = useMutation({
-    mutationFn: () => api.post("/attendance/clock-in"),
+    mutationFn: () => api.post("/attendance/clock-in", { note: clockNote.trim() || null }),
     onSuccess: () => {
+      setClockNote("");
       setFlash({ kind: "ok", text: "Clocked in. Have a great day!" });
       qc.invalidateQueries({ queryKey: ["attendance-today"] });
       qc.invalidateQueries({ queryKey: ["attendance-me"] });
@@ -81,8 +86,9 @@ export default function AttendancePage() {
     }),
   });
   const clockOut = useMutation({
-    mutationFn: () => api.post("/attendance/clock-out"),
+    mutationFn: () => api.post("/attendance/clock-out", { note: clockNote.trim() || null }),
     onSuccess: () => {
+      setClockNote("");
       setFlash({ kind: "ok", text: "Clocked out. See you tomorrow!" });
       qc.invalidateQueries({ queryKey: ["attendance-today"] });
       qc.invalidateQueries({ queryKey: ["attendance-me"] });
@@ -143,6 +149,33 @@ export default function AttendancePage() {
           <Card label="Clock out" value={fmtTime(t?.clock_out)} />
           <Card label="Hours"     value={t?.hours ? `${Number(t.hours).toFixed(2)}h` : "—"} />
         </div>
+
+        <div className="mt-5">
+          <label className="text-xs uppercase tracking-wider muted" htmlFor="clock-note">
+            Note (optional)
+          </label>
+          <textarea
+            id="clock-note"
+            className="input mt-1 w-full"
+            rows={2}
+            value={clockNote}
+            onChange={(e) => setClockNote(e.target.value)}
+            disabled={hasIn && hasOut}
+            placeholder="e.g. Late — traffic on the toll road. Leaving early for the PT Bara site visit."
+          />
+          <p className="mt-1 text-xs muted">
+            {hasIn && hasOut
+              ? "You are done for today — the note is closed."
+              : `Saved against today's attendance when you press Clock ${hasIn ? "OUT" : "IN"}.`}
+          </p>
+        </div>
+
+        {t?.notes && (
+          <div className="mt-3 rounded-xl bg-ink-50 px-4 py-3 text-sm whitespace-pre-line">
+            <div className="text-xs uppercase tracking-wider muted mb-1">Today's note</div>
+            {t.notes}
+          </div>
+        )}
 
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
