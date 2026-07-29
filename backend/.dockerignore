@@ -1,0 +1,14 @@
+# Build context is this directory (see render.yaml). Keep the layer small
+# and, more importantly, keep local junk from busting the Docker cache on
+# every push.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.env
+.env.*
+*.log
+.venv/
+venv/

@@ -391,5 +391,6 @@ Ongoing/Closed project sections.
 |---|---|
 | `docs/SYSTEM_GUIDE.md` | the complete product reference — every module and workflow, ~440 lines |
 | `docs/TEST_WORKFLOW.md` | manual end-to-end test script, Phases A–H |
+| `docs/DEPLOY_RENDER.md` | migrating the backend off the HF Space onto Render (persistent disk, auto-deploy) |
 | `docs/ROLE_GUIDES.md` | per-role usage guides (mirrored in-app) |
 | `docs/01-architecture.md` … `07-deployment.md` | original design docs |

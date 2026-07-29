@@ -1,0 +1,71 @@
+# Render Blueprint for the Transmisi Eng backend.
+#
+# In Render: New → Blueprint → pick this repo. Render reads this file and
+# creates the service; you then paste the secrets marked `sync: false`
+# below. Full walkthrough in docs/DEPLOY_RENDER.md.
+#
+# The database is NOT declared here — we stay on the existing Neon
+# Postgres, so nothing has to be migrated. Only DATABASE_URL points at it.
+
+services:
+  - type: web
+    name: transmisi-api
+    runtime: docker
+    # Singapore is the closest region to Jakarta.
+    region: singapore
+    # Starter, not Free: the free plan sleeps after ~15 minutes idle, which
+    # would stop the web-push sweeper and make the first request of the
+    # morning wait on a cold start.
+    plan: starter
+    dockerfilePath: ./infra/render/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    # A persistent disk pins the service to a single instance (Render can't
+    # attach one disk to many), so keep this at 1. That is fine here — the
+    # app runs one uvicorn process and the sweeper elects a single runner
+    # through a Postgres advisory lock anyway.
+    numInstances: 1
+
+    disk:
+      name: storage
+      # Matches STORAGE_LOCAL_DIR in the Dockerfile and the env var below.
+      mountPath: /data
+      sizeGB: 5
+
+    envVars:
+      # Enables the prod safety check in app/main.py, which refuses to boot
+      # on default secrets or a wildcard CORS origin.
+      - key: APP_ENV
+        value: prod
+
+      # Uploads land on the mounted disk, not the container filesystem.
+      - key: STORAGE_LOCAL_DIR
+        value: /data/storage
+
+      # Generated once by Render and then held steady. Do not rotate this
+      # casually — changing it invalidates every issued access and refresh
+      # token, signing everyone out.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # Also checked by the prod safety gate — the service refuses to boot
+      # while this is still "change-me-webhook", even though nothing in the
+      # app reads it yet. Generated so the check passes cleanly.
+      - key: N8N_WEBHOOK_SECRET
+        generateValue: true
+
+      # Paste in the dashboard. The Neon connection string, with the
+      # postgresql+asyncpg:// scheme (NOT plain postgresql://).
+      - key: DATABASE_URL
+        sync: false
+
+      # Paste in the dashboard. A JSON array, e.g.
+      #   ["https://transmisisuplindo.com","https://www.transmisisuplindo.com"]
+      # Pydantic parses this field as JSON, and APP_ENV=prod rejects ["*"].
+      - key: CORS_ORIGINS
+        sync: false
+
+      # Optional — the AI features stay dark without it and everything else
+      # works. Leave blank if you are not using them yet.
+      - key: OPENAI_API_KEY
+        sync: false
