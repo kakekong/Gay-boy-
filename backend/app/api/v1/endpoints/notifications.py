@@ -34,6 +34,15 @@ from app.models.user import User
 _WIB = timezone(timedelta(hours=7))
 _LATE_CUTOFF = time(9, 15)
 
+_DISCUSSION_LINK = {
+    "price_request": "/price-requests?open={id}",
+    "quotation": "/quotations/{id}",
+    "customer_po": "/customer-pos/{id}",
+    "supplier_po": "/purchase-orders",
+    "project": "/projects/{id}",
+    "invoice": "/finance",
+}
+
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
     # supplier, hierarchy tier 0) must never reach the CRM, pricing,
@@ -610,6 +619,92 @@ async def list_notifications(
             "body": "Click to open chat",
             "link": "/chat",
             "at": now,
+        })
+
+    # ── Mentions + discussion replies ──────────────────────────────────
+    # Discussions used to push to phones and nowhere else, so a reply was
+    # invisible to anyone who missed the notification. Both now surface here.
+    from app.models.comment import CommentMention, EntityComment
+
+    # Being named is high severity — it is addressed to you personally, and
+    # for someone mentioned into a document they cannot open, this row and the
+    # push are the only ways they will ever learn about it.
+    unread_mentions = (await db.execute(
+        select(CommentMention, EntityComment)
+        .join(EntityComment, CommentMention.comment_id == EntityComment.id)
+        .where(CommentMention.user_id == me.id, CommentMention.read_at.is_(None))
+        .order_by(EntityComment.created_at.desc())
+        .limit(15)
+    )).all()
+    for m, c in unread_mentions:
+        author = await db.get(User, c.author_id) if c.author_id else None
+        who = author.full_name if author else "Someone"
+        items.append({
+            "id": f"mention:{m.id}",
+            "kind": "mention",
+            "severity": "high",
+            "title": f"{who} mentioned you",
+            "body": c.body if len(c.body) <= 120 else c.body[:117] + "…",
+            "link": "/mentions",
+            "at": c.created_at,
+        })
+
+    # Replies on threads you are part of — you commented there, or you were
+    # mentioned into it. Deliberately not "every thread you could open": that
+    # would make the director's bell useless. Low-ish by design; the mention
+    # above is the one that shouts.
+    my_threads = set()
+    for row in (await db.execute(
+        select(EntityComment.owner_type, EntityComment.owner_id)
+        .where(EntityComment.author_id == me.id).distinct()
+    )).all():
+        my_threads.add((row[0], row[1]))
+    for row in (await db.execute(
+        select(CommentMention.owner_type, CommentMention.owner_id)
+        .where(CommentMention.user_id == me.id).distinct()
+    )).all():
+        my_threads.add((row[0], row[1]))
+
+    for owner_type, owner_id in list(my_threads)[:40]:
+        latest = await db.scalar(
+            select(EntityComment)
+            .where(
+                EntityComment.owner_type == owner_type,
+                EntityComment.owner_id == owner_id,
+                EntityComment.author_id != me.id,
+            )
+            .order_by(EntityComment.created_at.desc())
+            .limit(1)
+        )
+        if latest is None:
+            continue
+        # Only what arrived after your own last word in that thread — an old
+        # conversation you already answered must not sit in the bell forever.
+        mine_last = await db.scalar(
+            select(EntityComment.created_at)
+            .where(
+                EntityComment.owner_type == owner_type,
+                EntityComment.owner_id == owner_id,
+                EntityComment.author_id == me.id,
+            )
+            .order_by(EntityComment.created_at.desc())
+            .limit(1)
+        )
+        if mine_last and latest.created_at <= mine_last:
+            continue
+        if any(i["id"] == f"mention:{latest.id}" for i in items):
+            continue  # already shouted about as a mention
+        author = await db.get(User, latest.author_id) if latest.author_id else None
+        items.append({
+            # Scoped to the newest comment, so dismissing hides this reply and
+            # the next one brings the row back.
+            "id": f"discussion:{owner_type}:{owner_id}:{latest.id}",
+            "kind": "discussion",
+            "severity": "medium",
+            "title": f"{author.full_name if author else 'Someone'} replied",
+            "body": latest.body if len(latest.body) <= 120 else latest.body[:117] + "…",
+            "link": _DISCUSSION_LINK.get(owner_type, "/mentions").format(id=owner_id),
+            "at": latest.created_at,
         })
 
     # Drop items this user dismissed (X button on the bell). Dismissals are

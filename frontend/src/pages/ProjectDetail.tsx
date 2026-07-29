@@ -12,6 +12,7 @@ import { useAuthStore } from "@/store/auth";
 import { useT, t as tt } from "@/store/lang";
 import { UserLink } from "@/components/UserLink";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { CommentThread } from "@/components/CommentThread";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
 
@@ -1612,6 +1613,22 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
                 )}
+
+                {/* Per-invoice discussion. Finance queries usually concern one
+                    invoice, not the whole project, and @mention can pull in
+                    whoever raised it. */}
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-brand-700 select-none">
+                    {t("Discussion", "Diskusi")}
+                  </summary>
+                  <div className="mt-2">
+                    <CommentThread
+                      ownerType="invoice"
+                      ownerId={iv.id}
+                      title={`${t("Invoice", "Faktur")} ${iv.number ?? ""}`.trim()}
+                    />
+                  </div>
+                </details>
               </div>
             );
           })}
@@ -1970,6 +1987,14 @@ export default function ProjectDetailPage() {
 
       {/* Attachments */}
       <AttachmentsSection ownerType="project" ownerId={p.id} />
+
+      {/* Discussion — @mention pulls in anyone, including staff who can't
+          open this project. */}
+      <CommentThread
+        ownerType="project"
+        ownerId={p.id}
+        title={t("Discussion", "Diskusi")}
+      />
     </div>
   );
 }

@@ -22,6 +22,7 @@ const EmployeeDetailPage   = lazy(() => import("@/pages/EmployeeDetail"));
 const SalaryPage           = lazy(() => import("@/pages/Salary"));
 const InventoryPage        = lazy(() => import("@/pages/Inventory"));
 const ChatPage             = lazy(() => import("@/pages/Chat"));
+const MentionsPage         = lazy(() => import("@/pages/Mentions"));
 const HelpPage             = lazy(() => import("@/pages/Help"));
 const ReportsPage          = lazy(() => import("@/pages/Reports"));
 const SalesTargetsPage     = lazy(() => import("@/pages/SalesTargets"));
@@ -191,6 +192,7 @@ function MainApp() {
           <Route path="/salary" element={<SalaryPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/mentions" element={<MentionsPage />} />
           <Route path="/help" element={<HelpPage />} />
           <Route path="/role-guide" element={<RoleGuidePage />} />
           <Route path="/attachments" element={<AttachmentsAdminPage />} />

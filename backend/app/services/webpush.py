@@ -200,18 +200,26 @@ _DISCUSSION_LINKS = {
     "quotation": "/quotations/{id}",
     "customer_po": "/customer-pos/{id}",
     "supplier_po": "/purchase-orders",
+    "project": "/projects/{id}",
+    "invoice": "/finance",
 }
 
 
 async def notify_discussion_comment(owner_type: str, owner_id, sender_id,
-                                    sender_name: str, text: str) -> None:
-    """Instant push for entity discussion threads (price requests, POs,
-    quotations). Fire-and-forget from the comment endpoint.
+                                    sender_name: str, text: str,
+                                    mentioned_ids: list | None = None) -> None:
+    """Instant push for entity discussion threads. Fire-and-forget from the
+    comment endpoint.
 
-    Recipients = everyone who commented on the thread before + the
-    entity's natural stakeholders (requester / coster / approver), minus
-    the sender — so the FIRST comment already reaches the right people,
+    Recipients = everyone who commented on the thread before + the entity's
+    natural stakeholders (requester / coster / approver) + anyone @-mentioned,
+    minus the sender — so the FIRST comment already reaches the right people,
     not just repliers.
+
+    Mentions are included whether or not the person can open the document:
+    reaching someone outside the page is the entire point of mentioning them,
+    and their access to the thread was granted at the same moment. They get a
+    distinct title so being named reads differently from thread noise.
     """
     from app.core.db import SessionLocal
     from app.models.comment import EntityComment
@@ -254,18 +262,42 @@ async def notify_discussion_comment(owner_type: str, owner_id, sender_id,
                     if po.created_by:
                         recipients.add(po.created_by)
 
+            if owner_type == "project":
+                from app.models.operation import Project
+                proj = await db.get(Project, owner_id)
+                if proj:
+                    number = proj.code
+            elif owner_type == "invoice":
+                from app.models.finance import Invoice
+                inv = await db.get(Invoice, owner_id)
+                if inv:
+                    number = inv.number
+
+            named = {uid for uid in (mentioned_ids or [])}
+            recipients |= named
             recipients.discard(sender_id)
+            named.discard(sender_id)
             if not recipients:
                 return
 
             link = _DISCUSSION_LINKS.get(owner_type, "/")
-            title = f"{sender_name} · {number or owner_type.replace('_', ' ')}"
+            doc = number or owner_type.replace("_", " ")
             body = text if len(text) <= 140 else text[:137] + "…"
-            payload = {"title": title, "body": body,
-                       "url": link.format(id=owner_id),
-                       "tag": f"disc:{owner_type}:{owner_id}"}
             kp = await get_or_create_vapid(db)
             for uid in recipients:
+                was_named = uid in named
+                payload = {
+                    # Being named is the one that should pull someone out of
+                    # whatever they were doing, so say so in the title.
+                    "title": (f"{sender_name} mentioned you · {doc}" if was_named
+                              else f"{sender_name} · {doc}"),
+                    "body": body,
+                    # Someone mentioned into a document they cannot open must
+                    # not be deep-linked to a page that will 403 at them.
+                    "url": (link.format(id=owner_id) if not was_named
+                            else "/mentions"),
+                    "tag": f"disc:{owner_type}:{owner_id}",
+                }
                 subs = (await db.scalars(
                     select(PushSubscription).where(PushSubscription.user_id == uid)
                 )).all()

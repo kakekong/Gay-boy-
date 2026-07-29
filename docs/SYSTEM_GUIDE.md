@@ -371,7 +371,8 @@ A month grid aggregating the same material with identical role routing and purch
   - Messages can be edited/deleted (soft-delete leaves "message deleted").
   - On phones the chat is **WhatsApp-style**: full-screen list, tap opens a full-screen thread with a back arrow, composer pinned to the bottom.
   - Every message triggers an instant device push to the other members (§10.4).
-- **Discussions**: threaded comments live on price requests, quotations, customer POs and supplier POs — the async paper-trail companion to chat, with stakeholder pushes.
+- **Discussions**: threaded comments on price requests, quotations, customer POs, supplier POs, **projects and invoices** — the async paper-trail companion to chat, with stakeholder pushes. A thread is only readable by people who can open the document behind it.
+- **@mentions**: typing `@` in any discussion opens a picker of every internal colleague, marking those who cannot open that page. Mentioning one of them grants **that conversation and nothing else** — they read and reply from their **Mentions** inbox, and never gain the document, its prices or the customer record. Mentions raise a high-severity bell item and a device push; ordinary replies on a thread you are part of raise a medium one.
 - **Feedback**: every account can write feedback directly to the director (suggestion box); the director gets notified, reads them in an inbox, and marks items resolved.
 
 ---

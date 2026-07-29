@@ -179,6 +179,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_daily_log.py` | attendance daily log |
 | `test_clock_note.py` | clock-in/out notes; nobody overwrites HR's note or each other's |
 | `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
+| `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
 | `test_efaktur.py` | e-Faktur CSV export |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`
@@ -308,6 +309,16 @@ tasks. Two rules the user asked for explicitly:
 - `close_superseded_stage_tasks()` runs at the *top* of `ensure_stage_tasks()`,
   before any early return, so moving to `closed_won`/`closed_lost` retires
   earlier tasks even though those stages have no playbook.
+
+**Discussion threads are gated on the parent document** (`comments.py`).
+`_THREAD_ROLES` says which roles belong in each owner type — purchasing is
+absent from every customer-facing thread, which is the customer-blindness rule
+— and sales is additionally scoped to its own customers. **Being @-mentioned is
+the one exception**: it grants that thread and nothing else, which is how
+someone gets pulled into a conversation on a document they cannot open. Keep
+`_has_document_access` (role/scope only) separate from `_can_view_thread`
+(which also honours the mention), or the composer's warning and the "open the
+document" link both start lying to the people they exist for.
 
 **Approvals** are one `ApprovalRequest` table with `decide()` + `apply_to_target()`.
 When a target moves on by another route, its pending request must be cleared,

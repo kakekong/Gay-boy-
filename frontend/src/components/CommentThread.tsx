@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageCircle, Send, Loader2, AlertCircle } from "lucide-react";
+import { MessageCircle, Send, Loader2, AlertCircle, AtSign, EyeOff } from "lucide-react";
+import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { useT } from "@/store/lang";
 
+interface Mentioned { id: string; name: string }
 interface Comment {
   id: string;
   body: string;
@@ -11,9 +14,41 @@ interface Comment {
   author_name: string | null;
   author_role: string | null;
   created_at: string;
+  mentions?: Mentioned[];
+}
+interface Candidate {
+  id: string; name: string; role: string;
+  /** false = they can't open this document; mentioning them is how they see it */
+  has_access: boolean;
 }
 
-type OwnerType = "quotation" | "customer_po" | "supplier_po" | "price_request";
+type OwnerType =
+  | "quotation" | "customer_po" | "supplier_po" | "price_request"
+  | "project" | "invoice";
+
+/** Render @Name in bold so a mention is visible in the message body. */
+function withMentions(body: string, mentions: Mentioned[] | undefined) {
+  if (!mentions?.length) return body;
+  // Longest first so "@Ana Maria" wins over "@Ana".
+  const names = mentions.map((m) => m.name).sort((a, b) => b.length - a.length);
+  const parts: (string | JSX.Element)[] = [];
+  let rest = body;
+  let key = 0;
+  outer: while (rest.length) {
+    for (const n of names) {
+      const at = rest.indexOf("@" + n);
+      if (at === 0) {
+        parts.push(<b key={key++} className="font-semibold">@{n}</b>);
+        rest = rest.slice(n.length + 1);
+        continue outer;
+      }
+    }
+    const next = rest.indexOf("@", 1);
+    parts.push(rest.slice(0, next === -1 ? rest.length : next));
+    rest = next === -1 ? "" : rest.slice(next);
+  }
+  return parts;
+}
 
 /** A discussion / chat thread attachable to a quotation or PO. */
 export function CommentThread({
@@ -24,9 +59,59 @@ export function CommentThread({
   title?: string;
 }) {
   const qc = useQueryClient();
+  const t = useT();
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Who the composer has actually picked. Kept separate from the text so the
+  // backend never has to guess a person from a name typed by hand.
+  const [picked, setPicked] = useState<Candidate[]>([]);
+  // The "@qu" the caret is currently sitting in, or null when not mentioning.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState(0);
+  const boxRef = useRef<HTMLTextAreaElement>(null);
+
+  const people = useQuery({
+    queryKey: ["mentionable", ownerType, ownerId, mentionQuery],
+    queryFn: () => api.get("/comments/mentionable", {
+      params: { owner_type: ownerType, owner_id: ownerId, q: mentionQuery || undefined },
+    }).then((r) => r.data as Candidate[]),
+    enabled: mentionQuery !== null,
+  });
+  const candidates = people.data ?? [];
+
+  /** Track whether the caret is inside an @token, and what has been typed. */
+  function onDraftChange(value: string) {
+    setDraft(value);
+    const caret = boxRef.current?.selectionStart ?? value.length;
+    const upto = value.slice(0, caret);
+    // Only start a mention at a word boundary, so an email address doesn't.
+    const m = /(^|\s)@([\p{L}\p{N}. '-]{0,40})$/u.exec(upto);
+    setMentionQuery(m ? m[2] : null);
+    setHighlight(0);
+  }
+
+  function choose(c: Candidate) {
+    const box = boxRef.current;
+    const caret = box?.selectionStart ?? draft.length;
+    const upto = draft.slice(0, caret);
+    const m = /(^|\s)@([\p{L}\p{N}. '-]{0,40})$/u.exec(upto);
+    if (!m) return;
+    const start = upto.length - m[2].length - 1;      // index of the '@'
+    const next = draft.slice(0, start) + "@" + c.name + " " + draft.slice(caret);
+    setDraft(next);
+    setPicked((p) => (p.some((x) => x.id === c.id) ? p : [...p, c]));
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      box?.focus();
+      const pos = start + c.name.length + 2;
+      box?.setSelectionRange(pos, pos);
+    });
+  }
+
+  // Only send mentions whose @Name survived any later editing of the text.
+  const active = picked.filter((p) => draft.includes("@" + p.name));
+  const outsiders = active.filter((p) => !p.has_access);
 
   const key = ["comments", ownerType, ownerId];
   const q = useQuery({
@@ -40,9 +125,11 @@ export function CommentThread({
   const send = useMutation({
     mutationFn: (body: string) => api.post("/comments", {
       owner_type: ownerType, owner_id: ownerId, body,
+      mention_user_ids: active.map((p) => p.id),
     }),
     onSuccess: () => {
       setDraft("");
+      setPicked([]);
       qc.invalidateQueries({ queryKey: key });
     },
     onError: (e: any) => setErr(
@@ -95,7 +182,9 @@ export function CommentThread({
                       {c.author_role && <span className="uppercase"> · {c.author_role}</span>}
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap break-words">{c.body}</div>
+                  <div className="whitespace-pre-wrap break-words">
+                    {withMentions(c.body, c.mentions)}
+                  </div>
                   <div className={
                     "text-[10px] mt-0.5 " + (mine ? "text-white/70" : "text-ink-500")
                   }>
@@ -114,16 +203,72 @@ export function CommentThread({
         </div>
       )}
 
-      <div className="p-3 border-t border-ink-100 flex items-end gap-2">
+      {outsiders.length > 0 && (
+        <div className="mx-4 mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-1.5
+                        text-xs text-amber-800 flex items-start gap-1.5">
+          <EyeOff size={12} className="mt-0.5 shrink-0" />
+          <span>
+            {t(
+              `${outsiders.map((o) => o.name).join(", ")} can't normally open this page. They'll see this message and can reply, but nothing else on the document.`,
+              `${outsiders.map((o) => o.name).join(", ")} biasanya tidak bisa membuka halaman ini. Mereka akan melihat pesan ini dan bisa membalas, tetapi tidak melihat isi dokumen lainnya.`,
+            )}
+          </span>
+        </div>
+      )}
+
+      <div className="p-3 border-t border-ink-100 flex items-end gap-2 relative">
+        {mentionQuery !== null && candidates.length > 0 && (
+          <div className="absolute bottom-full left-3 right-3 mb-1 z-20 card p-1 max-h-56
+                          overflow-y-auto shadow-lg">
+            {candidates.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); choose(c); }}
+                onMouseEnter={() => setHighlight(i)}
+                className={clsx(
+                  "w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-sm",
+                  i === highlight ? "bg-brand-50" : "hover:bg-ink-50",
+                )}
+              >
+                <AtSign size={12} className="muted shrink-0" />
+                <span className="truncate">{c.name}</span>
+                <span className="text-[10px] uppercase muted">{c.role}</span>
+                {!c.has_access && (
+                  <span className="chip bg-amber-100 text-amber-800 ml-auto shrink-0">
+                    {t("no access", "tanpa akses")}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
+          ref={boxRef}
           className="input flex-1 min-h-[40px] resize-y"
           rows={1}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={(e) => {
+            if (mentionQuery !== null && candidates.length) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault(); setHighlight((h) => (h + 1) % candidates.length); return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHighlight((h) => (h - 1 + candidates.length) % candidates.length); return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault(); choose(candidates[highlight]); return;
+              }
+              if (e.key === "Escape") { setMentionQuery(null); return; }
+            }
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
-          placeholder="Write a message…  (⌘/Ctrl+Enter to send)"
+          placeholder={t(
+            "Write a message…  @ to mention someone  (⌘/Ctrl+Enter to send)",
+            "Tulis pesan…  @ untuk menyebut seseorang  (⌘/Ctrl+Enter untuk kirim)",
+          )}
         />
         <button
           className="btn-primary shrink-0"

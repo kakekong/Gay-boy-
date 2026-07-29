@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
-  MessageCircle, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
+  MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
   Receipt, ClipboardList, Eye, Tag, Sun, Moon,
   type LucideIcon,
 } from "lucide-react";
@@ -48,6 +48,10 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["director"] },
       { to: "/calendar", label: "Calendar", label_id: "Kalender", icon: CalendarDays },
       { to: "/chat", label: "Chat", label_id: "Obrolan", icon: MessageCircle, badgeQuery: "chat-unread" },
+      // No `roles` key: everyone internal can be mentioned, so everyone needs
+      // somewhere to read it — that is the whole point of the feature.
+      { to: "/mentions", label: "Mentions", label_id: "Sebutan", icon: AtSign,
+        badgeQuery: "mentions-unread" },
       { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare, roles: ["manager", "director"],
         badgeQuery: "approvals-pending" },
     ],
@@ -148,6 +152,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/projects",
     "/attendance",
     "/chat",
+    "/mentions",
     "/role-guide",
   ],
   purchasing: [
@@ -160,6 +165,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/projects",
     "/attendance",
     "/chat",
+    "/mentions",
     "/role-guide",
   ],
   // HR is scoped tightly: people + attendance + chat only. Crucially this
@@ -168,6 +174,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/employees",
     "/attendance",
     "/chat",
+    "/mentions",
     "/role-guide",
   ],
   // Admin's scope is production/ops only: projects, the operation board,
@@ -182,6 +189,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/inventory",
     "/attendance",
     "/chat",
+    "/mentions",
     "/role-guide",
   ],
 };
@@ -198,6 +206,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
     queryKey: ["chat-unread"],
     queryFn: () => api.get("/chat/unread").then((r) => r.data.unread as number),
     refetchInterval: 15_000,
+    enabled: !!user,
+  });
+
+  // Unread @mentions. Every role gets this one — anyone can be pulled into a
+  // conversation, including on a document they cannot open.
+  const mentions = useQuery({
+    queryKey: ["mentions-unread"],
+    queryFn: () => api.get("/comments/mentions", { params: { unread_only: true } })
+      .then((r) => (Array.isArray(r.data) ? r.data.length : 0)),
+    refetchInterval: 30_000,
     enabled: !!user,
   });
 
@@ -258,6 +276,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const badges: Record<string, number> = {
     "chat-unread": unread.data ?? 0,
+    "mentions-unread": mentions.data ?? 0,
     "finance-pending": pendingInvoices.data ?? 0,
     "claims-pending": pendingClaims.data ?? 0,
     "approvals-pending": (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
