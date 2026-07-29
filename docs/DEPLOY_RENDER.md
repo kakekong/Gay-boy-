@@ -143,9 +143,27 @@ fix is to move attachments to object storage (Cloudflare R2), which is what the
 unused `STORAGE_BACKEND` / `S3_BUCKET` settings in `app/core/config.py` were
 sketched for.
 
-**Disk size.** Started at 5 GB. Render can grow a disk later but **cannot
-shrink it**, and you pay per GB, so leave it small until the usage tells you
-otherwise.
+**Disk size and cost.** Render bills the *provisioned* size at **$0.25/GB per
+month**, not what you actually use, and a disk can be grown later but **never
+shrunk**. The blueprint asks for 15 GB ($3.75/month), which covers roughly 18
+months at about 10 GB of attachments per year. Grow it from the dashboard when
+it gets tight.
+
+Treat that as a stopgap. At $0.25/GB/month a disk gets expensive as the
+archive grows — 50 GB is $12.50/month, 100 GB is $25/month, and it only goes
+up because attachments are never deleted. Cloudflare R2 is roughly an order of
+magnitude cheaper per GB, charges nothing for egress, and has a free tier that
+would cover the first year outright. The blocker is code, not signup:
+`STORAGE_BACKEND` / `S3_BUCKET` in `app/core/config.py:49` are declared and
+read nowhere, and four endpoint files write straight to local disk. Once that
+layer exists the disk can be removed entirely, which also lifts the
+single-instance restriction and restores zero-downtime deploys.
+
+**Instance size.** Starter (512 MB RAM, 0.5 CPU) is enough, measured rather
+than guessed: the app settles around 150 MB after boot and peaked at 214 MB
+while generating a quotation PDF and an Excel export back to back — the
+heaviest things it does. That leaves better than 2× headroom. Move up to
+Standard only if the Render metrics tab actually shows memory pressure.
 
 **Which branch deploys.** Whatever branch you connected in step 1. This is a
 genuine improvement over the Space, where the branch was pinned inside the

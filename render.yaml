@@ -30,7 +30,15 @@ services:
       name: storage
       # Matches STORAGE_LOCAL_DIR in the Dockerfile and the env var below.
       mountPath: /data
-      sizeGB: 5
+      # Render bills the PROVISIONED size, not what is used, at $0.25/GB/month
+      # — and a disk can be grown later but never shrunk. 15 GB covers roughly
+      # the first 18 months at the observed ~10 GB/year of attachments; grow it
+      # from the dashboard when it gets tight.
+      #
+      # This is a stopgap. At this growth rate object storage (Cloudflare R2)
+      # is an order of magnitude cheaper per GB and removes the single-instance
+      # restriction a disk imposes — see docs/DEPLOY_RENDER.md.
+      sizeGB: 15
 
     envVars:
       # Enables the prod safety check in app/main.py, which refuses to boot
