@@ -248,6 +248,20 @@ difference between being useful here and being confidently wrong.
    variants. Adding a new color means adding an override there, or it will look
    broken at night. The user notices.
 
+9. **The look is the VOLER industrial design system** (source: the user's Drive
+   folder "Kettenwerk Industrial Design System"). It lives entirely in
+   `tailwind.config.js` + `src/index.css`, so the whole app re-skins from two
+   files — don't hardcode colors in pages. Voler Blue `#2A5992` (`brand-*`) is
+   the structural interactive colour; **Industrial Orange `#F36C21`
+   (`accent-*`) is deliberately rare** — the focus ring, the active-nav rule, a
+   screen's single main action (`.btn-accent`). The brand calls for one accent
+   moment per view, so adding orange anywhere means asking what it replaces.
+   Corners are machined (0–3px), cards are hairline borders not shadows,
+   headings are Montserrat uppercase, specs use Roboto Mono (`.spec`), section
+   eyebrows use `.overline`. A `/* Legacy palette remap */` block in
+   `index.css` maps the old indigo/violet utilities onto blue so pre-existing
+   screens follow along; new work should use `brand-*` / `accent-*` directly.
+
 ---
 
 ## 7. Domain rules a new agent will otherwise get wrong

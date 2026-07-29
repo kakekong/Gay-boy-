@@ -385,9 +385,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
                           "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                           isActive
                             ? n.accent
-                              ? "bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-soft"
-                              : "bg-brand-50 text-brand-700 dark:bg-white/10 dark:text-white"
-                            : "text-ink-600 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-400 dark:hover:bg-white/5 dark:hover:text-white"
+                              // No decorative gradients in this system — a flat
+                              // fill plus the accent rule does the same job.
+                              ? "bg-brand-600 text-white border-l-2 border-accent-500"
+                              // The one accent moment in the chrome: an orange
+                              // rule marks where you are, the way a machined
+                              // edge marks a datum.
+                              : "bg-brand-50 text-brand-700 border-l-2 border-accent-500 dark:bg-white/10 dark:text-white"
+                            : "border-l-2 border-transparent text-ink-600 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-400 dark:hover:bg-white/5 dark:hover:text-white"
                         )
                       }
                     >
