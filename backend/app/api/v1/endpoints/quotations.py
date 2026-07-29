@@ -20,7 +20,7 @@ from app.core.permissions import Role, can_approve_quotation, require, require_m
 from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.crm import Activity, Customer, CustomerContact, Reminder
-from app.models.quotation import Quotation, QuotationItem
+from app.models.quotation import Product, Quotation, QuotationItem
 from app.models.user import User
 from app.schemas.quotation import (
     QuotationAccountLinks,
@@ -973,14 +973,7 @@ async def export_quotation_pdf(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    from io import BytesIO
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import mm
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    )
+    from app.services.quotation_pdf import build_quotation_pdf
 
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
@@ -988,146 +981,51 @@ async def export_quotation_pdf(
     await _log_export_activity(db, q, user, "PDF")
     pic = _pic_fields(cust, contact)
 
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=15*mm, rightMargin=15*mm,
-        topMargin=15*mm, bottomMargin=15*mm,
-        title=f"Quotation {q.number}",
-    )
-    styles = getSampleStyleSheet()
-    h1 = ParagraphStyle("h1", parent=styles["Title"], fontSize=18, alignment=0)
-    section = ParagraphStyle("section", parent=styles["BodyText"],
-                             fontSize=10, fontName="Helvetica-Bold",
-                             textColor=colors.HexColor("#1f2937"), spaceAfter=2)
-    body = styles["BodyText"]
-    label = ParagraphStyle("label", parent=body, textColor=colors.grey, fontSize=8, leading=10)
-    flow: list = []
+    # KODE BARANG comes from the linked product where there is one; a
+    # free-text line falls back to its position on the sheet.
+    codes: dict = {}
+    product_ids = [it.product_id for it in items if it.product_id]
+    if product_ids:
+        for prod in (await db.scalars(
+            select(Product).where(Product.id.in_(product_ids))
+        )).all():
+            codes[prod.id] = prod.code
 
-    flow.append(Paragraph("<b>Transmisi Eng</b>", h1))
-    flow.append(Paragraph(f"Quotation <b>{q.number}</b>", body))
-    flow.append(Spacer(1, 6*mm))
-
-    # ── Customer block: company, address, addressed-to PIC ──────────────
-    flow.append(Paragraph("Bill to / Addressed to", section))
-    cust_block = [
-        ["Customer",       cust.company_name if cust else "—"],
-        ["Address",        (cust.company_address if cust and cust.company_address else "—")],
-        ["PIC",            pic["name"]],
-        ["Department",     pic["position"]],
-        ["Email",          pic["email"]],
-        ["Phone",          pic["phone"]],
-    ]
-    cust_table = Table(cust_block, colWidths=[35*mm, 145*mm])
-    cust_table.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
-        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]))
-    flow.append(cust_table)
-    flow.append(Spacer(1, 5*mm))
-
-    # ── Quote meta ──────────────────────────────────────────────────────
-    meta = [
-        ["Variant",     (q.variant or "—").title()],
-        ["Status",      (q.status or "—").replace("_", " ").title()],
-        ["Issued",      q.created_at.strftime("%Y-%m-%d") if q.created_at else "—"],
-        ["Valid until", q.valid_until.strftime("%Y-%m-%d") if q.valid_until else "—"],
-    ]
-    t = Table(meta, colWidths=[35*mm, 145*mm])
-    t.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
-        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    flow.append(t)
-    flow.append(Spacer(1, 6*mm))
-
-    flow.append(Paragraph("<b>Line items</b>", body))
-    flow.append(Spacer(1, 2*mm))
-    rows = [["#", "Description", "Qty", "Unit", "Unit price", "Line total"]]
-    for i, it in enumerate(items, start=1):
-        rows.append([
-            str(i),
-            it.description or "",
-            f"{float(it.qty or 0):g}",
-            it.uom or "",
-            _idr(it.unit_price),
-            _idr(float(it.qty or 0) * float(it.unit_price or 0)),
-        ])
-    items_table = Table(
-        rows,
-        colWidths=[10*mm, 80*mm, 15*mm, 15*mm, 30*mm, 30*mm],
-    )
-    items_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef0f4")),
-        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
-        ("FONT", (0, 1), (-1, -1), "Helvetica", 9),
-        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LINEABOVE", (0, 1), (-1, 1), 0.5, colors.HexColor("#cbd1dc")),
-        ("LINEBELOW", (0, -1), (-1, -1), 0.5, colors.HexColor("#cbd1dc")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    flow.append(items_table)
-    flow.append(Spacer(1, 4*mm))
+    rows = [{
+        "code": codes.get(it.product_id) or f"{it.line_no:03d}",
+        "name": it.description or "",
+        "qty": f"{float(it.qty or 0):g}",
+        "uom": (it.uom or "").upper(),
+        "unit_price": float(it.unit_price or 0),
+        "line_total": float(it.line_total or 0)
+                      or float(it.qty or 0) * float(it.unit_price or 0),
+    } for it in items]
 
     subtotal = float(q.subtotal or 0)
     disc_amt = float(q.discount_amount or 0)
-    after = subtotal - disc_amt
-    tax = after * (float(q.tax_pct or 0) / 100.0)
-    total = float(q.total or 0)
-    totals = [
-        ["Subtotal", _idr(subtotal)],
-        [f"Discount ({float(q.discount_pct or 0):.1f}%)", f"−{_idr(disc_amt)}"],
-        [f"Tax ({float(q.tax_pct or 0):.1f}%)", _idr(tax)],
-        ["TOTAL", _idr(total)],
-    ]
-    t2 = Table(totals, colWidths=[150*mm, 30*mm])
-    t2.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -2), "Helvetica", 9),
-        ("FONT", (0, -1), (-1, -1), "Helvetica-Bold", 11),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("LINEABOVE", (0, -1), (-1, -1), 1, colors.black),
-        ("TOPPADDING", (0, -1), (-1, -1), 4),
-    ]))
-    flow.append(t2)
-    flow.append(Spacer(1, 8*mm))
+    tax_pct = float(q.tax_pct or 0)
+    tax = (subtotal - disc_amt) * (tax_pct / 100.0)
 
-    if q.notes:
-        flow.append(Paragraph("<b>Notes</b>", body))
-        flow.append(Paragraph(q.notes.replace("\n", "<br/>"), body))
-        flow.append(Spacer(1, 6*mm))
-
-    # ── Sales rep block (at the very bottom, as requested) ─────────────
-    flow.append(Spacer(1, 6*mm))
-    flow.append(Paragraph("Issued by", section))
-    sales_rows = [
-        ["Sales rep", sales.full_name if sales else "—"],
-        ["Email",     sales.email if sales else "—"],
-        ["Phone",     ((sales.phone if sales else None) or (sales.whatsapp_id if sales else None) or "—")],
-    ]
-    sales_table = Table(sales_rows, colWidths=[35*mm, 145*mm])
-    sales_table.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
-        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    flow.append(sales_table)
-
-    flow.append(Spacer(1, 8*mm))
-    flow.append(Paragraph(
-        "Generated by Transmisi Eng. Prices in IDR. "
-        "Quotation valid for the period above.",
-        label,
-    ))
-    doc.build(flow)
-    pdf = buf.getvalue()
+    pdf = build_quotation_pdf(
+        number=q.number or "—",
+        issued=q.created_at.strftime("%d %b %Y") if q.created_at else "—",
+        customer_name=(cust.company_name if cust else "—"),
+        customer_address=(cust.company_address if cust and cust.company_address else "—"),
+        cp_name=pic["name"],
+        cp_position=pic["position"],
+        cp_email=pic["email"],
+        rows=rows,
+        subtotal=subtotal,
+        discount=disc_amt,
+        tax_pct=tax_pct,
+        tax=tax,
+        total=float(q.total or 0),
+        notes=q.notes,
+        signer_name=(sales.full_name if sales else "—"),
+        signer_phone=((sales.phone if sales else None)
+                      or (sales.whatsapp_id if sales else None) or "—"),
+        signer_email=(sales.email if sales else "—"),
+    )
     return Response(
         content=pdf,
         media_type="application/pdf",
