@@ -46,6 +46,12 @@ Have these to hand:
 > postgresql+asyncpg://user:password@ep-xxx.aws.neon.tech/dbname
 > ```
 >
+> A quick way to tell you have the right one: hitting the service root returns
+> `{"data":null,"errors":[{"code":"NOT_FOUND",…}],"meta":null}`. That is the
+> app's own error envelope, so seeing it means FastAPI booted and reached the
+> database — the root path simply has no route. A database failure looks
+> nothing like it.
+>
 > Both edits matter. The scheme selects the async driver, and `sslmode` is not a
 > keyword `asyncpg` accepts — leaving it in raises
 > `connect() got an unexpected keyword argument 'sslmode'` on the first query.
@@ -81,6 +87,13 @@ You now have the four values Render asks for:
 | `S3_BUCKET` | `transmisi-files` |
 | `S3_ACCESS_KEY_ID` | from the API token |
 | `S3_SECRET_ACCESS_KEY` | from the API token |
+
+**Leave the bucket name off `S3_ENDPOINT_URL`.** Cloudflare shows it as
+`https://<account-id>.r2.cloudflarestorage.com/transmisi-files`, but boto3
+appends the bucket itself, so keeping it produces
+`…/transmisi-files/transmisi-files/attachments/…`. Worse, that still returns
+HTTP 200 — uploads appear to work and quietly land in a nested folder. Take
+only the host part.
 
 Ignore anything Cloudflare says about public bucket URLs or custom domains for
 R2 — the app never uses them.
@@ -148,7 +161,8 @@ retries three times and starts anyway.
 
 ## 4. Check it before switching anything over
 
-Render gives the service a URL like `https://transmisi-api.onrender.com`.
+The live service is **`https://transmisi-api.onrender.com`** (the bucket is
+`transmisi-files`).
 
 Open `https://transmisi-api.onrender.com/healthz` in a browser. You should see:
 
