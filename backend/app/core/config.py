@@ -45,11 +45,19 @@ class Settings(BaseSettings):
     # Webhook secret (n8n shared)
     N8N_WEBHOOK_SECRET: str = "change-me-webhook"
 
-    # Storage
+    # Storage. "local" writes to STORAGE_LOCAL_DIR; "s3" writes to any
+    # S3-compatible bucket. For Cloudflare R2 set S3_ENDPOINT_URL to
+    # https://<account-id>.r2.cloudflarestorage.com and leave S3_REGION as
+    # "auto"; for real AWS S3 leave the endpoint unset and name the region.
+    # Reads always follow the path stored on the row, so switching backends
+    # does not strand files written under the previous one.
     STORAGE_BACKEND: str = "local"  # local | s3
     STORAGE_LOCAL_DIR: str = "/data/storage"
     S3_BUCKET: str | None = None
-    S3_REGION: str | None = None
+    S3_REGION: str | None = "auto"
+    S3_ENDPOINT_URL: str | None = None
+    S3_ACCESS_KEY_ID: str | None = None
+    S3_SECRET_ACCESS_KEY: str | None = None
 
     # Misc
     DEFAULT_CURRENCY: str = "IDR"

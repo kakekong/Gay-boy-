@@ -1,23 +1,20 @@
 """File attachments for customer / quotation / project records."""
 
-import os
 import re
-from datetime import UTC, datetime
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role
 from app.models.attachment import Attachment
 from app.models.user import User
+from app.services import storage
 
 router = APIRouter()
 
@@ -161,12 +158,6 @@ def _safe_filename(name: str) -> str:
     return name or "file"
 
 
-def _storage_root() -> Path:
-    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
 def _resolve_uploader(db: AsyncSession, uploader_id):
     return uploader_id
 
@@ -279,13 +270,8 @@ async def upload_attachment(
             f"File too large (max {MAX_FILE_SIZE_MB} MB)",
         )
 
-    now = datetime.now(UTC)
-    folder = _storage_root() / str(now.year) / f"{now.month:02d}"
-    folder.mkdir(parents=True, exist_ok=True)
     safe_name = _safe_filename(file.filename or "file")
-    storage_filename = f"{uuid4().hex}_{safe_name}"
-    storage_path = folder / storage_filename
-    storage_path.write_bytes(data)
+    storage_path = await storage.save(data, filename=safe_name)
 
     a = Attachment(
         owner_type=owner_type,
@@ -293,7 +279,7 @@ async def upload_attachment(
         filename=safe_name,
         content_type=file.content_type,
         size=size,
-        storage_path=str(storage_path),
+        storage_path=storage_path,
         description=description,
         uploaded_by=me.id,
     )
@@ -370,15 +356,18 @@ async def download_attachment(
     # Link attachments have no file on disk — send the caller to the URL.
     if a.external_url:
         return RedirectResponse(a.external_url)
-    if not os.path.exists(a.storage_path):
+    data = await storage.load(a.storage_path)
+    if data is None:
         raise HTTPException(status.HTTP_410_GONE, "File missing from storage")
     media_type = a.content_type or "application/octet-stream"
     # inline=1 lets the browser render PDFs/images directly in a new tab
     # instead of always triggering a save dialog.
     disposition = "inline" if inline else "attachment"
-    return FileResponse(
-        a.storage_path,
-        filename=a.filename,
+    # Served through the API rather than as a presigned bucket URL, so the
+    # role checks above stay the only way to reach a file. A presigned link
+    # would work without a token for as long as it lived.
+    return Response(
+        content=data,
         media_type=media_type,
         headers={
             "Content-Disposition":
@@ -402,10 +391,6 @@ async def delete_attachment(
         and Role(me.role) not in (Role.ADMIN, Role.DIRECTOR)
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only uploader or admin/director can delete")
-    try:
-        if os.path.exists(a.storage_path):
-            os.remove(a.storage_path)
-    except OSError:
-        pass  # don't block the DB delete on a missing file
+    await storage.delete(a.storage_path)  # best-effort; never blocks the row delete
     await db.delete(a)
     return None

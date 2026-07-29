@@ -3,14 +3,16 @@
 Moving the API off the Hugging Face Space onto Render. Two things get fixed by
 the move:
 
-- **Uploaded files stop disappearing.** They live on a persistent disk instead
-  of the Space's `/tmp`, which was wiped on every rebuild.
+- **Uploaded files stop disappearing.** They go to a Cloudflare R2 bucket
+  instead of the Space's `/tmp`, which was wiped on every rebuild.
 - **No more manual rebuilds.** Render redeploys on every push, the way Vercel
   already does for the frontend.
 
 The database does **not** move. Neon stays exactly as it is.
 
-Budget about 30 minutes, most of it waiting on the first build.
+Two accounts to set up: **Cloudflare** (the bucket — do this first, it takes
+five minutes and Render needs its credentials) and **Render** (the API itself).
+Budget about 45 minutes, most of it waiting on the first build.
 
 ---
 
@@ -22,6 +24,7 @@ Have these to hand:
 |---|---|
 | The `DATABASE_URL` value | Hugging Face Space → Settings → Variables and secrets. **Copy it verbatim** — see the warning below |
 | Your site's domain(s) | `https://transmisisuplindo.com` (and the `www.` variant if you use it) |
+| Four R2 values | From step 0 below |
 | `OPENAI_API_KEY` | Only if you use the AI features. Optional |
 
 > **Copy `DATABASE_URL` from the Space, don't rebuild it from Neon's dashboard.**
@@ -31,6 +34,38 @@ Have these to hand:
 > form, because it is the one that currently works. Copy that.
 
 ---
+
+## 0. Create the R2 bucket (do this first)
+
+Render needs these credentials during setup, so make them before you start
+there.
+
+1. Sign in to Cloudflare → **R2 Object Storage**. It asks for a payment card
+   even on the free tier; the free allowance is 10 GB of storage per month,
+   which covers roughly your first year.
+2. **Create bucket**. Name it something like `transmisi-files`. Location:
+   **Asia-Pacific** if offered. Leave it **private** — the app streams files
+   through the API after checking permissions, and a public bucket would hand
+   out customer documents to anyone with the URL.
+3. On the R2 overview page, copy the **S3 API endpoint**. It looks like
+   `https://<account-id>.r2.cloudflarestorage.com`. That is `S3_ENDPOINT_URL`.
+4. **Manage R2 API Tokens → Create API token**. Permission **Object Read &
+   Write**, scoped to just that bucket. Create it.
+5. Copy the **Access Key ID** and **Secret Access Key** now. The secret is shown
+   **once** and cannot be retrieved later — if you lose it, delete the token and
+   make another.
+
+You now have the four values Render asks for:
+
+| Key | Example |
+|---|---|
+| `S3_ENDPOINT_URL` | `https://abc123….r2.cloudflarestorage.com` |
+| `S3_BUCKET` | `transmisi-files` |
+| `S3_ACCESS_KEY_ID` | from the API token |
+| `S3_SECRET_ACCESS_KEY` | from the API token |
+
+Ignore anything Cloudflare says about public bucket URLs or custom domains for
+R2 — the app never uses them.
 
 ## 1. Create the service
 
@@ -44,12 +79,16 @@ Have these to hand:
 It will then ask for the values marked "sync: false" in the blueprint. That's
 step 2.
 
-## 2. Paste the three secrets
+## 2. Paste the secrets
 
 | Key | Value |
 |---|---|
 | `DATABASE_URL` | the value copied from the Space, unchanged |
 | `CORS_ORIGINS` | `["https://transmisisuplindo.com","https://www.transmisisuplindo.com"]` |
+| `S3_ENDPOINT_URL` | from step 0 |
+| `S3_BUCKET` | from step 0 |
+| `S3_ACCESS_KEY_ID` | from step 0 |
+| `S3_SECRET_ACCESS_KEY` | from step 0 |
 | `OPENAI_API_KEY` | your key, or leave blank |
 
 `CORS_ORIGINS` **must be a JSON array**, square brackets and double quotes
@@ -115,10 +154,16 @@ This is the part worth doing properly, because it is the reason for the move:
 
 1. Log in to the live site and upload a file somewhere — an attachment on a
    customer, or a drawing on a project.
-2. In Render, hit **Manual Deploy → Deploy latest commit**.
-3. When it comes back up, open that file again.
+2. Check it appeared: Cloudflare → your bucket → you should see it under
+   `attachments/<year>/<month>/`.
+3. In Render, hit **Manual Deploy → Deploy latest commit**.
+4. When it comes back up, open that file again.
 
 On the old Space it would 404. It should now download exactly as before.
+
+If the upload fails instead, the R2 credentials are wrong — check the Render
+log for the error, fix the four `S3_*` values, and redeploy. Nothing else in
+the app is affected while you sort it out.
 
 ## 7. Retire the Space
 
@@ -130,34 +175,46 @@ to run it (`infra/hfspace/Dockerfile`) stays in the repo either way.
 
 ## Things worth knowing
 
-**Deploys have a short blip.** A service with a persistent disk can't do
-zero-downtime rolling deploys — Render has to stop the old container before the
-new one can mount the disk. Expect a few seconds of downtime per deploy. Push
-backend changes outside working hours if it matters.
+**What this costs.** $7/month for the Render service, and R2 is free until the
+bucket passes 10 GB — then roughly $0.015/GB/month with no charge for
+downloads. At about 10 GB of attachments a year, storage stays near zero for a
+long time. A Render persistent disk would have been $0.25/GB/month, or 16×
+more, and would also have forbidden zero-downtime deploys and any future
+scaling.
 
-**The disk pins you to one instance.** You cannot scale `transmisi-api` past a
-single instance while it has a disk attached. That is fine at your size — one
-process handles this load comfortably, and the web-push sweeper elects a single
-runner through a Postgres advisory lock regardless. If you ever outgrow it, the
-fix is to move attachments to object storage (Cloudflare R2), which is what the
-unused `STORAGE_BACKEND` / `S3_BUCKET` settings in `app/core/config.py` were
-sketched for.
+**Why there is no disk.** Nothing is stored on the instance, so Render is free
+to start the new container before stopping the old one, and you could run more
+than one instance later if the load ever justified it. Neither is possible with
+a disk attached.
 
-**Disk size and cost.** Render bills the *provisioned* size at **$0.25/GB per
-month**, not what you actually use, and a disk can be grown later but **never
-shrunk**. The blueprint asks for 15 GB ($3.75/month), which covers roughly 18
-months at about 10 GB of attachments per year. Grow it from the dashboard when
-it gets tight.
+**If you would rather start on a disk anyway.** The code still supports it —
+leave `STORAGE_BACKEND` unset (it defaults to `local`), drop the four `S3_*`
+variables, and add a disk to `render.yaml`:
 
-Treat that as a stopgap. At $0.25/GB/month a disk gets expensive as the
-archive grows — 50 GB is $12.50/month, 100 GB is $25/month, and it only goes
-up because attachments are never deleted. Cloudflare R2 is roughly an order of
-magnitude cheaper per GB, charges nothing for egress, and has a free tier that
-would cover the first year outright. The blocker is code, not signup:
-`STORAGE_BACKEND` / `S3_BUCKET` in `app/core/config.py:49` are declared and
-read nowhere, and four endpoint files write straight to local disk. Once that
-layer exists the disk can be removed entirely, which also lifts the
-single-instance restriction and restores zero-downtime deploys.
+```yaml
+    disk:
+      name: storage
+      mountPath: /data
+      sizeGB: 15
+```
+
+with `STORAGE_LOCAL_DIR=/data/storage`. You can move to R2 later without
+downtime — see the next note.
+
+**Switching backends is not a cliff.** Every file download follows the path
+stored on its own database row, not the current setting. So flipping
+`STORAGE_BACKEND` to `s3` takes effect for new uploads immediately while
+everything uploaded before it keeps serving from wherever it already lives.
+When you want to consolidate, run the migration once:
+
+```bash
+python -m app.scripts.migrate_storage           # dry run, changes nothing
+python -m app.scripts.migrate_storage --apply   # copies files, rewrites rows
+```
+
+It is idempotent — rows already on R2 are skipped, so a re-run is safe. Files
+that vanished with an old Space rebuild are reported as `MISSING` and their
+rows left alone, so the audit trail still shows something was once attached.
 
 **Instance size.** Starter (512 MB RAM, 0.5 CPU) is enough, measured rather
 than guessed: the app settles around 150 MB after boot and peaked at 214 MB
@@ -180,7 +237,9 @@ bad migration can't lock you out of your own system.
 
 | File | What it does |
 |---|---|
-| `render.yaml` | the blueprint — service, region, plan, disk, env vars |
+| `render.yaml` | the blueprint — service, region, plan, env vars |
+| `backend/app/services/storage.py` | the storage layer — local disk or any S3-compatible bucket |
+| `backend/app/scripts/migrate_storage.py` | one-off copy of disk files into the bucket |
 | `infra/render/Dockerfile` | the image. Copies the repo Render checked out, rather than cloning from GitHub like the Space version does |
 | `backend/.dockerignore` | keeps local caches out of the build context |
 | `infra/hfspace/Dockerfile` | the old Space build. Left in place as a fallback |

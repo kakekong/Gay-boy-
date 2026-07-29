@@ -1,6 +1,5 @@
 from datetime import UTC, date, datetime
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse, Response
@@ -24,6 +23,7 @@ from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
+from app.services import storage
 from app.schemas.common import Page
 from app.schemas.customer import CustomerCreate, CustomerOut, CustomerUpdate
 
@@ -788,12 +788,6 @@ async def request_stage_move(
     # Save supporting files (if any) tied to this request.
     saved_count = 0
     if files:
-        now = datetime.now(UTC)
-        root = (
-            Path(settings.STORAGE_LOCAL_DIR) / "attachments"
-            / str(now.year) / f"{now.month:02d}"
-        )
-        root.mkdir(parents=True, exist_ok=True)
         for f in files:
             if not f.filename:
                 continue
@@ -809,15 +803,14 @@ async def request_stage_move(
                 ch if (ch.isalnum() or ch in "._- ") else "_"
                 for ch in f.filename
             )[:200]
-            path = root / f"{uuid4().hex}_{safe}"
-            path.write_bytes(data)
+            storage_path = await storage.save(data, filename=safe)
             db.add(Attachment(
                 owner_type="approval_request",
                 owner_id=req.id,
                 filename=safe,
                 content_type=f.content_type,
                 size=len(data),
-                storage_path=str(path),
+                storage_path=storage_path,
                 description=f"[stage-move] {target_stage}",
                 uploaded_by=user.id,
             ))

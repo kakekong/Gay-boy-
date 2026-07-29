@@ -20,25 +20,13 @@ services:
     dockerfilePath: ./infra/render/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /healthz
-    # A persistent disk pins the service to a single instance (Render can't
-    # attach one disk to many), so keep this at 1. That is fine here — the
-    # app runs one uvicorn process and the sweeper elects a single runner
-    # through a Postgres advisory lock anyway.
     numInstances: 1
 
-    disk:
-      name: storage
-      # Matches STORAGE_LOCAL_DIR in the Dockerfile and the env var below.
-      mountPath: /data
-      # Render bills the PROVISIONED size, not what is used, at $0.25/GB/month
-      # — and a disk can be grown later but never shrunk. 15 GB covers roughly
-      # the first 18 months at the observed ~10 GB/year of attachments; grow it
-      # from the dashboard when it gets tight.
-      #
-      # This is a stopgap. At this growth rate object storage (Cloudflare R2)
-      # is an order of magnitude cheaper per GB and removes the single-instance
-      # restriction a disk imposes — see docs/DEPLOY_RENDER.md.
-      sizeGB: 15
+    # No persistent disk on purpose. Attachments go to Cloudflare R2, which at
+    # ~10 GB/year of growth is an order of magnitude cheaper per GB than a
+    # Render disk, and — because nothing is stored on the instance — leaves
+    # zero-downtime deploys and future scaling available. A disk would forbid
+    # both. See docs/DEPLOY_RENDER.md if you would rather start on a disk.
 
     envVars:
       # Enables the prod safety check in app/main.py, which refuses to boot
@@ -46,9 +34,29 @@ services:
       - key: APP_ENV
         value: prod
 
-      # Uploads land on the mounted disk, not the container filesystem.
-      - key: STORAGE_LOCAL_DIR
-        value: /data/storage
+      # Attachments go to the R2 bucket rather than the container filesystem,
+      # which has no persistence at all on Render without a disk.
+      - key: STORAGE_BACKEND
+        value: s3
+
+      # R2 presents itself as one region.
+      - key: S3_REGION
+        value: auto
+
+      # Paste in the dashboard, from Cloudflare:
+      #   S3_ENDPOINT_URL      https://<account-id>.r2.cloudflarestorage.com
+      #   S3_BUCKET            the bucket name
+      #   S3_ACCESS_KEY_ID     R2 API token — Access Key ID
+      #   S3_SECRET_ACCESS_KEY R2 API token — Secret Access Key
+      # The secret is shown once at token creation and never again.
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
 
       # Generated once by Render and then held steady. Do not rotate this
       # casually — changing it invalidates every issued access and refresh

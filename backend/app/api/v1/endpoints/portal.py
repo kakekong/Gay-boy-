@@ -9,16 +9,14 @@ that flow back to internal staff.
 """
 
 from datetime import UTC, date, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 import os
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role
@@ -34,6 +32,7 @@ from app.models.operation import (
 from app.models.purchasing import PurchaseRequest, RFQ, SupplierPO
 from app.models.quotation import Quotation
 from app.models.user import User
+from app.services import storage
 
 router = APIRouter()
 
@@ -352,18 +351,14 @@ async def supplier_upload(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
 
-    now = datetime.now(UTC)
-    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
-    root.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
-    path = root / f"{uuid4().hex}_{kind}_{safe}"
-    path.write_bytes(data)
+    storage_path = await storage.save(data, filename=safe, label=kind)
 
     a = Attachment(
         owner_type="supplier_po", owner_id=po.id,
         filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=str(path),
+        storage_path=storage_path,
         description=f"[{kind}] {description or ''}".strip(),
         uploaded_by=me.id,
     )

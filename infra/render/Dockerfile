@@ -36,9 +36,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# The mount point of the Render persistent disk (render.yaml). Uploads
-# written here survive deploys and restarts — the ephemeral /tmp/storage
-# on the old Hugging Face Space did not.
+# Only used if STORAGE_BACKEND is left as "local" — the blueprint sets it to
+# "s3" so attachments go to R2 instead. Kept as a sane default so the image
+# still works on a host that mounts a disk at /data.
 ENV STORAGE_LOCAL_DIR=/data/storage
 
 # Render injects PORT and routes external traffic to it.

@@ -51,7 +51,7 @@ answering and building the same way. For *what the product does*, read
 | Frontend host | Vercel — **auto-deploys on every push**, no action needed |
 | Backend host | Hugging Face Space (Docker) — **requires a manual rebuild** |
 | Database | Neon serverless Postgres |
-| File storage | `/tmp/storage` on the Space — **ephemeral, wiped on every rebuild** |
+| File storage | `/tmp/storage` on the Space — **ephemeral, wiped on every rebuild**. Being replaced by Cloudflare R2 (`docs/DEPLOY_RENDER.md`) |
 | Live site | `transmisisuplindo.com` |
 
 **The branch matters.** `infra/hfspace/Dockerfile:21` pins
@@ -96,6 +96,15 @@ backend/tests/        pytest unit suites + tests/e2e/ (see §5)
 
 **Frontend** — React 18 + Vite + TypeScript, TanStack Query, Zustand, Tailwind,
 lucide-react, `frontend/src/pages/*.tsx` one page per screen.
+
+**File storage goes through `app/services/storage.py`** — never write to disk
+directly. `STORAGE_BACKEND` picks local disk or an S3-compatible bucket
+(Cloudflare R2 in production). Crucially, **reads dispatch on the stored path,
+not the current setting**: a row whose `storage_path` starts with `s3://` is
+fetched from the bucket, anything else from disk. That is what lets the backend
+be switched with no migration and no downtime; `app/scripts/migrate_storage.py`
+consolidates afterwards. boto3 is sync, so every call goes through a worker
+thread — don't call it inline.
 
 **There is no Alembic.** Schema changes go in `app/scripts/seed.py`:
 `Base.metadata.create_all` creates new tables, and the `COLUMN_MIGRATIONS` list
@@ -144,7 +153,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 11 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 14 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -169,6 +178,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
 | `test_clock_note.py` | clock-in/out notes; nobody overwrites HR's note or each other's |
+| `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
 | `test_efaktur.py` | e-Faktur CSV export |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`

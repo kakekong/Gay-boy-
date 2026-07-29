@@ -1,8 +1,7 @@
 """Operation: projects, work orders, drawings, deliveries."""
 
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, UploadFile, status,
@@ -12,7 +11,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval
-from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
@@ -25,6 +23,7 @@ from app.models.operation import (
 from app.models.purchasing import PurchaseRequest
 from app.models.quotation import Quotation
 from app.models.user import User
+from app.services import storage
 
 # Operations data (projects, work orders, deliveries) is internal-only.
 # External portal users (customer/supplier) get their scoped views via the
@@ -714,18 +713,14 @@ async def upload_drawing(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
 
-    now = datetime.now(UTC)
-    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
-    root.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
-    path = root / f"{uuid4().hex}_drawing_{safe}"
-    path.write_bytes(data)
+    storage_path = await storage.save(data, filename=safe, label="drawing")
 
     a = Attachment(
         owner_type="project", owner_id=p.id,
         filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=str(path),
+        storage_path=storage_path,
         description=f"[drawing] {notes or ''}".strip(),
         uploaded_by=user.id,
     )
@@ -828,18 +823,14 @@ async def reupload_drawing(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
 
-    now = datetime.now(UTC)
-    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
-    root.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
-    path = root / f"{uuid4().hex}_drawing_{safe}"
-    path.write_bytes(data)
+    storage_path = await storage.save(data, filename=safe, label="drawing")
 
     a = Attachment(
         owner_type="project", owner_id=p.id,
         filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=str(path),
+        storage_path=storage_path,
         description=f"[drawing] {notes or 'revised'}".strip(),
         uploaded_by=user.id,
     )
@@ -887,8 +878,7 @@ async def delete_drawing(
         att = await db.get(Attachment, UUID(m.group(1)))
         if att:
             try:
-                if att.storage_path and os.path.exists(att.storage_path):
-                    os.remove(att.storage_path)
+                await storage.delete(att.storage_path)
             except OSError:
                 pass
             await db.delete(att)
@@ -989,18 +979,14 @@ async def upload_import_doc(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
 
-    now = datetime.now(UTC)
-    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
-    root.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
-    path = root / f"{uuid4().hex}_{key}_{safe}"
-    path.write_bytes(data)
+    storage_path = await storage.save(data, filename=safe, label=key)
 
     a = Attachment(
         owner_type="project", owner_id=p.id,
         filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=str(path),
+        storage_path=storage_path,
         description=f"[import-doc:{key}] {note or ''}".strip(),
         uploaded_by=user.id,
     )
@@ -1131,17 +1117,13 @@ async def _save_attachment(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                             f"{label}: max 20 MB")
-    now = datetime.now(UTC)
-    root = Path(settings.STORAGE_LOCAL_DIR) / "attachments" / str(now.year) / f"{now.month:02d}"
-    root.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
-    path = root / f"{uuid4().hex}_{label}_{safe}"
-    path.write_bytes(data)
+    storage_path = await storage.save(data, filename=safe, label=label)
     a = Attachment(
         owner_type=owner_type, owner_id=owner_id,
         filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=str(path),
+        storage_path=storage_path,
         description=f"[{label}]",
         uploaded_by=user.id,
     )
