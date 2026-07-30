@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   MessageCircle, Send, Plus, Search, Loader2, MoreVertical, Trash2, Pencil, X,
-  ChevronLeft,
+  ChevronLeft, Reply, Forward,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
+import { MessageQuote } from "@/components/MessageQuote";
 import { useAuthStore } from "@/store/auth";
 
 interface Channel {
@@ -27,6 +29,14 @@ interface Message {
   edited_at: string | null;
   deleted: boolean;
   is_mine: boolean;
+  /** The message this one quotes — always one from this same conversation. */
+  reply_to: {
+    id: string; user_name: string | null; body: string;
+    deleted: boolean; is_mine: boolean;
+  } | null;
+  /** Present when this arrived by forward. Names the original author only —
+   *  never the conversation or document it came out of. */
+  forwarded: { author_name: string | null } | null;
 }
 
 interface Contact {
@@ -66,6 +76,22 @@ export default function ChatPage() {
   const [contactSearch, setContactSearch] = useState("");
   const isDirector = me?.role === "director";
   const [monitorMode, setMonitorMode] = useState(false);
+  // WhatsApp-shaped message actions.
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Set briefly after jumping to a quoted message, so the eye lands on it.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  /** Scroll to the message a quote points at, and flash it. */
+  function jumpTo(id: string) {
+    const el = rowRefs.current[id];
+    if (!el) return;   // older than the loaded window — nothing to scroll to
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlashId(id);
+    window.setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 1600);
+  }
 
   const monitor = useQuery({
     queryKey: ["chat-monitor"],
@@ -102,6 +128,9 @@ export default function ChatPage() {
     });
   }, [active, messages.data?.length, qc]);
 
+  // A reply belongs to the conversation it was started in.
+  useEffect(() => { setReplyTo(null); setMenuFor(null); }, [active]);
+
   // Scroll to bottom on new messages
   useEffect(() => {
     const el = threadRef.current;
@@ -118,9 +147,12 @@ export default function ChatPage() {
 
   const send = useMutation({
     mutationFn: (body: string) =>
-      api.post(`/chat/channels/${active}/messages`, { body }).then((r) => r.data as Message),
+      api.post(`/chat/channels/${active}/messages`, {
+        body, reply_to_id: replyTo?.id ?? null,
+      }).then((r) => r.data as Message),
     onSuccess: () => {
       setDraft("");
+      setReplyTo(null);
       qc.invalidateQueries({ queryKey: ["chat-messages", active] });
       qc.invalidateQueries({ queryKey: ["chat-channels"] });
     },
@@ -340,12 +372,87 @@ export default function ChatPage() {
                   const grouped = prev && prev.user_id === m.user_id
                     && new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60_000;
                   return (
-                    <div key={m.id} className={clsx("flex", m.is_mine ? "justify-end" : "justify-start")}>
-                      <div className={clsx("max-w-[75%]", grouped && "mt-0.5")}>
+                    <div
+                      key={m.id}
+                      ref={(el) => { rowRefs.current[m.id] = el; }}
+                      className={clsx("flex items-start gap-1",
+                        m.is_mine ? "justify-end" : "justify-start")}
+                    >
+                      {/* The action menu sits outside the bubble and is always
+                          visible: hover-only controls are unreachable on a
+                          phone, which is where this app is mostly read. */}
+                      {!m.deleted && editingId !== m.id && (
+                        <div className={clsx("relative shrink-0",
+                          m.is_mine ? "order-first" : "order-last")}>
+                          <button
+                            type="button"
+                            onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}
+                            className="grid place-items-center min-h-[36px] min-w-[30px] rounded-lg
+                                       text-ink-400 hover:text-ink-800 hover:bg-ink-100"
+                            aria-label="Message actions"
+                          >
+                            <MoreVertical size={14} />
+                          </button>
+                          {menuFor === m.id && (
+                            <>
+                              <div className="fixed inset-0 z-10" onClick={() => setMenuFor(null)} />
+                              <div className={clsx(
+                                "absolute z-20 top-full mt-0.5 w-40 card p-1 shadow-card",
+                                m.is_mine ? "left-0" : "right-0",
+                              )}>
+                                <button
+                                  className="w-full text-left px-2 py-1.5 rounded-lg text-sm
+                                             hover:bg-ink-100 flex items-center gap-2"
+                                  onClick={() => { setReplyTo(m); setMenuFor(null); }}
+                                >
+                                  <Reply size={13} /> Reply
+                                </button>
+                                <button
+                                  className="w-full text-left px-2 py-1.5 rounded-lg text-sm
+                                             hover:bg-ink-100 flex items-center gap-2"
+                                  onClick={() => {
+                                    setForwarding({
+                                      kind: "chat", id: m.id, body: m.body,
+                                      authorName: m.forwarded?.author_name ?? m.user_name,
+                                    });
+                                    setMenuFor(null);
+                                  }}
+                                >
+                                  <Forward size={13} /> Forward
+                                </button>
+                                {m.is_mine && (
+                                  <>
+                                    <button
+                                      className="w-full text-left px-2 py-1.5 rounded-lg text-sm
+                                                 hover:bg-ink-100 flex items-center gap-2"
+                                      onClick={() => {
+                                        setEditingId(m.id); setEditDraft(m.body); setMenuFor(null);
+                                      }}
+                                    >
+                                      <Pencil size={13} /> Edit
+                                    </button>
+                                    <button
+                                      className="w-full text-left px-2 py-1.5 rounded-lg text-sm
+                                                 text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                      onClick={() => {
+                                        setMenuFor(null);
+                                        if (window.confirm("Delete this message?")) del.mutate(m.id);
+                                      }}
+                                    >
+                                      <Trash2 size={13} /> Delete
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      <div className={clsx("max-w-[75%] min-w-0", grouped && "mt-0.5")}>
                         {!grouped && !m.is_mine && (
                           <div className="text-[11px] muted ml-2 mb-0.5">{m.user_name ?? "Unknown"}</div>
                         )}
-                        <div className="group relative">
+                        <div className="relative">
                           {editingId === m.id ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -365,14 +472,35 @@ export default function ChatPage() {
                               </button>
                             </div>
                           ) : (
-                            <>
-                              <div className={clsx(
-                                "rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words",
-                                m.is_mine
-                                  ? "bg-brand-600 text-white rounded-br-md"
-                                  : "bg-white border border-ink-200 rounded-bl-md",
-                                m.deleted && "italic opacity-60"
-                              )}>
+                            <div className={clsx(
+                              "rounded-2xl px-3.5 py-2 text-sm break-words transition-shadow",
+                              m.is_mine
+                                ? "bg-brand-600 text-white rounded-br-md"
+                                : "bg-white border border-ink-200 rounded-bl-md",
+                              m.deleted && "italic opacity-60",
+                              flashId === m.id && "ring-2 ring-accent-500",
+                            )}>
+                              {m.forwarded && (
+                                <div className={clsx(
+                                  "flex items-center gap-1 text-[10px] italic mb-1",
+                                  m.is_mine ? "text-white/70" : "muted",
+                                )}>
+                                  <Forward size={10} />
+                                  {m.forwarded.author_name
+                                    ? `Forwarded · originally from ${m.forwarded.author_name}`
+                                    : "Forwarded"}
+                                </div>
+                              )}
+                              {m.reply_to && (
+                                <MessageQuote
+                                  tone={m.is_mine ? "onBrand" : "light"}
+                                  name={m.reply_to.is_mine ? "You" : m.reply_to.user_name}
+                                  body={m.reply_to.body}
+                                  deleted={m.reply_to.deleted}
+                                  onClick={() => jumpTo(m.reply_to!.id)}
+                                />
+                              )}
+                              <div className="whitespace-pre-wrap">
                                 {m.body}
                                 {m.edited_at && !m.deleted && (
                                   <span className={clsx(
@@ -383,25 +511,7 @@ export default function ChatPage() {
                                   </span>
                                 )}
                               </div>
-                              {m.is_mine && !m.deleted && (
-                                <div className="absolute -top-2 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                                  <button
-                                    onClick={() => { setEditingId(m.id); setEditDraft(m.body); }}
-                                    className="h-6 w-6 rounded-full bg-white border border-ink-200 grid place-items-center text-ink-600 hover:bg-ink-50"
-                                    title="Edit"
-                                  >
-                                    <Pencil size={11} />
-                                  </button>
-                                  <button
-                                    onClick={() => { if (window.confirm("Delete this message?")) del.mutate(m.id); }}
-                                    className="h-6 w-6 rounded-full bg-white border border-ink-200 grid place-items-center text-red-600 hover:bg-red-50"
-                                    title="Delete"
-                                  >
-                                    <Trash2 size={11} />
-                                  </button>
-                                </div>
-                              )}
-                            </>
+                            </div>
                           )}
                           <div className={clsx("text-[10px] mt-0.5",
                             m.is_mine ? "text-right text-ink-400" : "text-ink-400 ml-2"
@@ -425,12 +535,21 @@ export default function ChatPage() {
                   e.preventDefault();
                   if (draft.trim()) send.mutate(draft);
                 }}
-                className="p-3 border-t border-ink-100 flex gap-2"
+                className="p-3 border-t border-ink-100 flex gap-2 flex-wrap"
               >
+                {replyTo && (
+                  <div className="w-full">
+                    <MessageQuote
+                      name={replyTo.is_mine ? "You" : replyTo.user_name}
+                      body={replyTo.body}
+                      onCancel={() => setReplyTo(null)}
+                    />
+                  </div>
+                )}
                 <input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Type a message…"
+                  placeholder={replyTo ? "Reply…" : "Type a message…"}
                   className="input flex-1"
                 />
                 <button
@@ -446,6 +565,14 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+
+      {forwarding && (
+        <ForwardDialog
+          source={forwarding}
+          onClose={() => setForwarding(null)}
+          onSent={() => qc.invalidateQueries({ queryKey: ["chat-messages", active] })}
+        />
+      )}
 
       {/* New chat picker */}
       {showPicker && (

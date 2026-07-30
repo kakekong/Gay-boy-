@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageCircle, Send, Loader2, AlertCircle, AtSign, EyeOff } from "lucide-react";
+import {
+  MessageCircle, Send, Loader2, AlertCircle, AtSign, EyeOff,
+  MoreVertical, Reply, Forward,
+} from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
+import { MessageQuote } from "@/components/MessageQuote";
 import { useAuthStore } from "@/store/auth";
 import { useT } from "@/store/lang";
 
@@ -15,6 +20,12 @@ interface Comment {
   author_role: string | null;
   created_at: string;
   mentions?: Mentioned[];
+  /** The earlier message in this same thread that this one quotes. */
+  reply_to: {
+    id: string; author_name: string | null; body: string; is_mine: boolean;
+  } | null;
+  /** Arrived by forward. Original author only — never where it came from. */
+  forwarded: { author_name: string | null } | null;
 }
 interface Candidate {
   id: string; name: string; role: string;
@@ -70,6 +81,20 @@ export function CommentThread({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLTextAreaElement>(null);
+  // Same two message actions as the chat page — a discussion is a chat.
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  function jumpTo(id: string) {
+    const el = rowRefs.current[id];
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlashId(id);
+    window.setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 1600);
+  }
 
   const people = useQuery({
     queryKey: ["mentionable", ownerType, ownerId, mentionQuery],
@@ -126,10 +151,12 @@ export function CommentThread({
     mutationFn: (body: string) => api.post("/comments", {
       owner_type: ownerType, owner_id: ownerId, body,
       mention_user_ids: active.map((p) => p.id),
+      reply_to_id: replyTo?.id ?? null,
     }),
     onSuccess: () => {
       setDraft("");
       setPicked([]);
+      setReplyTo(null);
       qc.invalidateQueries({ queryKey: key });
     },
     onError: (e: any) => setErr(
@@ -169,18 +196,84 @@ export function CommentThread({
           rows.map((c) => {
             const mine = !!me && c.author_id === me.id;
             return (
-              <div key={c.id} className={mine ? "flex justify-end" : "flex justify-start"}>
-                <div className={
-                  "max-w-[80%] rounded-2xl px-3 py-2 text-sm " +
-                  (mine
+              <div
+                key={c.id}
+                ref={(el) => { rowRefs.current[c.id] = el; }}
+                className={clsx("flex items-start gap-1",
+                  mine ? "justify-end" : "justify-start")}
+              >
+                {/* Always visible, not hover-only: the discussion is read on
+                    phones as often as on a desktop. */}
+                <div className={clsx("relative shrink-0",
+                  mine ? "order-first" : "order-last")}>
+                  <button
+                    type="button"
+                    onClick={() => setMenuFor(menuFor === c.id ? null : c.id)}
+                    className="grid place-items-center min-h-[36px] min-w-[30px] rounded-lg
+                                       text-ink-400 hover:text-ink-800 hover:bg-ink-100"
+                    aria-label={t("Message actions", "Aksi pesan")}
+                  >
+                    <MoreVertical size={13} />
+                  </button>
+                  {menuFor === c.id && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setMenuFor(null)} />
+                      <div className={clsx("absolute z-20 top-full mt-0.5 w-36 card p-1 shadow-card",
+                        mine ? "left-0" : "right-0")}>
+                        <button
+                          className="w-full text-left px-2 py-1.5 rounded-lg text-sm
+                                     hover:bg-ink-100 flex items-center gap-2"
+                          onClick={() => { setReplyTo(c); setMenuFor(null); boxRef.current?.focus(); }}
+                        >
+                          <Reply size={13} /> {t("Reply", "Balas")}
+                        </button>
+                        <button
+                          className="w-full text-left px-2 py-1.5 rounded-lg text-sm
+                                     hover:bg-ink-100 flex items-center gap-2"
+                          onClick={() => {
+                            setForwarding({
+                              kind: "comment", id: c.id, body: c.body,
+                              authorName: c.forwarded?.author_name ?? c.author_name,
+                            });
+                            setMenuFor(null);
+                          }}
+                        >
+                          <Forward size={13} /> {t("Forward", "Teruskan")}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className={clsx(
+                  "max-w-[80%] min-w-0 rounded-2xl px-3 py-2 text-sm",
+                  mine
                     ? "bg-brand-600 text-white rounded-br-sm"
-                    : "bg-ink-100 text-ink-900 rounded-bl-sm")
-                }>
+                    : "bg-ink-100 text-ink-900 rounded-bl-sm",
+                  flashId === c.id && "ring-2 ring-accent-500",
+                )}>
                   {!mine && (
                     <div className="text-[10px] font-semibold opacity-70 mb-0.5">
                       {c.author_name ?? "Unknown"}
                       {c.author_role && <span className="uppercase"> · {c.author_role}</span>}
                     </div>
+                  )}
+                  {c.forwarded && (
+                    <div className={clsx("flex items-center gap-1 text-[10px] italic mb-1",
+                      mine ? "text-white/70" : "text-ink-500")}>
+                      <Forward size={10} />
+                      {c.forwarded.author_name
+                        ? t(`Forwarded · originally from ${c.forwarded.author_name}`,
+                             `Diteruskan · asli dari ${c.forwarded.author_name}`)
+                        : t("Forwarded", "Diteruskan")}
+                    </div>
+                  )}
+                  {c.reply_to && (
+                    <MessageQuote
+                      tone={mine ? "onBrand" : "light"}
+                      name={c.reply_to.is_mine ? t("You", "Anda") : c.reply_to.author_name}
+                      body={c.reply_to.body}
+                      onClick={() => jumpTo(c.reply_to!.id)}
+                    />
                   )}
                   <div className="whitespace-pre-wrap break-words">
                     {withMentions(c.body, c.mentions)}
@@ -213,6 +306,16 @@ export function CommentThread({
               `${outsiders.map((o) => o.name).join(", ")} biasanya tidak bisa membuka halaman ini. Mereka akan melihat pesan ini dan bisa membalas, tetapi tidak melihat isi dokumen lainnya.`,
             )}
           </span>
+        </div>
+      )}
+
+      {replyTo && (
+        <div className="mx-3 mb-2">
+          <MessageQuote
+            name={replyTo.author_id === me?.id ? t("You", "Anda") : replyTo.author_name}
+            body={replyTo.body}
+            onCancel={() => setReplyTo(null)}
+          />
         </div>
       )}
 
@@ -279,6 +382,10 @@ export function CommentThread({
           Send
         </button>
       </div>
+
+      {forwarding && (
+        <ForwardDialog source={forwarding} onClose={() => setForwarding(null)} />
+      )}
     </div>
   );
 }

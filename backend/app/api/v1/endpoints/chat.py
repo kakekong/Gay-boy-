@@ -17,6 +17,16 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage
 from app.models.user import User
+from app.services.chat_policy import (
+    ForwardIn,
+    channel_member_roles as _channel_member_roles,
+    deliver_forward,
+    excerpt,
+    existing_dm_id,
+    is_cross_dept as _is_cross_dept,
+    may_start_cross_dept as _may_start_cross_dept,
+    resolve_dm,
+)
 
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
@@ -25,47 +35,17 @@ router = APIRouter(
     dependencies=[Depends(require_min(Role.SALES))]
 )
 
-
-# ─── Department / cross-department governance ─────────────────────────────────
-# A "department" is a role group. Cross-department chats (members spanning more
-# than one department) may only be started by a director or HR; the director can
-# chat unrestricted, and silently monitor any cross-department channel.
-
-_DEPARTMENTS = {
-    "sales": "sales", "finance": "finance", "hr": "hr",
-    "purchasing": "purchasing", "admin": "admin",
-    "manager": "management", "director": "management",
-    "customer": "external", "supplier": "external",
-}
-
-
-def _dept(role: str | None) -> str:
-    return _DEPARTMENTS.get(role or "", role or "unknown")
-
-
-def _is_cross_dept(roles) -> bool:
-    return len({_dept(r) for r in roles}) > 1
-
-
-def _may_start_cross_dept(role: str | None) -> bool:
-    # Director, HR and managers may start cross-department chats. When HR or a
-    # manager does, the director is notified and can view it silently.
-    return role in ("director", "hr", "manager")
-
-
-async def _channel_member_roles(db: AsyncSession, channel_id: UUID) -> list[str]:
-    rows = (await db.execute(
-        select(User.role)
-        .join(ChatChannelMember, ChatChannelMember.user_id == User.id)
-        .where(ChatChannelMember.channel_id == channel_id)
-    )).all()
-    return [r[0] for r in rows]
+# Cross-department governance (which chats may span teams) lives in
+# services/chat_policy.py, because forwarding a message into a new DM has to
+# apply the same rule from the discussion-thread endpoints too.
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 
 class MessageIn(BaseModel):
     body: str
+    # Quoting another message in this channel, WhatsApp-style.
+    reply_to_id: UUID | None = None
 
 
 class MessageEdit(BaseModel):
@@ -101,6 +81,38 @@ async def _ensure_can_read(db: AsyncSession, channel_id: UUID, me: User) -> None
     if Role(me.role) == Role.DIRECTOR:
         return
     await _ensure_member(db, channel_id, me.id)
+
+
+def _msg_out(m: ChatMessage, me: User, names: dict[UUID, str],
+             quoted: ChatMessage | None) -> dict:
+    """One message on the wire, including what it quotes and where it came from.
+
+    The forward carries the *original* author's name but never the channel or
+    document it was forwarded out of — see the comment on the model. A reader
+    learns who wrote it, not where they wrote it.
+    """
+    return {
+        "id": str(m.id),
+        "channel_id": str(m.channel_id),
+        "user_id": str(m.user_id) if m.user_id else None,
+        "user_name": names.get(m.user_id) if m.user_id else None,
+        "body": m.body if not m.deleted_at else "[message deleted]",
+        "created_at": m.created_at,
+        "edited_at": m.edited_at,
+        "deleted": bool(m.deleted_at),
+        "is_mine": m.user_id == me.id,
+        "reply_to": {
+            "id": str(quoted.id),
+            "user_name": names.get(quoted.user_id) if quoted.user_id else None,
+            "body": excerpt(quoted.body) if not quoted.deleted_at else "[message deleted]",
+            "deleted": bool(quoted.deleted_at),
+            "is_mine": quoted.user_id == me.id,
+        } if quoted else None,
+        "forwarded": {
+            "author_name": names.get(m.forwarded_from_author_id)
+            if m.forwarded_from_author_id else None,
+        } if m.forwarded_from_kind else None,
+    }
 
 
 # ─── Lightweight contact list (everyone can read) ────────────────────────────
@@ -236,46 +248,16 @@ async def get_or_create_dm(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    """Find or create a 1:1 DM channel between current user and target."""
-    if user_id == me.id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot DM yourself")
+    """Find or create a 1:1 DM channel between current user and target.
+
+    The department gate (and the reuse-an-existing-DM rule) lives in
+    `resolve_dm`, shared with forwarding.
+    """
     other = await db.get(User, user_id)
-    if not other or not other.is_active:
+    if not other:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-
-    # Cross-department DMs may only be started by a director or HR.
-    if _is_cross_dept([me.role, other.role]) and not _may_start_cross_dept(me.role):
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Cross-department chats can only be started by a director, manager, or HR.",
-        )
-
-    # Find a DM channel where both are members
-    a_member = ChatChannelMember.__table__.alias("a")
-    b_member = ChatChannelMember.__table__.alias("b")
-    existing_id = await db.scalar(
-        select(ChatChannel.id)
-        .join(a_member, a_member.c.channel_id == ChatChannel.id)
-        .join(b_member, b_member.c.channel_id == ChatChannel.id)
-        .where(
-            ChatChannel.kind == "dm",
-            a_member.c.user_id == me.id,
-            b_member.c.user_id == user_id,
-        )
-        .limit(1)
-    )
-    if existing_id:
-        return {"id": str(existing_id), "kind": "dm", "title": other.full_name}
-
-    ch = ChatChannel(kind="dm", created_by=me.id)
-    db.add(ch)
-    await db.flush()
-    db.add_all([
-        ChatChannelMember(channel_id=ch.id, user_id=me.id),
-        ChatChannelMember(channel_id=ch.id, user_id=user_id),
-    ])
-    await db.flush()
-    return {"id": str(ch.id), "kind": "dm", "title": other.full_name}
+    channel_id = await resolve_dm(db, me, other)
+    return {"id": str(channel_id), "kind": "dm", "title": other.full_name}
 
 
 # ─── Messages ────────────────────────────────────────────────────────────────
@@ -296,25 +278,31 @@ async def list_messages(
     )).all()
     rows = list(reversed(rows))
 
-    # Resolve user names in one query
-    user_ids = {m.user_id for m in rows if m.user_id}
-    users: dict[UUID, User] = {}
+    # Quoted messages may sit outside the window we just loaded (replying to
+    # something from last week), so fetch the missing ones by id.
+    by_id = {m.id: m for m in rows}
+    wanted_quotes = {m.reply_to_id for m in rows if m.reply_to_id} - set(by_id)
+    if wanted_quotes:
+        for q in (await db.scalars(
+            select(ChatMessage).where(
+                ChatMessage.id.in_(wanted_quotes),
+                # Belt and braces: a quote must never pull in another channel.
+                ChatMessage.channel_id == channel_id,
+            )
+        )).all():
+            by_id[q.id] = q
+
+    # Resolve every name we need in one query: authors, quoted authors, and the
+    # original author of anything forwarded in.
+    user_ids = {m.user_id for m in by_id.values() if m.user_id}
+    user_ids |= {m.forwarded_from_author_id for m in rows if m.forwarded_from_author_id}
+    names: dict[UUID, str] = {}
     if user_ids:
-        result = (await db.scalars(select(User).where(User.id.in_(user_ids)))).all()
-        users = {u.id: u for u in result}
+        for u in (await db.scalars(select(User).where(User.id.in_(user_ids)))).all():
+            names[u.id] = u.full_name
 
     return [
-        {
-            "id": str(m.id),
-            "channel_id": str(m.channel_id),
-            "user_id": str(m.user_id) if m.user_id else None,
-            "user_name": users.get(m.user_id).full_name if m.user_id and users.get(m.user_id) else None,
-            "body": m.body if not m.deleted_at else "[message deleted]",
-            "created_at": m.created_at,
-            "edited_at": m.edited_at,
-            "deleted": bool(m.deleted_at),
-            "is_mine": m.user_id == me.id,
-        }
+        _msg_out(m, me, names, by_id.get(m.reply_to_id) if m.reply_to_id else None)
         for m in rows
     ]
 
@@ -332,7 +320,19 @@ async def send_message(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty message")
     if len(body) > 4000:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Message too long (max 4000)")
-    m = ChatMessage(channel_id=channel_id, user_id=me.id, body=body)
+
+    # A quote is only ever a message from this same channel. Allowing any id
+    # would let someone copy a line out of a conversation they were never in
+    # simply by quoting it into one they are.
+    quoted: ChatMessage | None = None
+    if payload.reply_to_id:
+        quoted = await db.get(ChatMessage, payload.reply_to_id)
+        if not quoted or quoted.channel_id != channel_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "You can only reply to a message in this conversation")
+
+    m = ChatMessage(channel_id=channel_id, user_id=me.id, body=body,
+                    reply_to_id=quoted.id if quoted else None)
     db.add(m)
     await db.flush()
     # Auto-mark current user's read pointer to "now"
@@ -357,15 +357,97 @@ async def send_message(
         text=body,
     ))
 
-    return {
-        "id": str(m.id),
-        "channel_id": str(channel_id),
-        "user_id": str(me.id),
-        "user_name": me.full_name,
-        "body": m.body,
-        "created_at": m.created_at,
-        "is_mine": True,
-    }
+    names = {me.id: me.full_name}
+    if quoted and quoted.user_id and quoted.user_id != me.id:
+        author = await db.get(User, quoted.user_id)
+        if author:
+            names[author.id] = author.full_name
+    return _msg_out(m, me, names, quoted)
+
+
+@router.get("/forward-targets")
+async def forward_targets(
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Where the current user may forward something.
+
+    Shared by both conversation surfaces. `can_dm` is false for a colleague in
+    another department when the current user isn't allowed to open that
+    conversation — the picker greys them out rather than letting the forward
+    fail on send.
+    """
+    rows = (await db.execute(
+        select(ChatChannel)
+        .join(ChatChannelMember, ChatChannelMember.channel_id == ChatChannel.id)
+        .where(ChatChannelMember.user_id == me.id)
+        .order_by(ChatChannel.created_at.desc())
+    )).scalars().all()
+
+    channels: list[dict] = []
+    for ch in rows:
+        others = (await db.execute(
+            select(User)
+            .join(ChatChannelMember, ChatChannelMember.user_id == User.id)
+            .where(ChatChannelMember.channel_id == ch.id,
+                   ChatChannelMember.user_id != me.id)
+        )).scalars().all()
+        channels.append({
+            "id": str(ch.id),
+            "kind": ch.kind,
+            "title": ch.name or (others[0].full_name if others else "(self)"),
+            "member_count": len(others) + 1,
+        })
+
+    people = (await db.scalars(
+        select(User).where(
+            User.is_active.is_(True),
+            User.id != me.id,
+            User.role.notin_([Role.CUSTOMER.value, Role.SUPPLIER.value]),
+        ).order_by(User.full_name)
+    )).all()
+    contacts: list[dict] = []
+    for u in people:
+        dm = await existing_dm_id(db, me.id, u.id)
+        contacts.append({
+            "id": str(u.id),
+            "full_name": u.full_name,
+            "role": u.role,
+            "channel_id": str(dm) if dm else None,
+            "can_dm": bool(dm) or not _is_cross_dept([me.role, u.role])
+            or _may_start_cross_dept(me.role),
+        })
+    return {"channels": channels, "contacts": contacts}
+
+
+@router.post("/messages/{message_id}/forward")
+async def forward_message(
+    message_id: UUID,
+    payload: ForwardIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Pass a chat message on to other conversations.
+
+    Reading the source is enough to forward it, so the director's monitor view
+    can pass something on — but `deliver_forward` still requires membership of
+    every destination, so nothing can be posted into a channel they never
+    joined.
+    """
+    src = await db.get(ChatMessage, message_id)
+    if not src or src.deleted_at:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    await _ensure_can_read(db, src.channel_id, me)
+
+    # Forwarding a forward keeps pointing at the true author, the way the
+    # attribution on a paper trail should.
+    return await deliver_forward(
+        db, me=me, body=src.body,
+        origin_kind=src.forwarded_from_kind or "chat",
+        origin_id=src.forwarded_from_id or src.id,
+        origin_author_id=src.forwarded_from_author_id or src.user_id,
+        targets=payload,
+    )
 
 
 @router.patch("/messages/{message_id}")

@@ -57,3 +57,23 @@ class ChatMessage(Base, UUIDPK):
     )
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # A quoted reply, WhatsApp-style. Always a message in the *same* channel —
+    # the API refuses anything else, because quoting across channels would
+    # copy text out of a conversation the reader was never in. SET NULL rather
+    # than CASCADE: deleting the quoted message must not delete the reply.
+    reply_to_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="SET NULL"), index=True
+    )
+
+    # Forward provenance. `kind` says which table the origin lives in
+    # ("chat" | "comment") and `id` is that row — kept for the audit trail, and
+    # deliberately *not* returned by the API: the reader is shown "Forwarded"
+    # and the original author, never the document or channel it came from.
+    # Naming the origin would leak a quotation number or a deal channel past
+    # the scoping rules the rest of the app is careful about.
+    forwarded_from_kind: Mapped[str | None] = mapped_column(String(20))
+    forwarded_from_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    forwarded_from_author_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )

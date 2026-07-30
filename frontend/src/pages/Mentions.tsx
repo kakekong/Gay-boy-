@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, Loader2, Send, ExternalLink, EyeOff, CheckCheck } from "lucide-react";
+import {
+  AtSign, Loader2, Send, ExternalLink, EyeOff, CheckCheck, Forward,
+} from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
+import { MessageQuote } from "@/components/MessageQuote";
 import { useT } from "@/store/lang";
 
 interface Mention {
@@ -19,6 +23,9 @@ interface Mention {
   read_at: string | null;
   /** false = they hold the thread only; no document page to send them to */
   can_open: boolean;
+  /** When the mention was a reply, the line it was answering — otherwise the
+   *  message arrives with no idea what it is about. */
+  reply_to: { id: string; author_name: string | null; body: string; is_mine: boolean } | null;
 }
 
 const DOC_LINK: Record<string, (id: string) => string> = {
@@ -48,6 +55,7 @@ export default function MentionsPage() {
   const qc = useQueryClient();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
 
   const q = useQuery({
     queryKey: ["mentions"],
@@ -137,6 +145,15 @@ export default function MentionsPage() {
                   </span>
                 </div>
 
+                {m.reply_to && (
+                  <div className="mt-2">
+                    <MessageQuote
+                      name={m.reply_to.is_mine ? t("You", "Anda") : m.reply_to.author_name}
+                      body={m.reply_to.body}
+                    />
+                  </div>
+                )}
+
                 <p className="mt-2 text-sm whitespace-pre-wrap break-words">{m.body}</p>
 
                 <div className="mt-3 flex items-end gap-2">
@@ -169,6 +186,15 @@ export default function MentionsPage() {
                       <CheckCheck size={12} /> {t("Mark read", "Tandai dibaca")}
                     </button>
                   )}
+                  <button
+                    className="btn-ghost text-xs"
+                    onClick={() => setForwarding({
+                      kind: "comment", id: m.comment_id, body: m.body,
+                      authorName: m.author_name,
+                    })}
+                  >
+                    <Forward size={12} /> {t("Forward", "Teruskan")}
+                  </button>
                   {link ? (
                     <Link to={link} className="text-brand-700 hover:underline
                                                inline-flex items-center gap-1">
@@ -188,6 +214,10 @@ export default function MentionsPage() {
             );
           })}
         </div>
+      )}
+
+      {forwarding && (
+        <ForwardDialog source={forwarding} onClose={() => setForwarding(null)} />
       )}
     </div>
   );

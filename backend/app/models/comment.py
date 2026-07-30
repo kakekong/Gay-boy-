@@ -27,6 +27,23 @@ class EntityComment(Base, UUIDPK, TimestampMixin):
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # A quoted reply. Constrained to the same (owner_type, owner_id) thread by
+    # the API — quoting across threads would lift text out of a document the
+    # reader may have no access to.
+    reply_to_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("entity_comments.id", ondelete="SET NULL"),
+        index=True,
+    )
+
+    # Forward provenance — see the matching block on ChatMessage. Stored for
+    # audit; the API exposes only "Forwarded" plus the original author, never
+    # the thread or channel of origin.
+    forwarded_from_kind: Mapped[str | None] = mapped_column(String(20))
+    forwarded_from_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    forwarded_from_author_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
 
 class CommentMention(Base, UUIDPK, TimestampMixin):
     """Someone was @-mentioned in a comment.

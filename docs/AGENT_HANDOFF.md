@@ -153,7 +153,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 14 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 16 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -180,6 +180,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_clock_note.py` | clock-in/out notes; nobody overwrites HR's note or each other's |
 | `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
+| `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_efaktur.py` | e-Faktur CSV export |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`
@@ -272,6 +273,24 @@ difference between being useful here and being confidently wrong.
     chrome. A contextual up-link ("Back to Purchasing") is still fine when a
     page has one specific parent worth naming. A route with no nav entry of its
     own needs an entry in `ORPHAN_PARENT`.
+
+11. **Both conversation surfaces share their rules.** The chat page and the
+    discussion thread on a document are separate tables (`chat_messages`,
+    `entity_comments`) but one feature set: quoted replies and forwarding, with
+    the same UI (`components/MessageQuote.tsx`, `components/ForwardDialog.tsx`)
+    and the same policy module (`services/chat_policy.py` — department rules,
+    `resolve_dm`, `deliver_forward`). Two rules there are load-bearing and easy
+    to break by accident:
+    * **A quote may only cite a message from the same channel / the same
+      thread.** Otherwise replying becomes a way to copy a line out of a
+      conversation you were never in, into one you are.
+    * **A forward lands in chat only, and names the original author and nothing
+      else.** Not the document, not the channel — naming the origin would carry
+      a quotation number or a customer past the scoping rules. Forwards are
+      written to the audit log for exactly this reason. Read access to the
+      source licenses the forward; membership of the destination is checked
+      separately, so the director can forward *out of* a channel they only
+      monitor but not *into* one.
 
 ---
 

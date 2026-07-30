@@ -349,6 +349,19 @@ COLUMN_MIGRATIONS: list[str] = [
        AND r.status = 'pending'
        AND c.stage IN ('closed_won', 'closed_lost')
     """,
+
+    # Quoted replies + forwarding, on both conversation surfaces (the chat
+    # page and the discussion thread on a document).
+    "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_chat_messages_reply_to_id ON chat_messages (reply_to_id)",
+    "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS forwarded_from_kind VARCHAR(20)",
+    "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS forwarded_from_id UUID",
+    "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS forwarded_from_author_id UUID REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES entity_comments(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_entity_comments_reply_to_id ON entity_comments (reply_to_id)",
+    "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS forwarded_from_kind VARCHAR(20)",
+    "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS forwarded_from_id UUID",
+    "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS forwarded_from_author_id UUID REFERENCES users(id) ON DELETE SET NULL",
 ]
 
 

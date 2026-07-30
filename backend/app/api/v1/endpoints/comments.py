@@ -29,6 +29,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
 from app.models.comment import CommentMention, EntityComment
 from app.models.user import User
+from app.services.chat_policy import ForwardIn, deliver_forward, excerpt
 
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
@@ -157,10 +158,27 @@ class CommentIn(BaseModel):
     # punctuation, and a regex that guesses wrong would either miss a mention
     # or invent one. The composer knows exactly who was picked.
     mention_user_ids: list[UUID] = []
+    # Quoting an earlier message in this same thread.
+    reply_to_id: UUID | None = None
+
+
+def _quote_out(q: EntityComment | None, names: dict[UUID, str],
+               me: User | None = None) -> dict | None:
+    if not q:
+        return None
+    return {
+        "id": str(q.id),
+        "author_name": names.get(q.author_id) if q.author_id else None,
+        "body": excerpt(q.body),
+        "is_mine": bool(me and q.author_id == me.id),
+    }
 
 
 def _out(c: EntityComment, author: User | None,
-         mentions: list[User] | None = None) -> dict:
+         mentions: list[User] | None = None,
+         quoted: EntityComment | None = None,
+         names: dict[UUID, str] | None = None,
+         me: User | None = None) -> dict:
     return {
         "id": str(c.id),
         "owner_type": c.owner_type,
@@ -173,6 +191,14 @@ def _out(c: EntityComment, author: User | None,
         "mentions": [
             {"id": str(u.id), "name": u.full_name} for u in (mentions or [])
         ],
+        "reply_to": _quote_out(quoted, names or {}, me),
+        # Only ever the original author — never the thread it came from. See
+        # the comment on the model: naming the origin would carry a document
+        # number into a conversation that document is closed to.
+        "forwarded": {
+            "author_name": (names or {}).get(c.forwarded_from_author_id)
+            if c.forwarded_from_author_id else None,
+        } if c.forwarded_from_kind else None,
     }
 
 
@@ -229,16 +255,32 @@ async def my_mentions(
         stmt = stmt.where(CommentMention.read_at.is_(None))
     rows = (await db.execute(stmt)).all()
 
+    # The message being replied to, so a mention doesn't arrive without the
+    # line it answers. Fetched by id: the inbox holds single comments, not
+    # whole threads.
+    quote_ids = {c.reply_to_id for _, c in rows if c.reply_to_id}
+    quotes: dict[UUID, EntityComment] = {}
+    if quote_ids:
+        for q in (await db.scalars(
+            select(EntityComment).where(EntityComment.id.in_(quote_ids))
+        )).all():
+            quotes[q.id] = q
+
     author_ids = {c.author_id for _, c in rows if c.author_id}
+    author_ids |= {q.author_id for q in quotes.values() if q.author_id}
     authors: dict[UUID, User] = {}
     if author_ids:
         for u in (await db.scalars(select(User).where(User.id.in_(author_ids)))).all():
             authors[u.id] = u
+    names = {uid: u.full_name for uid, u in authors.items()}
 
     out = []
     for m, c in rows:
         a = authors.get(c.author_id) if c.author_id else None
         out.append({
+            "reply_to": _quote_out(
+                quotes.get(c.reply_to_id) if c.reply_to_id else None, names, me,
+            ),
             "id": str(m.id),
             "comment_id": str(c.id),
             "owner_type": c.owner_type,
@@ -335,15 +377,23 @@ async def list_comments(
 
     people: dict[UUID, User] = {}
     wanted = author_ids | {uid for ids in by_comment.values() for uid in ids}
+    wanted |= {c.forwarded_from_author_id for c in rows if c.forwarded_from_author_id}
     if wanted:
         for u in (await db.scalars(select(User).where(User.id.in_(wanted)))).all():
             people[u.id] = u
+    names = {uid: u.full_name for uid, u in people.items()}
+
+    # The whole thread is in `rows`, so a quote resolves without another query.
+    by_id = {c.id: c for c in rows}
 
     return [
         _out(
             c,
             people.get(c.author_id) if c.author_id else None,
             [people[uid] for uid in by_comment.get(c.id, []) if uid in people],
+            by_id.get(c.reply_to_id) if c.reply_to_id else None,
+            names,
+            me,
         )
         for c in rows
     ]
@@ -360,11 +410,22 @@ async def add_comment(
     if not body:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Comment cannot be empty")
 
+    # A quote must belong to this same thread. Any other id and the reply would
+    # lift a line out of a document the readers here may have no access to.
+    quoted: EntityComment | None = None
+    if payload.reply_to_id:
+        quoted = await db.get(EntityComment, payload.reply_to_id)
+        if (not quoted or quoted.owner_type != payload.owner_type
+                or quoted.owner_id != payload.owner_id):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "You can only reply to a message in this discussion")
+
     c = EntityComment(
         owner_type=payload.owner_type,
         owner_id=payload.owner_id,
         author_id=me.id,
         body=body,
+        reply_to_id=quoted.id if quoted else None,
     )
     db.add(c)
     await db.flush()
@@ -401,4 +462,40 @@ async def add_comment(
         mentioned_ids=[u.id for u in mentioned],
     ))
 
-    return _out(c, me, mentioned)
+    names = {me.id: me.full_name}
+    if quoted and quoted.author_id and quoted.author_id != me.id:
+        qa = await db.get(User, quoted.author_id)
+        if qa:
+            names[qa.id] = qa.full_name
+    return _out(c, me, mentioned, quoted, names, me)
+
+
+@router.post("/{comment_id}/forward")
+async def forward_comment(
+    comment_id: UUID,
+    payload: ForwardIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Pass a discussion message on to a chat conversation.
+
+    Destinations are chats, not other documents — a chat is somewhere the
+    recipient definitely has, so this works whether or not they could open the
+    document the message was written on. That is the same trade the @mention
+    makes: the sender shares the text and nothing else. Every forward out of a
+    document thread is written to the audit log.
+    """
+    c = await db.get(EntityComment, comment_id)
+    if not c:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    # Reading the thread is what licenses forwarding out of it — including for
+    # someone who only holds it via a mention.
+    await _require_thread(db, me, c.owner_type, c.owner_id)
+
+    return await deliver_forward(
+        db, me=me, body=c.body,
+        origin_kind=c.forwarded_from_kind or "comment",
+        origin_id=c.forwarded_from_id or c.id,
+        origin_author_id=c.forwarded_from_author_id or c.author_id,
+        targets=payload,
+    )
