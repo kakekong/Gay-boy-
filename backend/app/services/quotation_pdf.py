@@ -89,27 +89,14 @@ def _draw_frame_and_chrome(canvas, doc) -> None:
     top = h - 18 * mm
 
     # ── Logo ────────────────────────────────────────────────────────────
-    logo_w, logo_h = 22 * mm, 16 * mm
+    # The TE diamond, lifted from the company's own quotation artwork. Swap
+    # app/assets/te-logo.png for a higher-resolution original when there is
+    # one — this crop is about 100 dpi at the size it prints.
+    logo_w, logo_h = 20 * mm, 15 * mm
     if LOGO_PATH.exists():
         canvas.drawImage(str(LOGO_PATH), MARGIN_X, top - logo_h,
                          width=logo_w, height=logo_h,
-                         preserveAspectRatio=True, mask="auto")
-    else:
-        # A stand-in mark in the brand's geometry until the real artwork is
-        # dropped in: an orange chevron over a navy bar.
-        cx, cy = MARGIN_X + logo_w / 2, top - logo_h / 2
-        canvas.setFillColor(ORANGE)
-        p = canvas.beginPath()
-        p.moveTo(cx - 9 * mm, cy - 5 * mm)
-        p.lineTo(cx, cy + 6 * mm)
-        p.lineTo(cx + 9 * mm, cy - 5 * mm)
-        p.lineTo(cx + 4.5 * mm, cy - 5 * mm)
-        p.lineTo(cx, cy + 1.5 * mm)
-        p.lineTo(cx - 4.5 * mm, cy - 5 * mm)
-        p.close()
-        canvas.drawPath(p, fill=1, stroke=0)
-        canvas.setFillColor(NAVY)
-        canvas.rect(cx - 9 * mm, cy - 7.6 * mm, 18 * mm, 1.8 * mm, fill=1, stroke=0)
+                         preserveAspectRatio=True, anchor="sw", mask="auto")
 
     # ── Company name + tagline ──────────────────────────────────────────
     name_x = MARGIN_X + logo_w + 6 * mm
@@ -155,23 +142,103 @@ def _draw_frame_and_chrome(canvas, doc) -> None:
     canvas.restoreState()
 
 
+def _icon_quality(c, cx, cy, r) -> None:
+    """Shield with a tick — quality product."""
+    p = c.beginPath()
+    p.moveTo(cx - r, cy + r * 0.62)
+    p.lineTo(cx + r, cy + r * 0.62)
+    p.lineTo(cx + r, cy - r * 0.15)
+    p.curveTo(cx + r, cy - r * 0.72, cx + r * 0.45, cy - r * 0.9, cx, cy - r)
+    p.curveTo(cx - r * 0.45, cy - r * 0.9, cx - r, cy - r * 0.72, cx - r, cy - r * 0.15)
+    p.close()
+    c.drawPath(p, fill=0, stroke=1)
+    t = c.beginPath()
+    t.moveTo(cx - r * 0.42, cy + r * 0.05)
+    t.lineTo(cx - r * 0.08, cy - r * 0.32)
+    t.lineTo(cx + r * 0.48, cy + r * 0.34)
+    c.drawPath(t, fill=0, stroke=1)
+
+
+def _icon_wrench(c, cx, cy, r) -> None:
+    """Open-ended spanner — custom engineering.
+
+    An arc with a deliberate gap reads as a jaw; a straight shaft below it
+    reads as the handle. Drawn rather than assembled from rectangles, which
+    came out looking like a syringe.
+    """
+    c.saveState()
+    c.translate(cx, cy)
+    c.rotate(-40)
+    jr = r * 0.44
+    base = r * 0.22
+    # Jaw: ring left open across the top 80 degrees.
+    c.arc(-jr, base, jr, base + 2 * jr, startAng=130, extent=280)
+    # Handle.
+    c.line(0, base, 0, -r * 0.95)
+    c.restoreState()
+
+
+def _icon_gear(c, cx, cy, r) -> None:
+    """Toothed wheel — reliable performance."""
+    import math
+    teeth = 8
+    inner, outer = r * 0.62, r * 0.98
+    p = c.beginPath()
+    first = True
+    for i in range(teeth * 2):
+        a0 = (2 * math.pi / (teeth * 2)) * i
+        a1 = (2 * math.pi / (teeth * 2)) * (i + 1)
+        rad = outer if i % 2 == 0 else inner
+        for a in (a0, a1):
+            x, y = cx + rad * math.cos(a), cy + rad * math.sin(a)
+            if first:
+                p.moveTo(x, y); first = False
+            else:
+                p.lineTo(x, y)
+    p.close()
+    c.drawPath(p, fill=0, stroke=1)
+    c.circle(cx, cy, r * 0.30, fill=0, stroke=1)
+
+
+def _icon_clock(c, cx, cy, r) -> None:
+    """Dial with hands — on-time delivery."""
+    c.circle(cx, cy, r * 0.95, fill=0, stroke=1)
+    p = c.beginPath()
+    p.moveTo(cx, cy + r * 0.52)
+    p.lineTo(cx, cy)
+    p.lineTo(cx + r * 0.42, cy - r * 0.10)
+    c.drawPath(p, fill=0, stroke=1)
+
+
+_ICONS = (_icon_quality, _icon_wrench, _icon_gear, _icon_clock)
+
+
 def _capability_row(canvas, doc, y: float) -> None:
-    """The four capability marks along the bottom of the sheet."""
+    """The four capability marks along the bottom of the sheet — line icon,
+    two-line label, and a hairline divider between each group."""
     w = A4[0]
     right = w - MARGIN_X
     span = right - MARGIN_X
     step = span / len(CAPABILITIES)
     canvas.saveState()
+    canvas.setLineJoin(1)
+    canvas.setLineCap(1)
     for i, (top_word, bottom_word) in enumerate(CAPABILITIES):
-        cx = MARGIN_X + step * i + step / 2
+        left = MARGIN_X + step * i
+        icon_cx = left + step * 0.20
         canvas.setStrokeColor(NAVY)
-        canvas.setLineWidth(0.9)
-        canvas.circle(cx - 16 * mm, y + 1.2 * mm, 3.4 * mm, fill=0, stroke=1)
+        canvas.setLineWidth(0.85)
+        _ICONS[i](canvas, icon_cx, y + 1.2 * mm, 3.2 * mm)
+        text_x = icon_cx + 5.4 * mm
         canvas.setFillColor(NAVY)
         canvas.setFont("Helvetica-Bold", 6.8)
-        canvas.drawString(cx - 10 * mm, y + 2.6 * mm, top_word)
+        canvas.drawString(text_x, y + 2.6 * mm, top_word)
         canvas.setFillColor(INK_SOFT)
-        canvas.drawString(cx - 10 * mm, y - 1.0 * mm, bottom_word)
+        canvas.drawString(text_x, y - 1.0 * mm, bottom_word)
+        if i:
+            canvas.setStrokeColor(RULE)
+            canvas.setLineWidth(0.6)
+            canvas.line(left - 2 * mm, y - 2.6 * mm, left - 2 * mm, y + 4.6 * mm)
     canvas.restoreState()
 
 
