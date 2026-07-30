@@ -362,6 +362,10 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS forwarded_from_kind VARCHAR(20)",
     "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS forwarded_from_id UUID",
     "ALTER TABLE entity_comments ADD COLUMN IF NOT EXISTS forwarded_from_author_id UUID REFERENCES users(id) ON DELETE SET NULL",
+
+    # A maintenance action is about the database as a whole, so an audit row
+    # can legitimately have no single entity to point at.
+    "ALTER TABLE audit_log ALTER COLUMN entity_id DROP NOT NULL",
 ]
 
 

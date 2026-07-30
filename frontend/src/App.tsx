@@ -54,6 +54,7 @@ const AICommandCenter      = lazy(() => import("@/pages/AICommandCenter"));
 const RoleGuidePage        = lazy(() => import("@/pages/RoleGuide"));
 const AttachmentsAdminPage = lazy(() => import("@/pages/AttachmentsAdmin"));
 const FeedbackPage         = lazy(() => import("@/pages/Feedback"));
+const DataCleanupPage      = lazy(() => import("@/pages/DataCleanup"));
 
 function Protected({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.accessToken);
@@ -204,6 +205,8 @@ function MainApp() {
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
+          <Route path="/admin/cleanup" element={
+            <RequireRole roles={["director"]}><DataCleanupPage /></RequireRole>} />
           <Route path="/purchasing" element={<PurchasingPage />} />
           <Route path="/purchasing/stage/:stage" element={<PurchasingStagePage />} />
           <Route path="/suppliers/:id" element={<SupplierDetailPage />} />

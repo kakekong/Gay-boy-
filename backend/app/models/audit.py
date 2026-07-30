@@ -18,7 +18,9 @@ class AuditLog(Base, UUIDPK):
     )
     action: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     entity: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
-    entity_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    # Nullable: a maintenance action (a bulk purge, say) is about the database
+    # as a whole and has no one row to point at.
+    entity_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     before: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     after: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     ip: Mapped[str | None] = mapped_column(String(64))

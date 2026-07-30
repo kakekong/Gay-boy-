@@ -54,7 +54,7 @@ async def list_audit(
             "actor_role": actors.get(r.actor_id).role if r.actor_id and actors.get(r.actor_id) else None,
             "action": r.action,
             "entity": r.entity,
-            "entity_id": str(r.entity_id),
+            "entity_id": str(r.entity_id) if r.entity_id else None,
             "before": r.before,
             "after": r.after,
             "occurred_at": r.occurred_at,

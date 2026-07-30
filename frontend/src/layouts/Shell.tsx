@@ -8,7 +8,7 @@ import {
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft,
+  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -97,6 +97,10 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["sales", "admin", "hr", "finance", "purchasing", "manager", "director"] },
       { to: "/sales-targets", label: "Sales Targets", label_id: "Target penjualan", icon: Target },
       { to: "/admin/users", label: "Users", label_id: "Pengguna", icon: UserCog,
+        roles: ["director"] },
+      // One-off housekeeping. Director-only in the sidebar, at the route, and
+      // on the endpoints themselves — it deletes company history.
+      { to: "/admin/cleanup", label: "Clear test data", label_id: "Hapus data uji", icon: Trash2,
         roles: ["director"] },
     ],
   },
