@@ -262,6 +262,17 @@ difference between being useful here and being confidently wrong.
    `index.css` maps the old indigo/violet utilities onto blue so pre-existing
    screens follow along; new work should use `brand-*` / `accent-*` directly.
 
+10. **Back navigation lives in the chrome, not on the page.** `Shell.tsx` has a
+    `BackButton` in the topbar (mobile *and* desktop) driven by
+    `store/navHistory.ts`, which mirrors router navigations into an in-app
+    stack. That stack exists so Back can never eject someone to the login page
+    or the previous website; with nothing behind them (deep link, push-notif
+    tap) the button goes *up* to the parent list via `parentNavPath()` instead.
+    So **do not add a generic `← Back` to a new page** — it duplicates the
+    chrome. A contextual up-link ("Back to Purchasing") is still fine when a
+    page has one specific parent worth naming. A route with no nav entry of its
+    own needs an entry in `ORPHAN_PARENT`.
+
 ---
 
 ## 7. Domain rules a new agent will otherwise get wrong

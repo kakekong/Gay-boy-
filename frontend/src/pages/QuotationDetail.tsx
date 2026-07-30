@@ -246,10 +246,6 @@ export default function QuotationDetailPage() {
 
   return (
     <div className="space-y-6">
-      <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
-        <ArrowLeft size={15} /> {t("Back", "Kembali")}
-      </button>
-
       {flash && (
         <div
           className={clsx(

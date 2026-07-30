@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { useNavHistory } from "@/store/navHistory";
 
 export type Role =
   | "sales" | "admin" | "hr" | "finance" | "manager" | "director"
@@ -124,6 +125,9 @@ export const useAuthStore = create<AuthState>()(
           sessionStorage.removeItem(STORE_NAME);
           localStorage.removeItem(STORE_NAME);
         } catch {}
+        // Drop the in-app back stack too: after the next login, Back must not
+        // be able to walk into the previous user's pages.
+        useNavHistory.getState().reset();
         set({
           accessToken: null,
           refreshToken: null,

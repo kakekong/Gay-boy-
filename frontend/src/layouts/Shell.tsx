@@ -1,18 +1,21 @@
-import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import {
+  NavLink, useLocation, useNavigate, useNavigationType,
+} from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList, Eye, Tag, Sun, Moon,
+  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { useLangStore, useT } from "@/store/lang";
+import { useNavHistory } from "@/store/navHistory";
 import { useThemeStore } from "@/store/theme";
 import { NotificationsBell } from "@/components/NotificationsBell";
 import { FeedbackButton } from "@/components/FeedbackButton";
@@ -134,6 +137,109 @@ export function requiredRolesForPath(path: string): string[] | undefined {
   return best?.roles;
 }
 
+/** The nav item's own name for a path, in the active language, or null when
+ *  the path isn't a nav destination (a detail page, say). */
+function navTitleForPath(path: string, lang: string): string | null {
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (item.to === path) return lang === "id" ? item.label_id : item.label;
+    }
+  }
+  return null;
+}
+
+// Routes with no nav entry of their own need somewhere to go "up" to.
+const ORPHAN_PARENT: Record<string, string> = {
+  // Supplier detail pages are reached from the purchasing directory.
+  "/suppliers": "/purchasing",
+};
+
+/**
+ * Where "up" is from `path` — the list page a detail or sub-page belongs to.
+ *
+ * This is the fallback for someone who arrived by pasting a link or tapping a
+ * push notification: there is no in-app history behind them, but they still
+ * need one tap back to the list. Returns null on a top-level nav page, which
+ * is where Back stops making sense.
+ */
+function parentNavPath(path: string): string | null {
+  let best: string | null = null;
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (item.to === path) return null;
+      if (item.to !== "/" && path.startsWith(item.to + "/")
+          && (!best || item.to.length > best.length)) best = item.to;
+    }
+  }
+  if (best) return best;
+  const first = "/" + (path.split("/").filter(Boolean)[0] ?? "");
+  return ORPHAN_PARENT[first] ?? (path === "/" ? null : "/");
+}
+
+/** Mirror react-router's navigations into our own in-app stack. */
+function useTrackNavHistory() {
+  const location = useLocation();
+  const navType = useNavigationType();
+  const push = useNavHistory((s) => s.push);
+  const replace = useNavHistory((s) => s.replace);
+  const pop = useNavHistory((s) => s.pop);
+
+  useEffect(() => {
+    const path = location.pathname + location.search;
+    if (navType === "POP") pop(path);
+    else if (navType === "REPLACE") replace(path);
+    else push(path);
+    // location.key changes on every navigation, including re-visits to the
+    // same path — which pathname alone would swallow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+}
+
+/**
+ * One-tap Back, in the chrome rather than on each page.
+ *
+ * Two behaviours, one button:
+ *  - normally it rewinds the in-app stack (`navigate(-1)`), labelled with
+ *    where you'll land;
+ *  - with nothing behind you (deep link, notification tap, fresh tab) it
+ *    goes up to the list page instead.
+ * On a top-level nav page it renders nothing at all — there is no "back"
+ * from the dashboard.
+ */
+function BackButton() {
+  const nav = useNavigate();
+  const location = useLocation();
+  const lang = useLangStore((s) => s.lang);
+  const t = useT();
+  const stack = useNavHistory((s) => s.stack);
+
+  const previous = stack.length > 1 ? stack[stack.length - 2] : null;
+  const target = previous ?? parentNavPath(location.pathname);
+  if (!target) return null;
+
+  // Name the destination when it's a known page; stay generic otherwise so
+  // the label never claims something wrong.
+  const label = navTitleForPath(target.split("?")[0], lang)
+    ?? t("Back", "Kembali");
+
+  return (
+    <button
+      type="button"
+      onClick={() => (previous ? nav(-1) : nav(target))}
+      title={t(`Back to ${label}`, `Kembali ke ${label}`)}
+      aria-label={t("Go back", "Kembali")}
+      className="shrink-0 inline-flex items-center justify-center gap-1.5
+                 min-h-[38px] min-w-[38px] px-2 md:px-2.5 rounded-lg
+                 border border-ink-200 bg-white text-sm font-medium text-ink-600
+                 hover:border-brand-300 hover:text-ink-900 active:bg-ink-100
+                 transition-colors"
+    >
+      <ChevronLeft size={18} className="shrink-0" />
+      <span className="hidden md:inline max-w-[9rem] truncate">{label}</span>
+    </button>
+  );
+}
+
 // Hard caps for built-in base roles: when a role appears here it sees ONLY
 // these pages in the sidebar (plus Help, always), regardless of the per-item
 // `roles` lists. A custom role or per-user page override still wins over this.
@@ -201,6 +307,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const t = useT();
   const lang = useLangStore((s) => s.lang);
   const [mobileOpen, setMobileOpen] = useState(false);
+  useTrackNavHistory();
 
   const unread = useQuery({
     queryKey: ["chat-unread"],
@@ -454,6 +561,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           >
             <Menu size={20} />
           </button>
+          <BackButton />
           <button
             type="button"
             onClick={() => {

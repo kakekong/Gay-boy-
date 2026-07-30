@@ -532,9 +532,6 @@ export default function ProjectDetailPage() {
       ?? t("Failed to load project", "Gagal memuat proyek");
     return (
       <div className="space-y-4">
-        <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
-          <ArrowLeft size={15} /> {t("Back", "Kembali")}
-        </button>
         <div className="card p-6 text-sm">
           <div className="font-semibold text-red-700">{t("Could not load project", "Gagal memuat proyek")}</div>
           <div className="muted mt-1">{msg}</div>
@@ -576,10 +573,6 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="space-y-6">
-      <button onClick={() => nav(-1)} className="btn-ghost -ml-3">
-        <ArrowLeft size={15} /> Back
-      </button>
-
       {/* Header */}
       <div className="card p-5 lg:p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
