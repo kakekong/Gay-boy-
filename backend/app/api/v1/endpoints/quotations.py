@@ -781,6 +781,17 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
 async def mark_lost(q_id: UUID, reason: str,
                     db: AsyncSession = Depends(get_db),
                     user: User = Depends(get_current_user)):
+    # A lost deal without a reason is a hole in the lost-deal report, which is
+    # the only place the company learns why it loses work. The composer already
+    # insists on one; this is the rule itself, so it holds for anything calling
+    # the API — `reason: str` alone accepts "" and " ".
+    reason = (reason or "").strip()
+    if len(reason) < 3:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Say why the quotation was lost — the reason is what the "
+            "lost-deal report is built from.",
+        )
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)

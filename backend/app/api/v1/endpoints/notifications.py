@@ -439,9 +439,12 @@ async def list_notifications(
                     late += 1
             if missing:
                 items.append({
-                    # Day+count-scoped so a dismissal only lasts while
-                    # nothing changes (and never beyond today).
-                    "id": f"attendance-missing:{today.isoformat()}:{missing}",
+                    # Day-scoped, NOT count-scoped. Putting the count in the id
+                    # meant the alert returned as a brand-new item every time
+                    # one more person clocked in — so dismissing it in the
+                    # morning was pointless, and the red badge sat there all
+                    # day reappearing. One dismissal now covers today.
+                    "id": f"attendance-missing:{today.isoformat()}",
                     "kind": "attendance",
                     "severity": "medium",
                     "title": f"{missing} employee(s) not clocked in today",
@@ -451,7 +454,7 @@ async def list_notifications(
                 })
             if late:
                 items.append({
-                    "id": f"attendance-late:{today.isoformat()}:{late}",
+                    "id": f"attendance-late:{today.isoformat()}",
                     "kind": "attendance",
                     "severity": "low",
                     "title": f"{late} employee(s) clocked in late today",
@@ -493,7 +496,11 @@ async def list_notifications(
         if fresh_fb:
             newest = fresh_fb[0]
             items.append({
-                "id": f"feedback:{len(fresh_fb)}:{newest.id}",
+                # Keyed on the newest message only. The count added nothing —
+                # it just made an old dismissal resurface whenever the number
+                # moved — while `newest.id` still re-notifies on genuinely new
+                # feedback, which is the point.
+                "id": f"feedback:{newest.id}",
                 "kind": "feedback",
                 "severity": "medium",
                 "title": f"{len(fresh_fb)} new feedback message"
