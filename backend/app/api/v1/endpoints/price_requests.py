@@ -197,19 +197,38 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
     return out
 
 
-def _norm_items(items: list[ItemIn]) -> list[dict]:
-    return [
-        {
+def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list[dict]:
+    """Renumber the lines, carrying pricing across an edit.
+
+    `previous` matters when a request is edited *after* purchasing has costed
+    it — only the director can do that. Rebuilding the lines from scratch would
+    silently blank every cost and approved sell price, which is a quiet way to
+    lose real work. So a line whose description survives the edit keeps its
+    prices, and a new or renamed line starts unpriced, because it is a
+    different item and nobody has quoted it yet.
+
+    Matching is on the description alone: prices are stored per unit, so
+    changing a quantity, a UoM or a spec note does not invalidate them.
+    Duplicate descriptions are paired off in order.
+    """
+    by_desc: dict[str, list[dict]] = {}
+    for old in previous or []:
+        by_desc.setdefault((old.get("description") or "").strip().casefold(), []).append(old)
+
+    out = []
+    for i, it in enumerate(items):
+        pool = by_desc.get((it.description or "").strip().casefold())
+        old = pool.pop(0) if pool else None
+        out.append({
             "line_no": i + 1,
             "description": it.description,
             "qty": float(it.qty or 0),
             "uom": it.uom,
             "spec": it.spec,
-            "cost_price": None,
-            "sell_price": None,
-        }
-        for i, it in enumerate(items)
-    ]
+            "cost_price": old.get("cost_price") if old else None,
+            "sell_price": old.get("sell_price") if old else None,
+        })
+    return out
 
 
 # ─── CRUD + workflow ─────────────────────────────────────────────────────────
@@ -319,14 +338,33 @@ async def update_price_request(
                                before={"number": old},
                                after={"number": new_number})
     non_meta = payload.items is not None or payload.notes is not None
-    if non_meta and pr.status not in ("draft", "rejected"):
+    # Past draft/rejected a request is a live commercial document: purchasing
+    # has costed it and the director may have approved sell prices off the back
+    # of it. The director can still correct one — a customer changes a spec
+    # mid-negotiation and somebody has to be able to fix it — but nobody else,
+    # and never silently.
+    locked = pr.status not in ("draft", "rejected")
+    if non_meta and locked and Role(user.role) != Role.DIRECTOR:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Only a draft or rejected request can be edited")
+
+    before_items = list(pr.items or [])
     if payload.items is not None:
-        pr.items = _norm_items(payload.items)
+        pr.items = _norm_items(payload.items, before_items)
     if payload.notes is not None:
         pr.notes = payload.notes
     pr.updated_by = user.id
+
+    if non_meta and locked:
+        # An override on a costed or approved request is exactly the kind of
+        # change someone will want to reconstruct later.
+        await audit_record(
+            db, actor=user, action="override_edit", entity="price_request",
+            entity_id=pr.id,
+            before={"status": pr.status, "items": before_items},
+            after={"items": pr.items},
+        )
+
     await db.flush()
     return await _serialize(db, pr, Role(user.role))
 

@@ -362,8 +362,26 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     onError: onErr,
   });
 
+  // Line-item editing. `null` = not editing; otherwise the working copy.
+  const [editItems, setEditItems] = useState<
+    { description: string; qty: number | string; uom: string; spec: string }[] | null
+  >(null);
+
   const refresh = () => { qc.invalidateQueries({ queryKey: ["price-request", id] }); qc.invalidateQueries({ queryKey: ["price-requests"] }); };
   const mut = (fn: () => Promise<any>) => ({ mutationFn: fn, onSuccess: refresh, onError: onErr });
+
+  const saveItems = useMutation({
+    mutationFn: () => api.patch(`/price-requests/${id}`, {
+      items: (editItems ?? []).map((row) => ({
+        description: row.description.trim(),
+        qty: Number(row.qty) || 0,
+        uom: row.uom.trim() || null,
+        spec: row.spec.trim() || null,
+      })),
+    }).then((r) => r.data),
+    onSuccess: () => { setEditItems(null); refresh(); },
+    onError: onErr,
+  });
 
   const submit = useMutation(mut(() => api.post(`/price-requests/${id}/submit`)));
   const price = useMutation(mut(() => api.post(`/price-requests/${id}/price`, {
@@ -436,6 +454,13 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     && (pr.status === "pending_purchasing" || pr.status === "pending_director");
   const canApprove = isDirector && (pr.status === "pending_director" || pr.status === "pending_purchasing");
   const canSubmit = pr.status === "draft" || pr.status === "rejected";
+  // Past draft/rejected the request is a live commercial document — purchasing
+  // has costed it. Only the director may still correct one; the backend
+  // enforces the same rule.
+  const stillDraft = pr.status === "draft" || pr.status === "rejected";
+  const canEditItems = isDirector
+    || (stillDraft && (role === "sales" || role === "manager" || role === "admin"));
+  const editingLocked = editItems !== null && !stillDraft;
 
   return (
     <div className="space-y-5">
@@ -504,7 +529,119 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
           </div>
         </div>
 
-        <table className="w-full text-sm mt-4">
+        <div className="mt-4 flex items-center gap-2">
+          <span className="overline">{t("Items", "Barang")}</span>
+          {canEditItems && editItems === null && (
+            <button
+              className="btn-ghost ml-auto text-xs"
+              onClick={() => setEditItems((pr.items ?? []).map((it: any) => ({
+                description: it.description ?? "",
+                qty: it.qty ?? 1,
+                uom: it.uom ?? "",
+                spec: it.spec ?? "",
+              })))}
+            >
+              <Pencil size={13} /> {t("Edit items", "Ubah barang")}
+            </button>
+          )}
+        </div>
+
+        {editItems !== null ? (
+          <div className="mt-2 space-y-2">
+            {editingLocked && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2
+                              text-xs text-amber-900 space-y-1">
+                <div className="font-semibold">
+                  {t("This request has already been costed.",
+                     "Permintaan ini sudah dihitung biayanya.")}
+                </div>
+                <div>
+                  {t("Lines you leave alone keep their cost and approved price. A line you rename or add comes back unpriced and has to go through purchasing again.",
+                     "Baris yang tidak diubah tetap membawa biaya dan harga yang disetujui. Baris yang Anda ganti namanya atau tambahkan akan kosong dan harus dihitung ulang oleh pembelian.")}
+                </div>
+                {pr.quotation_id && (
+                  <div>
+                    {t("A quotation has already been made from this request — changing it here does not change the quotation.",
+                       "Penawaran sudah dibuat dari permintaan ini — mengubah di sini tidak mengubah penawarannya.")}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {editItems.map((row, i) => (
+              <div key={i} className="grid grid-cols-12 gap-2">
+                <input
+                  className="input col-span-12 sm:col-span-5"
+                  placeholder={t("Description", "Deskripsi")}
+                  value={row.description}
+                  onChange={(e) => setEditItems((rows) => rows!.map(
+                    (x, j) => (j === i ? { ...x, description: e.target.value } : x)))}
+                />
+                <input
+                  className="input col-span-4 sm:col-span-2 text-right" type="number" min="0"
+                  placeholder={t("Qty", "Jml")}
+                  value={row.qty}
+                  onChange={(e) => setEditItems((rows) => rows!.map(
+                    (x, j) => (j === i ? { ...x, qty: e.target.value } : x)))}
+                />
+                <input
+                  className="input col-span-4 sm:col-span-2"
+                  placeholder={t("UoM", "Satuan")}
+                  value={row.uom}
+                  onChange={(e) => setEditItems((rows) => rows!.map(
+                    (x, j) => (j === i ? { ...x, uom: e.target.value } : x)))}
+                />
+                <input
+                  className="input col-span-3 sm:col-span-2"
+                  placeholder={t("Spec", "Spesifikasi")}
+                  value={row.spec}
+                  onChange={(e) => setEditItems((rows) => rows!.map(
+                    (x, j) => (j === i ? { ...x, spec: e.target.value } : x)))}
+                />
+                <button
+                  className="col-span-1 grid place-items-center rounded-lg text-red-600
+                             hover:bg-red-50"
+                  aria-label={t("Remove line", "Hapus baris")}
+                  onClick={() => setEditItems((rows) => rows!.filter((_, j) => j !== i))}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+
+            <button
+              className="btn-ghost text-xs"
+              onClick={() => setEditItems((rows) => [
+                ...(rows ?? []), { description: "", qty: 1, uom: "", spec: "" }])}
+            >
+              <Plus size={13} /> {t("Add line", "Tambah baris")}
+            </button>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                className="btn-primary"
+                disabled={saveItems.isPending
+                  || !editItems.length
+                  || editItems.some((r) => !r.description.trim())}
+                onClick={() => saveItems.mutate()}
+              >
+                {saveItems.isPending
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <Check size={14} />}
+                {t("Save changes", "Simpan perubahan")}
+              </button>
+              <button className="btn-ghost" onClick={() => setEditItems(null)}>
+                <X size={14} /> {t("Cancel", "Batal")}
+              </button>
+              {editItems.some((r) => !r.description.trim()) && (
+                <span className="text-xs muted">
+                  {t("Every line needs a description.", "Setiap baris perlu deskripsi.")}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+        <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
               <th className="th">#</th><th className="th">{t("Description", "Deskripsi")}</th>
@@ -540,6 +677,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             ))}
           </tbody>
         </table>
+        )}
 
         {(canCost || canApprove || canSubmit) && (
           <div className="mt-4 flex items-center gap-2 flex-wrap">
