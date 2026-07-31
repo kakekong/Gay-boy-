@@ -366,9 +366,36 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const [editItems, setEditItems] = useState<
     { description: string; qty: number | string; uom: string; spec: string }[] | null
   >(null);
+  // "edit" writes straight to the request (draft, or the director overriding).
+  // "propose" files a revision for the director to decide — the negotiation path.
+  const [editMode, setEditMode] = useState<"edit" | "propose">("edit");
+  const [reviseReason, setReviseReason] = useState("");
 
   const refresh = () => { qc.invalidateQueries({ queryKey: ["price-request", id] }); qc.invalidateQueries({ queryKey: ["price-requests"] }); };
   const mut = (fn: () => Promise<any>) => ({ mutationFn: fn, onSuccess: refresh, onError: onErr });
+
+  const revisions = useQuery({
+    queryKey: ["pr-revisions", id],
+    queryFn: () => api.get(`/price-requests/${id}/revisions`).then((r) => r.data),
+  });
+
+  const propose = useMutation({
+    mutationFn: () => api.post(`/price-requests/${id}/revise`, {
+      items: (editItems ?? []).map((row) => ({
+        description: row.description.trim(),
+        qty: Number(row.qty) || 0,
+        uom: row.uom.trim() || null,
+        spec: row.spec.trim() || null,
+      })),
+      reason: reviseReason.trim() || null,
+    }).then((r) => r.data),
+    onSuccess: () => {
+      setEditItems(null); setReviseReason("");
+      qc.invalidateQueries({ queryKey: ["pr-revisions", id] });
+      refresh();
+    },
+    onError: onErr,
+  });
 
   const saveItems = useMutation({
     mutationFn: () => api.patch(`/price-requests/${id}`, {
@@ -460,6 +487,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const stillDraft = pr.status === "draft" || pr.status === "rejected";
   const canEditItems = isDirector
     || (stillDraft && (role === "sales" || role === "manager" || role === "admin"));
+  const revLeft = revisions.data?.left ?? 0;
+  const revPending = (revisions.data?.revisions ?? []).some((r: any) => r.status === "pending");
+  // Negotiation path: propose a change on a request that has already gone out.
+  const canPropose = !stillDraft && !revPending && revLeft > 0
+    && (role === "sales" || role === "manager" || role === "admin" || isDirector);
   const editingLocked = editItems !== null && !stillDraft;
 
   return (
@@ -534,21 +566,41 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
           {canEditItems && editItems === null && (
             <button
               className="btn-ghost ml-auto text-xs"
-              onClick={() => setEditItems((pr.items ?? []).map((it: any) => ({
+              onClick={() => { setEditMode("edit"); setEditItems((pr.items ?? []).map((it: any) => ({
                 description: it.description ?? "",
                 qty: it.qty ?? 1,
                 uom: it.uom ?? "",
                 spec: it.spec ?? "",
-              })))}
+              }))); }}
             >
               <Pencil size={13} /> {t("Edit items", "Ubah barang")}
             </button>
+          )}
+          {canPropose && editItems === null && (
+            <button
+              className="btn-ghost ml-auto text-xs"
+              onClick={() => {
+                setEditMode("propose");
+                setEditItems((pr.items ?? []).map((it: any) => ({
+                  description: it.description ?? "", qty: it.qty ?? 1,
+                  uom: it.uom ?? "", spec: it.spec ?? "",
+                })));
+              }}
+            >
+              <Send size={13} /> {t(`Propose revision (${revLeft} left)`,
+                                    `Ajukan revisi (sisa ${revLeft})`)}
+            </button>
+          )}
+          {revPending && editItems === null && (
+            <span className="ml-auto chip bg-amber-100 text-amber-800">
+              {t("Revision waiting for the director", "Revisi menunggu direktur")}
+            </span>
           )}
         </div>
 
         {editItems !== null ? (
           <div className="mt-2 space-y-2">
-            {editingLocked && (
+            {editingLocked && editMode === "edit" && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2
                               text-xs text-amber-900 space-y-1">
                 <div className="font-semibold">
@@ -565,6 +617,20 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                        "Penawaran sudah dibuat dari permintaan ini — mengubah di sini tidak mengubah penawarannya.")}
                   </div>
                 )}
+              </div>
+            )}
+
+            {editMode === "propose" && (
+              <div className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2
+                              text-xs text-brand-900 space-y-1">
+                <div className="font-semibold">
+                  {t("This goes to the director as a revision.",
+                     "Ini dikirim ke direktur sebagai revisi.")}
+                </div>
+                <div>
+                  {t(`Nothing changes until it is approved. ${revLeft} of 3 revisions left — a rejected one doesn't count.`,
+                     `Tidak ada yang berubah sampai disetujui. Sisa ${revLeft} dari 3 revisi — yang ditolak tidak dihitung.`)}
+                </div>
               </div>
             )}
 
@@ -617,18 +683,29 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
               <Plus size={13} /> {t("Add line", "Tambah baris")}
             </button>
 
+            {editMode === "propose" && (
+              <input
+                className="input"
+                value={reviseReason}
+                onChange={(e) => setReviseReason(e.target.value)}
+                placeholder={t("Why is this changing? e.g. customer raised the quantity",
+                               "Alasan perubahan? cth. pelanggan menambah jumlah")}
+              />
+            )}
             <div className="flex items-center gap-2 pt-1">
               <button
                 className="btn-primary"
-                disabled={saveItems.isPending
+                disabled={(editMode === "propose" ? propose.isPending : saveItems.isPending)
                   || !editItems.length
                   || editItems.some((r) => !r.description.trim())}
-                onClick={() => saveItems.mutate()}
+                onClick={() => (editMode === "propose" ? propose.mutate() : saveItems.mutate())}
               >
-                {saveItems.isPending
+                {(editMode === "propose" ? propose.isPending : saveItems.isPending)
                   ? <Loader2 size={14} className="animate-spin" />
                   : <Check size={14} />}
-                {t("Save changes", "Simpan perubahan")}
+                {editMode === "propose"
+                  ? t("Send to director", "Kirim ke direktur")
+                  : t("Save changes", "Simpan perubahan")}
               </button>
               <button className="btn-ghost" onClick={() => setEditItems(null)}>
                 <X size={14} /> {t("Cancel", "Batal")}
@@ -709,6 +786,69 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         )}
         {pr.decision_notes && <div className="mt-3 text-xs muted">{t("Note:", "Catatan:")} {pr.decision_notes}</div>}
       </div>
+
+      {(revisions.data?.revisions ?? []).length > 0 && (
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="overline">{t("Negotiation log", "Riwayat negosiasi")}</span>
+            <span className="text-xs muted ml-auto">
+              {t(`${revisions.data.applied} of ${revisions.data.limit} revisions used`,
+                 `${revisions.data.applied} dari ${revisions.data.limit} revisi terpakai`)}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {revisions.data.revisions.map((rv: any) => (
+              <div key={rv.n} className={clsx(
+                "rounded-lg border px-3 py-2 text-sm",
+                rv.status === "approved" ? "border-emerald-200 bg-emerald-50/50"
+                : rv.status === "rejected" ? "border-red-200 bg-red-50/50"
+                : "border-amber-200 bg-amber-50/50",
+              )}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">#{rv.n}</span>
+                  <span className={clsx("chip",
+                    rv.status === "approved" ? "bg-emerald-100 text-emerald-800"
+                    : rv.status === "rejected" ? "bg-red-100 text-red-800"
+                    : "bg-amber-100 text-amber-800")}>
+                    {rv.status === "approved" ? t("approved", "disetujui")
+                     : rv.status === "rejected" ? t("rejected", "ditolak")
+                     : t("waiting", "menunggu")}
+                  </span>
+                  <span className="muted text-xs">{rv.requested_by_name}</span>
+                  <span className="muted text-xs">
+                    {rv.requested_at ? new Date(rv.requested_at).toLocaleString() : ""}
+                  </span>
+                  {rv.decided_by_name && (
+                    <span className="muted text-xs ml-auto">
+                      {t("decided by", "diputuskan")} {rv.decided_by_name}
+                    </span>
+                  )}
+                </div>
+                {rv.reason && <div className="mt-1">{rv.reason}</div>}
+                {(rv.changes ?? []).length > 0 && (
+                  <ul className="mt-1 text-xs muted list-disc pl-5">
+                    {rv.changes.map((ch: any, i: number) => (
+                      <li key={i}>
+                        {ch.kind === "added" && t(`added ${ch.description} × ${ch.qty}`,
+                                                  `tambah ${ch.description} × ${ch.qty}`)}
+                        {ch.kind === "removed" && t(`removed ${ch.description}`,
+                                                    `hapus ${ch.description}`)}
+                        {ch.kind === "qty" && t(`${ch.description}: ${ch.from} → ${ch.to}`,
+                                                `${ch.description}: ${ch.from} → ${ch.to}`)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {rv.decision_notes && (
+                  <div className="mt-1 text-xs muted">
+                    {t("Note:", "Catatan:")} {rv.decision_notes}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Spec sheets / customer RFQ files ride on the PR so purchasing can
           cost from the source documents. */}

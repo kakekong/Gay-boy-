@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.permissions import Role
 from app.models.approval import ApprovalRequest, ApprovalStatus
+from app.models.user import User as _User
 
 
 @dataclass(slots=True)
@@ -133,6 +134,36 @@ async def apply_to_target(
     Returns a small dict describing what was applied (for the API response).
     """
     applied: dict = {"target_type": req.target_type, "target_id": str(req.target_id)}
+    if req.target_type == "price_request_revision":
+        # A negotiation revision on a price request. Approving applies the
+        # proposed lines; rejecting leaves the request exactly as it was and
+        # does NOT spend one of the rep's three revisions — nothing changed.
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, req.target_id)
+        n = (req.payload or {}).get("revision_n")
+        if pr:
+            revs = list(pr.revisions or [])
+            for i, r in enumerate(revs):
+                if r.get("n") != n or r.get("status") != "pending":
+                    continue
+                r = dict(r)
+                r["status"] = "approved" if approve else "rejected"
+                r["decided_at"] = datetime.now(UTC).isoformat()
+                r["decision_notes"] = req.decision_notes
+                decider = await db.get(_User, req.decided_by) if req.decided_by else None
+                r["decided_by"] = str(req.decided_by) if req.decided_by else None
+                r["decided_by_name"] = decider.full_name if decider else None
+                revs[i] = r
+                if approve:
+                    pr.items = r.get("proposed_items") or pr.items
+                    if r.get("proposed_notes") is not None:
+                        pr.notes = r["proposed_notes"]
+                applied["revision"] = n
+                applied["revision_status"] = r["status"]
+                break
+            pr.revisions = revs
+        return applied
+
     if req.target_type in ("quotation", "discount"):
         from app.models.quotation import Quotation
         q = await db.get(Quotation, req.target_id)

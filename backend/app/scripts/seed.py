@@ -366,6 +366,9 @@ COLUMN_MIGRATIONS: list[str] = [
     # A maintenance action is about the database as a whole, so an audit row
     # can legitimately have no single entity to point at.
     "ALTER TABLE audit_log ALTER COLUMN entity_id DROP NOT NULL",
+
+    # Price-request negotiation history (who proposed what, and the decision).
+    "ALTER TABLE price_requests ADD COLUMN IF NOT EXISTS revisions JSONB NOT NULL DEFAULT '[]'::jsonb",
 ]
 
 

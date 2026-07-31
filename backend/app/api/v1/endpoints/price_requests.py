@@ -504,3 +504,142 @@ async def pending_counts(
                 PriceRequest.status == "pending_director",
                 PriceRequest.is_deleted.is_(False))) or 0
     return out
+
+
+# ─── Negotiation revisions ───────────────────────────────────────────────────
+# A price request that has left draft is a live commercial document, but a
+# negotiation moves: the customer trims a quantity, swaps a spec, asks for one
+# more line. Sales can propose that change, capped, and the director decides.
+#
+# The cap counts revisions the director *applied*, not proposals made. A
+# rejected proposal changed nothing, so it should not spend the budget — the
+# rep would otherwise be punished for the director's decision.
+
+MAX_APPLIED_REVISIONS = 3
+
+
+class ReviseIn(BaseModel):
+    items: list[ItemIn] = Field(default_factory=list)
+    notes: str | None = None
+    reason: str | None = None
+
+
+def _applied_revisions(pr: PriceRequest) -> int:
+    return len([r for r in (pr.revisions or []) if r.get("status") == "approved"])
+
+
+def _pending_revision(pr: PriceRequest) -> dict | None:
+    return next((r for r in (pr.revisions or []) if r.get("status") == "pending"), None)
+
+
+@router.post("/{pr_id}/revise")
+async def propose_revision(
+    pr_id: UUID,
+    payload: ReviseIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Propose a change to a submitted request. The director decides."""
+    pr = await _scoped(pr_id, db, user)
+    if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.ADMIN, Role.DIRECTOR):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only sales, a manager, admin or the director can revise a request")
+    if pr.status in ("draft", "rejected"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This request is still a draft — edit it directly, no approval needed.",
+        )
+    if _pending_revision(pr):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A revision is already waiting for the director. Wait for that "
+            "decision before proposing another.",
+        )
+    used = _applied_revisions(pr)
+    if used >= MAX_APPLIED_REVISIONS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This request has already been revised {used} times, the limit. "
+            "Raise a new price request instead.",
+        )
+    if not payload.items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A revision needs at least one line")
+
+    proposed = _norm_items(payload.items, list(pr.items or []))
+    n = len(pr.revisions or []) + 1
+    entry = {
+        "n": n,
+        "status": "pending",
+        "requested_by": str(user.id),
+        "requested_by_name": user.full_name,
+        "requested_at": datetime.now(UTC).isoformat(),
+        "reason": (payload.reason or "").strip() or None,
+        "before_items": list(pr.items or []),
+        "proposed_items": proposed,
+        "proposed_notes": payload.notes,
+        "before_notes": pr.notes,
+    }
+    pr.revisions = list(pr.revisions or []) + [entry]
+
+    from app.core.approval import request_approval
+    req = await request_approval(
+        db,
+        target_type="price_request_revision",
+        target_id=pr.id,
+        requested_by=user.id,
+        required_role=Role.DIRECTOR,
+        reason=(f"Revision {n} of {pr.number}"
+                + (f" — {entry['reason']}" if entry["reason"] else "")),
+        payload={"revision_n": n},
+    )
+    entry["approval_request_id"] = str(req.id)
+    pr.revisions = list(pr.revisions)          # re-assign so JSONB is flagged dirty
+    await audit_record(db, actor=user, action="propose_revision",
+                       entity="price_request", entity_id=pr.id,
+                       after={"revision": n, "reason": entry["reason"]})
+    await db.flush()
+    return {
+        "ok": True, "revision": n,
+        "revisions_left": MAX_APPLIED_REVISIONS - used,
+        "approval_request_id": str(req.id),
+        "price_request": await _serialize(db, pr, Role(user.role)),
+    }
+
+
+@router.get("/{pr_id}/revisions")
+async def list_revisions(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The negotiation log — every proposal and what came of it."""
+    pr = await _scoped(pr_id, db, user)
+    role = Role(user.role)
+    out = []
+    for r in (pr.revisions or []):
+        row = {k: r.get(k) for k in
+               ("n", "status", "requested_by_name", "requested_at", "reason",
+                "decided_by_name", "decided_at", "decision_notes")}
+        # Show what actually changed, not two raw item blobs.
+        before = {(i.get("description") or "").strip(): i for i in (r.get("before_items") or [])}
+        after = {(i.get("description") or "").strip(): i for i in (r.get("proposed_items") or [])}
+        changes = []
+        for desc, item in after.items():
+            old = before.get(desc)
+            if old is None:
+                changes.append({"kind": "added", "description": desc, "qty": item.get("qty")})
+            elif float(old.get("qty") or 0) != float(item.get("qty") or 0):
+                changes.append({"kind": "qty", "description": desc,
+                                "from": old.get("qty"), "to": item.get("qty")})
+        for desc in before:
+            if desc not in after:
+                changes.append({"kind": "removed", "description": desc})
+        row["changes"] = changes
+        # Costs and prices are not sales' to see on a request they don't own;
+        # the same rule the serializer applies to the live lines.
+        if not _can_see_cost(role) and not _can_see_sell(role):
+            row.pop("decision_notes", None)
+        out.append(row)
+    return {"revisions": out, "applied": _applied_revisions(pr),
+            "limit": MAX_APPLIED_REVISIONS,
+            "left": max(0, MAX_APPLIED_REVISIONS - _applied_revisions(pr))}

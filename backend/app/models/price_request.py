@@ -43,6 +43,12 @@ class PriceRequest(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixi
     items: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
 
+    # Negotiation history. One entry per revision sales proposed after the
+    # request left draft: what changed, who asked, and what the director
+    # decided. Kept on the row rather than in a side table because it is only
+    # ever read with the request itself, and it is capped at a handful.
+    revisions: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+
     # Purchasing fills costs
     priced_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     priced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
