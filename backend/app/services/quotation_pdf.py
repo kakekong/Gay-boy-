@@ -136,7 +136,10 @@ def _draw_frame_and_chrome(canvas, doc) -> None:
     canvas.setFillColor(INK_SOFT)
     canvas.setFont("Helvetica", 7)
     canvas.drawString(MARGIN_X, fy, " ".join(COMPANY_NAME))
-    canvas.drawCentredString(w / 2, fy, " ".join("PENAWARAN HARGA"))
+    # The document's own name, so this chrome can carry other sheets too
+    # (the customer-PO confirmation reuses it).
+    footer_label = getattr(doc, "footer_label", "PENAWARAN HARGA")
+    canvas.drawCentredString(w / 2, fy, " ".join(footer_label))
     canvas.drawRightString(right, fy, f"PAGE {doc.page:02d} / {doc._total_pages:02d}"
                            if getattr(doc, "_total_pages", None) else f"PAGE {doc.page:02d}")
     canvas.restoreState()

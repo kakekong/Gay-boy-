@@ -153,7 +153,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 19 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 20 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -184,6 +184,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
+| `test_customer_po_sheet.py` | the order-confirmation PDF: ship-to and PIC chosen at download, address fallback, cross-customer contact refused |
 | `test_efaktur.py` | e-Faktur CSV export |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`

@@ -4,9 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Receipt, Building2, FileText, Briefcase, Calendar,
   Loader2, AlertCircle, Check, X, TrendingUp, Wallet, AlertTriangle,
+  Download, Pencil, MapPin, User as UserIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { downloadFile } from "@/lib/download";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { useAuthStore } from "@/store/auth";
@@ -721,12 +723,7 @@ export default function CustomerPODetailPage() {
         )}
       </div>
 
-      {p.notes && (
-        <div className="card p-5">
-          <div className="text-[10px] uppercase tracking-wider muted mb-1">{t("Notes", "Catatan")}</div>
-          <div className="text-sm whitespace-pre-wrap">{p.notes}</div>
-        </div>
-      )}
+      <KeteranganCard po={p} />
 
       {/* PO file (and any other attachments) */}
       <AttachmentsSection ownerType="customer_po" ownerId={p.id} />
@@ -942,6 +939,193 @@ function CustomerRecap({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+interface PdfOptions {
+  ship_to: { key: string; label: string; address: string }[];
+  pics: { id: string | null; name: string; position: string; phone: string;
+          email: string; primary: boolean }[];
+  keterangan: string;
+}
+
+/**
+ * The keterangan, and the order-confirmation sheet it prints on.
+ *
+ * Where the goods go and who owns the order are asked at download time rather
+ * than stored: the same customer takes delivery at a site and paperwork at
+ * head office, and the responsible person changes from order to order.
+ */
+function KeteranganCard({ po }: { po: any }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(po.notes ?? "");
+  const [open, setOpen] = useState(false);
+  const [shipTo, setShipTo] = useState("delivery");
+  const [contactIdx, setContactIdx] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/customer-pos/${po.id}`, { notes: draft }),
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["customer-po", po.id] });
+      qc.invalidateQueries({ queryKey: ["customer-pos"] });
+    },
+  });
+
+  const opts = useQuery({
+    queryKey: ["po-pdf-options", po.id],
+    queryFn: () => api.get(`/customer-pos/${po.id}/pdf-options`)
+      .then((r) => r.data as PdfOptions),
+    enabled: open,
+  });
+
+  const pics = opts.data?.pics ?? [];
+  const chosen = pics[contactIdx];
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="overline">{t("Keterangan / Notes", "Keterangan")}</span>
+        {!editing && (
+          <button className="btn-ghost text-xs" onClick={() => { setDraft(po.notes ?? ""); setEditing(true); }}>
+            <Pencil size={13} /> {t("Edit", "Ubah")}
+          </button>
+        )}
+        <button className="btn-primary text-xs ml-auto" onClick={() => setOpen(true)}>
+          <Download size={13} /> {t("Download PDF", "Unduh PDF")}
+        </button>
+      </div>
+
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            className="input min-h-[100px]" autoFocus value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={t("e.g. Delivered in stages. 60% before first shipment. Confirm unloading slot 2 days ahead.",
+                           "cth. Barang dikirim bertahap. Termin 1 (60%) sebelum pengiriman pertama. Konfirmasi jadwal unloading H-2.")}
+          />
+          <div className="flex gap-2">
+            <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              {t("Save", "Simpan")}
+            </button>
+            <button className="btn-ghost" onClick={() => setEditing(false)}>
+              <X size={14} /> {t("Cancel", "Batal")}
+            </button>
+          </div>
+          <p className="text-[11px] muted">
+            {t("This prints on the order confirmation sheet.",
+               "Ini tercetak pada lembar konfirmasi pesanan.")}
+          </p>
+        </div>
+      ) : (
+        <div className="text-sm whitespace-pre-wrap">
+          {po.notes || <span className="muted">{t("No keterangan yet.", "Belum ada keterangan.")}</span>}
+        </div>
+      )}
+
+      {open && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4">
+          <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
+          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[85vh] overflow-y-auto">
+            <header className="p-4 border-b border-ink-100 flex items-center gap-2">
+              <FileText size={16} className="text-brand-600" />
+              <span className="text-lg font-semibold">
+                {t("Order confirmation sheet", "Lembar konfirmasi pesanan")}
+              </span>
+              <button className="ml-auto text-ink-400 hover:text-ink-800"
+                      onClick={() => setOpen(false)} aria-label="Close"><X size={16} /></button>
+            </header>
+
+            {opts.isLoading ? (
+              <div className="p-8 text-center muted">
+                <Loader2 size={16} className="animate-spin inline" /> {t("Loading…", "Memuat…")}
+              </div>
+            ) : (
+              <div className="p-4 space-y-4">
+                <div>
+                  <div className="overline mb-2 flex items-center gap-1">
+                    <MapPin size={12} /> {t("Ship to", "Kirim ke")}
+                  </div>
+                  <div className="space-y-2">
+                    {(opts.data?.ship_to ?? []).map((s) => (
+                      <label key={s.key} className={clsx(
+                        "block rounded-lg border px-3 py-2 cursor-pointer",
+                        shipTo === s.key ? "border-brand-400 bg-brand-50/60" : "border-ink-200",
+                        !s.address && "opacity-60",
+                      )}>
+                        <div className="flex items-center gap-2">
+                          <input type="radio" name="shipto" checked={shipTo === s.key}
+                                 onChange={() => setShipTo(s.key)} />
+                          <span className="text-sm font-medium">{s.label}</span>
+                        </div>
+                        <div className="text-xs muted whitespace-pre-wrap mt-1 pl-6">
+                          {s.address || t("Not set on the customer — the office address is used instead.",
+                                          "Belum diisi pada pelanggan — alamat kantor yang dipakai.")}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="overline mb-2 flex items-center gap-1">
+                    <UserIcon size={12} /> {t("PIC for this order", "PIC pesanan ini")}
+                  </div>
+                  {pics.length ? (
+                    <select className="input" value={contactIdx}
+                            onChange={(e) => setContactIdx(Number(e.target.value))}>
+                      {pics.map((p2, i) => (
+                        <option key={i} value={i}>
+                          {p2.name}{p2.position ? ` — ${p2.position}` : ""}
+                          {p2.primary ? t(" (primary)", " (utama)") : ""}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-sm muted">
+                      {t("This customer has no contacts yet — add one on the customer page.",
+                         "Pelanggan ini belum punya kontak — tambahkan di halaman pelanggan.")}
+                    </p>
+                  )}
+                  {chosen && (
+                    <div className="text-xs muted mt-1">
+                      {[chosen.phone, chosen.email].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button className="btn-ghost" onClick={() => setOpen(false)}>
+                    {t("Cancel", "Batal")}
+                  </button>
+                  <button
+                    className="btn-primary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      await downloadFile(
+                        `/customer-pos/${po.id}/export.pdf`,
+                        `KonfirmasiPesanan-${po.number}.pdf`,
+                        { ship_to: shipTo, contact_id: chosen?.id ?? undefined },
+                      );
+                      setBusy(false);
+                      setOpen(false);
+                    }}
+                  >
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    {t("Download", "Unduh")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

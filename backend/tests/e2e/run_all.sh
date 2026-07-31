@@ -64,6 +64,11 @@ echo "=== pytest unit suites ==="
 PYTHONPATH=. python -m pytest tests/test_permissions.py tests/test_discount_rules.py \
   tests/test_financials.py -q 2>&1 | tail -2
 echo "=== DP flow ==="
-python tests/e2e_dp_flow.py 2>&1 | grep RESULT
+dp=$(python tests/e2e_dp_flow.py 2>&1)
+echo "$dp" | grep RESULT || echo "DP flow: NO RESULT"
+# Name the failing checks. Printing only the tally left us guessing which one
+# broke, which is exactly when you most want the name.
+echo "$dp" | grep -E "^  FAIL" || true
+echo "$dp" | grep RESULT | grep -qE "RESULT: [0-9]+ passed, 0 failed" || fail=1
 
 exit $fail

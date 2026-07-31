@@ -18,7 +18,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
 from app.models.approval import ApprovalRequest, ApprovalStatus
-from app.models.crm import Customer
+from app.models.crm import Customer, CustomerContact
 from app.models.customer_po import CustomerPO
 from app.models.operation import Project
 from app.models.quotation import Quotation
@@ -807,3 +807,118 @@ async def _spawn_project(
         "project_id": str(project.id),
     })
     return project
+
+
+# ─── Order confirmation sheet ────────────────────────────────────────────────
+# Where it ships and who owns the order are decided per shipment, not stored on
+# the PO: the same customer takes goods at a site and paperwork at head office,
+# and which of their people is responsible changes order to order. So both are
+# picked at download time and printed onto the sheet.
+
+@router.get("/{po_id}/pdf-options")
+async def customer_po_pdf_options(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_any_internal),
+):
+    """The addresses and contacts this PO could be printed against."""
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    if Role(user.role) == Role.SALES:
+        c = await db.get(Customer, po.customer_id)
+        if not c or c.sales_pic_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
+
+    cust = await db.get(Customer, po.customer_id)
+    ship_to = [
+        {"key": "office", "label": "Kantor / Office",
+         "address": (cust.company_address if cust else None) or ""},
+        {"key": "delivery", "label": "Alamat Pengiriman / Delivery",
+         "address": (cust.delivery_address if cust else None) or ""},
+    ]
+    pics = []
+    if cust and cust.pic_name:
+        pics.append({"id": None, "name": cust.pic_name,
+                     "position": cust.pic_position or "", "phone": cust.phone or "",
+                     "email": cust.email or "", "primary": True})
+    for ct in (await db.scalars(
+        select(CustomerContact).where(CustomerContact.customer_id == po.customer_id)
+        .order_by(CustomerContact.is_primary.desc(), CustomerContact.name)
+    )).all():
+        pics.append({"id": str(ct.id), "name": ct.name, "position": ct.position or "",
+                     "phone": ct.phone or "", "email": ct.email or "",
+                     "primary": ct.is_primary})
+    return {"ship_to": ship_to, "pics": pics, "keterangan": po.notes or ""}
+
+
+@router.get("/{po_id}/export.pdf")
+async def export_customer_po_pdf(
+    po_id: UUID,
+    ship_to: str = "delivery",
+    contact_id: UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_any_internal),
+):
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    cust = await db.get(Customer, po.customer_id)
+    if Role(user.role) == Role.SALES and (not cust or cust.sales_pic_id != user.id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
+    if ship_to not in ("office", "delivery"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "ship_to must be 'office' or 'delivery'")
+
+    if ship_to == "office":
+        label, address = "Kantor", (cust.company_address if cust else "") or ""
+    else:
+        # Fall back to the office address rather than printing a blank block —
+        # a sheet with no destination on it is worse than the wrong heading.
+        label = "Alamat Pengiriman"
+        address = (cust.delivery_address if cust else "") or ""
+        if not address:
+            label, address = "Kantor", (cust.company_address if cust else "") or ""
+
+    if contact_id:
+        ct = await db.get(CustomerContact, contact_id)
+        if not ct or ct.customer_id != po.customer_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "That contact doesn't belong to this customer")
+        pic = (ct.name, ct.position or "", ct.phone or "", ct.email or "")
+    else:
+        pic = ((cust.pic_name if cust else "") or "",
+               (cust.pic_position if cust else "") or "",
+               (cust.phone if cust else "") or "",
+               (cust.email if cust else "") or "")
+
+    quote_no = None
+    if po.quotation_id:
+        from app.models.quotation import Quotation
+        q = await db.get(Quotation, po.quotation_id)
+        quote_no = q.number if q else None
+
+    sales_name = ""
+    if cust and cust.sales_pic_id:
+        rep = await db.get(User, cust.sales_pic_id)
+        sales_name = rep.full_name if rep else ""
+
+    from app.services.customer_po_pdf import build_customer_po_pdf
+    pdf = build_customer_po_pdf(
+        number=po.number,
+        po_date=po.po_date.strftime("%d %B %Y") if po.po_date else "—",
+        customer_name=cust.company_name if cust else "—",
+        ship_to_label=label, ship_to_address=address,
+        pic_name=pic[0], pic_position=pic[1], pic_phone=pic[2], pic_email=pic[3],
+        quotation_number=quote_no,
+        rows=list(po.items or []),
+        total=float(po.total or 0),
+        keterangan=po.notes,
+        sales_pic=sales_name or (user.full_name or ""),
+    )
+    from fastapi.responses import Response
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="KonfirmasiPesanan-{po.number}.pdf"'},
+    )
