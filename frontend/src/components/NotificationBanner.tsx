@@ -65,7 +65,10 @@ const WRITE_PREF = (k: string, v: boolean) => {
   try { localStorage.setItem(k, String(v)); } catch { /* noop */ }
 };
 
-const AUTO_DISMISS_MS = 25_000;
+// Short on purpose. These sit top-right, which is also where the Approve /
+// Reject buttons live on the approvals cards — at 25s a banner could cover the
+// button for most of the time it took someone to read the request.
+const AUTO_DISMISS_MS = 8_000;
 
 function chime(vol = 0.06) {
   // Two-note ascending arpeggio. Kept short + soft so it doesn't

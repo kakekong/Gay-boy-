@@ -153,7 +153,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 22 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 23 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -187,6 +187,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_customer_po_sheet.py` | the order-confirmation PDF: ship-to and PIC chosen at download, address fallback, cross-customer contact refused |
 | `test_pr_revisions.py` | negotiation revisions: capped at 3 applied, one pending at a time, a rejection changes nothing and costs nothing |
 | `test_cross_dept_chat.py` | cross-department chat by request: approving opens it, rejecting opens nothing, no duplicate asks |
+| `test_approval_preview.py` | the document preview on an approval request: lines and per-line money, the keterangan, files attached to the *document*, revision before/after, director-only |
 | `test_efaktur.py` | e-Faktur CSV export |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`
@@ -400,6 +401,20 @@ Chat messages and discussion comments both push instantly.
 - **Dateless rows in date arithmetic.** `smart_reminder.py` crashed on
   `r.due_at - datetime.now(UTC)` when `due_at` was None. Filter with
   `Reminder.due_at.is_not(None)` before subtracting anywhere.
+- **Drivers share one database, so re-runs are not free.** `run_all.sh` without
+  `--fresh` re-runs everything on the accumulated data. Most drivers tag their
+  fixtures with a random suffix and cope; `e2e_dp_flow.py` uses hardcoded
+  document numbers (`DP-001`, `PO-CUST-A1`, `INV-EF-001`) and **will** 409 on a
+  second run — that is a fixture artefact, not a product bug. Use `--fresh`
+  before believing a failure. `--fresh` now terminates open connections and
+  aborts loudly if the DROP fails; it used to swallow the error and silently
+  run on days-old data, which is how a stale notification dismissal and 52
+  leftover customers once read as two product bugs.
+- **A driver that dismisses a notification must undo it.** Dismissal ids are
+  deliberately day-scoped (that *is* the fix in `test_lost_and_badges.py`), and
+  there is no un-dismiss endpoint — so a second run the same day finds the
+  alert already gone. That driver deletes its own `notification_dismissed` rows
+  up front; copy that if you write another.
 - **`'text/html' is not a valid JavaScript MIME type`** — a stale-build symptom
   after a Vercel deploy: the browser holds an old index.html referencing a hash
   that no longer exists. Handled by a reload-on-chunk-error path; if it
@@ -412,6 +427,19 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Show the document behind an approval request
+Open cross-department chats by request instead of refusing them
+Let sales negotiate a price request, capped at three revisions
+Add a keterangan and an order confirmation sheet to the customer PO
+Require a reason to mark a deal lost, and make dismissed alerts stay dismissed
+Let the director edit a price request after it leaves draft
+Add a director-only screen for clearing test data
+Add WhatsApp-style replies and forwarding to every conversation
+Add a Back button to the app chrome, on mobile and desktop
+Quotation PDF: use the real TE mark and draw the capability icons
+Quotation PDF: rebuild on the company's PENAWARAN HARGA letterhead
+Re-skin the app to the VOLER industrial design system
+Discussions: @mentions, and gate threads on the document behind them
 Count only what is still owed as outstanding AR
 docs: handoff brief so a new chat picks up with the same context
 Preserve the end-to-end audit drivers as a runnable suite
@@ -434,10 +462,26 @@ Fix AI Top Actions crash on dateless stage tasks
 Features added in that stretch: instant push for chat and discussions,
 date-gated stage tasks, mobile chat scroll fix, attendance **daily log** (text +
 file + link attachments), link attachments generally, e-Faktur CSV export,
-Ongoing/Closed project sections.
+Ongoing/Closed project sections, the VOLER re-skin, @mentions, a Back button in
+the app chrome, WhatsApp-style replies and forwarding, the director-only test
+data purge, director-editable price requests with capped negotiation revisions,
+the customer-PO keterangan and order confirmation sheet, cross-department chat
+by request, and document previews in the approval inbox.
 
 ## 10. Open items
 
+- **Nothing has actually been purged yet.** The director-only *Clear test data*
+  screen is built, tested and deployed, but it is the user who has to run it
+  against production. Until they do, the test customers/projects/POs they asked
+  about are still there. Preview first — it lists exactly what will go.
+- **The 11 real staff accounts have not been created.** The emails and roles
+  were supplied (7 sales, director, purchasing, finance, admin, all
+  `@voler.co.id`); creating them is a production action the user performs.
+  A self-service password-change screen was offered and not built — ask before
+  assuming it is wanted.
+- **This sandbox cannot reach production.** The proxy returns 000/403 for
+  `onrender.com`, `vercel.app` and the Neon database. Anything that has to
+  touch live data is the user's to run; never claim to have verified it.
 - **The Hugging Face Space still needs a manual rebuild.** A large batch of
   backend fixes (security lockdown, money integrity, stale queues, approval
   gates, outstanding-AR netting) is pushed but **not live** until the user

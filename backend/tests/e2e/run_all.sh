@@ -25,8 +25,20 @@ pg_isready -h 127.0.0.1 -p 55432 -q || {
 }
 
 if [ "${1:-}" = "--fresh" ]; then
+  # DROP DATABASE fails while anything is still connected — a stray dev server
+  # on :8099 is enough. That used to be swallowed by >/dev/null, so --fresh
+  # quietly kept the old database and the drivers ran on days-old leftovers
+  # while claiming to be fresh. Kick the connections off, then insist it worked.
   su -s /bin/bash nobody -c "/usr/lib/postgresql/16/bin/psql -h /tmp -p 55432 -U postgres \
-    -c 'DROP DATABASE IF EXISTS transmisi_test' -c 'CREATE DATABASE transmisi_test'" >/dev/null 2>&1
+    -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+         WHERE datname = 'transmisi_test' AND pid <> pg_backend_pid()\"" >/dev/null 2>&1
+  drop_out=$(su -s /bin/bash nobody -c "/usr/lib/postgresql/16/bin/psql -h /tmp -p 55432 -U postgres \
+    -v ON_ERROR_STOP=1 -c 'DROP DATABASE IF EXISTS transmisi_test' \
+    -c 'CREATE DATABASE transmisi_test'" 2>&1) || {
+    echo "--fresh FAILED to recreate the database — refusing to run on stale data:"
+    echo "$drop_out" | tail -3
+    exit 1
+  }
   rm -rf /tmp/storage_test/* 2>/dev/null
   python -m app.scripts.seed >/dev/null 2>&1
   # the seed only creates 6 demo users; these two are needed by the drivers

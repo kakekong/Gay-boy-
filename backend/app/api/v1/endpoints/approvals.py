@@ -391,3 +391,178 @@ async def reject(
         after={"approval_request_id": str(req.id), "notes": notes, "applied": applied},
     )
     return {"id": str(req.id), "status": req.status, "applied": applied}
+
+
+# ─── What am I actually approving? ───────────────────────────────────────────
+# The queue used to show a title and two buttons. For a PO or a purchase
+# request that is not enough to decide on — you want the lines, the money, and
+# the files the requester attached. This returns one normalised shape so the UI
+# has a single renderer regardless of what is being approved.
+
+async def _attachments_for(db: AsyncSession, owner_type: str, owner_id) -> list[dict]:
+    from app.models.attachment import Attachment
+    rows = (await db.scalars(
+        select(Attachment).where(
+            Attachment.owner_type == owner_type, Attachment.owner_id == owner_id,
+        ).order_by(Attachment.created_at.desc())
+    )).all()
+    return [{"id": str(a.id), "filename": a.filename,
+             "description": a.description, "external_url": a.external_url,
+             "size": a.size, "content_type": a.content_type}
+            for a in rows]
+
+
+def _money(n) -> float:
+    try:
+        return float(n or 0)
+    except Exception:
+        return 0.0
+
+
+@router.get("/{req_id}/preview")
+async def preview_request(
+    req_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR, Role.FINANCE)),
+):
+    """The document behind an approval request — fields, lines, money, files."""
+    req = await db.get(ApprovalRequest, req_id)
+    if not req:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Request not found")
+
+    out: dict = {
+        "target_type": req.target_type, "title": None, "subtitle": None,
+        "fields": [], "items": [], "total": None, "notes": None,
+        "attachments": await _attachments_for(db, "approval_request", req.id),
+        "link": None,
+    }
+    t, tid = req.target_type, req.target_id
+
+    if t in ("quotation", "quotation_won", "discount"):
+        from app.models.quotation import Quotation, QuotationItem
+        q = await db.get(Quotation, tid)
+        if q:
+            cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+            rows = (await db.scalars(select(QuotationItem)
+                    .where(QuotationItem.quotation_id == q.id))).all()
+            out.update(
+                title=q.number, subtitle=cust.company_name if cust else None,
+                link=f"/quotations/{q.id}", notes=q.notes,
+                total=_money(q.total) if hasattr(q, "total") else None,
+                items=[{"description": i.description, "qty": _money(i.qty),
+                        "unit_price": _money(i.unit_price),
+                        "line_total": _money(i.qty) * _money(i.unit_price)} for i in rows],
+                fields=[{"label": "Status", "value": q.status},
+                        {"label": "Valid until", "value": str(q.valid_until or "—")}],
+            )
+            out["attachments"] += await _attachments_for(db, "quotation", q.id)
+
+    elif t == "customer_po":
+        from app.models.customer_po import CustomerPO
+        po = await db.get(CustomerPO, tid)
+        if po:
+            cust = await db.get(Customer, po.customer_id) if po.customer_id else None
+            out.update(
+                title=po.number, subtitle=cust.company_name if cust else None,
+                link=f"/customer-pos/{po.id}", notes=po.notes,
+                total=_money(po.total),
+                items=[{"description": i.get("description"), "qty": _money(i.get("qty")),
+                        "unit_price": _money(i.get("unit_price")),
+                        "line_total": _money(i.get("qty")) * _money(i.get("unit_price"))}
+                       for i in (po.items or [])],
+                fields=[{"label": "PO date", "value": str(po.po_date or "—")},
+                        {"label": "Down payment",
+                         "value": "yes" if po.is_downpayment else "no"}],
+            )
+            out["attachments"] += await _attachments_for(db, "customer_po", po.id)
+
+    elif t == "purchase_request":
+        from app.models.purchasing import PurchaseRequest
+        pr = await db.get(PurchaseRequest, tid)
+        if pr:
+            out.update(
+                title=pr.number, subtitle=None, notes=pr.notes,
+                link="/purchasing",
+                items=[{"description": i.get("description"), "qty": _money(i.get("qty")),
+                        "unit_price": None, "line_total": None}
+                       for i in (pr.items or [])],
+                fields=[{"label": "Status", "value": pr.status}],
+            )
+
+    elif t == "supplier_po":
+        from app.models.purchasing import SupplierPO, Supplier
+        sp = await db.get(SupplierPO, tid)
+        if sp:
+            sup = await db.get(Supplier, sp.supplier_id) if sp.supplier_id else None
+            out.update(
+                title=sp.number, subtitle=sup.name if sup else None,
+                link="/purchase-orders", total=_money(getattr(sp, "total", 0)),
+                items=[{"description": i.get("description"), "qty": _money(i.get("qty")),
+                        "unit_price": _money(i.get("unit_price")),
+                        "line_total": _money(i.get("qty")) * _money(i.get("unit_price"))}
+                       for i in (getattr(sp, "items", None) or [])],
+                fields=[{"label": "Status", "value": sp.status}],
+            )
+            out["attachments"] += await _attachments_for(db, "supplier_po", sp.id)
+
+    elif t == "price_request_revision":
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, tid)
+        n = (req.payload or {}).get("revision_n")
+        if pr:
+            cust = await db.get(Customer, pr.customer_id) if pr.customer_id else None
+            rev = next((r for r in (pr.revisions or []) if r.get("n") == n), None)
+            proposed = (rev or {}).get("proposed_items") or []
+            before = {(i.get("description") or ""): i for i in ((rev or {}).get("before_items") or [])}
+            out.update(
+                title=f"{pr.number} — revision {n}",
+                subtitle=cust.company_name if cust else None,
+                link=f"/price-requests?open={pr.id}",
+                notes=(rev or {}).get("reason"),
+                # Show the proposal, with the old quantity beside anything that
+                # moved — the decision is about the change, not the whole list.
+                items=[{"description": i.get("description"), "qty": _money(i.get("qty")),
+                        "was_qty": _money(before[i.get("description")].get("qty"))
+                        if i.get("description") in before else None,
+                        "is_new": i.get("description") not in before,
+                        "unit_price": None, "line_total": None}
+                       for i in proposed],
+                fields=[{"label": "Requested by",
+                         "value": (rev or {}).get("requested_by_name") or "—"},
+                        {"label": "Revisions used",
+                         "value": f"{len([r for r in (pr.revisions or []) if r.get('status') == 'approved'])} of 3"}],
+            )
+            out["attachments"] += await _attachments_for(db, "price_request", pr.id)
+
+    elif t == "cross_dept_chat":
+        requester = await db.get(User, req.requested_by)
+        other = await db.get(User, tid)
+        out.update(
+            title="Cross-department conversation",
+            subtitle=(f"{requester.full_name if requester else '?'} → "
+                      f"{other.full_name if other else '?'}"),
+            notes=(req.payload or {}).get("reason"),
+            fields=[{"label": "From", "value": (requester.role if requester else "—")},
+                    {"label": "To", "value": (other.role if other else "—")}],
+        )
+
+    elif t == "project":
+        from app.models.operation import Project
+        p = await db.get(Project, tid)
+        if p:
+            cust = await db.get(Customer, p.customer_id) if p.customer_id else None
+            out.update(title=p.code, subtitle=cust.company_name if cust else None,
+                       link=f"/projects/{p.id}", total=_money(p.po_value),
+                       fields=[{"label": "Status", "value": p.status}])
+            out["attachments"] += await _attachments_for(db, "project", p.id)
+
+    elif t in ("customer", "followup"):
+        cust = await db.get(Customer, tid)
+        if cust:
+            out.update(title=cust.company_name, link=f"/customers/{cust.id}",
+                       fields=[{"label": "Stage", "value": cust.stage}])
+
+    if not out["title"]:
+        # Never leave the panel blank — the raw request is better than nothing.
+        out["title"] = req.reason or req.target_type
+    return out

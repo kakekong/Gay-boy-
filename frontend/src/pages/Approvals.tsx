@@ -462,6 +462,8 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             </div>
           )}
 
+          <DocumentPreview requestId={r.id} />
+
           <div className="mt-2">
             <button
               onClick={() => setShowRaw((v) => !v)}
@@ -515,6 +517,171 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
           contentType={preview.content_type}
           onClose={() => setPreview(null)}
         />
+      )}
+    </div>
+  );
+}
+
+
+interface PreviewShape {
+  target_type: string;
+  title: string | null;
+  subtitle: string | null;
+  fields: { label: string; value: string }[];
+  items: {
+    description: string | null; qty: number;
+    unit_price: number | null; line_total: number | null;
+    was_qty?: number | null; is_new?: boolean;
+  }[];
+  total: number | null;
+  notes: string | null;
+  attachments: ApprovalAttachment[];
+  link: string | null;
+}
+
+const rp = (n: number | null | undefined) =>
+  n == null ? "—" : "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n));
+
+/**
+ * What is actually being approved.
+ *
+ * The queue used to show a one-line title and two buttons, which is not enough
+ * to decide a purchase order on — you want the lines, the money, and the files
+ * the requester attached. Loaded on demand so a queue of twenty requests
+ * doesn't fetch twenty documents nobody opened.
+ */
+function DocumentPreview({ requestId }: { requestId: string }) {
+  const [open, setOpen] = useState(true);
+  const q = useQuery({
+    queryKey: ["approval-preview", requestId],
+    queryFn: () => api.get(`/approvals/${requestId}/preview`)
+      .then((r) => r.data as PreviewShape),
+    enabled: open,
+  });
+  const p = q.data;
+
+  return (
+    <div className="mt-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-[11px] text-brand-700 hover:underline"
+      >
+        {open ? "Hide details" : "Show what's being approved"}
+      </button>
+      {open && (
+        <div className="mt-2 rounded-lg border border-ink-200 bg-white p-3">
+          {q.isLoading ? (
+            <div className="text-xs muted flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" /> Loading the document…
+            </div>
+          ) : !p ? (
+            <div className="text-xs muted">Couldn't load the document.</div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">{p.title}</span>
+                {p.subtitle && <span className="text-sm muted">· {p.subtitle}</span>}
+                {p.link && (
+                  <Link to={p.link} className="ml-auto text-xs text-brand-700 hover:underline">
+                    Open the document →
+                  </Link>
+                )}
+              </div>
+
+              {p.fields.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                  {p.fields.map((f, i) => (
+                    <span key={i}>
+                      <span className="muted">{f.label}: </span>{f.value}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {p.items.length > 0 && (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-ink-50">
+                      <tr>
+                        <th className="th text-left">Description</th>
+                        <th className="th text-right">Qty</th>
+                        {p.items.some((i) => i.unit_price != null) && (
+                          <>
+                            <th className="th text-right">Unit</th>
+                            <th className="th text-right">Total</th>
+                          </>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {p.items.map((it, i) => (
+                        <tr key={i} className="border-t border-ink-100">
+                          <td className="td">
+                            {it.description}
+                            {it.is_new && (
+                              <span className="chip bg-emerald-100 text-emerald-800 ml-1">new</span>
+                            )}
+                          </td>
+                          <td className="td text-right tabular-nums">
+                            {it.was_qty != null && it.was_qty !== it.qty && (
+                              <span className="muted line-through mr-1">{it.was_qty}</span>
+                            )}
+                            {it.qty}
+                          </td>
+                          {p.items.some((x) => x.unit_price != null) && (
+                            <>
+                              <td className="td text-right tabular-nums">{rp(it.unit_price)}</td>
+                              <td className="td text-right tabular-nums">{rp(it.line_total)}</td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                    {p.total != null && (
+                      <tfoot>
+                        <tr className="border-t border-ink-200 font-semibold">
+                          <td className="td" colSpan={p.items.some((x) => x.unit_price != null) ? 3 : 1}>
+                            Total
+                          </td>
+                          <td className="td text-right tabular-nums">{rp(p.total)}</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+
+              {p.notes && (
+                <div className="mt-2 text-xs whitespace-pre-wrap">
+                  <span className="muted">Notes: </span>{p.notes}
+                </div>
+              )}
+
+              {p.attachments.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[10px] uppercase tracking-wider muted mb-1">
+                    Files on the document ({p.attachments.length})
+                  </div>
+                  <ul className="space-y-1">
+                    {p.attachments.map((a) => (
+                      <li key={a.id}
+                          className="flex items-center gap-2 rounded-md border border-ink-200 px-2 py-1.5 text-xs">
+                        <FileText size={12} className="text-ink-400 shrink-0" />
+                        <span className="truncate flex-1">{a.filename}</span>
+                        {(a as any).external_url ? (
+                          <a href={(a as any).external_url} target="_blank" rel="noreferrer"
+                             className="btn-ghost px-2 py-1 text-xs">Open</a>
+                        ) : (
+                          <span className="muted tabular-nums">{humanSize(a.size)}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   );

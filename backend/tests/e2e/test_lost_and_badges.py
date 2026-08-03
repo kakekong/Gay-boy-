@@ -36,6 +36,17 @@ async def main():
     pu = await login(c, "purchasing@demo.local")
     tag = uuid.uuid4().hex[:5]
 
+    # Undo this driver's own dismissal from an earlier run. There is no
+    # un-dismiss endpoint, by design — and the fix under test is precisely that
+    # the id is day-scoped, so a second run on the same day would otherwise
+    # find the alert already dismissed and report a fixture artefact as a bug.
+    from sqlalchemy import text as _sql
+    from app.core.db import SessionLocal as _S
+    async with _S() as _db:
+        await _db.execute(_sql("DELETE FROM notification_dismissed "
+                               "WHERE item_id LIKE 'attendance-%'"))
+        await _db.commit()
+
     async def a_quotation():
         cust = J(await c.post("/customers", headers=s1, json={
             "company_name": f"PT Kalah {tag}-{uuid.uuid4().hex[:3]}", "industry": "mining"}))["id"]
