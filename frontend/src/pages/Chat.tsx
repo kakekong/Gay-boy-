@@ -119,6 +119,23 @@ export default function ChatPage() {
     enabled: showPicker,
   });
 
+  // Who I may open a conversation with directly, and what I have already
+  // asked the director for. Shared with the forward picker's rules.
+  const targets = useQuery({
+    queryKey: ["forward-targets"],
+    queryFn: () => api.get("/chat/forward-targets").then((r) => r.data as any),
+    enabled: showPicker,
+  });
+  const asked = useQuery({
+    queryKey: ["cross-dept-requests"],
+    queryFn: () => api.get("/chat/cross-dept-requests").then((r) => r.data as any[]),
+    enabled: showPicker,
+  });
+  const canDm = new Map<string, boolean>(
+    (targets.data?.contacts ?? []).map((u: any) => [u.id, !!u.can_dm]));
+  const pendingAsk = new Set(
+    (asked.data ?? []).filter((a) => a.status === "pending").map((a) => a.with_user_id));
+
   // Mark read when opening or when new messages arrive
   useEffect(() => {
     if (!active) return;
@@ -144,6 +161,20 @@ export default function ChatPage() {
       ?? e?.message
       ?? "Chat action failed"
   );
+
+  const askCrossDept = useMutation({
+    mutationFn: (userId: string) =>
+      api.post("/chat/cross-dept-request", { user_id: userId }).then((r) => r.data),
+    onSuccess: (d: any) => {
+      qc.invalidateQueries({ queryKey: ["cross-dept-requests"] });
+      if (d?.already_open && d?.channel_id) {
+        setShowPicker(false);
+        setActive(d.channel_id);
+        qc.invalidateQueries({ queryKey: ["chat-channels"] });
+      }
+    },
+    onError: showErr,
+  });
 
   const send = useMutation({
     mutationFn: (body: string) =>
@@ -626,20 +657,33 @@ export default function ChatPage() {
             <div className="flex-1 overflow-y-auto">
               {filteredContacts.map((u) => {
                 const selected = groupMembers.has(u.id);
+                const blocked = canDm.has(u.id) && !canDm.get(u.id);
+                const waiting = pendingAsk.has(u.id);
                 return pickerMode === "dm" ? (
                   <button
                     key={u.id}
-                    onClick={() => newDm.mutate(u.id)}
-                    disabled={newDm.isPending}
-                    className="w-full text-left p-3 flex items-center gap-3 hover:bg-ink-50 border-b border-ink-100 last:border-b-0"
+                    onClick={() => (blocked ? askCrossDept.mutate(u.id) : newDm.mutate(u.id))}
+                    disabled={newDm.isPending || askCrossDept.isPending || waiting}
+                    className="w-full text-left p-3 flex items-center gap-3 hover:bg-ink-50 border-b border-ink-100 last:border-b-0 disabled:opacity-70"
                   >
                     <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 grid place-items-center font-semibold text-sm">
                       {u.full_name.slice(0, 1).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">{u.full_name}</div>
-                      <div className="text-xs muted truncate">{u.email}</div>
+                      <div className="text-xs muted truncate">
+                        {waiting
+                          ? "Waiting for the director to approve this conversation"
+                          : blocked
+                            ? "Different department — asks the director first"
+                            : u.email}
+                      </div>
                     </div>
+                    {waiting ? (
+                      <span className="chip bg-amber-100 text-amber-800">asked</span>
+                    ) : blocked ? (
+                      <span className="chip bg-brand-100 text-brand-700">ask director</span>
+                    ) : null}
                     <span className="chip bg-ink-100 text-ink-700 uppercase">{u.role}</span>
                   </button>
                 ) : (

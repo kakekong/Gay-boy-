@@ -25,6 +25,7 @@ from app.services.chat_policy import (
     existing_dm_id,
     is_cross_dept as _is_cross_dept,
     may_start_cross_dept as _may_start_cross_dept,
+    request_cross_dept_chat,
     resolve_dm,
 )
 
@@ -258,6 +259,44 @@ async def get_or_create_dm(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     channel_id = await resolve_dm(db, me, other)
     return {"id": str(channel_id), "kind": "dm", "title": other.full_name}
+
+
+class CrossDeptRequestIn(BaseModel):
+    user_id: UUID
+    reason: str | None = None
+
+
+@router.post("/cross-dept-request")
+async def ask_for_cross_dept_chat(
+    payload: CrossDeptRequestIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Ask the director to open a conversation that crosses departments."""
+    other = await db.get(User, payload.user_id)
+    if not other:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return await request_cross_dept_chat(db, me=me, other=other, reason=payload.reason)
+
+
+@router.get("/cross-dept-requests")
+async def my_cross_dept_requests(
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """The requests I have outstanding, so the picker can say 'asked' rather
+    than offering the same button again."""
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+    rows = (await db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "cross_dept_chat",
+            ApprovalRequest.requested_by == me.id,
+        ).order_by(ApprovalRequest.created_at.desc()).limit(50)
+    )).all()
+    return [{"id": str(r.id), "with_user_id": str(r.target_id),
+             "status": r.status, "reason": r.reason,
+             "decision_notes": r.decision_notes,
+             "created_at": r.created_at} for r in rows]
 
 
 # ─── Messages ────────────────────────────────────────────────────────────────

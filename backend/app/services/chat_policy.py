@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import Role
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage
 from app.models.user import User
 
@@ -106,7 +107,8 @@ async def resolve_dm(db: AsyncSession, me: User, other: User) -> UUID:
     if is_cross_dept([me.role, other.role]) and not may_start_cross_dept(me.role):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Cross-department chats can only be started by a director, manager, or HR.",
+            "This conversation crosses departments. Ask the director to open "
+            "it — the request goes to their approval queue.",
         )
     ch = ChatChannel(kind="dm", created_by=me.id)
     db.add(ch)
@@ -256,3 +258,56 @@ async def deliver_forward(
         ))
 
     return {"count": len(delivered), "delivered": delivered}
+
+
+async def request_cross_dept_chat(db: AsyncSession, *, me: User, other: User,
+                                  reason: str | None) -> dict:
+    """Ask the director to open a conversation that crosses departments.
+
+    The rule used to be a flat no for everyone below director/manager/HR, which
+    is the right default and a dead end in practice — people genuinely need to
+    talk across teams, and a blocked conversation just moves to WhatsApp where
+    nobody can oversee it. So it becomes a request the director decides, and
+    approving it opens the DM.
+    """
+    if other.id == me.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That is you")
+    if not other.is_active or other.role in ("customer", "supplier"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    existing = await existing_dm_id(db, me.id, other.id)
+    if existing:
+        return {"already_open": True, "channel_id": str(existing)}
+    if not is_cross_dept([me.role, other.role]) or may_start_cross_dept(me.role):
+        # No approval needed — just open it, so the button never lies about
+        # what it did.
+        cid = await resolve_dm(db, me, other)
+        return {"already_open": True, "channel_id": str(cid)}
+
+    from app.core.approval import request_approval
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+    dup = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "cross_dept_chat",
+            ApprovalRequest.target_id == other.id,
+            ApprovalRequest.requested_by == me.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )
+    if dup:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "You already asked for this conversation — it is with the director.",
+        )
+    req = await request_approval(
+        db,
+        target_type="cross_dept_chat",
+        target_id=other.id,
+        requested_by=me.id,
+        required_role=Role.DIRECTOR,
+        reason=(f"{me.full_name} ({dept(me.role)}) wants to message "
+                f"{other.full_name} ({dept(other.role)})"
+                + (f" — {reason.strip()}" if (reason or "").strip() else "")),
+        payload={"with_user_id": str(other.id), "reason": (reason or "").strip() or None},
+    )
+    return {"already_open": False, "approval_request_id": str(req.id)}

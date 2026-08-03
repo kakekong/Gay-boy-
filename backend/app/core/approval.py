@@ -134,6 +134,29 @@ async def apply_to_target(
     Returns a small dict describing what was applied (for the API response).
     """
     applied: dict = {"target_type": req.target_type, "target_id": str(req.target_id)}
+    if req.target_type == "cross_dept_chat":
+        # Approving opens the DM between the two people; rejecting opens
+        # nothing. Either way the requester can see the outcome on their own
+        # request list.
+        from app.services.chat_policy import existing_dm_id
+        from app.models.chat import ChatChannel, ChatChannelMember
+        if approve:
+            already = await existing_dm_id(db, req.requested_by, req.target_id)
+            if already:
+                applied["channel_id"] = str(already)
+            else:
+                ch = ChatChannel(kind="dm", created_by=req.requested_by)
+                db.add(ch)
+                await db.flush()
+                db.add_all([
+                    ChatChannelMember(channel_id=ch.id, user_id=req.requested_by),
+                    ChatChannelMember(channel_id=ch.id, user_id=req.target_id),
+                ])
+                await db.flush()
+                applied["channel_id"] = str(ch.id)
+        applied["opened"] = approve
+        return applied
+
     if req.target_type == "price_request_revision":
         # A negotiation revision on a price request. Approving applies the
         # proposed lines; rejecting leaves the request exactly as it was and
