@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import {
   NavLink, useLocation, useNavigate, useNavigationType,
 } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Users, FileText, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2,
+  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, Check,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -308,6 +308,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const nav = useNavigate();
+  const qc = useQueryClient();
   const t = useT();
   const lang = useLangStore((s) => s.lang);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -405,10 +406,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
     refetchInterval: 30_000,
     enabled: !!user,
   });
-  const pathCounts: Record<string, number> = {};
+  // Keep the ids, not just the tally. Marking a section read has to clear
+  // exactly the alerts the badge counted — so it dismisses these ids rather
+  // than re-deriving a set server-side from a rule the sidebar doesn't share.
+  const pathItems: Record<string, string[]> = {};
   if (notif.data?.items) {
     const navPaths = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.to));
-    for (const item of notif.data.items as { link?: string }[]) {
+    for (const item of notif.data.items as { id: string; link?: string }[]) {
       const link = item.link || "";
       let best = "";
       for (const p of navPaths) {
@@ -416,11 +420,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
           || (p !== "/" && (link.startsWith(p + "/") || link.startsWith(p + "?")));
         if (hit && p.length > best.length) best = p;
       }
-      if (best) pathCounts[best] = (pathCounts[best] ?? 0) + 1;
+      if (best) (pathItems[best] ??= []).push(item.id);
     }
   }
   const badgeCountFor = (n: NavItem): number =>
-    n.badgeQuery ? (badges[n.badgeQuery] ?? 0) : (pathCounts[n.to] ?? 0);
+    n.badgeQuery ? (badges[n.badgeQuery] ?? 0) : (pathItems[n.to]?.length ?? 0);
+
+  // Only notification-derived badges can be marked read. The queue counters
+  // (approvals, unread chat, pending invoices…) are live counts of work that
+  // still exists — "dismissing" one would hide a number that the next poll
+  // brings straight back, which is worse than not offering it at all.
+  const dismissibleIdsFor = (n: NavItem): string[] =>
+    n.badgeQuery ? [] : (pathItems[n.to] ?? []);
+
+  const markSectionRead = (ids: string[]) => {
+    if (!ids.length) return;
+    // Drop them from the shared cache first so the badge goes immediately —
+    // the bell reads the same query key, so both surfaces update together.
+    qc.setQueryData(["notifications"], (old: any) => {
+      if (!old?.items) return old;
+      const items = old.items.filter((i: any) => !ids.includes(i.id));
+      return {
+        ...old,
+        items,
+        counts: {
+          total: items.length,
+          high: items.filter((i: any) => i.severity === "high").length,
+          medium: items.filter((i: any) => i.severity === "medium").length,
+          low: items.filter((i: any) => i.severity === "low").length,
+        },
+      };
+    });
+    api.post("/notifications/dismiss", { item_ids: ids })
+      .catch(() => qc.invalidateQueries({ queryKey: ["notifications"] }));
+  };
 
   return (
     <div className="flex h-full bg-ink-50">
@@ -514,14 +547,74 @@ export function Shell({ children }: { children: React.ReactNode }) {
                           AI
                         </span>
                       )}
-                      {badgeCountFor(n) > 0 && (
-                        <span className="relative inline-flex items-center">
-                          <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60 animate-ping" />
-                          <span className="relative text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500 text-white min-w-[18px] text-center">
-                            {badgeCountFor(n)}
+                      {badgeCountFor(n) > 0 && (() => {
+                        const ids = dismissibleIdsFor(n);
+                        const count = badgeCountFor(n);
+                        // A queue badge is a live count of work that still
+                        // exists — it clears by doing the work, so it stays a
+                        // plain label. An alert badge can be marked read here,
+                        // and swaps the number for a tick on hover to say so.
+                        const clearable = ids.length > 0;
+                        return (
+                          <span
+                            className={clsx(
+                              "relative inline-flex items-center shrink-0",
+                              // -m-1 p-1 grows the tap target by 4px a side
+                              // without moving the pill — it is ~18px, which
+                              // is under the comfortable minimum on a phone.
+                              clearable && "group/badge cursor-pointer -m-1 p-1",
+                            )}
+                            {...(clearable ? {
+                              role: "button",
+                              tabIndex: 0,
+                              title: t(
+                                `Mark ${count} alert${count === 1 ? "" : "s"} as read`,
+                                `Tandai ${count} notifikasi sudah dibaca`,
+                              ),
+                              "aria-label": t(
+                                `Mark ${count} alert${count === 1 ? "" : "s"} as read`,
+                                `Tandai ${count} notifikasi sudah dibaca`,
+                              ),
+                              onClick: (e: React.MouseEvent) => {
+                                // Inside the NavLink — without this the click
+                                // navigates instead of clearing.
+                                e.preventDefault();
+                                e.stopPropagation();
+                                markSectionRead(ids);
+                              },
+                              onKeyDown: (e: React.KeyboardEvent) => {
+                                if (e.key !== "Enter" && e.key !== " ") return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                markSectionRead(ids);
+                              },
+                            } : {
+                              title: t(
+                                `${count} waiting for you here`,
+                                `${count} menunggu Anda di sini`,
+                              ),
+                            })}
+                          >
+                            <span className={clsx(
+                              "absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60 animate-ping",
+                              clearable && "group-hover/badge:hidden",
+                            )} />
+                            <span className={clsx(
+                              "relative text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white min-w-[18px] grid place-items-center",
+                              clearable
+                                ? "bg-red-500 group-hover/badge:bg-emerald-600"
+                                : "bg-red-500",
+                            )}>
+                              <span className={clsx(clearable && "group-hover/badge:hidden")}>
+                                {count}
+                              </span>
+                              {clearable && (
+                                <Check size={11} strokeWidth={3} className="hidden group-hover/badge:block" />
+                              )}
+                            </span>
                           </span>
-                        </span>
-                      )}
+                        );
+                      })()}
                     </NavLink>
                   ))}
                 </div>

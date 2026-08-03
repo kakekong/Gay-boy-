@@ -746,21 +746,39 @@ async def dismiss_notification(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    """Hide one bell item for this user (the X button)."""
+    """Hide bell items for this user.
+
+    Takes either `item_id` (the X button on one row) or `item_ids` (marking a
+    whole section read from its sidebar badge). Batching matters: the sidebar
+    number is a count of several alerts, and clearing them one request at a
+    time would leave the badge visibly counting down — and a half-failed
+    sequence would leave it stuck at some arbitrary number.
+    """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.models.push import NotificationDismissed
 
-    item_id = str(payload.get("item_id") or "")[:120]
-    if not item_id:
+    raw = payload.get("item_ids")
+    if raw is None:
+        raw = [payload.get("item_id")]
+    if not isinstance(raw, list):
+        raw = [raw]
+    # Deduplicate but keep it bounded — this is a user action, not an import.
+    seen: list[str] = []
+    for x in raw[:200]:
+        s = str(x or "")[:120]
+        if s and s not in seen:
+            seen.append(s)
+    if not seen:
         from fastapi import HTTPException, status
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "item_id required")
-    await db.execute(
-        pg_insert(NotificationDismissed)
-        .values(user_id=me.id, item_id=item_id)
-        .on_conflict_do_nothing(constraint="uq_notif_dismissed")
-    )
-    return {"ok": True}
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "item_id or item_ids required")
+    for item_id in seen:
+        await db.execute(
+            pg_insert(NotificationDismissed)
+            .values(user_id=me.id, item_id=item_id)
+            .on_conflict_do_nothing(constraint="uq_notif_dismissed")
+        )
+    return {"ok": True, "dismissed": len(seen)}
 
 
 @router.post("/dismiss-all")
