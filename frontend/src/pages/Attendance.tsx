@@ -241,36 +241,40 @@ export default function AttendancePage() {
           </div>
           <div className="text-xs muted">last 30 days</div>
         </div>
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50/60">
-            <tr>
-              <th className="th">Date</th>
-              <th className="th">Status</th>
-              <th className="th">Clock in</th>
-              <th className="th">Clock out</th>
-              <th className="th text-right">Hours</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(myHistory.data ?? []).map((r) => (
-              <tr key={r.id} className="border-t border-ink-100">
-                <td className="td">{r.date}</td>
-                <td className="td">
-                  <span className={clsx("chip uppercase",
-                    STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
-                    {r.status.replace(/_/g, " ")}
-                  </span>
-                </td>
-                <td className="td muted">{fmtTime(r.clock_in)}</td>
-                <td className="td muted">{fmtTime(r.clock_out)}</td>
-                <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">Date</th>
+                <th className="th">Status</th>
+                <th className="th">Clock in</th>
+                <th className="th">Clock out</th>
+                <th className="th text-right">Hours</th>
+                <th className="th">Note</th>
               </tr>
-            ))}
-            {!myHistory.data?.length && (
-              <tr><td colSpan={5} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(myHistory.data ?? []).map((r) => (
+                <tr key={r.id} className="border-t border-ink-100">
+                  <td className="td whitespace-nowrap">{r.date}</td>
+                  <td className="td">
+                    <span className={clsx("chip uppercase",
+                      STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
+                      {r.status.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}</td>
+                  <td className="td muted whitespace-nowrap">{fmtTime(r.clock_out)}</td>
+                  <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
+                  <td className="td"><AttendanceNote text={r.notes} /></td>
+                </tr>
+              ))}
+              {!myHistory.data?.length && (
+                <tr><td colSpan={6} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* HR / Director: monthly summary per employee */}
@@ -333,39 +337,81 @@ export default function AttendancePage() {
             <div className="font-semibold">All employees · today + recent</div>
             <div className="text-xs muted">HR / Director view</div>
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-ink-50/60">
-              <tr>
-                <th className="th">Date</th>
-                <th className="th">Employee</th>
-                <th className="th">Status</th>
-                <th className="th">Clock in</th>
-                <th className="th">Clock out</th>
-                <th className="th text-right">Hours</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(all.data ?? []).map((r) => (
-                <tr key={r.id} className="border-t border-ink-100">
-                  <td className="td">{r.date}</td>
-                  <td className="td font-medium">{r.user_name ?? "—"}</td>
-                  <td className="td">
-                    <span className={clsx("chip uppercase",
-                      STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
-                      {r.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                  <td className="td muted">{fmtTime(r.clock_in)}</td>
-                  <td className="td muted">{fmtTime(r.clock_out)}</td>
-                  <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">Date</th>
+                  <th className="th">Employee</th>
+                  <th className="th">Status</th>
+                  <th className="th">Clock in</th>
+                  <th className="th">Clock out</th>
+                  <th className="th text-right">Hours</th>
+                  <th className="th">Note</th>
                 </tr>
-              ))}
-              {!all.data?.length && (
-                <tr><td colSpan={6} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(all.data ?? []).map((r) => (
+                  <tr key={r.id} className="border-t border-ink-100">
+                    <td className="td whitespace-nowrap">{r.date}</td>
+                    <td className="td font-medium whitespace-nowrap">{r.user_name ?? "—"}</td>
+                    <td className="td">
+                      <span className={clsx("chip uppercase",
+                        STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
+                        {r.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}</td>
+                    <td className="td muted whitespace-nowrap">{fmtTime(r.clock_out)}</td>
+                    <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
+                    <td className="td"><AttendanceNote text={r.notes} /></td>
+                  </tr>
+                ))}
+                {!all.data?.length && (
+                  <tr><td colSpan={7} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The day's note.
+ *
+ *  One column with up to three authors: clocking in and clocking out each
+ *  append a labelled line (`In: …`, `Out: …`), while HR's manual entry
+ *  overwrites the field with plain text. So show the labels as labels, let the
+ *  rest wrap, and keep a long note from turning the row into a wall of text. */
+function AttendanceNote({ text }: { text: string | null }) {
+  const [open, setOpen] = useState(false);
+  const lines = (text ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return <span className="muted">—</span>;
+  const shown = open ? lines : lines.slice(0, 2);
+  return (
+    <div className="min-w-[13rem] max-w-[26rem] space-y-0.5">
+      {shown.map((line, i) => {
+        const m = /^(In|Out|HR):\s*(.*)$/i.exec(line);
+        return (
+          <div key={i} className="flex gap-1.5 items-baseline">
+            {m && (
+              <span className="text-[10px] font-semibold uppercase tracking-wider muted shrink-0">
+                {m[1]}
+              </span>
+            )}
+            <span className="whitespace-pre-wrap break-words">{m ? m[2] : line}</span>
+          </div>
+        );
+      })}
+      {lines.length > 2 && (
+        <button
+          className="text-xs text-brand-700 hover:underline"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "Show less" : `+${lines.length - 2} more`}
+        </button>
       )}
     </div>
   );

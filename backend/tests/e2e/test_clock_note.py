@@ -80,6 +80,46 @@ async def main():
     check("still no note", not (J(r).get("notes") or ""), J(r).get("notes"))
     check("hours were computed", J(r).get("hours") is not None, J(r))
 
+    # ── who gets to read the notes ───────────────────────────────────────────
+    # The whole point of a clock-in note is that somebody reads it — "late,
+    # traffic on the toll road" is only worth typing if the person who
+    # notices the lateness sees the reason. The director does; a colleague
+    # does not, because a note is about your day and often about your health.
+    d = await login(c, "director@demo.local")
+    rows = J(await c.get("/attendance", headers=d))
+    mine_d = next((x for x in rows if x.get("user_id") == uid), None) \
+        if isinstance(rows, list) else None
+    check("the director can list everyone's attendance", mine_d is not None,
+          str(rows)[:160])
+    check("...and the note is on the row",
+          "traffic on the toll road" in ((mine_d or {}).get("notes") or ""),
+          str((mine_d or {}).get("notes")))
+    check("...including the clock-out line",
+          "Left early for the site visit" in ((mine_d or {}).get("notes") or ""),
+          str((mine_d or {}).get("notes")))
+    check("...and HR's own note",
+          "counted as late" in ((mine_d or {}).get("notes") or ""),
+          str((mine_d or {}).get("notes")))
+    check("the row says whose day it is, so the note has an owner",
+          bool((mine_d or {}).get("user_name")), str((mine_d or {}).get("user_name")))
+
+    # Filtering to one employee keeps the notes.
+    one = J(await c.get("/attendance", headers=d, params={"user_id": uid}))
+    check("the director can filter to one employee",
+          isinstance(one, list) and one and all(x["user_id"] == uid for x in one),
+          str(one)[:160])
+    check("...and still sees the notes",
+          any("traffic on the toll road" in (x.get("notes") or "") for x in one),
+          str(one)[:200])
+
+    r = await c.get("/attendance", headers=H2)
+    check("a colleague cannot read the whole roll", r.status_code == 403,
+          str(r.status_code))
+    own = J(await c.get("/attendance/me", headers=H))
+    check("you can still read your own notes back",
+          any("traffic on the toll road" in (x.get("notes") or "") for x in own),
+          str(own)[:200])
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     sys.exit(1 if FAIL else 0)
