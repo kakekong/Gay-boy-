@@ -153,7 +153,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 24 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 25 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -188,6 +188,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_pr_revisions.py` | negotiation revisions: capped at 3 applied, one pending at a time, a rejection changes nothing and costs nothing |
 | `test_cross_dept_chat.py` | cross-department chat by request: approving opens it, rejecting opens nothing, no duplicate asks |
 | `test_approval_preview.py` | the document preview on an approval request: lines and per-line money, the keterangan, files attached to the *document*, revision before/after, director-only |
+| `test_attendance_alert_window.py` | attendance alerts stay silent before 08:30 **WIB** — includes a threshold that only passes if the comparison isn't done in server/UTC time |
 | `test_mark_read.py` | marking a section's alerts read from its sidebar badge: batched, per-user, tolerant of ids that resolved on their own |
 | `test_efaktur.py` | e-Faktur CSV export |
 

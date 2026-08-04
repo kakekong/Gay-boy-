@@ -33,6 +33,10 @@ from app.models.user import User
 # Office timezone for "late" attendance — the business runs on WIB (UTC+7).
 _WIB = timezone(timedelta(hours=7))
 _LATE_CUTOFF = time(9, 15)
+# Before this, "nobody has clocked in" is just a description of the morning.
+# Raising it at 06:00 trains people to ignore the badge, so the attendance
+# alerts stay silent until the office is actually expected to be working.
+_ATTENDANCE_ALERT_FROM = time(8, 30)
 
 _DISCUSSION_LINK = {
     "price_request": "/price-requests?open={id}",
@@ -413,8 +417,11 @@ async def list_notifications(
 
     # 6. People oversight (manager/director): attendance + missed deadlines
     if role in (Role.MANAGER, Role.DIRECTOR):
-        # 6a. Attendance today — who's missing or late (weekdays only)
-        if today.weekday() < 5:
+        # 6a. Attendance today — who's missing or late (weekdays, after 08:30 WIB)
+        # The clock is read in WIB, not server time: the box runs on UTC, so
+        # `now.time()` there is 08:30 WIB minus seven hours and the gate would
+        # open mid-afternoon.
+        if today.weekday() < 5 and now.astimezone(_WIB).time() >= _ATTENDANCE_ALERT_FROM:
             internal = (await db.scalars(
                 select(User).where(
                     User.is_active.is_(True),
