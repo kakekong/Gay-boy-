@@ -82,16 +82,69 @@ def _client():
     )
 
 
-def build_key(filename: str, label: str | None = None) -> str:
-    """A collision-proof object key, foldered by year/month like the disk
-    layout so a migrated bucket browses the same way the old directory did."""
+def _slug(value: str | None, *, fallback: str, limit: int = 60) -> str:
+    """A path segment safe for an object key: no slashes, no surprises.
+
+    Object stores have no real directories — the key is one string and `/` is
+    only a display convention — so a stray slash inside a segment silently
+    invents a folder level. Everything outside a small safe set collapses to
+    `-`.
+    """
+    out = "".join(
+        ch if (ch.isalnum() or ch in "._-") else "-"
+        for ch in (value or "")
+    ).strip("-._")[:limit]
+    return out or fallback
+
+
+def build_key(
+    filename: str,
+    label: str | None = None,
+    *,
+    owner_type: str | None = None,
+    owner_id: object | None = None,
+) -> str:
+    """A collision-proof object key that says what the file is.
+
+    The old layout was `attachments/<year>/<month>/<uuid>_<name>`, which put
+    every upload in the company into one folder per month — fine for a program
+    reading a path out of the database, useless for a person opening the bucket
+    to find the scans for one purchase order.
+
+    The shape is now::
+
+        attachments/<owner_type>/<year>/<month>/<owner_id>/<uuid8>_<label>_<name>
+
+    Owner type first, because "show me every drawing" is the question people
+    actually ask; then the date, so a lifecycle rule or a spot-check by month
+    still works; then the owner, so everything belonging to one document sits
+    together. Callers that have no owner land under `misc/`, unchanged in
+    spirit from before.
+
+    The uuid keeps its collision-proofing but is trimmed to 8 hex characters —
+    at these volumes that is still far more than enough, and it leaves the
+    human-readable filename visible in a bucket listing instead of pushed off
+    the end of the column.
+
+    **Existing rows are untouched.** Each row stores its own full
+    `s3://bucket/key`, and reads dispatch on that string, so files written
+    under the old layout keep downloading forever. Only new uploads use this.
+    """
     now = datetime.now(UTC)
     safe = "".join(
         ch if (ch.isalnum() or ch in "._- ") else "_"
         for ch in (filename or "file")
     )[:200] or "file"
-    stem = f"{uuid4().hex}_{label}_{safe}" if label else f"{uuid4().hex}_{safe}"
-    return f"attachments/{now.year}/{now.month:02d}/{stem}"
+
+    scope = _slug(owner_type, fallback="misc", limit=40)
+    stem = f"{uuid4().hex[:8]}_{_slug(label, fallback='')}_{safe}" if label \
+        else f"{uuid4().hex[:8]}_{safe}"
+
+    parts = ["attachments", scope, f"{now.year}", f"{now.month:02d}"]
+    if owner_id is not None:
+        parts.append(_slug(str(owner_id), fallback="unknown", limit=64))
+    parts.append(stem)
+    return "/".join(parts)
 
 
 def _split_s3(storage_path: str) -> tuple[str, str]:
@@ -101,14 +154,24 @@ def _split_s3(storage_path: str) -> tuple[str, str]:
     return bucket, key
 
 
-async def save(data: bytes, *, filename: str, label: str | None = None) -> str:
+async def save(
+    data: bytes,
+    *,
+    filename: str,
+    label: str | None = None,
+    owner_type: str | None = None,
+    owner_id: object | None = None,
+) -> str:
     """Store `data` and return the value to persist in `Attachment.storage_path`.
 
-    Local returns an absolute filesystem path — byte-identical to what the old
-    inline code produced, so nothing about existing rows changes. S3 returns an
-    `s3://bucket/key` URI.
+    Pass `owner_type`/`owner_id` when the caller knows what the file belongs
+    to; they only shape the key (see `build_key`) and are optional so a caller
+    without that context still works.
+
+    Local returns an absolute filesystem path, S3 an `s3://bucket/key` URI.
+    Both use the same key, so the disk and the bucket browse identically.
     """
-    key = build_key(filename, label)
+    key = build_key(filename, label, owner_type=owner_type, owner_id=owner_id)
 
     if not using_s3():
         path = Path(settings.STORAGE_LOCAL_DIR) / key

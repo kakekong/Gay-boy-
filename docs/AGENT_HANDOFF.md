@@ -98,7 +98,10 @@ backend/tests/        pytest unit suites + tests/e2e/ (see §5)
 lucide-react, `frontend/src/pages/*.tsx` one page per screen.
 
 **File storage goes through `app/services/storage.py`** — never write to disk
-directly. `STORAGE_BACKEND` picks local disk or an S3-compatible bucket
+directly. Keys are built by `build_key()` as
+`attachments/<owner_type>/<year>/<month>/<owner_id>/<uuid8>_<label>_<name>`, so
+pass `owner_type`/`owner_id` to `storage.save()` when the caller knows them —
+without it the file still saves, just under `misc/`. `STORAGE_BACKEND` picks local disk or an S3-compatible bucket
 (Cloudflare R2 in production). Crucially, **reads dispatch on the stored path,
 not the current setting**: a row whose `storage_path` starts with `s3://` is
 fetched from the bucket, anything else from disk. That is what lets the backend
@@ -153,7 +156,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 25 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 26 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -178,6 +181,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
 | `test_clock_note.py` | clock-in/out notes; nobody overwrites HR's note or each other's |
+| `test_storage_layout.py` | bucket key layout: grouped by owner type / month / document, user-supplied names can't traverse, and files written under the **old** flat layout still download |
 | `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |

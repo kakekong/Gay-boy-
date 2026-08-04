@@ -803,7 +803,8 @@ async def request_stage_move(
                 ch if (ch.isalnum() or ch in "._- ") else "_"
                 for ch in f.filename
             )[:200]
-            storage_path = await storage.save(data, filename=safe)
+            storage_path = await storage.save(data, filename=safe,
+                                              owner_type="approval_request", owner_id=req.id)
             db.add(Attachment(
                 owner_type="approval_request",
                 owner_id=req.id,

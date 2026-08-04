@@ -72,7 +72,12 @@ async def main() -> None:
                 continue
 
             try:
-                new_path = await storage.save(data, filename=a.filename or "file")
+                new_path = await storage.save(
+                    data, filename=a.filename or "file",
+                    # Migrated files land in the same organised layout as
+                    # new uploads rather than a flat dump — the row knows
+                    # what it belongs to, so the key may as well say so.
+                    owner_type=a.owner_type, owner_id=a.owner_id)
                 a.storage_path = new_path
                 await db.flush()
                 print(f"  moved  {a.filename}  ->  {new_path}")

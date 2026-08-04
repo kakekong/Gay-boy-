@@ -194,7 +194,15 @@ This is the part worth doing properly, because it is the reason for the move:
 1. Log in to the live site and upload a file somewhere — an attachment on a
    customer, or a drawing on a project.
 2. Check it appeared: Cloudflare → your bucket → you should see it under
-   `attachments/<year>/<month>/`.
+   `attachments/<what it belongs to>/<year>/<month>/<the document>/`, e.g.
+   `attachments/customer_po/2026/08/<po-id>/c9e9425a_po-scan.pdf`. Everything
+   attached to one document shares that folder, so the prefix is that
+   document's file list.
+
+   Files uploaded before August 2026 sit under the older, flatter
+   `attachments/<year>/<month>/` instead. That is expected and harmless — each
+   database row stores its own full key and downloads follow it, so old and
+   new files serve identically. Nothing needs migrating.
 3. In Render, hit **Manual Deploy → Deploy latest commit**.
 4. When it comes back up, open that file again.
 
