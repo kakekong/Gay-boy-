@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   NavLink, useLocation, useNavigate, useNavigationType,
 } from "react-router-dom";
@@ -8,7 +8,7 @@ import {
   Wrench, Banknote, BarChart3, Crown, BrainCircuit, LogOut, Search,
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
-  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, Check,
+  Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, CheckCheck,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -433,6 +433,67 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const dismissibleIdsFor = (n: NavItem): string[] =>
     n.badgeQuery ? [] : (pathItems[n.to] ?? []);
 
+  // ── "mark as read" on right-click ────────────────────────────────────────
+  // Right-click is exploratory — people use it to see what's available, not to
+  // fire something off — so it opens a one-item menu rather than clearing on
+  // the spot. Touch has no right-click, so a long press opens the same menu.
+  const [badgeMenu, setBadgeMenu] = useState<
+    { ids: string[]; count: number; x: number; y: number } | null
+  >(null);
+  const longPressTimer = useRef<number | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  const openBadgeMenu = (ids: string[], count: number, x: number, y: number) => {
+    // Clamp so the menu never opens off-screen — on a phone the badge sits
+    // close to the right edge of the drawer.
+    const W = 232, H = 52;
+    setBadgeMenu({
+      ids, count,
+      x: Math.min(x, Math.max(8, window.innerWidth - W - 8)),
+      y: Math.min(y, Math.max(8, window.innerHeight - H - 8)),
+    });
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  const startLongPress = (fire: () => void) => {
+    cancelLongPress();
+    longPressFiredRef.current = false;
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null;
+      longPressFiredRef.current = true;
+      fire();
+    }, 500);
+  };
+
+  // Anything that moves the page out from under the menu closes it — the menu
+  // is pinned to viewport coordinates, so a scroll would leave it stranded
+  // away from the badge it belongs to.
+  useEffect(() => {
+    if (!badgeMenu) return;
+    const close = () => setBadgeMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    // Wait a frame before listening for scroll. Opening the menu moves focus
+    // into it, and focusing an element inside a scrollable container makes the
+    // browser scroll it into view — which would trip this listener and close
+    // the menu on the very frame it appeared. (`preventScroll` on the focus
+    // call handles it too; this is the belt to that pair of braces.)
+    const frame = requestAnimationFrame(() => {
+      window.addEventListener("scroll", close, true);
+    });
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [badgeMenu]);
+
   const markSectionRead = (ids: string[]) => {
     if (!ids.length) return;
     // Drop them from the shared cache first so the badge goes immediately —
@@ -551,42 +612,53 @@ export function Shell({ children }: { children: React.ReactNode }) {
                         const ids = dismissibleIdsFor(n);
                         const count = badgeCountFor(n);
                         // A queue badge is a live count of work that still
-                        // exists — it clears by doing the work, so it stays a
-                        // plain label. An alert badge can be marked read here,
-                        // and swaps the number for a tick on hover to say so.
+                        // exists — it clears by doing the work, so right-click
+                        // leaves it to the browser. An alert badge offers
+                        // "mark as read" on right-click (long-press on touch);
+                        // a left click still just follows the nav link.
                         const clearable = ids.length > 0;
                         return (
                           <span
                             className={clsx(
                               "relative inline-flex items-center shrink-0",
-                              // -m-1 p-1 grows the tap target by 4px a side
+                              // -m-1 p-1 grows the press target by 4px a side
                               // without moving the pill — it is ~18px, which
                               // is under the comfortable minimum on a phone.
-                              clearable && "group/badge cursor-pointer -m-1 p-1",
+                              clearable && "-m-1 p-1 select-none",
                             )}
                             {...(clearable ? {
-                              role: "button",
                               tabIndex: 0,
+                              "aria-haspopup": "menu" as const,
+                              // The context-menu key (or Shift+F10) fires
+                              // `contextmenu` on the focused element, so the
+                              // keyboard gets the same action for free.
                               title: t(
-                                `Mark ${count} alert${count === 1 ? "" : "s"} as read`,
-                                `Tandai ${count} notifikasi sudah dibaca`,
+                                `${count} alert${count === 1 ? "" : "s"} — right-click to mark as read`,
+                                `${count} notifikasi — klik kanan untuk menandai dibaca`,
                               ),
-                              "aria-label": t(
-                                `Mark ${count} alert${count === 1 ? "" : "s"} as read`,
-                                `Tandai ${count} notifikasi sudah dibaca`,
-                              ),
-                              onClick: (e: React.MouseEvent) => {
-                                // Inside the NavLink — without this the click
-                                // navigates instead of clearing.
+                              style: { WebkitTouchCallout: "none" as const },
+                              onContextMenu: (e: React.MouseEvent) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                markSectionRead(ids);
+                                openBadgeMenu(ids, count, e.clientX, e.clientY);
                               },
-                              onKeyDown: (e: React.KeyboardEvent) => {
-                                if (e.key !== "Enter" && e.key !== " ") return;
-                                e.preventDefault();
-                                e.stopPropagation();
-                                markSectionRead(ids);
+                              onPointerDown: (e: React.PointerEvent) => {
+                                if (e.pointerType === "mouse") return;
+                                const x = e.clientX, y = e.clientY;
+                                startLongPress(() => openBadgeMenu(ids, count, x, y));
+                              },
+                              onPointerUp: cancelLongPress,
+                              onPointerLeave: cancelLongPress,
+                              onPointerCancel: cancelLongPress,
+                              onClick: (e: React.MouseEvent) => {
+                                // A long-press fires click too on most touch
+                                // browsers; without this the menu opens and
+                                // the nav link fires underneath it.
+                                if (longPressFiredRef.current) {
+                                  longPressFiredRef.current = false;
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                }
                               },
                             } : {
                               title: t(
@@ -595,22 +667,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
                               ),
                             })}
                           >
-                            <span className={clsx(
-                              "absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60 animate-ping",
-                              clearable && "group-hover/badge:hidden",
-                            )} />
-                            <span className={clsx(
-                              "relative text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white min-w-[18px] grid place-items-center",
-                              clearable
-                                ? "bg-red-500 group-hover/badge:bg-emerald-600"
-                                : "bg-red-500",
-                            )}>
-                              <span className={clsx(clearable && "group-hover/badge:hidden")}>
-                                {count}
-                              </span>
-                              {clearable && (
-                                <Check size={11} strokeWidth={3} className="hidden group-hover/badge:block" />
-                              )}
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60 animate-ping" />
+                            <span className="relative text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white min-w-[18px] text-center bg-red-500">
+                              {count}
                             </span>
                           </span>
                         );
@@ -778,6 +837,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
+
+      {/* The badge context menu. Rendered at the shell root, positioned fixed,
+          so it escapes the sidebar's own scroll container. */}
+      {badgeMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[60]"
+            onClick={() => setBadgeMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setBadgeMenu(null); }}
+          />
+          <div
+            role="menu"
+            className="fixed z-[61] w-[232px] rounded-lg border border-ink-200 bg-white
+                       shadow-card overflow-hidden dark:bg-ink-800 dark:border-white/10"
+            style={{ left: badgeMenu.x, top: badgeMenu.y }}
+          >
+            <button
+              role="menuitem"
+              ref={(el) => el?.focus({ preventScroll: true })}
+              className="w-full text-left px-3 py-2.5 text-sm flex items-center gap-2.5
+                         hover:bg-ink-100 dark:hover:bg-white/10"
+              onClick={() => { markSectionRead(badgeMenu.ids); setBadgeMenu(null); }}
+            >
+              <CheckCheck size={15} className="text-emerald-600 shrink-0" />
+              <span>
+                {t(
+                  `Mark ${badgeMenu.count} alert${badgeMenu.count === 1 ? "" : "s"} as read`,
+                  `Tandai ${badgeMenu.count} notifikasi sudah dibaca`,
+                )}
+              </span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
