@@ -284,16 +284,25 @@ async def upload_attachment(
 ):
     if owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
-    # External portal accounts may only attach to their own rows; internal
-    # staff may attach anywhere. Viewing is a separate question, answered by
-    # `_attachment_visible_to` + `_sales_owns_attachment`. It used to be
-    # possible to upload a customer file and then be unable to read it back —
-    # the two rules now agree for the sales side.
-    if Role(me.role) in (Role.CUSTOMER, Role.SUPPLIER):
-        if not _attachment_visible_to(owner_type, Role(me.role)) or \
-                not await _external_owns_attachment(db, me, owner_type, owner_id):
-            raise HTTPException(status.HTTP_403_FORBIDDEN,
-                                "Not allowed to attach files here")
+    # Uploading is the same question as reading: if you may not see the files
+    # on a record, you may not put one there either.
+    #
+    # This used to gate external portal accounts only, leaving internal staff
+    # able to attach to anything. That produced both halves of one bug. The
+    # visible half: upload a customer file, get 403 listing it, conclude the
+    # upload failed. The quiet half: sales, purchasing and admin could write
+    # into an EMPLOYEE record — KTP, employment contract, NPWP, BPJS — which
+    # only HR, finance and management may read. Asking the read rule first
+    # makes the two symmetric by construction.
+    if not _attachment_visible_to(owner_type, Role(me.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not allowed to attach files here")
+    if not await _external_owns_attachment(db, me, owner_type, owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not allowed to attach files here")
+    if not await _sales_owns_attachment(db, me, owner_type, owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not your customer's record")
     if owner_type == "daily_log":
         # Only the log's owner may attach to it (overseers can read, not add).
         from app.models.daily_log import DailyLog
