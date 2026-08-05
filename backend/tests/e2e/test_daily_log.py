@@ -125,6 +125,27 @@ async def main():
     r = await c.get("/attendance/daily-log/team", headers=sales_h, params={"date": today})
     check("sales forbidden from team view", r.status_code == 403, str(r.status_code))
 
+    # Which days have anything on them. The team view shows one date at a
+    # time, so on a morning nobody has written yet it has nothing to say —
+    # and "no logs today" reads as "there are no daily logs". This is what
+    # gives the page somewhere to point instead of dead-ending.
+    r = await c.get("/attendance/daily-log/team/days", headers=dir_h)
+    check("the director can ask which days have logs", r.status_code == 200, r.text[:120])
+    days = r.json() if r.status_code == 200 else []
+    check("today is in the list, because logs were written today",
+          any(str(d["date"]) == str(today) for d in days), str(days)[:200])
+    today_row = next((d for d in days if str(d["date"]) == str(today)), None)
+    check("...with a count of how many people wrote",
+          (today_row or {}).get("count", 0) >= 2, str(today_row))
+    check("the days come back newest first",
+          [str(d["date"]) for d in days] == sorted((str(d["date"]) for d in days), reverse=True),
+          str([str(d["date"]) for d in days])[:160])
+    check("only days that have logs are listed",
+          all(d["count"] > 0 for d in days), str(days)[:200])
+
+    r = await c.get("/attendance/daily-log/team/days", headers=sales_h)
+    check("a colleague cannot see who wrote when", r.status_code == 403, str(r.status_code))
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -484,6 +484,29 @@ async def daily_log_history(
     return [await _log_out(db, log) for log in rows]
 
 
+@router.get("/daily-log/team/days")
+async def daily_log_team_days(
+    range_days: int = Query(30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_log_overseer),
+):
+    """Which recent days anyone actually wrote a log on, newest first.
+
+    The team view shows one date at a time, and on a day nobody has written
+    yet it has nothing to say — which reads as "there are no daily logs"
+    rather than "not today". This gives the page somewhere to point: the days
+    that do have entries, and how many each.
+    """
+    since = date_t.today() - timedelta(days=range_days)
+    rows = (await db.execute(
+        select(DailyLog.date, func.count(DailyLog.id))
+        .where(DailyLog.date >= since)
+        .group_by(DailyLog.date)
+        .order_by(DailyLog.date.desc())
+    )).all()
+    return [{"date": d, "count": n} for d, n in rows]
+
+
 @router.get("/daily-log/team")
 async def daily_log_team(
     date: date_t = Query(..., description="YYYY-MM-DD"),

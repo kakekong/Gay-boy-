@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   NotebookPen, Link2, Plus, Trash2, Loader2, Check, Paperclip,
-  ChevronDown, ChevronRight, ExternalLink, Users,
+  ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Users,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -229,28 +229,77 @@ export function TeamDailyLogs() {
     queryFn: () => api.get("/attendance/daily-log/team", { params: { date } })
       .then((r) => r.data as DailyLog[]),
   });
+  // Which days anyone wrote on. Without this the card dead-ends: it opens on
+  // today, and before anyone has written it says "no logs" with no hint that
+  // there are plenty on other days.
+  const days = useQuery({
+    queryKey: ["daily-log-team-days"],
+    queryFn: () => api.get("/attendance/daily-log/team/days")
+      .then((r) => r.data as { date: string; count: number }[]),
+  });
   const rows = (q.data ?? []).filter(
     (l) => l.body || l.links.length || l.file_count,
   );
+  const recent = (days.data ?? []).filter((d) => d.date !== date).slice(0, 6);
+  const shift = (n: number) => {
+    const d = new Date(date + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    const iso = d.toISOString().slice(0, 10);
+    if (iso <= todayStr()) setDate(iso);
+  };
   return (
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div className="font-semibold flex items-center gap-2">
           <Users size={15} /> Team daily logs
         </div>
-        <input
-          type="date"
-          value={date}
-          max={todayStr()}
-          onChange={(e) => setDate(e.target.value || todayStr())}
-          className="input max-w-[160px] py-1 text-sm"
-        />
+        <div className="flex items-center gap-1">
+          <button className="btn-ghost px-2 py-1" onClick={() => shift(-1)}
+                  title="Previous day" aria-label="Previous day">
+            <ChevronLeft size={15} />
+          </button>
+          <input
+            type="date"
+            value={date}
+            max={todayStr()}
+            onChange={(e) => setDate(e.target.value || todayStr())}
+            className="input max-w-[160px] py-1 text-sm"
+          />
+          <button className="btn-ghost px-2 py-1 disabled:opacity-40"
+                  onClick={() => shift(1)} disabled={date >= todayStr()}
+                  title="Next day" aria-label="Next day">
+            <ChevronRight size={15} />
+          </button>
+        </div>
       </div>
+
+      {recent.length > 0 && (
+        <div className="px-5 py-2.5 border-b border-ink-100 flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wider muted">Days with logs</span>
+          {recent.map((d) => (
+            <button key={d.date} onClick={() => setDate(d.date)}
+                    className="chip bg-ink-100 text-ink-700 hover:bg-brand-50 hover:text-brand-700">
+              {fmtDay(d.date)} · {d.count}
+            </button>
+          ))}
+        </div>
+      )}
+
       {q.isLoading ? (
         <div className="p-6 text-center text-sm muted">Loading…</div>
       ) : !rows.length ? (
         <div className="p-6 text-center text-sm muted">
-          No logs written for {fmtDay(date)} yet.
+          Nobody has written a log for {fmtDay(date)}.
+          {recent.length > 0 && (
+            <>
+              {" "}
+              <button className="text-brand-700 hover:underline"
+                      onClick={() => setDate(recent[0].date)}>
+                Jump to {fmtDay(recent[0].date)}
+              </button>
+              , the most recent day that has any.
+            </>
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-ink-100">
