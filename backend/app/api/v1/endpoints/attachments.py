@@ -35,8 +35,9 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
     - Supplier-side files (supplier_po) stay limited to director + purchasing.
     - Approval attachments stay viewable by the approval reviewers (manager +
       director) so they can see what they're signing off.
-    - Every other internal file (customer/quotation/project drawings & uploads)
-      is director-only.
+    - Customer / quotation / customer-PO files are visible to the sales side
+      that files them, scoped per-rep by `_sales_owns_attachment`.
+    - Anything not named here is director-only.
     """
     if role in (Role.CUSTOMER, Role.SUPPLIER):
         # Externals may only ever touch the owner types their portal shows.
@@ -88,7 +89,45 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
         # transparency of work, so any internal staffer may open them;
         # external portal users never touch them.
         return role not in (Role.CUSTOMER, Role.SUPPLIER)
+    if owner_type in ("customer", "quotation", "customer_po"):
+        # The sales rep is the one who FILES these — the customer's documents,
+        # the quotation they wrote, the signed PO scan. They used to fall
+        # through to director-only, so a rep could upload a file and then not
+        # see it, which reads as "the upload failed". Which rep sees which row
+        # is scoped by `_sales_owns_attachment` below: their own customers
+        # only, the same boundary the rest of the app draws.
+        return role in (
+            Role.SALES, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR,
+        )
     return role == Role.DIRECTOR
+
+
+async def _sales_owns_attachment(db: AsyncSession, me: User,
+                                 owner_type: str, owner_id) -> bool:
+    """Row-level scope for sales, mirroring `_sales_owns` in comments.py.
+
+    A rep sees files on their own customers' documents and nobody else's —
+    the boundary every other sales-facing endpoint already draws. Other
+    internal roles are unscoped here; their role gate above is the whole rule.
+    """
+    if Role(me.role) is not Role.SALES:
+        return True
+    from app.models.crm import Customer
+    if owner_type == "customer":
+        cust = await db.get(Customer, owner_id)
+        return bool(cust and cust.sales_pic_id == me.id)
+    if owner_type == "quotation":
+        from app.models.quotation import Quotation
+        q = await db.get(Quotation, owner_id)
+        return bool(q and q.sales_pic_id == me.id)
+    if owner_type == "customer_po":
+        from app.models.customer_po import CustomerPO
+        po = await db.get(CustomerPO, owner_id)
+        if not po:
+            return False
+        cust = await db.get(Customer, po.customer_id) if po.customer_id else None
+        return bool(cust and cust.sales_pic_id == me.id)
+    return True
 
 
 async def _external_owns_attachment(db: AsyncSession, me: User,
@@ -199,6 +238,8 @@ async def list_attachments(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
     if not await _external_owns_attachment(db, me, owner_type, owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view these files")
+    if not await _sales_owns_attachment(db, me, owner_type, owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer's files")
     rows = (await db.scalars(
         select(Attachment)
         .where(Attachment.owner_type == owner_type, Attachment.owner_id == owner_id)
@@ -243,10 +284,11 @@ async def upload_attachment(
 ):
     if owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
-    # External portal accounts may only attach to their own rows. Internal
-    # staff keep the previous behaviour — _attachment_visible_to governs who
-    # may VIEW a file (customer files are director-only to read), which must
-    # NOT gate uploading: sales legitimately attach files to their customers.
+    # External portal accounts may only attach to their own rows; internal
+    # staff may attach anywhere. Viewing is a separate question, answered by
+    # `_attachment_visible_to` + `_sales_owns_attachment`. It used to be
+    # possible to upload a customer file and then be unable to read it back —
+    # the two rules now agree for the sales side.
     if Role(me.role) in (Role.CUSTOMER, Role.SUPPLIER):
         if not _attachment_visible_to(owner_type, Role(me.role)) or \
                 not await _external_owns_attachment(db, me, owner_type, owner_id):
@@ -354,6 +396,8 @@ async def download_attachment(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
     if not await _external_owns_attachment(db, me, a.owner_type, a.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
+    if not await _sales_owns_attachment(db, me, a.owner_type, a.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer's files")
     # Link attachments have no file on disk — send the caller to the URL.
     if a.external_url:
         return RedirectResponse(a.external_url)

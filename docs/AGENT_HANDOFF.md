@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 26 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 27 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -205,6 +205,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
 | `test_clock_note.py` | clock-in/out notes; nobody overwrites HR's note or each other's |
+| `test_sales_sees_own_files.py` | a rep can read back the files they filed on their own customer / quotation / customer PO — and still not another rep's |
 | `test_storage_layout.py` | bucket key layout: grouped by owner type / month / document, user-supplied names can't traverse, and files written under the **old** flat layout still download |
 | `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
