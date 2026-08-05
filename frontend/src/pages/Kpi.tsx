@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Download } from "lucide-react";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 async function readBlobError(e: any): Promise<string> {
   const status = e?.response?.status;
@@ -57,17 +58,14 @@ export default function KpiPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <BarChart3 size={22} className="text-brand-600" /> KPIs
-          </h1>
-          <p className="text-sm muted">Performance across every department.</p>
+            <BarChart3 size={22} className="text-brand-600" /> {T("KPIs")}</h1>
+          <p className="text-sm muted">{T("Performance across every department.")}</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-ghost" onClick={() => exportKpi("pdf")}>
-            <Download size={15} /> PDF
-          </button>
+            <Download size={15} /> {T("PDF")}</button>
           <button className="btn-ghost" onClick={() => exportKpi("xlsx")}>
-            <Download size={15} /> Excel
-          </button>
+            <Download size={15} /> {T("Excel")}</button>
         </div>
       </div>
 
@@ -75,7 +73,7 @@ export default function KpiPage() {
         {cards.map((c) => (
           <div key={c.title} className="card overflow-hidden">
             <div className={`bg-gradient-to-br ${c.tone} px-5 py-3`}>
-              <div className="font-semibold text-ink-900">{c.title}</div>
+              <div className="font-semibold text-ink-900">{T(c.title)}</div>
             </div>
             <div className="p-5">
               {c.data ? (
@@ -83,7 +81,7 @@ export default function KpiPage() {
                   {Object.entries(c.data).map(([k, v]) => (
                     <li key={k} className="rounded-lg bg-ink-50 px-3 py-2">
                       <div className="text-[11px] uppercase muted tracking-wider">
-                        {k.replace(/_/g, " ")}
+                        {T(k.replace(/_/g, " "))}
                       </div>
                       <div className="font-semibold tabular-nums">
                         {typeof v === "number" ? v.toLocaleString("id-ID") : String(v ?? "—")}
@@ -92,7 +90,7 @@ export default function KpiPage() {
                   ))}
                 </ul>
               ) : (
-                <div className="muted text-sm">Loading…</div>
+                <div className="muted text-sm">{T("Loading…")}</div>
               )}
             </div>
           </div>

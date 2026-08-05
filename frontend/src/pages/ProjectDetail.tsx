@@ -9,7 +9,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T, locale } from "@/store/lang";
 import { UserLink } from "@/components/UserLink";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
@@ -536,7 +536,7 @@ export default function ProjectDetailPage() {
           <div className="font-semibold text-red-700">{t("Could not load project", "Gagal memuat proyek")}</div>
           <div className="muted mt-1">{msg}</div>
           {httpStatus && (
-            <div className="text-xs muted mt-2">HTTP {httpStatus} · GET /operation/projects/{id}/full</div>
+            <div className="text-xs muted mt-2">{T("HTTP")}{" "}{httpStatus} {T("· GET /operation/projects/")}{id}{T("/full")}</div>
           )}
           <div className="text-xs muted mt-3">
             {t(
@@ -626,7 +626,7 @@ export default function ProjectDetailPage() {
                   <Link to={`/customer-pos/${cpo.id}`}
                     className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
                     title={t("Customer PO that spawned this project", "PO pelanggan asal proyek ini")}>
-                    <FileText size={13} /> PO {cpo.number}
+                    <FileText size={13} /> {T("PO")}{" "}{cpo.number}
                   </Link>
                 )}
                 {priceReq && (
@@ -634,11 +634,11 @@ export default function ProjectDetailPage() {
                     <Link to={`/price-requests?open=${priceReq.id}`}
                       className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
                       title={t("The approved price request this project fulfils", "Permintaan harga yang dipenuhi proyek ini")}>
-                      <Tag size={13} /> PR {priceReq.number}
+                      <Tag size={13} /> {T("PR")}{" "}{priceReq.number}
                     </Link>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 text-ink-600">
-                      <Tag size={13} /> PR {priceReq.number}
+                      <Tag size={13} /> {T("PR")}{" "}{priceReq.number}
                     </span>
                   )
                 )}
@@ -991,10 +991,10 @@ export default function ProjectDetailPage() {
                   <td className="td">
                     <span className="chip bg-ink-100 text-ink-700 capitalize">{t(w.stage, WO_STAGE_LABEL_ID[w.stage] ?? w.stage)}</span>
                   </td>
-                  <td className="td muted">{w.started_at ? new Date(w.started_at).toLocaleDateString() : "—"}</td>
+                  <td className="td muted">{w.started_at ? new Date(w.started_at).toLocaleDateString(locale()) : "—"}</td>
                   <td className="td muted">
                     {w.completed_at
-                      ? <span className="text-emerald-700">{new Date(w.completed_at).toLocaleDateString()}</span>
+                      ? <span className="text-emerald-700">{new Date(w.completed_at).toLocaleDateString(locale())}</span>
                       : "—"}
                   </td>
                   <td className="td text-right">
@@ -1071,9 +1071,9 @@ export default function ProjectDetailPage() {
             <thead className="bg-ink-50/60">
               <tr>
                 <th className="th">{t("Rev", "Rev")}</th>
-                <th className="th">Status</th>
+                <th className="th">{T("Status")}</th>
                 <th className="th">{t("Decision", "Keputusan")}</th>
-                <th className="th">File</th>
+                <th className="th">{T("File")}</th>
                 <th className="th">{t("Notes", "Catatan")}</th>
                 {canApproveDrawing && <th className="th text-right">{t("Sign-off", "Persetujuan")}</th>}
               </tr>
@@ -1116,7 +1116,7 @@ export default function ProjectDetailPage() {
                   <td className="td muted">
                     {(d.decided_at || d.customer_decision_at) ? (
                       <span>
-                        {new Date(d.decided_at ?? d.customer_decision_at).toLocaleDateString()}
+                        {new Date(d.decided_at ?? d.customer_decision_at).toLocaleDateString(locale())}
                         {d.decided_by_name && <span className="block text-[11px]">{t("by", "oleh")} {d.decided_by_name}</span>}
                       </span>
                     ) : "—"}
@@ -1232,7 +1232,7 @@ export default function ProjectDetailPage() {
                 <div className="text-[11px] uppercase tracking-wider muted mb-1">{t("Delivery date", "Tanggal pengiriman")}</div>
                 {logistics.delivery_confirmed_at ? (
                   <div className="text-emerald-700 text-sm">
-                    {t("Confirmed", "Dikonfirmasi")} {new Date(logistics.delivery_confirmed_at).toLocaleDateString()}
+                    {t("Confirmed", "Dikonfirmasi")} {new Date(logistics.delivery_confirmed_at).toLocaleDateString(locale())}
                   </div>
                 ) : canLogistics ? (
                   <>
@@ -1258,7 +1258,7 @@ export default function ProjectDetailPage() {
               <div className="space-y-2">
                 {(logistics.required_docs ?? []).map((d: any) => (
                   <div key={d.key} className="flex items-center gap-3 flex-wrap text-sm border-b border-ink-50 pb-2">
-                    <span className="w-32 shrink-0 font-medium">{d.label}</span>
+                    <span className="w-32 shrink-0 font-medium">{T(d.label)}</span>
 
                     {/* Status chip */}
                     <span className={clsx("chip text-xs",
@@ -1339,7 +1339,7 @@ export default function ProjectDetailPage() {
         <div className="p-5 space-y-3">
           {p.qc_passed_at ? (
             <div className="text-sm text-emerald-700">
-              {t("Passed", "Lulus")} {new Date(p.qc_passed_at).toLocaleString()}{t(
+              {t("Passed", "Lulus")} {new Date(p.qc_passed_at).toLocaleString(locale())}{t(
                 " — finance can now issue the final invoice + delivery order.",
                 " — keuangan kini dapat menerbitkan faktur final + surat jalan.",
               )}
@@ -1385,7 +1385,7 @@ export default function ProjectDetailPage() {
           </div>
           {p.customer_received_at && (
             <span className="chip bg-emerald-50 text-emerald-700">
-              {t("Customer received", "Diterima pelanggan")} {new Date(p.customer_received_at).toLocaleDateString()}
+              {t("Customer received", "Diterima pelanggan")} {new Date(p.customer_received_at).toLocaleDateString(locale())}
             </span>
           )}
         </div>
@@ -1399,10 +1399,10 @@ export default function ProjectDetailPage() {
                   <div className="text-sm">
                     <span className="font-medium">{iv.number}</span>
                     {showMoney && iv.total != null && (
-                      <span className="muted"> · {iv.total.toLocaleString()}</span>
+                      <span className="muted"> · {iv.total.toLocaleString(locale())}</span>
                     )}
                     <div className="text-[11px] muted">
-                      FP: {iv.faktur_pajak_no || "—"} ({iv.faktur_pajak_status})
+                      {T("FP:")}{" "}{iv.faktur_pajak_no || "—"} ({iv.faktur_pajak_status})
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1497,7 +1497,7 @@ export default function ProjectDetailPage() {
                       </div>
                       {showMoney && iv.total != null && (
                         <div className="text-[11px] muted tabular-nums">
-                          {t("Paid", "Dibayar")} Rp {new Intl.NumberFormat("id-ID").format(Math.round(iv.paid_amount ?? 0))}
+                          {t("Paid", "Dibayar")} {T("Rp")}{" "}{new Intl.NumberFormat("id-ID").format(Math.round(iv.paid_amount ?? 0))}
                           {" / "}
                           <span className={clsx(
                             (iv.outstanding ?? 0) === 0 ? "text-emerald-700 font-medium" : ""
@@ -1521,11 +1521,11 @@ export default function ProjectDetailPage() {
                               : c.status === "rejected" ? "bg-red-50 text-red-700"
                               : "bg-amber-50 text-amber-700")}>{sl(c.status, CLAIM_STATUS_LABEL_ID)}</span>
                             <span className="tabular-nums font-medium">
-                              Rp {new Intl.NumberFormat("id-ID").format(Math.round(c.amount || 0))}
+                              {T("Rp")}{" "}{new Intl.NumberFormat("id-ID").format(Math.round(c.amount || 0))}
                             </span>
                             {c.method && <span className="muted">· {c.method}</span>}
-                            {c.reference && <span className="muted">· ref {c.reference}</span>}
-                            {c.paid_at && <span className="muted">· {new Date(c.paid_at).toLocaleDateString()}</span>}
+                            {c.reference && <span className="muted">{T("· ref")}{" "}{c.reference}</span>}
+                            {c.paid_at && <span className="muted">· {new Date(c.paid_at).toLocaleDateString(locale())}</span>}
                           </li>
                         ))}
                       </ul>
@@ -1645,7 +1645,7 @@ export default function ProjectDetailPage() {
                       invType === k ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
                     )}
                   >
-                    {label}
+                    {T(label)}
                   </button>
                 ))}
               </div>
@@ -1729,11 +1729,11 @@ export default function ProjectDetailPage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">DO</th>
+                <th className="th">{T("DO")}</th>
                 <th className="th">{t("Split", "Bagian")}</th>
                 <th className="th">{t("Courier", "Kurir")}</th>
                 <th className="th">{t("Tracking", "Resi")}</th>
-                <th className="th">Status</th>
+                <th className="th">{T("Status")}</th>
                 <th className="th text-right">{t("Actions", "Aksi")}</th>
               </tr>
             </thead>
@@ -1763,7 +1763,7 @@ export default function ProjectDetailPage() {
                       </span>
                       {isVerified && (
                         <div className="text-[10px] muted">
-                          {t("verified", "diverifikasi")} {new Date(d.verified_at).toLocaleDateString()}
+                          {t("verified", "diverifikasi")} {new Date(d.verified_at).toLocaleDateString(locale())}
                           {d.verified_by_name && <> {t("by", "oleh")} {d.verified_by_name}</>}
                         </div>
                       )}
@@ -1869,8 +1869,8 @@ export default function ProjectDetailPage() {
                 <th className="th">{t("Number", "Nomor")}</th>
                 <th className="th">{t("Type", "Tipe")}</th>
                 <th className="th">{t("Due", "Jatuh tempo")}</th>
-                <th className="th">Status</th>
-                {showMoney && <th className="th text-right">Total</th>}
+                <th className="th">{T("Status")}</th>
+                {showMoney && <th className="th text-right">{T("Total")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -1912,11 +1912,11 @@ export default function ProjectDetailPage() {
             <thead className="bg-ink-50/60">
               <tr>
                 <th className="th">{t("Number", "Nomor")}</th>
-                <th className="th">Supplier</th>
+                <th className="th">{T("Supplier")}</th>
                 <th className="th">{t("PO date", "Tanggal PO")}</th>
                 <th className="th">{t("Lead", "Lead")}</th>
-                <th className="th">Status</th>
-                {showMoney && <th className="th text-right">Total</th>}
+                <th className="th">{T("Status")}</th>
+                {showMoney && <th className="th text-right">{T("Total")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -1928,7 +1928,7 @@ export default function ProjectDetailPage() {
                     </Link>
                   </td>
                   <td className="td">{po.supplier_name ?? "—"}</td>
-                  <td className="td muted">{po.po_date ? new Date(po.po_date).toLocaleDateString() : "—"}</td>
+                  <td className="td muted">{po.po_date ? new Date(po.po_date).toLocaleDateString(locale()) : "—"}</td>
                   <td className="td muted">{po.quoted_lead_days != null ? `${po.quoted_lead_days}d` : "—"}</td>
                   <td className="td">
                     <span className={clsx("chip capitalize",
@@ -1970,7 +1970,7 @@ export default function ProjectDetailPage() {
                 <span className="chip bg-ink-100 text-ink-700">{pr.status}</span>
                 <span className="text-xs muted">{(pr.items ?? []).length} {t("item(s)", "item")}</span>
                 <span className="ml-auto text-[11px] text-ink-400">
-                  {new Date(pr.created_at).toLocaleDateString()}
+                  {new Date(pr.created_at).toLocaleDateString(locale())}
                 </span>
               </li>
             ))}
@@ -1998,7 +1998,7 @@ function Field({ icon, label, children }: {
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
     </div>
@@ -2025,7 +2025,7 @@ function EditableTextField({
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <input
         type="text"
@@ -2063,7 +2063,7 @@ function EditableDateField({
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <input
         type="date"
@@ -2089,7 +2089,7 @@ function Stat({ label, value, tone }: {
   return (
     <div className="card p-4">
       <div className={`inline-block text-[11px] uppercase tracking-wider px-2 py-0.5 rounded ${cls}`}>
-        {label}
+        {T(label)}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>

@@ -5,6 +5,7 @@ import {
   FileSignature,
 } from "lucide-react";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 interface DocRow {
   id: string;
@@ -85,12 +86,9 @@ export function EmployeeDocsSection({ employeeId }: { employeeId: string }) {
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100">
         <div className="font-semibold flex items-center gap-2">
-          <FileText size={15} className="text-brand-600" /> Employee documents
-        </div>
+          <FileText size={15} className="text-brand-600" /> {T("Employee documents")}</div>
         <div className="text-xs muted">
-          KTP, employment contract, NPWP (tax ID) and BPJS (social security).
-          Visible to HR, finance and management.
-        </div>
+          {T("KTP, employment contract, NPWP (tax ID) and BPJS (social security). Visible to HR, finance and management.")}</div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
         {DOC_KINDS.map((k) => (
@@ -126,9 +124,9 @@ function DocSlot({
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-sm font-semibold flex items-center gap-1.5">
-            <Icon size={13} className="text-brand-600" /> {kind.label}
+            <Icon size={13} className="text-brand-600" /> {T(kind.label)}
           </div>
-          <div className="text-[11px] muted">{kind.hint}</div>
+          <div className="text-[11px] muted">{T(kind.hint)}</div>
         </div>
         <button
           type="button"
@@ -137,8 +135,7 @@ function DocSlot({
           className="btn-ghost text-xs"
         >
           {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-          Upload
-        </button>
+          {T("Upload")}</button>
         <input
           ref={inputRef}
           type="file"
@@ -152,8 +149,7 @@ function DocSlot({
       </div>
       {files.length === 0 ? (
         <div className="mt-2 rounded-lg border border-dashed border-ink-200 py-4 text-center text-xs muted">
-          Not filed yet
-        </div>
+          {T("Not filed yet")}</div>
       ) : (
         <ul className="mt-2 space-y-1 text-xs">
           {files.map((f) => (
@@ -168,7 +164,7 @@ function DocSlot({
               </button>
               <button
                 type="button"
-                title="Remove"
+                title={T("Remove")}
                 className="text-red-600 hover:opacity-80 shrink-0"
                 onClick={() => {
                   if (window.confirm(`Remove ${f.filename}?`)) onDelete(f.id);

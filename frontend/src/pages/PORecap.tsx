@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { UserLink } from "@/components/UserLink";
+import { T } from "@/store/lang";
 
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -119,11 +120,9 @@ export default function PORecapPage() {
     return (
       <div className="card p-12 text-center">
         <AlertCircle size={28} className="mx-auto text-amber-500" />
-        <div className="mt-3 font-semibold">Director only</div>
+        <div className="mt-3 font-semibold">{T("Director only")}</div>
         <p className="text-sm muted mt-1 max-w-md mx-auto">
-          The PO recap aggregates customer POs and supplier POs across the
-          whole company, so it's restricted to the director.
-        </p>
+          {T("The PO recap aggregates customer POs and supplier POs across the whole company, so it's restricted to the director.")}</p>
       </div>
     );
   }
@@ -132,40 +131,35 @@ export default function PORecapPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ClipboardList size={22} className="text-brand-600" /> PO Recap
-        </h1>
+          <ClipboardList size={22} className="text-brand-600" /> {T("PO Recap")}</h1>
         <p className="text-sm muted">
-          Every customer PO and supplier PO in one place, with the person
-          in charge and the deal they're tied to.
-        </p>
+          {T("Every customer PO and supplier PO in one place, with the person in charge and the deal they're tied to.")}</p>
       </div>
 
       {/* Top-line cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <Receipt size={15} className="text-brand-600" /> Customer POs (incoming)
-          </div>
+            <Receipt size={15} className="text-brand-600" /> {T("Customer POs (incoming)")}</div>
           <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
-            <Stat label="Total" value={cpoTotals.count} />
-            <Stat label="Pending" value={cpoTotals.open} tone="amber" />
-            <Stat label="Approved" value={cpoTotals.approved} tone="emerald" />
+            <Stat label={T("Total")} value={cpoTotals.count} />
+            <Stat label={T("Pending")} value={cpoTotals.open} tone="amber" />
+            <Stat label={T("Approved")} value={cpoTotals.approved} tone="emerald" />
           </div>
           <div className="mt-3 text-xs muted">
-            Combined value: <span className="font-semibold">{idr(cpoTotals.total)}</span>
+            {T("Combined value:")}{" "}<span className="font-semibold">{idr(cpoTotals.total)}</span>
           </div>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <Truck size={15} className="text-brand-600" /> Supplier POs (outbound)
-          </div>
+            <Truck size={15} className="text-brand-600" /> {T("Supplier POs (outbound)")}</div>
           <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
-            <Stat label="Total" value={spoTotals.count} />
-            <Stat label="Open" value={spoTotals.open} tone="amber" />
-            <Stat label="Closed" value={spoTotals.closed} tone="emerald" />
+            <Stat label={T("Total")} value={spoTotals.count} />
+            <Stat label={T("Open")} value={spoTotals.open} tone="amber" />
+            <Stat label={T("Closed")} value={spoTotals.closed} tone="emerald" />
           </div>
           <div className="mt-3 text-xs muted">
-            Combined value: <span className="font-semibold">{idr(spoTotals.total)}</span>
+            {T("Combined value:")}{" "}<span className="font-semibold">{idr(spoTotals.total)}</span>
           </div>
         </div>
       </div>
@@ -186,7 +180,7 @@ export default function PORecapPage() {
                 tab === k ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
               )}
             >
-              {label}
+              {T(label)}
             </button>
           ))}
         </div>
@@ -195,7 +189,7 @@ export default function PORecapPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by PO number, customer, supplier, sales rep, project…"
+            placeholder={T("Search by PO number, customer, supplier, sales rep, project…")}
             className="input pl-9"
           />
         </div>
@@ -206,14 +200,12 @@ export default function PORecapPage() {
         <div className="card overflow-hidden">
           <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-3">
             <div className="font-semibold flex items-center gap-2">
-              <Receipt size={14} className="text-brand-600" /> Customer POs
-            </div>
+              <Receipt size={14} className="text-brand-600" /> {T("Customer POs")}</div>
             <Link
               to="/customer-pos"
               className="text-xs text-brand-700 hover:underline"
             >
-              Open full list →
-            </Link>
+              {T("Open full list →")}</Link>
           </header>
           {cpos.isLoading ? (
             <Loading />
@@ -239,14 +231,12 @@ export default function PORecapPage() {
         <div className="card overflow-hidden">
           <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-3">
             <div className="font-semibold flex items-center gap-2">
-              <Truck size={14} className="text-brand-600" /> Supplier POs
-            </div>
+              <Truck size={14} className="text-brand-600" /> {T("Supplier POs")}</div>
             <Link
               to="/purchase-orders"
               className="text-xs text-brand-700 hover:underline"
             >
-              Open full list →
-            </Link>
+              {T("Open full list →")}</Link>
           </header>
           {spos.isLoading ? (
             <Loading />
@@ -278,22 +268,21 @@ function CPOTable({
   if (!rows.length) {
     return (
       <div className="p-8 text-center text-sm muted">
-        No customer POs match your filters.
-      </div>
+        {T("No customer POs match your filters.")}</div>
     );
   }
   return (
     <table className="w-full text-sm">
       <thead className="bg-ink-50/60">
         <tr>
-          <th className="th">PO number</th>
-          <th className="th">Customer</th>
-          <th className="th">Sales rep</th>
-          <th className="th">Quotation</th>
-          <th className="th">Project</th>
-          <th className="th">PO date</th>
-          <th className="th">Status</th>
-          <th className="th text-right">Total</th>
+          <th className="th">{T("PO number")}</th>
+          <th className="th">{T("Customer")}</th>
+          <th className="th">{T("Sales rep")}</th>
+          <th className="th">{T("Quotation")}</th>
+          <th className="th">{T("Project")}</th>
+          <th className="th">{T("PO date")}</th>
+          <th className="th">{T("Status")}</th>
+          <th className="th text-right">{T("Total")}</th>
         </tr>
       </thead>
       <tbody>
@@ -322,7 +311,7 @@ function CPOTable({
                 "chip capitalize",
                 CPOSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
               )}>
-                {p.status.replace(/_/g, " ")}
+                {T(p.status.replace(/_/g, " "))}
               </span>
             </td>
             <td className="td text-right tabular-nums">{idr(p.total)}</td>
@@ -337,22 +326,21 @@ function SPOTable({ rows }: { rows: SPO[] }) {
   if (!rows.length) {
     return (
       <div className="p-8 text-center text-sm muted">
-        No supplier POs match your filters.
-      </div>
+        {T("No supplier POs match your filters.")}</div>
     );
   }
   return (
     <table className="w-full text-sm">
       <thead className="bg-ink-50/60">
         <tr>
-          <th className="th">PO number</th>
-          <th className="th">Supplier</th>
-          <th className="th">Customer</th>
-          <th className="th">Sales rep</th>
-          <th className="th">Project</th>
-          <th className="th">PO date</th>
-          <th className="th">Status</th>
-          <th className="th text-right">Total</th>
+          <th className="th">{T("PO number")}</th>
+          <th className="th">{T("Supplier")}</th>
+          <th className="th">{T("Customer")}</th>
+          <th className="th">{T("Sales rep")}</th>
+          <th className="th">{T("Project")}</th>
+          <th className="th">{T("PO date")}</th>
+          <th className="th">{T("Status")}</th>
+          <th className="th text-right">{T("Total")}</th>
         </tr>
       </thead>
       <tbody>
@@ -379,7 +367,7 @@ function SPOTable({ rows }: { rows: SPO[] }) {
                 "chip capitalize",
                 SPOSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
               )}>
-                {p.status.replace(/_/g, " ")}
+                {T(p.status.replace(/_/g, " "))}
               </span>
             </td>
             <td className="td text-right tabular-nums">{idr(p.total)}</td>
@@ -393,8 +381,7 @@ function SPOTable({ rows }: { rows: SPO[] }) {
 function Loading() {
   return (
     <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
-      <Loader2 size={14} className="animate-spin" /> Loading…
-    </div>
+      <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
   );
 }
 function ErrorRow({ err }: { err: any }) {
@@ -402,9 +389,9 @@ function ErrorRow({ err }: { err: any }) {
     <div className="p-5 text-sm text-red-700 flex items-start gap-2">
       <AlertCircle size={16} className="mt-0.5 shrink-0" />
       <div className="flex-1">
-        <div className="font-medium">Couldn't load.</div>
+        <div className="font-medium">{T("Couldn't load.")}</div>
         <div className="text-xs mt-0.5 break-all">
-          {err?.response?.data?.detail ?? err?.message ?? "Request failed"}
+          {err?.response?.data?.detail ?? err?.message ?? T("Request failed")}
         </div>
       </div>
     </div>
@@ -419,7 +406,7 @@ function Stat({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider muted">{T(label)}</div>
       <div className={clsx(
         "text-xl font-semibold tabular-nums mt-0.5",
         tone === "amber" && "text-amber-700",

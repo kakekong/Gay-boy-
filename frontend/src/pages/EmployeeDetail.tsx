@@ -14,6 +14,7 @@ import { StageBadge } from "@/components/StageBadge";
 import { TagChip } from "@/components/TagChip";
 import { TagPicker } from "@/components/TagPicker";
 import { useAuthStore } from "@/store/auth";
+import { T, locale } from "@/store/lang";
 
 const ROLE_CHIP: Record<string, string> = {
   sales:    "bg-brand-50 text-brand-700",
@@ -127,7 +128,7 @@ export default function EmployeeDetailPage() {
   });
 
   const e = employee.data;
-  if (!e) return <div className="muted">Loading…</div>;
+  if (!e) return <div className="muted">{T("Loading…")}</div>;
 
   const isSales = e.role === "sales";
 
@@ -147,7 +148,7 @@ export default function EmployeeDetailPage() {
                 <span className={clsx("chip uppercase", ROLE_CHIP[e.role] ?? "bg-ink-100 text-ink-700")}>
                   {e.role}
                 </span>
-                {!e.is_active && <span className="chip bg-ink-100 text-ink-600">inactive</span>}
+                {!e.is_active && <span className="chip bg-ink-100 text-ink-600">{T("inactive")}</span>}
               </div>
             </div>
           </div>
@@ -156,24 +157,23 @@ export default function EmployeeDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-sm">
           {canSeeContact ? (
             <>
-              <Field icon={<Mail size={14} />} label="Email">{e.email}</Field>
-              <Field icon={<Phone size={14} />} label="Phone">{e.phone ?? "—"}</Field>
+              <Field icon={<Mail size={14} />} label={T("Email")}>{e.email}</Field>
+              <Field icon={<Phone size={14} />} label={T("Phone")}>{e.phone ?? "—"}</Field>
             </>
           ) : (
-            <Field icon={<Mail size={14} />} label="Contact">
-              <span className="muted">Hidden for HR</span>
+            <Field icon={<Mail size={14} />} label={T("Contact")}>
+              <span className="muted">{T("Hidden for HR")}</span>
             </Field>
           )}
-          <Field icon={<Briefcase size={14} />} label="Status">
-            {e.is_active ? "Active" : "Inactive"}
+          <Field icon={<Briefcase size={14} />} label={T("Status")}>
+            {e.is_active ? T("Active") : T("Inactive")}
           </Field>
         </div>
 
         {canTag && (
           <div className="mt-6 pt-4 border-t border-ink-100">
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider muted mb-2">
-              <Tags size={12} /> Tags
-            </div>
+              <Tags size={12} /> {T("Tags")}</div>
             <div className="flex flex-wrap gap-1.5 items-center">
               {(userTags.data ?? []).map((t: any) => (
                 <TagChip
@@ -189,8 +189,7 @@ export default function EmployeeDetailPage() {
               />
               {(userTags.data ?? []).length === 0 && (
                 <span className="text-xs muted">
-                  No tags yet — click "+ Add tag" to label this employee.
-                </span>
+                  {T("No tags yet — click \"+ Add tag\" to label this employee.")}</span>
               )}
             </div>
           </div>
@@ -203,26 +202,26 @@ export default function EmployeeDetailPage() {
       {/* HR work summary — counts only, no names or money */}
       {isHR && (
         <div className="grid grid-cols-3 gap-3">
-          <KpiCard label="Projects" value={stats.data?.projects_total ?? "—"} icon={Briefcase} accent="brand" />
-          <KpiCard label="Fulfilled" value={stats.data?.projects_fulfilled ?? "—"} icon={Trophy} accent="emerald" />
-          <KpiCard label="Overdue" value={stats.data?.projects_overdue ?? "—"} icon={Frown} accent="red" />
+          <KpiCard label={T("Projects")} value={stats.data?.projects_total ?? "—"} icon={Briefcase} accent="brand" />
+          <KpiCard label={T("Fulfilled")} value={stats.data?.projects_fulfilled ?? "—"} icon={Trophy} accent="emerald" />
+          <KpiCard label={T("Overdue")} value={stats.data?.projects_overdue ?? "—"} icon={Frown} accent="red" />
         </div>
       )}
 
       {/* Sales KPIs — hidden from HR */}
       {!isHR && (
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <KpiCard label="Customers"     value={stats.data?.customers ?? "—"}      icon={Users}       accent="brand" />
-        <KpiCard label="Quotations"    value={stats.data?.quotations ?? "—"}     icon={FileText}    accent="violet" />
-        <KpiCard label="Won"           value={stats.data?.won ?? "—"}            icon={Trophy}      accent="emerald" />
-        <KpiCard label="Lost"          value={stats.data?.lost ?? "—"}           icon={Frown}       accent="red" />
+        <KpiCard label={T("Customers")}     value={stats.data?.customers ?? "—"}      icon={Users}       accent="brand" />
+        <KpiCard label={T("Quotations")}    value={stats.data?.quotations ?? "—"}     icon={FileText}    accent="violet" />
+        <KpiCard label={T("Won")}           value={stats.data?.won ?? "—"}            icon={Trophy}      accent="emerald" />
+        <KpiCard label={T("Lost")}          value={stats.data?.lost ?? "—"}           icon={Frown}       accent="red" />
         <KpiCard
-          label="Win rate"
+          label={T("Win rate")}
           value={stats.data ? `${Math.round((stats.data.win_rate ?? 0) * 100)}%` : "—"}
           icon={TrendingUp} accent="amber"
         />
         <KpiCard
-          label="Won revenue"
+          label={T("Won revenue")}
           value={stats.data ? idr(stats.data.won_revenue) : "—"}
           icon={Wallet} accent="emerald"
         />
@@ -231,7 +230,7 @@ export default function EmployeeDetailPage() {
 
       {canSeeAttendance && (attendanceSummary.data?.deductible_days ?? 0) > 0 && (
         <KpiCard
-          label="Missed days this month"
+          label={T("Missed days this month")}
           value={attendanceSummary.data?.deductible_days ?? 0}
           icon={CalendarX}
           accent={(attendanceSummary.data?.deductible_days ?? 0) >= 3 ? "red" : "amber"}
@@ -241,13 +240,13 @@ export default function EmployeeDetailPage() {
       {/* All-time attendance tally */}
       {canSeeAttendance && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <KpiCard label="Total attendance (days)"
+          <KpiCard label={T("Total attendance (days)")}
             value={stats.data?.attendance_present_total ?? "—"}
             icon={CalendarCheck} accent="emerald" />
-          <KpiCard label="Total absences"
+          <KpiCard label={T("Total absences")}
             value={stats.data?.attendance_absent_total ?? "—"}
             icon={CalendarX} accent="red" />
-          <KpiCard label="Leave / sick (days)"
+          <KpiCard label={T("Leave / sick (days)")}
             value={stats.data?.attendance_leave_total ?? "—"}
             icon={Clock} accent="amber" />
         </div>
@@ -255,7 +254,7 @@ export default function EmployeeDetailPage() {
 
       {isSales && !isHR && (
         <KpiCard
-          label="Pipeline value (open quotations)"
+          label={T("Pipeline value (open quotations)")}
           value={stats.data ? idr(stats.data.pipeline_value) : "—"}
           icon={TrendingUp}
           accent="brand"
@@ -268,27 +267,26 @@ export default function EmployeeDetailPage() {
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
           <div>
             <div className="font-semibold flex items-center gap-2">
-              <FileText size={15} /> Quotations
-            </div>
+              <FileText size={15} /> {T("Quotations")}</div>
             <div className="text-xs muted">
-              {(quotations.data ?? []).length} document(s) authored by {e.full_name}
+              {(quotations.data ?? []).length} {T("document(s) authored by")}{" "}{e.full_name}
             </div>
           </div>
         </div>
         {(quotations.data ?? []).length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No quotations.</div>
+          <div className="p-8 text-center muted text-sm">{T("No quotations.")}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Number</th>
-                  <th className="th">Customer</th>
-                  <th className="th">Variant</th>
-                  <th className="th">Status</th>
-                  <th className="th text-right">Discount</th>
-                  <th className="th text-right">Total</th>
-                  <th className="th">Created</th>
+                  <th className="th">{T("Number")}</th>
+                  <th className="th">{T("Customer")}</th>
+                  <th className="th">{T("Variant")}</th>
+                  <th className="th">{T("Status")}</th>
+                  <th className="th text-right">{T("Discount")}</th>
+                  <th className="th text-right">{T("Total")}</th>
+                  <th className="th">{T("Created")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -319,7 +317,7 @@ export default function EmployeeDetailPage() {
                     <td className="td capitalize muted">{q.variant}</td>
                     <td className="td">
                       <span className={clsx("chip", QSTATUS[q.status] ?? "bg-ink-100 text-ink-600")}>
-                        {q.status.replace(/_/g, " ")}
+                        {T(q.status.replace(/_/g, " "))}
                       </span>
                     </td>
                     <td className="td text-right tabular-nums">{q.discount_pct}%</td>
@@ -339,22 +337,20 @@ export default function EmployeeDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
-            <Users size={15} /> Assigned customers
-          </div>
+            <Users size={15} /> {T("Assigned customers")}</div>
           <div className="text-xs muted">
-            {(customers.data ?? []).length} customer(s)
-          </div>
+            {(customers.data ?? []).length} {T("customer(s)")}</div>
         </div>
         {(customers.data ?? []).length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No assigned customers.</div>
+          <div className="p-8 text-center muted text-sm">{T("No assigned customers.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Company</th>
-                <th className="th">Industry</th>
-                <th className="th">Stage</th>
-                <th className="th text-right">Lifetime value</th>
+                <th className="th">{T("Company")}</th>
+                <th className="th">{T("Industry")}</th>
+                <th className="th">{T("Stage")}</th>
+                <th className="th text-right">{T("Lifetime value")}</th>
               </tr>
             </thead>
             <tbody>
@@ -390,22 +386,21 @@ export default function EmployeeDetailPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
-            <Briefcase size={15} /> Projects / POs
-          </div>
-          <div className="text-xs muted">{(projects.data ?? []).length} project(s)</div>
+            <Briefcase size={15} /> {T("Projects / POs")}</div>
+          <div className="text-xs muted">{(projects.data ?? []).length} {T("project(s)")}</div>
         </div>
         {(projects.data ?? []).length === 0 ? (
-          <div className="p-8 text-center muted text-sm">No projects.</div>
+          <div className="p-8 text-center muted text-sm">{T("No projects.")}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Code</th>
-                  <th className="th">Customer</th>
-                  <th className="th">Status</th>
-                  <th className="th">Target delivery</th>
-                  <th className="th text-right">PO value</th>
+                  <th className="th">{T("Code")}</th>
+                  <th className="th">{T("Customer")}</th>
+                  <th className="th">{T("Status")}</th>
+                  <th className="th">{T("Target delivery")}</th>
+                  <th className="th text-right">{T("PO value")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -420,7 +415,7 @@ export default function EmployeeDetailPage() {
                         className="text-brand-700 hover:underline">{p.code}</Link>
                     </td>
                     <td className="td">{p.customer_name}</td>
-                    <td className="td capitalize">{p.status?.replace(/_/g, " ")}</td>
+                    <td className="td capitalize">{T(p.status?.replace(/_/g, " "))}</td>
                     <td className="td muted">{p.target_delivery ?? "—"}</td>
                     <td className="td text-right tabular-nums">
                       {p.po_value == null ? "—" : idr(p.po_value)}
@@ -440,11 +435,9 @@ export default function EmployeeDetailPage() {
           <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
             <div>
               <div className="font-semibold flex items-center gap-2">
-                <CalendarCheck size={15} /> Attendance
-              </div>
+                <CalendarCheck size={15} /> {T("Attendance")}</div>
               <div className="text-xs muted">
-                Daily presence + monthly summary used for salary deductions.
-              </div>
+                {T("Daily presence + monthly summary used for salary deductions.")}</div>
             </div>
             <input
               type="month"
@@ -456,21 +449,21 @@ export default function EmployeeDetailPage() {
 
           {/* Summary tiles */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-5 border-b border-ink-100">
-            <SumTile label="Workdays" value={attendanceSummary.data?.workdays_in_month ?? "—"} />
-            <SumTile label="Present"
+            <SumTile label={T("Workdays")} value={attendanceSummary.data?.workdays_in_month ?? "—"} />
+            <SumTile label={T("Present")}
               value={
                 (attendanceSummary.data?.counts?.present ?? 0)
                 + (attendanceSummary.data?.counts?.wfh ?? 0)
               }
               tone="emerald" />
-            <SumTile label="Half day" value={attendanceSummary.data?.counts?.half_day ?? 0} tone="amber" />
-            <SumTile label="Absent" value={attendanceSummary.data?.counts?.absent ?? 0} tone="red" />
-            <SumTile label="Leave"
+            <SumTile label={T("Half day")} value={attendanceSummary.data?.counts?.half_day ?? 0} tone="amber" />
+            <SumTile label={T("Absent")} value={attendanceSummary.data?.counts?.absent ?? 0} tone="red" />
+            <SumTile label={T("Leave")}
               value={
                 (attendanceSummary.data?.counts?.leave ?? 0)
                 + (attendanceSummary.data?.counts?.sick ?? 0)
               } />
-            <SumTile label="Deductible days"
+            <SumTile label={T("Deductible days")}
               value={attendanceSummary.data?.deductible_days ?? 0}
               tone="red" />
           </div>
@@ -484,26 +477,26 @@ export default function EmployeeDetailPage() {
             </span>
             {attendanceSummary.error && (
               <span className="text-red-600">
-                Couldn't load summary (HTTP {(attendanceSummary.error as any)?.response?.status ?? "?"})
+                {T("Couldn't load summary (HTTP")}{" "}{(attendanceSummary.error as any)?.response?.status ?? "?"})
               </span>
             )}
           </div>
 
           {(attendanceRows.data ?? []).length === 0 ? (
             <div className="p-8 text-center text-sm muted">
-              No attendance records for {period}.
+              {T("No attendance records for")}{" "}{period}.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-ink-50/60">
                   <tr>
-                    <th className="th">Date</th>
-                    <th className="th">Status</th>
-                    <th className="th text-right">Hours</th>
-                    <th className="th">Clock in</th>
-                    <th className="th">Clock out</th>
-                    <th className="th">Notes</th>
+                    <th className="th">{T("Date")}</th>
+                    <th className="th">{T("Status")}</th>
+                    <th className="th text-right">{T("Hours")}</th>
+                    <th className="th">{T("Clock in")}</th>
+                    <th className="th">{T("Clock out")}</th>
+                    <th className="th">{T("Notes")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -513,7 +506,7 @@ export default function EmployeeDetailPage() {
                       <td className="td">
                         <span className={clsx("chip capitalize",
                           ATT_CHIP[a.status] ?? "bg-ink-100 text-ink-700")}>
-                          {a.status?.replace(/_/g, " ")}
+                          {T(a.status?.replace(/_/g, " "))}
                         </span>
                       </td>
                       <td className="td text-right tabular-nums">{a.hours ?? "—"}</td>
@@ -537,15 +530,13 @@ export default function EmployeeDetailPage() {
       {!isHR && (
       <div className="card p-5">
         <div className="flex items-center gap-2 font-semibold">
-          <ActivityIcon size={15} /> Recent activity
-        </div>
+          <ActivityIcon size={15} /> {T("Recent activity")}</div>
         <div className="text-xs muted mb-3">
-          Last {activities.data?.length ?? 0} interactions logged by {e.full_name}.
+          {T("Last")}{" "}{activities.data?.length ?? 0} {T("interactions logged by")}{" "}{e.full_name}.
         </div>
         {(activities.data ?? []).length === 0 ? (
           <div className="rounded-xl border border-dashed border-ink-200 p-8 text-center text-sm muted">
-            No activity logged.
-          </div>
+            {T("No activity logged.")}</div>
         ) : (
           <ul className="space-y-2">
             {(activities.data ?? []).map((a: any) => (
@@ -555,7 +546,7 @@ export default function EmployeeDetailPage() {
                 </div>
                 <div className="flex-1">
                   <div className="text-sm capitalize">
-                    <b>{a.type.replace(/_/g, " ")}</b>{" "}
+                    <b>{T(a.type.replace(/_/g, " "))}</b>{" "}
                     <span className="muted">· {a.direction}</span>{" "}
                     <span className="muted">·</span>{" "}
                     <Link to={`/customers/${a.customer_id}`} className="text-brand-700 hover:underline">
@@ -564,7 +555,7 @@ export default function EmployeeDetailPage() {
                   </div>
                   {a.notes && <div className="text-xs muted mt-0.5">{a.notes}</div>}
                   <div className="text-[11px] text-ink-400 mt-0.5">
-                    {new Date(a.occurred_at).toLocaleString()}
+                    {new Date(a.occurred_at).toLocaleString(locale())}
                   </div>
                 </div>
               </li>
@@ -588,7 +579,7 @@ function SumTile({ label, value, tone }: {
     : "text-ink-900";
   return (
     <div className="rounded-xl border border-ink-100 p-3">
-      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider muted">{T(label)}</div>
       <div className={clsx("mt-1 text-xl font-semibold tabular-nums", toneClass)}>
         {value}
       </div>
@@ -602,7 +593,7 @@ function Field({ icon, label, children }: {
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
     </div>

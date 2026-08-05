@@ -7,6 +7,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { T, locale } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -50,13 +51,12 @@ export default function SupplierPortalPage() {
             <Factory size={22} />
           </div>
           <div>
-            <div className="text-xs uppercase tracking-widest text-white/70">Supplier portal</div>
+            <div className="text-xs uppercase tracking-widest text-white/70">{T("Supplier portal")}</div>
             <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight mt-0.5">
-              {me.data?.name ?? "Loading…"}
+              {me.data?.name ?? T("Loading…")}
             </h1>
             <p className="text-white/80 text-sm mt-1">
-              See your open POs and upload invoices, drawings, bills, and delivery (landing) documents.
-            </p>
+              {T("See your open POs and upload invoices, drawings, bills, and delivery (landing) documents.")}</p>
           </div>
         </div>
       </div>
@@ -65,20 +65,19 @@ export default function SupplierPortalPage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
-            <FileText size={15} className="text-brand-600" /> Open RFQs
-          </div>
+            <FileText size={15} className="text-brand-600" /> {T("Open RFQs")}</div>
         </div>
         {(orders.data?.rfqs ?? []).length === 0 ? (
-          <div className="p-6 text-center text-sm muted">No RFQs right now.</div>
+          <div className="p-6 text-center text-sm muted">{T("No RFQs right now.")}</div>
         ) : (
           <ul className="divide-y divide-ink-100">
             {orders.data!.rfqs.map((r: any) => (
               <li key={r.id} className="p-3 text-sm flex items-center gap-3 flex-wrap">
-                <span className="chip bg-amber-50 text-amber-700">RFQ</span>
-                <span className="muted">Lead time: {r.quoted_lead_days ?? "—"} days</span>
-                <span className="muted">{(r.quoted_lines ?? []).length} line(s)</span>
+                <span className="chip bg-amber-50 text-amber-700">{T("RFQ")}</span>
+                <span className="muted">{T("Lead time:")}{" "}{r.quoted_lead_days ?? "—"} {T("days")}</span>
+                <span className="muted">{(r.quoted_lines ?? []).length} {T("line(s)")}</span>
                 <span className="ml-auto text-xs text-ink-400">
-                  {new Date(r.created_at).toLocaleDateString()}
+                  {new Date(r.created_at).toLocaleDateString(locale())}
                 </span>
               </li>
             ))}
@@ -88,9 +87,9 @@ export default function SupplierPortalPage() {
 
       {/* POs */}
       <div className="space-y-3">
-        <div className="font-semibold text-lg">Purchase orders</div>
+        <div className="font-semibold text-lg">{T("Purchase orders")}</div>
         {(orders.data?.purchase_orders ?? []).length === 0 && (
-          <div className="card p-8 text-center text-sm muted">No POs yet.</div>
+          <div className="card p-8 text-center text-sm muted">{T("No POs yet.")}</div>
         )}
         {(orders.data?.purchase_orders ?? []).map((po: PO) => (
           <POCard key={po.id} po={po} />
@@ -196,17 +195,16 @@ function POCard({ po }: { po: PO }) {
         <div className="min-w-0">
           <div className="font-mono text-sm">{po.number}</div>
           <div className="text-xs muted">
-            PO date: {po.po_date ?? "—"} · Lead: {po.quoted_lead_days ?? "—"} days · {(po.items ?? []).length} line(s)
-          </div>
+            {T("PO date:")}{" "}{po.po_date ?? "—"} {T("· Lead:")}{" "}{po.quoted_lead_days ?? "—"} {T("days ·")}{" "}{(po.items ?? []).length} {T("line(s)")}</div>
           {po.project_code && (
             <div className="text-xs mt-0.5">
-              Project: <span className="font-mono text-brand-700">{po.project_code}</span>
+              {T("Project:")}{" "}<span className="font-mono text-brand-700">{po.project_code}</span>
             </div>
           )}
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <div className="text-[10px] uppercase muted">Total</div>
+            <div className="text-[10px] uppercase muted">{T("Total")}</div>
             <div className="font-semibold tabular-nums">{idr(po.total)}</div>
           </div>
           <span className="chip bg-ink-100 text-ink-700 uppercase">{po.status}</span>
@@ -218,18 +216,15 @@ function POCard({ po }: { po: PO }) {
         <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 flex flex-wrap gap-3">
           {needsProject && (
             <span className="inline-flex items-center gap-1">
-              <AlertCircle size={12} /> Not linked to a project — ask the buyer to attach one
-            </span>
+              <AlertCircle size={12} /> {T("Not linked to a project — ask the buyer to attach one")}</span>
           )}
           {needsDrawing && !needsProject && (
             <span className="inline-flex items-center gap-1">
-              <AlertCircle size={12} /> Drawing PDF required
-            </span>
+              <AlertCircle size={12} /> {T("Drawing PDF required")}</span>
           )}
           {needsEta && !needsProject && (
             <span className="inline-flex items-center gap-1">
-              <AlertCircle size={12} /> Set the estimated arrival at our warehouse
-            </span>
+              <AlertCircle size={12} /> {T("Set the estimated arrival at our warehouse")}</span>
           )}
         </div>
       )}
@@ -238,12 +233,12 @@ function POCard({ po }: { po: PO }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <StatusTile
           done={po.has_drawing}
-          label="Drawing uploaded"
+          label={T("Drawing uploaded")}
           hint={po.has_drawing ? "Visible to the customer for approval" : "Upload below"}
         />
         <StatusTile
           done={!!po.est_arrive_our_warehouse}
-          label="Warehouse ETA"
+          label={T("Warehouse ETA")}
           hint={po.est_arrive_our_warehouse
             ? `Customer sees: ${po.est_arrive_our_warehouse}`
             : "Just an estimate is enough — customer sees it instantly"}
@@ -253,15 +248,11 @@ function POCard({ po }: { po: PO }) {
       {/* Shipping date inputs */}
       <div className="rounded-xl border border-ink-200 bg-white p-3">
         <div className="text-xs font-semibold uppercase muted mb-1 flex items-center gap-1">
-          <Warehouse size={12} /> Shipping dates (visible to the customer)
-        </div>
+          <Warehouse size={12} /> {T("Shipping dates (visible to the customer)")}</div>
         <div className="text-[11px] muted mb-3">
-          Fill in any of these as soon as you know them — the customer sees
-          updates straight away. <b>Just the estimate alone is enough</b>;
-          you don't have to wait for the goods to actually arrive.
-        </div>
+          {T("Fill in any of these as soon as you know them — the customer sees updates straight away.")}{" "}<b>{T("Just the estimate alone is enough")}</b>{T("; you don't have to wait for the goods to actually arrive.")}</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Est. arrival at our warehouse">
+          <Field label={T("Est. arrival at our warehouse")}>
             <input
               type="date"
               className="input"
@@ -270,7 +261,7 @@ function POCard({ po }: { po: PO }) {
               disabled={needsProject}
             />
           </Field>
-          <Field label="Actual ship from origin">
+          <Field label={T("Actual ship from origin")}>
             <input
               type="date"
               className="input"
@@ -279,7 +270,7 @@ function POCard({ po }: { po: PO }) {
               disabled={needsProject}
             />
           </Field>
-          <Field label="Actual arrival at warehouse">
+          <Field label={T("Actual arrival at warehouse")}>
             <input
               type="date"
               className="input"
@@ -298,15 +289,14 @@ function POCard({ po }: { po: PO }) {
             {saveEta.isPending
               ? <Loader2 size={14} className="animate-spin" />
               : <Save size={14} />}
-            Save dates
-          </button>
+            {T("Save dates")}</button>
           {flash && <span className="text-xs text-emerald-700">{flash}</span>}
         </div>
       </div>
 
       {/* Upload row */}
       <div className="rounded-xl border border-ink-200 bg-ink-50/30 p-3">
-        <div className="text-xs font-semibold uppercase muted mb-2">Upload a document</div>
+        <div className="text-xs font-semibold uppercase muted mb-2">{T("Upload a document")}</div>
         <div className="flex flex-wrap gap-2">
           {UPLOAD_KINDS.map((k) => (
             <button
@@ -320,7 +310,7 @@ function POCard({ po }: { po: PO }) {
                   : "bg-white text-ink-600 border-ink-200 hover:bg-ink-50",
               )}
             >
-              <k.Icon size={12} /> {k.label}
+              <k.Icon size={12} /> {T(k.label)}
             </button>
           ))}
         </div>
@@ -342,21 +332,21 @@ function POCard({ po }: { po: PO }) {
       {/* Existing uploads */}
       {(files.data ?? []).length > 0 && (
         <div>
-          <div className="text-xs font-semibold uppercase muted mb-2">Your uploads</div>
+          <div className="text-xs font-semibold uppercase muted mb-2">{T("Your uploads")}</div>
           <ul className="divide-y divide-ink-100">
             {files.data!.map((f: any) => (
               <li key={f.id} className="py-2 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{f.filename}</div>
                   <div className="text-[11px] muted">
-                    {(f.size / 1024).toFixed(1)} KB · {new Date(f.uploaded_at).toLocaleString()}
+                    {(f.size / 1024).toFixed(1)} {T("KB ·")}{" "}{new Date(f.uploaded_at).toLocaleString(locale())}
                     {f.description && <> · {f.description}</>}
                   </div>
                 </div>
-                <button className="btn-ghost" title="View" onClick={() => setPreview(f)}>
+                <button className="btn-ghost" title={T("View")} onClick={() => setPreview(f)}>
                   <Eye size={13} />
                 </button>
-                <button className="btn-ghost" title="Download" onClick={() => download(f.id, f.filename)}>
+                <button className="btn-ghost" title={T("Download")} onClick={() => download(f.id, f.filename)}>
                   <Download size={13} />
                 </button>
               </li>
@@ -392,8 +382,8 @@ function StatusTile({ done, label, hint }: {
         {done ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
       </div>
       <div>
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs muted">{hint}</div>
+        <div className="text-sm font-medium">{T(label)}</div>
+        <div className="text-xs muted">{T(hint)}</div>
       </div>
     </div>
   );
@@ -402,7 +392,7 @@ function StatusTile({ done, label, hint }: {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-[10px] uppercase tracking-wider muted mb-0.5">{label}</span>
+      <span className="block text-[10px] uppercase tracking-wider muted mb-0.5">{T(label)}</span>
       {children}
     </label>
   );

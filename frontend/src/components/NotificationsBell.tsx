@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { t as tt } from "@/store/lang";
+import { t as tt, T } from "@/store/lang";
 import { isPushSupported, subscribePush, unsubscribePush } from "@/lib/push";
 
 interface NotificationItem {
@@ -233,8 +233,8 @@ export function NotificationsBell() {
       <button
         onClick={() => setOpen((v) => !v)}
         className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
-        aria-label="Notifications"
-        title="Notifications"
+        aria-label={T("Notifications")}
+        title={T("Notifications")}
       >
         <Bell size={18} className={hasHigh ? "text-red-600" : ""} />
         {total > 0 && (
@@ -253,9 +253,9 @@ export function NotificationsBell() {
           <div className="absolute right-0 top-12 z-40 w-96 max-w-[calc(100vw-1rem)] rounded-xl bg-white shadow-card border border-ink-100 overflow-hidden">
             <div className="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
               <div>
-                <div className="font-semibold text-sm">Notifications</div>
+                <div className="font-semibold text-sm">{T("Notifications")}</div>
                 <div className="text-xs muted">
-                  {total === 0 ? "All clear" : `${total} active alert${total === 1 ? "" : "s"}`}
+                  {total === 0 ? T("All clear") : `${total} active alert${total === 1 ? "" : "s"}`}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -274,12 +274,12 @@ export function NotificationsBell() {
 
             <div className="max-h-[60vh] overflow-y-auto">
               {q.isLoading && (
-                <div className="p-8 text-center muted text-sm">Loading…</div>
+                <div className="p-8 text-center muted text-sm">{T("Loading…")}</div>
               )}
               {!q.isLoading && (q.data?.items.length ?? 0) === 0 && (
                 <div className="p-8 text-center text-sm">
                   <div className="text-3xl mb-1">🎉</div>
-                  <div className="muted">Inbox zero — nothing needs you right now.</div>
+                  <div className="muted">{T("Inbox zero — nothing needs you right now.")}</div>
                 </div>
               )}
               <ul>
@@ -305,7 +305,7 @@ export function NotificationsBell() {
                       <button
                         onClick={(e) => { e.stopPropagation(); dismissOne(n.id); }}
                         className="absolute top-2 right-2 p-1 rounded text-ink-300 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/15"
-                        aria-label="Dismiss notification"
+                        aria-label={T("Dismiss notification")}
                         title={tt("Dismiss", "Hapus")}
                       >
                         <X size={13} />
@@ -319,8 +319,7 @@ export function NotificationsBell() {
             <PushToggleRow />
 
             <div className="border-t border-ink-100 px-4 py-2 text-[11px] muted text-center">
-              Auto-refreshes every 30 seconds. Click any item to act on it.
-            </div>
+              {T("Auto-refreshes every 30 seconds. Click any item to act on it.")}</div>
           </div>
         </>
       )}

@@ -14,7 +14,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
-import { useLangStore, useT } from "@/store/lang";
+import { useLangStore, useT, T, t } from "@/store/lang";
 import { useNavHistory } from "@/store/navHistory";
 import { useThemeStore } from "@/store/theme";
 import { NotificationsBell } from "@/components/NotificationsBell";
@@ -239,7 +239,7 @@ function BackButton() {
                  transition-colors"
     >
       <ChevronLeft size={18} className="shrink-0" />
-      <span className="hidden md:inline max-w-[9rem] truncate">{label}</span>
+      <span className="hidden md:inline max-w-[9rem] truncate">{T(label)}</span>
     </button>
   );
 }
@@ -543,7 +543,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Factory size={18} className="text-white" />
           </div>
           <div>
-            <div className="font-semibold text-ink-900 dark:text-white leading-tight">Transmisi Eng</div>
+            <div className="font-semibold text-ink-900 dark:text-white leading-tight">{T("Transmisi Eng")}</div>
             <div className="text-[10px] uppercase tracking-wider text-ink-400">
               {t("Project ERP · v0.1", "ERP Proyek · v0.1")}
             </div>
@@ -551,7 +551,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <button
             className="ml-auto lg:hidden text-ink-500 dark:text-ink-400 hover:text-ink-900 dark:hover:text-white"
             onClick={() => setMobileOpen(false)}
-            aria-label="Close menu"
+            aria-label={T("Close menu")}
           >
             <X size={18} />
           </button>
@@ -605,8 +605,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                       <span className="flex-1">{lang === "id" ? n.label_id : n.label}</span>
                       {n.accent && (
                         <span className="text-[9px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded bg-white/15">
-                          AI
-                        </span>
+                          {T("AI")}</span>
                       )}
                       {badgeCountFor(n) > 0 && (() => {
                         const ids = dismissibleIdsFor(n);
@@ -713,7 +712,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <button
             className="lg:hidden text-ink-600"
             onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
+            aria-label={T("Open menu")}
           >
             <Menu size={20} />
           </button>
@@ -743,8 +742,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
           <button
             className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800 hidden sm:block shrink-0"
-            aria-label="Chat"
-            title="Open chat"
+            aria-label={T("Chat")}
+            title={T("Open chat")}
             onClick={() => nav("/chat")}
           >
             <MessageCircle size={18} />
@@ -782,43 +781,51 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {
               key: "approvals-pending",
               count: (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
-              title: "Approvals & documents",
-              body: (n: number) => `${n} item${n === 1 ? "" : "s"} waiting for a decision.`,
+              title: t("Approvals & documents", "Persetujuan & dokumen"),
+              body: (n: number) => t(`${n} item${n === 1 ? "" : "s"} waiting for a decision.`,
+                                     `${n} item menunggu keputusan.`),
               link: "/approvals",
               severity: "high" as const,
             },
             {
               key: "finance-pending",
               count: pendingInvoices.data ?? 0,
-              title: "Invoices waiting for finance",
-              body: (n: number) => `${n} new invoice${n === 1 ? "" : "s"} to review + sign off on the faktur pajak.`,
+              title: t("Invoices waiting for finance", "Invoice menunggu keuangan"),
+              body: (n: number) => t(`${n} new invoice${n === 1 ? "" : "s"} to review + sign off on the faktur pajak.`,
+                                     `${n} invoice baru untuk ditinjau + tanda tangan faktur pajak.`),
               link: "/finance",
               severity: "medium" as const,
             },
             {
               key: "claims-pending",
               count: pendingClaims.data ?? 0,
-              title: "Payment claims",
-              body: (n: number) => `${n} customer payment${n === 1 ? "" : "s"} to verify.`,
+              title: t("Payment claims", "Klaim pembayaran"),
+              body: (n: number) => t(`${n} customer payment${n === 1 ? "" : "s"} to verify.`,
+                                     `${n} pembayaran pelanggan untuk diverifikasi.`),
               link: "/finance/payment-verification",
               severity: "medium" as const,
             },
             {
               key: "dp-pending",
               count: pendingDp.data ?? 0,
-              title: role === "sales" ? "DP deposits to confirm" : "DP POs awaiting finance",
+              title: role === "sales"
+                ? t("DP deposits to confirm", "DP untuk dikonfirmasi")
+                : t("DP POs awaiting finance", "PO DP menunggu keuangan"),
               body: (n: number) =>
                 role === "sales"
-                  ? `${n} down payment${n === 1 ? "" : "s"} approved by finance — confirm receipt to start the project.`
-                  : `${n} down-payment PO${n === 1 ? "" : "s"} waiting for finance approval.`,
+                  ? t(`${n} down payment${n === 1 ? "" : "s"} approved by finance — confirm receipt to start the project.`,
+                      `${n} uang muka disetujui keuangan — konfirmasi penerimaan untuk memulai proyek.`)
+                  : t(`${n} down-payment PO${n === 1 ? "" : "s"} waiting for finance approval.`,
+                      `${n} PO uang muka menunggu persetujuan keuangan.`),
               link: "/customer-pos",
               severity: "high" as const,
             },
             {
               key: "chat-unread",
               count: unread.data ?? 0,
-              title: "Chat messages",
-              body: (n: number) => `${n} unread message${n === 1 ? "" : "s"}.`,
+              title: t("Chat messages", "Pesan obrolan"),
+              body: (n: number) => t(`${n} unread message${n === 1 ? "" : "s"}.`,
+                                     `${n} pesan belum dibaca.`),
               link: "/chat",
               severity: "low" as const,
             },
@@ -884,11 +891,11 @@ function ImpersonationBanner() {
     <div className="bg-amber-500 text-amber-950 px-4 lg:px-6 py-2 flex items-center gap-3 text-sm font-medium shadow-soft z-20">
       <Eye size={16} className="shrink-0" />
       <span className="flex-1 min-w-0 truncate">
-        Viewing as <b>{user?.full_name}</b>
+        {T("Viewing as")}{" "}<b>{user?.full_name}</b>
         <span className="font-normal"> ({user?.custom_role_name ?? user?.role})</span>
         {origin?.user?.full_name && (
           <span className="hidden sm:inline font-normal opacity-80">
-            {" "}· you are {origin.user.full_name}
+            {" "}{T("· you are")}{" "}{origin.user.full_name}
           </span>
         )}
       </span>
@@ -896,8 +903,7 @@ function ImpersonationBanner() {
         onClick={exitViewAs}
         className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-950/90 text-amber-50 px-3 py-1.5 text-xs font-semibold hover:bg-amber-950"
       >
-        <LogOut size={13} /> Exit view-as
-      </button>
+        <LogOut size={13} /> {T("Exit view-as")}</button>
     </div>
   );
 }
@@ -913,7 +919,7 @@ function ThemeToggle() {
         ? t("Switch to light mode", "Ganti ke mode terang")
         : t("Switch to dark mode", "Ganti ke mode gelap")}
       className="p-2 rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-800"
-      aria-label="Toggle dark mode"
+      aria-label={T("Toggle dark mode")}
     >
       {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
     </button>
@@ -930,7 +936,7 @@ function LangToggle() {
       title={lang === "en" ? "Ganti ke Bahasa Indonesia" : "Switch to English"}
       className="px-2 py-1.5 rounded-lg text-xs font-semibold text-ink-600 hover:bg-ink-100 hover:text-ink-900 border border-ink-200"
     >
-      {lang === "en" ? "EN · ID" : "ID · EN"}
+      {lang === "en" ? T("EN · ID") : T("ID · EN")}
     </button>
   );
 }

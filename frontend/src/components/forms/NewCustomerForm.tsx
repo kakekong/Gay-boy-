@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT } from "@/store/lang";
+import { useT, T } from "@/store/lang";
 
 const INDUSTRIES = [
   "mining", "pltu", "fertilizer", "sugar", "cement",
@@ -190,7 +190,7 @@ export function NewCustomerForm({ onClose, customer }: Props) {
             <input className="input" value={basic.phone}
               onChange={(e) => setBasic({ ...basic, phone: e.target.value })} placeholder="+62…" />
           </Field>
-          <Field label="WhatsApp">
+          <Field label={T("WhatsApp")}>
             <input className="input" value={basic.whatsapp}
               onChange={(e) => setBasic({ ...basic, whatsapp: e.target.value })} placeholder="+62…" />
           </Field>
@@ -265,7 +265,7 @@ export function NewCustomerForm({ onClose, customer }: Props) {
                         <input className="input" value={c.phone}
                           onChange={(e) => updateContact(idx, { phone: e.target.value })} />
                       </Field>
-                      <Field label="WhatsApp">
+                      <Field label={T("WhatsApp")}>
                         <input className="input" value={c.whatsapp}
                           onChange={(e) => updateContact(idx, { whatsapp: e.target.value })} />
                       </Field>
@@ -433,7 +433,7 @@ function Stepper({ step, labels }: { step: 1 | 2 | 3; labels: string[] }) {
                 : done ? "text-ink-700"
                 : "text-ink-400",
             )}>
-              {label}
+              {T(label)}
             </span>
             {n < 3 && (
               <span className={clsx("w-6 h-px",
@@ -449,7 +449,7 @@ function Stepper({ step, labels }: { step: 1 | 2 | 3; labels: string[] }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );

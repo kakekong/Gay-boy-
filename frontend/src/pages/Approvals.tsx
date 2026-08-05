@@ -9,6 +9,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { T, locale } from "@/store/lang";
 
 interface ApprovalAttachment {
   id: string;
@@ -101,12 +102,9 @@ export default function ApprovalsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ShieldCheck size={22} className="text-brand-600" /> Approval inbox
-        </h1>
+          <ShieldCheck size={22} className="text-brand-600" /> {T("Approval inbox")}</h1>
         <p className="text-sm muted">
-          Discounts, stage moves, follow-ups and mark-won requests routed to you
-          for sign-off.
-        </p>
+          {T("Discounts, stage moves, follow-ups and mark-won requests routed to you for sign-off.")}</p>
       </div>
 
       {flash && (
@@ -134,8 +132,7 @@ export default function ApprovalsPage() {
         ))}
         {!q.isLoading && !q.data?.length && (
           <div className="card p-12 text-center muted text-sm">
-            🎉 No pending approvals — inbox zero.
-          </div>
+            {T("🎉 No pending approvals — inbox zero.")}</div>
         )}
       </div>
 
@@ -147,13 +144,9 @@ export default function ApprovalsPage() {
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
               <FileText size={15} className="text-brand-600" />
-              Documents waiting for your decision
-            </div>
+              {T("Documents waiting for your decision")}</div>
             <div className="text-xs muted">
-              Decided on their own pages — drawings & shipping docs on the
-              project, price requests on their queue. Listed here so nothing
-              slips past the inbox.
-            </div>
+              {T("Decided on their own pages — drawings & shipping docs on the project, price requests on their queue. Listed here so nothing slips past the inbox.")}</div>
           </div>
           <ul className="divide-y divide-ink-100">
             {(docs.data ?? []).map((d, i) => (
@@ -169,10 +162,10 @@ export default function ApprovalsPage() {
                     : d.kind === "delivery_proof" ? "bg-lime-50 text-lime-700"
                     : "bg-violet-50 text-violet-700",
                   )}>
-                    {d.kind === "drawing" ? "DRW"
-                     : d.kind === "import_doc" ? "DOC"
-                     : d.kind === "delivery_proof" ? "POD"
-                     : "PR"}
+                    {d.kind === "drawing" ? T("DRW")
+                     : d.kind === "import_doc" ? T("DOC")
+                     : d.kind === "delivery_proof" ? T("POD")
+                     : T("PR")}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">{d.title}</div>
@@ -244,7 +237,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
     // YYYY-MM-DD dates → locale date
     if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) {
       const d = new Date(v);
-      if (!isNaN(d.getTime())) return d.toLocaleDateString();
+      if (!isNaN(d.getTime())) return d.toLocaleDateString(locale());
     }
     return String(v);
   };
@@ -278,31 +271,26 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
           <div className="flex items-center gap-2 flex-wrap">
             {isStageMove ? (
               <span className="chip bg-violet-50 text-violet-700 inline-flex items-center gap-1">
-                <ChevronRight size={11} /> Stage move
-              </span>
+                <ChevronRight size={11} /> {T("Stage move")}</span>
             ) : isFollowup ? (
               <span className="chip bg-sky-50 text-sky-700 inline-flex items-center gap-1">
-                <MessageSquare size={11} /> Follow-up
-              </span>
+                <MessageSquare size={11} /> {T("Follow-up")}</span>
             ) : isWon ? (
               <span className="chip bg-emerald-50 text-emerald-700 inline-flex items-center gap-1">
-                <Trophy size={11} /> Mark won
-              </span>
+                <Trophy size={11} /> {T("Mark won")}</span>
             ) : isProjectUpdate ? (
               <span className="chip bg-indigo-50 text-indigo-700 inline-flex items-center gap-1">
-                <FileText size={11} /> Shipping update
-              </span>
+                <FileText size={11} /> {T("Shipping update")}</span>
             ) : (
               <span className="chip bg-brand-50 text-brand-700 capitalize">
                 {r.target_type}
               </span>
             )}
             <span className="chip bg-amber-50 text-amber-700 uppercase">
-              {r.required_role} approval
-            </span>
+              {r.required_role} {T("approval")}</span>
             <span className="text-[11px] muted">
-              {new Date(r.created_at).toLocaleString()}
-              {r.requester_name && <> · by <b className="text-ink-700">{r.requester_name}</b></>}
+              {new Date(r.created_at).toLocaleString(locale())}
+              {r.requester_name && <> {T("· by")}{" "}<b className="text-ink-700">{r.requester_name}</b></>}
             </span>
           </div>
 
@@ -320,24 +308,23 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               <div className="flex items-center gap-2 flex-wrap text-sm">
                 {fromStage ? (
                   <>
-                    <span className="muted">Move from</span>
+                    <span className="muted">{T("Move from")}</span>
                     <span className="chip bg-ink-100 text-ink-700 capitalize">
-                      {fromStage.replace(/_/g, " ")}
+                      {T(fromStage.replace(/_/g, " "))}
                     </span>
                     <ChevronRight size={14} className="text-ink-400" />
                   </>
                 ) : (
-                  <span className="muted">Move to</span>
+                  <span className="muted">{T("Move to")}</span>
                 )}
                 <span className="chip bg-brand-50 text-brand-700 capitalize font-semibold">
-                  {String(toStage).replace(/_/g, " ")}
+                  {T(String(toStage).replace(/_/g, " "))}
                 </span>
               </div>
               {narrative ? (
                 <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-sm whitespace-pre-wrap">
                   <div className="text-[10px] uppercase tracking-wider muted mb-1">
-                    Reason from requester
-                  </div>
+                    {T("Reason from requester")}</div>
                   {narrative}
                 </div>
               ) : (
@@ -359,7 +346,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               )}
               {r.payload?.quotation_number && (
                 <div className="text-xs muted">
-                  On quotation{" "}
+                  {T("On quotation")}{" "}
                   <span className="font-mono text-ink-700">
                     {r.payload.quotation_number}
                   </span>
@@ -368,14 +355,13 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               {r.payload?.notes && (
                 <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-sm whitespace-pre-wrap">
                   <div className="text-[10px] uppercase tracking-wider muted mb-1">
-                    Follow-up note
-                  </div>
+                    {T("Follow-up note")}</div>
                   {r.payload.notes}
                 </div>
               )}
               {r.payload?.next_at && (
                 <div className="text-xs muted">
-                  Next touchpoint: {new Date(r.payload.next_at).toLocaleString()}
+                  {T("Next touchpoint:")}{" "}{new Date(r.payload.next_at).toLocaleString(locale())}
                   {r.payload?.next_channel ? ` · ${r.payload.next_channel}` : ""}
                 </div>
               )}
@@ -387,12 +373,12 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                 className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-900 hover:text-brand-700"
               >
                 <FileText size={14} />
-                {r.target_label ?? "Quotation"}
+                {r.target_label ?? T("Quotation")}
               </Link>
               <div className="text-sm">
-                Mark this deal as <b>Won</b>
+                {T("Mark this deal as")}{" "}<b>{T("Won")}</b>
                 {typeof r.payload?.total === "number" && (
-                  <> · total <b className="tabular-nums">{fmtIdr(r.payload.total)}</b></>
+                  <> {T("· total")}{" "}<b className="tabular-nums">{fmtIdr(r.payload.total)}</b></>
                 )}
               </div>
               {r.reason && <div className="text-xs muted italic">{r.reason}</div>}
@@ -408,7 +394,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                   {r.target_label}
                 </Link>
               )}
-              <div className="text-xs muted">Proposed shipping update:</div>
+              <div className="text-xs muted">{T("Proposed shipping update:")}</div>
               <table className="w-full text-sm border border-ink-100 rounded-lg overflow-hidden">
                 <tbody>
                   {Object.entries(r.payload?.changes ?? {}).map(([k, v]) => (
@@ -431,7 +417,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
           {r.attachments.length > 0 && (
             <div className="mt-3">
               <div className="text-[10px] uppercase tracking-wider muted mb-1">
-                Supporting files ({r.attachments.length})
+                {T("Supporting files (")}{r.attachments.length})
               </div>
               <ul className="space-y-1">
                 {r.attachments.map((a) => (
@@ -445,14 +431,14 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                     <button
                       onClick={() => setPreview(a)}
                       className="btn-ghost px-2 py-1 text-xs"
-                      title="View without downloading"
+                      title={T("View without downloading")}
                     >
                       <Eye size={11} />
                     </button>
                     <button
                       onClick={() => download(a.id, a.filename)}
                       className="btn-ghost px-2 py-1 text-xs"
-                      title="Download"
+                      title={T("Download")}
                     >
                       <Download size={11} />
                     </button>
@@ -469,7 +455,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               onClick={() => setShowRaw((v) => !v)}
               className="text-[11px] text-brand-700 hover:underline"
             >
-              {showRaw ? "Hide raw payload" : "Show raw payload"}
+              {showRaw ? T("Hide raw payload") : T("Show raw payload")}
             </button>
             {showRaw && (
               <pre className="mt-2 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-[11px] font-mono text-ink-600 overflow-x-auto">
@@ -485,7 +471,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             onChange={(e) => { setNotes(e.target.value); setNoteErr(null); }}
             rows={2}
             className="input text-sm"
-            placeholder="Reason for your decision (required to reject, shown to the requester)…"
+            placeholder={T("Reason for your decision (required to reject, shown to the requester)…")}
           />
           {noteErr && (
             <div className="text-[11px] text-red-700">{noteErr}</div>
@@ -496,16 +482,14 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               className="btn-danger flex-1"
               disabled={decide.isPending}
             >
-              <X size={15} /> Reject
-            </button>
+              <X size={15} /> {T("Reject")}</button>
             <button
               onClick={() => act(true)}
               className="btn-success flex-1"
               disabled={decide.isPending}
             >
               {decide.isPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-              Approve
-            </button>
+              {T("Approve")}</button>
           </div>
         </div>
       </div>
@@ -566,16 +550,15 @@ function DocumentPreview({ requestId }: { requestId: string }) {
         onClick={() => setOpen((v) => !v)}
         className="text-[11px] text-brand-700 hover:underline"
       >
-        {open ? "Hide details" : "Show what's being approved"}
+        {open ? T("Hide details") : T("Show what's being approved")}
       </button>
       {open && (
         <div className="mt-2 rounded-lg border border-ink-200 bg-white p-3">
           {q.isLoading ? (
             <div className="text-xs muted flex items-center gap-2">
-              <Loader2 size={12} className="animate-spin" /> Loading the document…
-            </div>
+              <Loader2 size={12} className="animate-spin" /> {T("Loading the document…")}</div>
           ) : !p ? (
-            <div className="text-xs muted">Couldn't load the document.</div>
+            <div className="text-xs muted">{T("Couldn't load the document.")}</div>
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2">
@@ -583,8 +566,7 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                 {p.subtitle && <span className="text-sm muted">· {p.subtitle}</span>}
                 {p.link && (
                   <Link to={p.link} className="ml-auto text-xs text-brand-700 hover:underline">
-                    Open the document →
-                  </Link>
+                    {T("Open the document →")}</Link>
                 )}
               </div>
 
@@ -592,7 +574,7 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                 <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
                   {p.fields.map((f, i) => (
                     <span key={i}>
-                      <span className="muted">{f.label}: </span>{f.value}
+                      <span className="muted">{T(f.label)}: </span>{f.value}
                     </span>
                   ))}
                 </div>
@@ -603,12 +585,12 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                   <table className="w-full text-xs">
                     <thead className="bg-ink-50">
                       <tr>
-                        <th className="th text-left">Description</th>
-                        <th className="th text-right">Qty</th>
+                        <th className="th text-left">{T("Description")}</th>
+                        <th className="th text-right">{T("Qty")}</th>
                         {p.items.some((i) => i.unit_price != null) && (
                           <>
-                            <th className="th text-right">Unit</th>
-                            <th className="th text-right">Total</th>
+                            <th className="th text-right">{T("Unit")}</th>
+                            <th className="th text-right">{T("Total")}</th>
                           </>
                         )}
                       </tr>
@@ -619,7 +601,7 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                           <td className="td">
                             {it.description}
                             {it.is_new && (
-                              <span className="chip bg-emerald-100 text-emerald-800 ml-1">new</span>
+                              <span className="chip bg-emerald-100 text-emerald-800 ml-1">{T("new")}</span>
                             )}
                           </td>
                           <td className="td text-right tabular-nums">
@@ -641,8 +623,7 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                       <tfoot>
                         <tr className="border-t border-ink-200 font-semibold">
                           <td className="td" colSpan={p.items.some((x) => x.unit_price != null) ? 3 : 1}>
-                            Total
-                          </td>
+                            {T("Total")}</td>
                           <td className="td text-right tabular-nums">{rp(p.total)}</td>
                         </tr>
                       </tfoot>
@@ -653,14 +634,14 @@ function DocumentPreview({ requestId }: { requestId: string }) {
 
               {p.notes && (
                 <div className="mt-2 text-xs whitespace-pre-wrap">
-                  <span className="muted">Notes: </span>{p.notes}
+                  <span className="muted">{T("Notes:")}{" "}</span>{p.notes}
                 </div>
               )}
 
               {p.attachments.length > 0 && (
                 <div className="mt-3">
                   <div className="text-[10px] uppercase tracking-wider muted mb-1">
-                    Files on the document ({p.attachments.length})
+                    {T("Files on the document (")}{p.attachments.length})
                   </div>
                   <ul className="space-y-1">
                     {p.attachments.map((a) => (
@@ -670,7 +651,7 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                         <span className="truncate flex-1">{a.filename}</span>
                         {(a as any).external_url ? (
                           <a href={(a as any).external_url} target="_blank" rel="noreferrer"
-                             className="btn-ghost px-2 py-1 text-xs">Open</a>
+                             className="btn-ghost px-2 py-1 text-xs">{T("Open")}</a>
                         ) : (
                           <span className="muted tabular-nums">{humanSize(a.size)}</span>
                         )}

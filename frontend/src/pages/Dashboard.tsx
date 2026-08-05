@@ -9,7 +9,7 @@ import { api } from "@/api/client";
 import { KpiCard } from "@/components/KpiCard";
 import { StageBadge } from "@/components/StageBadge";
 import { useAuthStore } from "@/store/auth";
-import { useT } from "@/store/lang";
+import { useT, T } from "@/store/lang";
 
 export default function DashboardPage() {
   const t = useT();
@@ -98,7 +98,7 @@ export default function DashboardPage() {
                 <tr className="border-y border-ink-100">
                   <th className="th">{t("Company", "Perusahaan")}</th>
                   <th className="th">{t("Industry", "Industri")}</th>
-                  <th className="th">PIC</th>
+                  <th className="th">{T("PIC")}</th>
                   <th className="th">{t("Stage", "Tahap")}</th>
                 </tr>
               </thead>
@@ -343,7 +343,7 @@ function QueueBucket({
     <div>
       <div className="flex items-center gap-2 mb-1">
         {icon}
-        <span className="text-sm font-medium">{label}</span>
+        <span className="text-sm font-medium">{T(label)}</span>
         <span className={clsx("chip ml-auto", ring)}>{count}</span>
       </div>
       <div className="pl-6 divide-y divide-ink-100">{children}</div>

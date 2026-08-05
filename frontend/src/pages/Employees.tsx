@@ -7,6 +7,7 @@ import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { TagChip } from "@/components/TagChip";
 import { TagManager, type TagRecord } from "@/components/TagManager";
+import { T } from "@/store/lang";
 
 interface Employee {
   id: string;
@@ -69,16 +70,12 @@ export default function EmployeesPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Users size={22} className="text-brand-600" /> Employees
-          </h1>
+            <Users size={22} className="text-brand-600" /> {T("Employees")}</h1>
           <p className="text-sm muted">
-            Click any sales person to see their pipeline, quotations, customers, and activity.
-            Use tags to label people (e.g. "Top performer", "Mining specialist").
-          </p>
+            {T("Click any sales person to see their pipeline, quotations, customers, and activity. Use tags to label people (e.g. \"Top performer\", \"Mining specialist\").")}</p>
         </div>
         <button className="btn-primary" onClick={() => setOpenTags(true)}>
-          <Tags size={14} /> Manage tags
-        </button>
+          <Tags size={14} /> {T("Manage tags")}</button>
       </div>
 
       <div className="card p-3 flex flex-wrap items-center gap-2">
@@ -87,7 +84,7 @@ export default function EmployeesPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email…"
+            placeholder={T("Search by name or email…")}
             className="input pl-9"
           />
         </div>
@@ -96,7 +93,7 @@ export default function EmployeesPage() {
           onChange={(e) => setRoleFilter(e.target.value)}
           className="input max-w-[160px]"
         >
-          <option value="">All roles</option>
+          <option value="">{T("All roles")}</option>
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <select
@@ -104,7 +101,7 @@ export default function EmployeesPage() {
           onChange={(e) => setTagFilter(e.target.value)}
           className="input max-w-[200px]"
         >
-          <option value="">All tags</option>
+          <option value="">{T("All tags")}</option>
           {(tags.data ?? []).map((t) => (
             <option key={t.id} value={t.id}>{t.name}</option>
           ))}
@@ -119,7 +116,7 @@ export default function EmployeesPage() {
           <div key={r}>
             <div className="flex items-center gap-2 mb-2">
               <span className={clsx("chip uppercase", ROLE_CHIP[r])}>{r}</span>
-              <span className="text-xs muted">{grouped.get(r)!.length} person(s)</span>
+              <span className="text-xs muted">{grouped.get(r)!.length} {T("person(s)")}</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
               {grouped.get(r)!.map((e) => (
@@ -154,11 +151,10 @@ export default function EmployeesPage() {
                             ? "bg-red-50 text-red-700"
                             : "bg-amber-50 text-amber-700",
                         )}
-                        title="Missed days this month (absent + half-day×0.5)"
+                        title={T("Missed days this month (absent + half-day×0.5)")}
                       >
                         <CalendarX size={11} />
-                        {e.missed_days_this_month} missed this month
-                      </span>
+                        {e.missed_days_this_month} {T("missed this month")}</span>
                     </div>
                   )}
                 </Link>
@@ -168,16 +164,15 @@ export default function EmployeesPage() {
         ))}
         {!employees.isLoading && !filtered.length && (
           <div className="card p-12 text-center muted text-sm">
-            No employees match your filter.
-          </div>
+            {T("No employees match your filter.")}</div>
         )}
       </div>
 
       <Modal
         open={openTags}
         onClose={() => setOpenTags(false)}
-        title="Manage tags"
-        subtitle="Create, rename, and recolor employee tags. Deleting a tag removes it from everyone."
+        title={T("Manage tags")}
+        subtitle={T("Create, rename, and recolor employee tags. Deleting a tag removes it from everyone.")}
         size="lg"
       >
         <TagManager onClose={() => setOpenTags(false)} />

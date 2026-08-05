@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Download, Loader2, AlertCircle, ExternalLink } from "lucide-react";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 interface Props {
   attachmentId: string;
@@ -103,10 +104,9 @@ export function FilePreviewModal({ attachmentId, filename, contentType, onClose 
           onClick={download}
           disabled={!blobUrl}
           className="btn-ghost text-xs disabled:opacity-50"
-          title="Download"
+          title={T("Download")}
         >
-          <Download size={14} /> Download
-        </button>
+          <Download size={14} /> {T("Download")}</button>
         {blobUrl && (
           // Last-resort full-tab open, only after the user has clicked
           // (so the click is properly user-initiated and Safari allows it).
@@ -115,12 +115,11 @@ export function FilePreviewModal({ attachmentId, filename, contentType, onClose 
             target="_blank"
             rel="noopener"
             className="btn-ghost text-xs"
-            title="Open in a new tab"
+            title={T("Open in a new tab")}
           >
-            <ExternalLink size={14} /> New tab
-          </a>
+            <ExternalLink size={14} /> {T("New tab")}</a>
         )}
-        <button onClick={onClose} className="btn-ghost" title="Close (Esc)">
+        <button onClick={onClose} className="btn-ghost" title={T("Close (Esc)")}>
           <X size={16} />
         </button>
       </header>
@@ -129,13 +128,12 @@ export function FilePreviewModal({ attachmentId, filename, contentType, onClose 
         {err ? (
           <div className="self-center justify-self-center max-w-md bg-white rounded-2xl shadow-card p-6 text-center space-y-2">
             <AlertCircle size={28} className="mx-auto text-amber-500" />
-            <div className="font-semibold">Couldn't preview this file</div>
+            <div className="font-semibold">{T("Couldn't preview this file")}</div>
             <p className="text-sm text-ink-600">{err}</p>
           </div>
         ) : !blobUrl ? (
           <div className="self-center justify-self-center text-white flex items-center gap-2 text-sm">
-            <Loader2 size={16} className="animate-spin" /> Loading…
-          </div>
+            <Loader2 size={16} className="animate-spin" /> {T("Loading…")}</div>
         ) : isImage ? (
           <img
             src={blobUrl}
@@ -153,23 +151,19 @@ export function FilePreviewModal({ attachmentId, filename, contentType, onClose 
           // browser may not render inline. Give the user the controls to
           // get at the file without leaving the page.
           <div className="self-center justify-self-center max-w-md bg-white rounded-2xl shadow-card p-6 text-center space-y-3">
-            <div className="font-semibold">This file type can't be previewed</div>
+            <div className="font-semibold">{T("This file type can't be previewed")}</div>
             <p className="text-sm text-ink-600">
-              Your browser can't render <span className="font-mono">{mime}</span> inline.
-              Download it or open in a new tab instead.
-            </p>
+              {T("Your browser can't render")}{" "}<span className="font-mono">{mime}</span> {T("inline. Download it or open in a new tab instead.")}</p>
             <div className="flex justify-center gap-2 pt-1">
               <button className="btn-primary" onClick={download}>
-                <Download size={14} /> Download
-              </button>
+                <Download size={14} /> {T("Download")}</button>
               <a
                 className="btn-ghost"
                 href={blobUrl}
                 target="_blank"
                 rel="noopener"
               >
-                <ExternalLink size={14} /> New tab
-              </a>
+                <ExternalLink size={14} /> {T("New tab")}</a>
             </div>
           </div>
         )}

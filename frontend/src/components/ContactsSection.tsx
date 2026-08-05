@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T } from "@/store/lang";
 
 interface Contact {
   id: string;
@@ -151,11 +151,11 @@ export function ContactsSection({ customerId }: { customerId: string }) {
               <input className="input" value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </Field>
-            <Field label="WhatsApp">
+            <Field label={T("WhatsApp")}>
               <input className="input" value={form.whatsapp}
                 onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
             </Field>
-            <Field label="Email">
+            <Field label={T("Email")}>
               <input className="input" type="email" value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </Field>
@@ -287,7 +287,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );

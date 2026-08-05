@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 interface Employee { id: string; full_name: string; role: string; }
 
@@ -81,7 +82,7 @@ export function NewSalaryForm({ initial, onClose }: Props) {
 
   const num = (k: keyof typeof form, label: string) => (
     <label className="block">
-      <span className="block text-[11px] uppercase muted mb-0.5">{label}</span>
+      <span className="block text-[11px] uppercase muted mb-0.5">{T(label)}</span>
       <input
         type="number" min={0} step="any" className="input"
         value={form[k] as number}
@@ -95,20 +96,20 @@ export function NewSalaryForm({ initial, onClose }: Props) {
           className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label className="block">
-          <span className="block text-[11px] uppercase muted mb-0.5">Employee *</span>
+          <span className="block text-[11px] uppercase muted mb-0.5">{T("Employee *")}</span>
           <select
             className="input" required disabled={editing}
             value={form.user_id}
             onChange={(e) => setForm({ ...form, user_id: e.target.value })}
           >
-            <option value="">— select employee —</option>
+            <option value="">{T("— select employee —")}</option>
             {(employees.data ?? []).map((u) => (
               <option key={u.id} value={u.id}>{u.full_name} ({u.role})</option>
             ))}
           </select>
         </label>
         <label className="block">
-          <span className="block text-[11px] uppercase muted mb-0.5">Period (YYYY-MM)</span>
+          <span className="block text-[11px] uppercase muted mb-0.5">{T("Period (YYYY-MM)")}</span>
           <input
             type="month" className="input" required disabled={editing}
             value={form.period}
@@ -118,7 +119,7 @@ export function NewSalaryForm({ initial, onClose }: Props) {
       </div>
 
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider muted mb-2">Earnings</div>
+        <div className="text-xs font-semibold uppercase tracking-wider muted mb-2">{T("Earnings")}</div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {num("base_salary",     "Base salary")}
           {num("transport",       "Transport")}
@@ -130,7 +131,7 @@ export function NewSalaryForm({ initial, onClose }: Props) {
       </div>
 
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider muted mb-2">Deductions</div>
+        <div className="text-xs font-semibold uppercase tracking-wider muted mb-2">{T("Deductions")}</div>
         <div className="grid grid-cols-3 gap-3">
           {num("pph21",           "PPh 21")}
           {num("bpjs",            "BPJS")}
@@ -139,7 +140,7 @@ export function NewSalaryForm({ initial, onClose }: Props) {
       </div>
 
       <label className="block">
-        <span className="block text-[11px] uppercase muted mb-0.5">Notes</span>
+        <span className="block text-[11px] uppercase muted mb-0.5">{T("Notes")}</span>
         <textarea
           className="input min-h-[60px]"
           value={form.notes}
@@ -148,9 +149,9 @@ export function NewSalaryForm({ initial, onClose }: Props) {
       </label>
 
       <div className="card p-4 grid grid-cols-3 gap-3 text-sm">
-        <Stat label="Gross" value={idr(totals.gross)} tone="brand" />
-        <Stat label="Deductions" value={`− ${idr(totals.deductions)}`} tone="red" />
-        <Stat label="Net pay" value={idr(totals.net)} tone="emerald" big />
+        <Stat label={T("Gross")} value={idr(totals.gross)} tone="brand" />
+        <Stat label={T("Deductions")} value={`− ${idr(totals.deductions)}`} tone="red" />
+        <Stat label={T("Net pay")} value={idr(totals.net)} tone="emerald" big />
       </div>
 
       {err && (
@@ -160,10 +161,10 @@ export function NewSalaryForm({ initial, onClose }: Props) {
       )}
 
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
         <button type="submit" className="btn-primary" disabled={save.isPending}>
           {save.isPending && <Loader2 size={14} className="animate-spin" />}
-          {editing ? "Save changes" : "Create salary"}
+          {editing ? T("Save changes") : T("Create salary")}
         </button>
       </div>
     </form>
@@ -181,7 +182,7 @@ function Stat({ label, value, tone, big }: {
   }[tone];
   return (
     <div className={`rounded-lg px-3 py-2 ${cls}`}>
-      <div className="text-[10px] uppercase tracking-wider">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider">{T(label)}</div>
       <div className={`tabular-nums font-semibold ${big ? "text-xl" : "text-base"}`}>{value}</div>
     </div>
   );

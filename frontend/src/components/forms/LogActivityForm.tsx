@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T } from "@/store/lang";
 
 const TYPES = [
   "call", "presentation", "technical_meeting", "purchase_request",
@@ -129,7 +129,7 @@ export function LogActivityForm({ customerId, onClose }: Props) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );

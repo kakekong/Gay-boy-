@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 export interface AccountRow {
   id: string;
@@ -141,17 +142,17 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
       >
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold">
-            {editing ? `Edit account · ${account!.account_no}` : "New account"}
+            {editing ? `Edit account · ${account!.account_no}` : T("New account")}
           </h2>
           <p className="text-sm muted mt-0.5">
-            {editing ? "Update or delete this Chart of Accounts entry."
-                     : "Add a new entry to the Chart of Accounts."}
+            {editing ? T("Update or delete this Chart of Accounts entry.")
+                     : T("Add a new entry to the Chart of Accounts.")}
           </p>
         </header>
 
         <div className="flex-1 overflow-auto p-5 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Account No *">
+            <Field label={T("Account No *")}>
               <input
                 className="input"
                 required
@@ -161,7 +162,7 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
                 placeholder="e.g. 1101-06"
               />
             </Field>
-            <Field label="Account Type *">
+            <Field label={T("Account Type *")}>
               <select
                 className="input"
                 value={form.account_type}
@@ -170,30 +171,30 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
                 {accountTypes.map((t) => <option key={t}>{t}</option>)}
               </select>
             </Field>
-            <Field label="Name (Indonesian) *">
+            <Field label={T("Name (Indonesian) *")}>
               <input
                 className="input"
                 required
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Bank Mandiri"
+                placeholder={T("e.g. Bank Mandiri")}
               />
             </Field>
-            <Field label="Name (English)">
+            <Field label={T("Name (English)")}>
               <input
                 className="input"
                 value={form.name_en}
                 onChange={(e) => setForm({ ...form, name_en: e.target.value })}
-                placeholder="optional"
+                placeholder={T("optional")}
               />
             </Field>
-            <Field label="Parent account">
+            <Field label={T("Parent account")}>
               <select
                 className="input"
                 value={form.parent_account_no}
                 onChange={(e) => setForm({ ...form, parent_account_no: e.target.value })}
               >
-                <option value="">— none —</option>
+                <option value="">{T("— none —")}</option>
                 {parentOptions.map((p) => (
                   <option key={p.account_no} value={p.account_no}>
                     {p.account_no} · {p.name}
@@ -201,7 +202,7 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
                 ))}
               </select>
             </Field>
-            <Field label="Opening balance">
+            <Field label={T("Opening balance")}>
               <input
                 type="number"
                 step="any"
@@ -214,31 +215,31 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-ink-100">
             <Toggle
-              label="Parent account"
-              hint="Header row, no postings"
+              label={T("Parent account")}
+              hint={T("Header row, no postings")}
               checked={form.is_parent}
               onChange={(v) => setForm({ ...form, is_parent: v })}
             />
             <Toggle
-              label="Suspended"
-              hint="Hidden by default in lists"
+              label={T("Suspended")}
+              hint={T("Hidden by default in lists")}
               checked={form.is_suspended}
               onChange={(v) => setForm({ ...form, is_suspended: v })}
             />
             <Toggle
-              label="Tax account"
-              hint="Treats as a tax-related ledger"
+              label={T("Tax account")}
+              hint={T("Treats as a tax-related ledger")}
               checked={form.is_tax}
               onChange={(v) => setForm({ ...form, is_tax: v })}
             />
           </div>
 
-          <Field label="Notes / description">
+          <Field label={T("Notes / description")}>
             <textarea
               className="input min-h-[80px]"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Optional. e.g. Holding bank account for project receipts."
+              placeholder={T("Optional. e.g. Holding bank account for project receipts.")}
             />
           </Field>
 
@@ -260,15 +261,14 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
                 }}
                 disabled={del.isPending}
               >
-                <Trash2 size={14} /> Delete
-              </button>
+                <Trash2 size={14} /> {T("Delete")}</button>
             )}
           </div>
           <div className="flex gap-2">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
             <button type="submit" className="btn-primary" disabled={save.isPending}>
               {save.isPending && <Loader2 size={14} className="animate-spin" />}
-              {editing ? "Save changes" : "Create account"}
+              {editing ? T("Save changes") : T("Create account")}
             </button>
           </div>
         </footer>
@@ -280,7 +280,7 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );
@@ -298,8 +298,8 @@ function Toggle({ label, hint, checked, onChange }: {
         onChange={(e) => onChange(e.target.checked)}
       />
       <span>
-        <span className="block text-sm font-medium">{label}</span>
-        {hint && <span className="block text-[11px] muted">{hint}</span>}
+        <span className="block text-sm font-medium">{T(label)}</span>
+        {hint && <span className="block text-[11px] muted">{T(hint)}</span>}
       </span>
     </label>
   );

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 /**
  * Renders a user's name. For a director it links through to that user's
@@ -20,9 +21,9 @@ export function UserLink({ id, name, className }: {
         onClick={(e) => e.stopPropagation()}
         className={className ?? "text-brand-700 hover:underline"}
       >
-        {label}
+        {T(label)}
       </Link>
     );
   }
-  return <span className={className}>{label}</span>;
+  return <span className={className}>{T(label)}</span>;
 }

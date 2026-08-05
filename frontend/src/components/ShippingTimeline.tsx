@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Truck, Warehouse, Building2, CheckCircle2, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T, locale } from "@/store/lang";
 
 interface Stage {
   key: string;
@@ -13,7 +14,7 @@ interface Stage {
 
 function fmt(d: string | null) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString();
+  return new Date(d).toLocaleDateString(locale());
 }
 
 function daysBetween(a: Date, b: Date) {
@@ -31,7 +32,7 @@ function DeliveryStatus({ target, actual }: { target: string | null; actual: str
       if (late > 0) { cls = "bg-red-100 text-red-800"; label = `Delivered ${late}d late`; }
       else label = "Delivered on time";
     }
-    return <span className={clsx("chip text-[10px] uppercase", cls)}>{label}</span>;
+    return <span className={clsx("chip text-[10px] uppercase", cls)}>{T(label)}</span>;
   }
   // Not delivered yet — compare target to today.
   const left = daysBetween(new Date(target!), new Date());
@@ -41,7 +42,7 @@ function DeliveryStatus({ target, actual }: { target: string | null; actual: str
   const label = left < 0 ? `${-left}d overdue`
     : left === 0 ? "Due today"
     : `Due in ${left}d`;
-  return <span className={clsx("chip text-[10px] uppercase", cls)}>{label}</span>;
+  return <span className={clsx("chip text-[10px] uppercase", cls)}>{T(label)}</span>;
 }
 
 const ICON: Record<string, any> = {
@@ -60,8 +61,7 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
   if (q.isLoading) {
     return (
       <div className="card p-5 flex items-center gap-2 text-sm muted">
-        <Loader2 size={14} className="animate-spin" /> Loading timeline…
-      </div>
+        <Loader2 size={14} className="animate-spin" /> {T("Loading timeline…")}</div>
     );
   }
   if (!q.data) return null;
@@ -73,17 +73,16 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Truck size={15} className="text-brand-600" /> Shipping timeline
-          </div>
+            <Truck size={15} className="text-brand-600" /> {T("Shipping timeline")}</div>
           <div className="text-xs muted">
-            {q.data.is_import ? "International import" : "Local shipment"}
+            {q.data.is_import ? T("International import") : T("Local shipment")}
             {q.data.origin_location && ` · from ${q.data.origin_location}`}
           </div>
         </div>
         <div className="flex items-center gap-2">
           {q.data.target_delivery && (
             <span className="text-[11px] muted">
-              Target <b className="text-ink-800">{fmt(q.data.target_delivery)}</b>
+              {T("Target")}{" "}<b className="text-ink-800">{fmt(q.data.target_delivery)}</b>
             </span>
           )}
           <DeliveryStatus target={q.data.target_delivery ?? null} actual={q.data.actual_delivery ?? null} />
@@ -92,8 +91,7 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
 
       {allEmpty ? (
         <div className="rounded-xl border border-dashed border-ink-200 p-6 text-sm muted text-center">
-          No shipping milestones set yet.
-        </div>
+          {T("No shipping milestones set yet.")}</div>
       ) : (
         <ol className="relative pl-6">
           {/* vertical line */}
@@ -129,7 +127,7 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
                                             : "border-ink-100 bg-ink-50/30",
                 )}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="font-medium text-sm">{s.label}</div>
+                    <div className="font-medium text-sm">{T(s.label)}</div>
                     <span className={clsx(
                       "chip uppercase text-[10px]",
                       s.status === "completed" ? "bg-emerald-100 text-emerald-800"
@@ -141,12 +139,12 @@ export function ShippingTimeline({ projectId }: { projectId: string }) {
                   <div className="mt-1 text-xs muted flex gap-4 flex-wrap">
                     {hasEstOnly ? (
                       <span className="text-amber-800">
-                        Expected: <b>{fmt(s.est)}</b>
+                        {T("Expected:")}{" "}<b>{fmt(s.est)}</b>
                       </span>
                     ) : (
-                      <span>Estimated: <b className="text-ink-800">{fmt(s.est)}</b></span>
+                      <span>{T("Estimated:")}{" "}<b className="text-ink-800">{fmt(s.est)}</b></span>
                     )}
-                    <span>Actual: <b className={clsx(
+                    <span>{T("Actual:")}{" "}<b className={clsx(
                       s.actual ? "text-emerald-700" : "text-ink-800"
                     )}>{fmt(s.actual)}</b></span>
                   </div>

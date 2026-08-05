@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useAuthStore } from "@/store/auth";
-import { useT } from "@/store/lang";
+import { useT, T } from "@/store/lang";
 
 type RoleKey =
   | "sales" | "purchasing" | "hr" | "finance" | "admin" | "manager" | "director"
@@ -987,7 +987,7 @@ function SystemFlow() {
       colour,
     )}>
       <div className="text-2xl">{emoji}</div>
-      <div className="font-semibold mt-1 text-sm">{label}</div>
+      <div className="font-semibold mt-1 text-sm">{T(label)}</div>
       <ul className="mt-2 space-y-1 text-xs text-ink-600">
         {items.map((it, i) => <li key={i}>· {it}</li>)}
       </ul>

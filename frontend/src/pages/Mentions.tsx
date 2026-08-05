@@ -8,7 +8,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
 import { MessageQuote } from "@/components/MessageQuote";
-import { useT } from "@/store/lang";
+import { useT, locale } from "@/store/lang";
 
 interface Mention {
   id: string;
@@ -141,7 +141,7 @@ export default function MentionsPage() {
                     <span className="chip bg-brand-100 text-brand-700">{t("new", "baru")}</span>
                   )}
                   <span className="ml-auto text-xs muted">
-                    {new Date(m.created_at).toLocaleString()}
+                    {new Date(m.created_at).toLocaleString(locale())}
                   </span>
                 </div>
 

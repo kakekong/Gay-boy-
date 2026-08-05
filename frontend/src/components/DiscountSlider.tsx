@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import { ShieldCheck, ShieldAlert, Crown } from "lucide-react";
+import { T } from "@/store/lang";
 
 interface Props {
   value: number;
@@ -23,11 +24,11 @@ export function DiscountSlider({ value, onChange, autoMax = 5, managerMax = 15 }
     <div className="card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-xs uppercase tracking-wider text-ink-500">Discount</div>
+          <div className="text-xs uppercase tracking-wider text-ink-500">{T("Discount")}</div>
           <div className="text-2xl font-semibold tabular-nums">{value}%</div>
         </div>
         <span className={clsx("chip ring-1", META.cls)}>
-          <Icon size={12} /> {META.label}
+          <Icon size={12} /> {T(META.label)}
         </span>
       </div>
 

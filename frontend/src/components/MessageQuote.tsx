@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import clsx from "clsx";
+import { T } from "@/store/lang";
 
 /**
  * The quoted-message block: an accent rule, who wrote it, one line of it.
@@ -63,7 +64,7 @@ export function MessageQuote({
           type="button"
           onClick={onCancel}
           className="shrink-0 px-2 text-ink-500 hover:text-ink-900"
-          aria-label="Cancel reply"
+          aria-label={T("Cancel reply")}
         >
           <X size={13} />
         </button>

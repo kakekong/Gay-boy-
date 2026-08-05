@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Factory, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import { useAuthStore, setAuthPersistence } from "@/store/auth";
-import { useT, useLangStore } from "@/store/lang";
+import { useT, useLangStore, T } from "@/store/lang";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -57,10 +57,9 @@ export default function LoginPage() {
             <Factory size={22} />
           </div>
           <div>
-            <div className="text-xl font-semibold">Transmisi Eng</div>
+            <div className="text-xl font-semibold">{T("Transmisi Eng")}</div>
             <div className="text-xs uppercase tracking-widest text-white/70">
-              Project ERP · AI · WhatsApp
-            </div>
+              {T("Project ERP · AI · WhatsApp")}</div>
           </div>
         </div>
 
@@ -90,8 +89,7 @@ export default function LoginPage() {
         </div>
 
         <div className="relative text-xs text-white/60">
-          © {new Date().getFullYear()} Transmisi Eng
-        </div>
+          © {new Date().getFullYear()} {T("Transmisi Eng")}</div>
       </div>
 
       {/* Form panel */}
@@ -105,7 +103,7 @@ export default function LoginPage() {
               <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
                 <Factory size={18} className="text-white" />
               </div>
-              <span className="font-semibold">Transmisi Eng</span>
+              <span className="font-semibold">{T("Transmisi Eng")}</span>
             </div>
             <div className="flex items-start justify-between gap-2">
               <h2 className="section-title">{t("Welcome back", "Selamat datang kembali")}</h2>
@@ -115,7 +113,7 @@ export default function LoginPage() {
                 className="text-[10px] font-semibold uppercase tracking-wider text-ink-500 border border-ink-200 rounded px-2 py-1 hover:bg-ink-50"
                 title={lang === "en" ? "Bahasa Indonesia" : "English"}
               >
-                {lang === "en" ? "EN · ID" : "ID · EN"}
+                {lang === "en" ? T("EN · ID") : T("ID · EN")}
               </button>
             </div>
             <p className="text-sm muted">{t("Sign in to continue.", "Masuk untuk melanjutkan.")}</p>
@@ -128,7 +126,7 @@ export default function LoginPage() {
                 className="input mt-1"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
+                placeholder={T("you@company.com")}
                 autoComplete="email"
               />
             </label>
@@ -216,7 +214,7 @@ export default function LoginPage() {
           </button>
 
           <div className="text-[10px] text-ink-300 text-center font-mono">
-            build {__BUILD_STAMP__}
+            {T("build")}{" "}{__BUILD_STAMP__}
           </div>
         </form>
       </div>

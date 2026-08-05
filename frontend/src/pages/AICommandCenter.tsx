@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { api } from "@/api/client";
 import { RiskFlag } from "@/components/RiskFlag";
+import { T, locale } from "@/store/lang";
 
 export default function AICommandCenter() {
   const q = useQuery({
@@ -30,21 +31,18 @@ export default function AICommandCenter() {
           </div>
           <div className="flex-1">
             <div className="text-xs uppercase tracking-widest text-white/70">
-              Strategic war-room · live
-            </div>
+              {T("Strategic war-room · live")}</div>
             <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight mt-0.5">
-              AI Command Center
-            </h1>
+              {T("AI Command Center")}</h1>
             <p className="text-white/80 text-sm mt-1 max-w-2xl">
-              Risk, profit, and your top moves of the day — re-ranked every minute.
-            </p>
+              {T("Risk, profit, and your top moves of the day — re-ranked every minute.")}</p>
           </div>
         </div>
 
         <div className="relative grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8">
           <HeroStat
             icon={<Target size={16} />}
-            label="Forecast vs Reality"
+            label={T("Forecast vs Reality")}
             primary={idr(reality)}
             secondary={`of ${idr(forecast)} forecast`}
             footer={
@@ -58,13 +56,13 @@ export default function AICommandCenter() {
           />
           <HeroStat
             icon={<AlertTriangle size={16} />}
-            label="At-risk deals"
+            label={T("At-risk deals")}
             primary={String((q.data?.at_risk_deals ?? []).length)}
             secondary="needs attention this week"
           />
           <HeroStat
             icon={<TrendingUp size={16} />}
-            label="Profit alerts"
+            label={T("Profit alerts")}
             primary={String((q.data?.profit_alerts ?? []).length)}
             secondary="projects breaching margin"
           />
@@ -74,13 +72,13 @@ export default function AICommandCenter() {
       {/* Panels */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Panel
-          title="At Risk Deals"
-          subtitle="Deals slipping — act in the next 24h"
+          title={T("At Risk Deals")}
+          subtitle={T("Deals slipping — act in the next 24h")}
           icon={<AlertTriangle size={16} className="text-red-600" />}
           accent="bg-red-50"
         >
           {(q.data?.at_risk_deals ?? []).length === 0 && (
-            <Empty text="No risky deals — nice work." />
+            <Empty text={T("No risky deals — nice work.")} />
           )}
           <ul className="space-y-2">
             {(q.data?.at_risk_deals ?? []).map((d: any) => (
@@ -94,7 +92,7 @@ export default function AICommandCenter() {
                     <div className="text-xs muted mt-0.5">
                       <span className="font-mono">{d.deal_number}</span>
                       <span className="mx-1.5">·</span>
-                      discount {d.discount_pct}%
+                      {T("discount")}{" "}{d.discount_pct}%
                     </div>
                   </div>
                   <RiskFlag level={d.risk_level} />
@@ -102,7 +100,7 @@ export default function AICommandCenter() {
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {(d.reasons ?? []).slice(0, 3).map((r: any) => (
                     <span key={r.factor} className="chip bg-ink-100 text-ink-600">
-                      {r.factor.replace(/_/g, " ")}
+                      {T(r.factor.replace(/_/g, " "))}
                     </span>
                   ))}
                 </div>
@@ -115,13 +113,13 @@ export default function AICommandCenter() {
         </Panel>
 
         <Panel
-          title="Top Priority Actions"
-          subtitle="Your day, ranked by AI"
+          title={T("Top Priority Actions")}
+          subtitle={T("Your day, ranked by AI")}
           icon={<Zap size={16} className="text-amber-600" />}
           accent="bg-amber-50"
         >
           {(q.data?.top_priority_actions ?? []).length === 0 && (
-            <Empty text="No queued tasks." />
+            <Empty text={T("No queued tasks.")} />
           )}
           <ol className="space-y-1.5">
             {(q.data?.top_priority_actions ?? []).map((a: any, i: number) => (
@@ -137,7 +135,7 @@ export default function AICommandCenter() {
                     {a.message ?? a.kind.replace(/_/g, " ")}
                   </div>
                   <div className="text-[11px] muted mt-0.5">
-                    due {new Date(a.due_at).toLocaleString()} · {a.channel}
+                    {T("due")}{" "}{new Date(a.due_at).toLocaleString(locale())} · {a.channel}
                   </div>
                 </div>
                 <span className="chip bg-ink-100 text-ink-600">
@@ -149,13 +147,13 @@ export default function AICommandCenter() {
         </Panel>
 
         <Panel
-          title="Profit Alerts"
-          subtitle="Projects breaching margin estimate"
+          title={T("Profit Alerts")}
+          subtitle={T("Projects breaching margin estimate")}
           icon={<TrendingUp size={16} className="text-emerald-700" />}
           accent="bg-emerald-50"
         >
           {(q.data?.profit_alerts ?? []).length === 0 && (
-            <Empty text="All projects within margin." />
+            <Empty text={T("All projects within margin.")} />
           )}
           <ul className="space-y-2">
             {(q.data?.profit_alerts ?? []).map((p: any) => (
@@ -163,12 +161,11 @@ export default function AICommandCenter() {
                 <div className="flex items-center justify-between">
                   <div className="font-mono text-xs text-ink-500">{p.code}</div>
                   <span className="chip bg-red-50 text-red-700">
-                    -{Math.abs((p.estimate - p.actual) * 100).toFixed(1)} pp
-                  </span>
+                    -{Math.abs((p.estimate - p.actual) * 100).toFixed(1)} {T("pp")}</span>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <Bar label="Estimate" value={p.estimate * 100} color="bg-ink-300" />
-                  <Bar label="Actual" value={p.actual * 100} color="bg-red-400" />
+                  <Bar label={T("Estimate")} value={p.estimate * 100} color="bg-ink-300" />
+                  <Bar label={T("Actual")} value={p.actual * 100} color="bg-red-400" />
                 </div>
               </li>
             ))}
@@ -176,8 +173,8 @@ export default function AICommandCenter() {
         </Panel>
 
         <Panel
-          title="AI Recommendations"
-          subtitle="Spotted by the company memory"
+          title={T("AI Recommendations")}
+          subtitle={T("Spotted by the company memory")}
           icon={<Lightbulb size={16} className="text-violet-700" />}
           accent="bg-violet-50"
         >
@@ -191,7 +188,7 @@ export default function AICommandCenter() {
                 </div>
               </li>
             ))}
-            {!q.data?.recommendations?.length && <Empty text="Nothing yet." />}
+            {!q.data?.recommendations?.length && <Empty text={T("Nothing yet.")} />}
           </ul>
         </Panel>
       </div>
@@ -211,7 +208,7 @@ function HeroStat({
   return (
     <div className="rounded-xl bg-white/10 backdrop-blur ring-1 ring-white/15 p-4">
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-white/70">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{primary}</div>
       {secondary && <div className="text-xs text-white/70">{secondary}</div>}
@@ -257,7 +254,7 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
   return (
     <div>
       <div className="flex justify-between text-[10px] muted">
-        <span>{label}</span>
+        <span>{T(label)}</span>
         <span className="tabular-nums">{value.toFixed(1)}%</span>
       </div>
       <div className="mt-1 h-1.5 bg-ink-100 rounded-full overflow-hidden">

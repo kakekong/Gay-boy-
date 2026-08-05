@@ -18,7 +18,7 @@ import { CommentThread } from "@/components/CommentThread";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { useAuthStore } from "@/store/auth";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T, locale } from "@/store/lang";
 
 // Indonesian display labels for backend status keys. Display only — the
 // keys themselves are still what the code compares and sends.
@@ -298,7 +298,7 @@ export default function QuotationDetailPage() {
                       className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
                       title={t("Open the source price request", "Buka permintaan harga sumbernya")}
                     >
-                      <Link2 size={14} /> PR {Q.price_request_number}
+                      <Link2 size={14} /> {T("PR")}{" "}{Q.price_request_number}
                     </Link>
                   )}
                   {Q.parent_number && (
@@ -424,15 +424,13 @@ export default function QuotationDetailPage() {
               onClick={() => downloadExport(Q.id, Q.number, "pdf")}
               title={t("Download as PDF", "Unduh sebagai PDF")}
             >
-              <FileText size={15} /> PDF
-            </button>
+              <FileText size={15} /> {T("PDF")}</button>
             <button
               className="btn-ghost"
               onClick={() => downloadExport(Q.id, Q.number, "xlsx")}
               title={t("Download as Excel", "Unduh sebagai Excel")}
             >
-              <FileText size={15} /> Excel
-            </button>
+              <FileText size={15} /> {T("Excel")}</button>
           </div>
         </div>
 
@@ -496,7 +494,7 @@ export default function QuotationDetailPage() {
             <div className="mt-1.5 flex items-center justify-between">
               <div className="text-2xl font-semibold tabular-nums">{Number(Q.discount_pct)}%</div>
               <span className={clsx("chip ring-1", TIER_META.cls)}>
-                <TIER_META.Icon size={12} /> {TIER_META.label}
+                <TIER_META.Icon size={12} /> {T(TIER_META.label)}
               </span>
             </div>
           </div>
@@ -593,7 +591,7 @@ export default function QuotationDetailPage() {
                         {r.message ?? r.kind.replace(/_/g, " ")}
                       </div>
                       <div className="text-[11px] muted">
-                        {due.toLocaleString()} · {r.channel}
+                        {due.toLocaleString(locale())} · {r.channel}
                         {overdue && <span className="ml-2 text-red-700 font-medium">{t("OVERDUE", "TERLAMBAT")}</span>}
                         {blockedBeforeApproval && (
                           <span className="ml-2 text-amber-700 font-medium">
@@ -646,7 +644,7 @@ export default function QuotationDetailPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm capitalize">
-                    <b>{a.type.replace(/_/g, " ")}</b>{" "}
+                    <b>{T(a.type.replace(/_/g, " "))}</b>{" "}
                     <span className="muted">· {a.direction}</span>
                     {a.tagged && (
                       <span className="ml-2 chip bg-brand-50 text-brand-700">{t("linked to this quote", "terkait penawaran ini")}</span>
@@ -656,7 +654,7 @@ export default function QuotationDetailPage() {
                     <div className="text-sm text-ink-700 mt-1 whitespace-pre-wrap">{a.notes}</div>
                   )}
                   <div className="text-[11px] text-ink-400 mt-1">
-                    {new Date(a.occurred_at).toLocaleString()}
+                    {new Date(a.occurred_at).toLocaleString(locale())}
                   </div>
                 </div>
               </li>
@@ -807,7 +805,7 @@ function Field({ label, icon, children }: {
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
     </div>
@@ -817,7 +815,7 @@ function Field({ label, icon, children }: {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between py-0.5">
-      <span className="muted">{label}</span>
+      <span className="muted">{T(label)}</span>
       <span className="tabular-nums">{value}</span>
     </div>
   );
@@ -862,26 +860,25 @@ function WonNextStepCard({
     <div className="card p-5 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <div className="text-xs uppercase tracking-wider muted">Next step</div>
+          <div className="text-xs uppercase tracking-wider muted">{T("Next step")}</div>
           <h3 className="text-base font-semibold mt-0.5">
             {hasApproved
-              ? "Customer PO approved — project created"
+              ? T("Customer PO approved — project created")
               : pending.length
-                ? "Customer PO submitted — waiting on director approval"
-                : "Submit the customer's PO"}
+                ? T("Customer PO submitted — waiting on director approval")
+                : T("Submit the customer's PO")}
           </h3>
           <p className="text-sm muted mt-1 max-w-2xl">
             {hasApproved
-              ? "The customer's PO has been approved by the director and the project is now active. Manage it from the Projects section."
+              ? T("The customer's PO has been approved by the director and the project is now active. Manage it from the Projects section.")
               : pending.length
-                ? "The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed."
-                : "Once you have the signed PO from the customer, file it here. You'll attach the actual PO file, pick the items they ordered out of this quote, and the director will approve it. Approval is what creates the project."}
+                ? T("The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed.")
+                : T("Once you have the signed PO from the customer, file it here. You'll attach the actual PO file, pick the items they ordered out of this quote, and the director will approve it. Approval is what creates the project.")}
           </p>
         </div>
         {!hasApproved && (
           <button className="btn-primary" onClick={() => setOpen(true)}>
-            <CheckCircle2 size={14} /> Submit customer PO
-          </button>
+            <CheckCircle2 size={14} /> {T("Submit customer PO")}</button>
         )}
       </div>
 
@@ -890,11 +887,11 @@ function WonNextStepCard({
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60 text-[10px] uppercase tracking-wider">
               <tr>
-                <th className="px-3 py-1.5 text-left">PO number</th>
-                <th className="px-3 py-1.5 text-left">PO date</th>
-                <th className="px-3 py-1.5 text-left">Status</th>
-                <th className="px-3 py-1.5 text-left">Project</th>
-                <th className="px-3 py-1.5 text-right">Total</th>
+                <th className="px-3 py-1.5 text-left">{T("PO number")}</th>
+                <th className="px-3 py-1.5 text-left">{T("PO date")}</th>
+                <th className="px-3 py-1.5 text-left">{T("Status")}</th>
+                <th className="px-3 py-1.5 text-left">{T("Project")}</th>
+                <th className="px-3 py-1.5 text-right">{T("Total")}</th>
               </tr>
             </thead>
             <tbody>
@@ -916,7 +913,7 @@ function WonNextStepCard({
                           : p.status === "rejected" ? "bg-red-50 text-red-700"
                           : "bg-ink-100 text-ink-600",
                       )}>
-                        {p.status.replace(/_/g, " ")}
+                        {T(p.status.replace(/_/g, " "))}
                       </span>
                     </td>
                     <td className="px-3 py-1.5">
@@ -933,11 +930,11 @@ function WonNextStepCard({
                   {p.status === "rejected" && p.decision_notes && (
                     <tr className="border-t border-red-100 bg-red-50/40">
                       <td colSpan={5} className="px-3 py-1.5 text-xs text-red-800">
-                        <span className="font-semibold">Rejection reason:</span>{" "}
+                        <span className="font-semibold">{T("Rejection reason:")}</span>{" "}
                         {p.decision_notes}
                         {p.decided_at && (
                           <span className="muted ml-2">
-                            ({new Date(p.decided_at).toLocaleDateString()})
+                            ({new Date(p.decided_at).toLocaleDateString(locale())})
                           </span>
                         )}
                       </td>

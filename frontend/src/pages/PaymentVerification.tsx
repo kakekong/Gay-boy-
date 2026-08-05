@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T, locale } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -77,12 +78,9 @@ export default function PaymentVerificationPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Banknote size={22} className="text-brand-600" /> Payment verification
-        </h1>
+          <Banknote size={22} className="text-brand-600" /> {T("Payment verification")}</h1>
         <p className="text-sm muted">
-          Customers submit payment claims from their portal. Verify them here — verifying
-          creates a Payment row and updates the invoice status.
-        </p>
+          {T("Customers submit payment claims from their portal. Verify them here — verifying creates a Payment row and updates the invoice status.")}</p>
       </div>
 
       {flash && (
@@ -113,7 +111,7 @@ export default function PaymentVerificationPage() {
               filter === t.key ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-100",
             )}
           >
-            {t.label}
+            {T(t.label)}
           </button>
         ))}
       </div>
@@ -128,8 +126,8 @@ export default function PaymentVerificationPage() {
         {!claims.isLoading && !claims.data?.length && (
           <div className="card p-12 text-center text-sm muted">
             {filter === "pending"
-              ? "🎉 Nothing pending right now."
-              : "No claims match this filter."}
+              ? T("🎉 Nothing pending right now.")
+              : T("No claims match this filter.")}
           </div>
         )}
       </div>
@@ -156,23 +154,23 @@ function ClaimCard({ claim, onVerify, onReject, busy }: {
             </span>
           </div>
           <div className="mt-1 text-xs muted">
-            From <b>{claim.customer_user_name ?? "—"}</b> · submitted {new Date(claim.created_at).toLocaleString()}
+            {T("From")}{" "}<b>{claim.customer_user_name ?? "—"}</b> {T("· submitted")}{" "}{new Date(claim.created_at).toLocaleString(locale())}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase muted">Amount claimed</div>
+          <div className="text-[10px] uppercase muted">{T("Amount claimed")}</div>
           <div className="text-2xl font-semibold tabular-nums">{idr(claim.amount)}</div>
           {claim.invoice_total && (
-            <div className="text-[11px] muted">of invoice {idr(claim.invoice_total)}</div>
+            <div className="text-[11px] muted">{T("of invoice")}{" "}{idr(claim.invoice_total)}</div>
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 text-sm">
-        <Field label="Date paid">{claim.paid_at ?? "—"}</Field>
-        <Field label="Method">{claim.method ?? "—"}</Field>
-        <Field label="Reference">{claim.reference ?? "—"}</Field>
-        <Field label="Attachment">
+        <Field label={T("Date paid")}>{claim.paid_at ?? "—"}</Field>
+        <Field label={T("Method")}>{claim.method ?? "—"}</Field>
+        <Field label={T("Reference")}>{claim.reference ?? "—"}</Field>
+        <Field label={T("Attachment")}>
           {claim.attachment_id
             ? <AttachmentLink id={claim.attachment_id} />
             : "—"}
@@ -181,7 +179,7 @@ function ClaimCard({ claim, onVerify, onReject, busy }: {
 
       {claim.notes && (
         <div className="mt-3 rounded-lg bg-ink-50 border border-ink-100 px-3 py-2 text-sm">
-          <div className="text-[10px] uppercase muted mb-0.5">Customer notes</div>
+          <div className="text-[10px] uppercase muted mb-0.5">{T("Customer notes")}</div>
           {claim.notes}
         </div>
       )}
@@ -192,7 +190,7 @@ function ClaimCard({ claim, onVerify, onReject, busy }: {
             className="input mb-2"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Decision notes (optional)"
+            placeholder={T("Decision notes (optional)")}
           />
           <div className="flex gap-2 justify-end">
             <button
@@ -200,23 +198,21 @@ function ClaimCard({ claim, onVerify, onReject, busy }: {
               onClick={() => onReject(notes)}
               disabled={busy}
             >
-              <XCircle size={14} /> Reject
-            </button>
+              <XCircle size={14} /> {T("Reject")}</button>
             <button
               className="btn-success"
               onClick={() => onVerify(notes)}
               disabled={busy}
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              Verify payment
-            </button>
+              {T("Verify payment")}</button>
           </div>
         </div>
       )}
 
       {claim.decision_notes && claim.status !== "pending" && (
         <div className="mt-3 text-xs muted">
-          Decided by <b>{claim.verified_by_name ?? "—"}</b> on {claim.verified_at ? new Date(claim.verified_at).toLocaleString() : "—"}
+          {T("Decided by")}{" "}<b>{claim.verified_by_name ?? "—"}</b> {T("on")}{" "}{claim.verified_at ? new Date(claim.verified_at).toLocaleString(locale()) : "—"}
           {claim.decision_notes && <> — {claim.decision_notes}</>}
         </div>
       )}
@@ -227,7 +223,7 @@ function ClaimCard({ claim, onVerify, onReject, busy }: {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider muted">{T(label)}</div>
       <div className="mt-0.5">{children}</div>
     </div>
   );
@@ -258,7 +254,6 @@ function AttachmentLink({ id }: { id: string }) {
       className="text-brand-700 hover:underline inline-flex items-center gap-1"
     >
       {busy && <Loader2 size={12} className="animate-spin" />}
-      View
-    </button>
+      {T("View")}</button>
   );
 }

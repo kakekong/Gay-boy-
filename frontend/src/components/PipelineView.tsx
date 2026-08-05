@@ -5,6 +5,7 @@ import { GripVertical, Building2, ChevronRight, Eye, EyeOff } from "lucide-react
 import clsx from "clsx";
 import { api } from "@/api/client";
 import type { Customer } from "@/types";
+import { T } from "@/store/lang";
 
 const STAGES: { key: string; label: string; tone: string; dot: string }[] = [
   { key: "lead",          label: "Lead",          tone: "bg-ink-100 text-ink-700",        dot: "bg-ink-400"     },
@@ -121,15 +122,13 @@ export function PipelineView({ customers }: Props) {
     <div>
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm muted">
-          Drag any card to a different stage to move the deal. Sales sees only their own customers.
-        </p>
+          {T("Drag any card to a different stage to move the deal. Sales sees only their own customers.")}</p>
         <button
           onClick={() => setShowClosed((v) => !v)}
           className="btn-ghost"
         >
           {showClosed ? <EyeOff size={14} /> : <Eye size={14} />}
-          {showClosed ? "Hide" : "Show"} closed
-        </button>
+          {showClosed ? T("Hide") : T("Show")} {T("closed")}</button>
       </div>
 
       {/* Mobile stage picker */}
@@ -141,7 +140,7 @@ export function PipelineView({ customers }: Props) {
         >
           {stages.map((s) => (
             <option key={s.key} value={s.key}>
-              {s.label} ({(byStage.get(s.key) ?? []).length})
+              {T(s.label)} ({(byStage.get(s.key) ?? []).length})
             </option>
           ))}
         </select>
@@ -172,7 +171,7 @@ export function PipelineView({ customers }: Props) {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={clsx("h-2 w-2 rounded-full", s.dot)} />
-                      <span className="font-semibold text-sm truncate">{s.label}</span>
+                      <span className="font-semibold text-sm truncate">{T(s.label)}</span>
                       <span className={clsx("chip", s.tone)}>{items.length}</span>
                     </div>
                   </div>
@@ -186,8 +185,7 @@ export function PipelineView({ customers }: Props) {
                 <div className="p-2 space-y-2 min-h-[200px]">
                   {items.length === 0 ? (
                     <div className="text-xs muted text-center py-6 italic">
-                      Drop here
-                    </div>
+                      {T("Drop here")}</div>
                   ) : (
                     items.map((c) => {
                       const tint = INDUSTRY_TINT[c.industry] ?? INDUSTRY_TINT.other;
@@ -216,7 +214,7 @@ export function PipelineView({ customers }: Props) {
                                   {c.company_name}
                                 </div>
                                 <div className="text-[11px] muted truncate capitalize">
-                                  {c.industry.replace(/_/g, " ")}
+                                  {T(c.industry.replace(/_/g, " "))}
                                   {c.pic_name && <> · {c.pic_name}</>}
                                 </div>
                               </div>
@@ -256,7 +254,7 @@ export function PipelineView({ customers }: Props) {
               <div className="px-3 py-2.5 border-b border-ink-100 bg-white rounded-t-xl">
                 <div className="flex items-center gap-2">
                   <span className={clsx("h-2 w-2 rounded-full", s.dot)} />
-                  <span className="font-semibold text-sm">{s.label}</span>
+                  <span className="font-semibold text-sm">{T(s.label)}</span>
                   <span className={clsx("chip", s.tone)}>{items.length}</span>
                 </div>
                 <div className="text-[11px] muted mt-0.5 tabular-nums">
@@ -266,8 +264,7 @@ export function PipelineView({ customers }: Props) {
               <div className="p-2 space-y-2 min-h-[200px]">
                 {items.length === 0 ? (
                   <div className="text-xs muted text-center py-6 italic">
-                    No customers in this stage
-                  </div>
+                    {T("No customers in this stage")}</div>
                 ) : (
                   items.map((c) => {
                     const tint = INDUSTRY_TINT[c.industry] ?? INDUSTRY_TINT.other;
@@ -286,7 +283,7 @@ export function PipelineView({ customers }: Props) {
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold truncate">{c.company_name}</div>
                             <div className="text-[11px] muted truncate capitalize">
-                              {c.industry.replace(/_/g, " ")}
+                              {T(c.industry.replace(/_/g, " "))}
                               {c.pic_name && <> · {c.pic_name}</>}
                             </div>
                           </div>

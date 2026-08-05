@@ -12,7 +12,7 @@ import { downloadFile } from "@/lib/download";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { useAuthStore } from "@/store/auth";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T, locale } from "@/store/lang";
 
 interface CustomerPO {
   id: string;
@@ -332,7 +332,7 @@ export default function CustomerPODetailPage() {
               {p.number}
             </div>
             <div className="text-xs muted">
-              {t("Filed", "Diajukan")} {new Date(p.created_at).toLocaleString()}
+              {t("Filed", "Diajukan")} {new Date(p.created_at).toLocaleString(locale())}
               {p.po_date && <> · {t("PO dated", "PO tertanggal")} {p.po_date}</>}
             </div>
           </div>
@@ -452,7 +452,7 @@ export default function CustomerPODetailPage() {
           <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 space-y-3">
             <div className="text-xs font-semibold text-blue-900">
               {t("Finance approved the DP", "Keuangan menyetujui DP")}{p.dp_finance_approved_at && (
-                <> {t("on", "pada")} {new Date(p.dp_finance_approved_at).toLocaleDateString()}</>
+                <> {t("on", "pada")} {new Date(p.dp_finance_approved_at).toLocaleDateString(locale())}</>
               )}. {(p.dp_invoices ?? []).length === 0
                 ? t(
                     "Finance — issue the DP invoice below so the customer can pay.",
@@ -577,7 +577,7 @@ export default function CustomerPODetailPage() {
                   )}>{sl(t, iv.status, INVOICE_STATUS_LABEL_ID)}</span>
                   <span className="tabular-nums">{idr(iv.total)}</span>
                   {iv.faktur_pajak_no && (
-                    <span className="muted text-xs">FP {iv.faktur_pajak_no}</span>
+                    <span className="muted text-xs">{T("FP")}{" "}{iv.faktur_pajak_no}</span>
                   )}
                 </li>
               ))}
@@ -649,7 +649,7 @@ export default function CustomerPODetailPage() {
             <div className="text-ink-700">{p.decision_notes}</div>
             {p.decided_at && (
               <div className="text-ink-500 mt-0.5">
-                {new Date(p.decided_at).toLocaleString()}
+                {new Date(p.decided_at).toLocaleString(locale())}
               </div>
             )}
           </div>
@@ -743,7 +743,7 @@ function Meta({
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
     </div>
@@ -931,7 +931,7 @@ function CustomerRecap({
               <div className="text-[11px] muted mt-3 pt-3 border-t border-ink-100">
                 {t("Last contact:", "Kontak terakhir:")}{" "}
                 <b className="text-ink-700">
-                  {new Date(s.last_activity_at).toLocaleString()}
+                  {new Date(s.last_activity_at).toLocaleString(locale())}
                 </b>
                 {" · "}{t("known", "dikenal")} {s?.days_known ?? 0} {t("day(s)", "hari")}
               </div>
@@ -1038,7 +1038,7 @@ function KeteranganCard({ po }: { po: any }) {
                 {t("Order confirmation sheet", "Lembar konfirmasi pesanan")}
               </span>
               <button className="ml-auto text-ink-400 hover:text-ink-800"
-                      onClick={() => setOpen(false)} aria-label="Close"><X size={16} /></button>
+                      onClick={() => setOpen(false)} aria-label={T("Close")}><X size={16} /></button>
             </header>
 
             {opts.isLoading ? (
@@ -1061,7 +1061,7 @@ function KeteranganCard({ po }: { po: any }) {
                         <div className="flex items-center gap-2">
                           <input type="radio" name="shipto" checked={shipTo === s.key}
                                  onChange={() => setShipTo(s.key)} />
-                          <span className="text-sm font-medium">{s.label}</span>
+                          <span className="text-sm font-medium">{T(s.label)}</span>
                         </div>
                         <div className="text-xs muted whitespace-pre-wrap mt-1 pl-6">
                           {s.address || t("Not set on the customer — the office address is used instead.",

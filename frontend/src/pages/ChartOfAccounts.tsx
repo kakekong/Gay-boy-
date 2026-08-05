@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
 import { AccountModal, type AccountRow } from "@/components/forms/AccountModal";
+import { T } from "@/store/lang";
 
 const SUSPEND_OPTS = [
   { value: "all",       label: "All" },
@@ -168,33 +169,30 @@ export default function ChartOfAccountsPage() {
       {/* Title */}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Receipt size={22} className="text-brand-600" /> Chart of Accounts
-        </h1>
+          <Receipt size={22} className="text-brand-600" /> {T("Chart of Accounts")}</h1>
         <p className="text-sm muted">
-          Bagan akun (Indonesian Chart of Accounts). Parent accounts shown with grey background.
-        </p>
+          {T("Bagan akun (Indonesian Chart of Accounts). Parent accounts shown with grey background.")}</p>
       </div>
 
       {/* Toolbar */}
       <div className="card p-3 flex flex-wrap items-center gap-2 no-print">
         <button className="btn-primary" onClick={openCreate}>
-          <Plus size={14} /> New
-        </button>
+          <Plus size={14} /> {T("New")}</button>
         <button
           className="btn-ghost"
           onClick={() => accounts.refetch()}
-          title="Refresh"
+          title={T("Refresh")}
         >
           <RefreshCw size={15} className={accounts.isFetching ? "animate-spin" : ""} />
         </button>
 
         <select className="input max-w-[200px]" value={type} onChange={(e) => setType(e.target.value)}>
-          <option value="All">All types</option>
+          <option value="All">{T("All types")}</option>
           {(types.data ?? []).map((t) => <option key={t}>{t}</option>)}
         </select>
 
         <select className="input max-w-[160px]" value={suspended} onChange={(e) => setSuspended(e.target.value)}>
-          {SUSPEND_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {SUSPEND_OPTS.map((o) => <option key={o.value} value={o.value}>{T(o.label)}</option>)}
         </select>
 
         <span
@@ -214,28 +212,26 @@ export default function ChartOfAccountsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search account no. or name…"
+            placeholder={T("Search account no. or name…")}
             className="input pl-9"
           />
         </div>
 
-        <button className="btn-ghost" onClick={exportCsv} title="Export CSV">
+        <button className="btn-ghost" onClick={exportCsv} title={T("Export CSV")}>
           <Download size={15} />
         </button>
         <button className="btn-ghost text-xs"
           onClick={() => downloadFile("/accounts/export.xlsx", "chart-of-accounts.xlsx")}
-          title="Export Excel">
-          Excel
-        </button>
+          title={T("Export Excel")}>
+          {T("Excel")}</button>
         <button className="btn-ghost text-xs"
           onClick={() => downloadFile("/accounts/export.pdf", "chart-of-accounts.pdf")}
-          title="Export PDF">
-          PDF
-        </button>
-        <button className="btn-ghost" onClick={share} title="Copy account list to clipboard">
+          title={T("Export PDF")}>
+          {T("PDF")}</button>
+        <button className="btn-ghost" onClick={share} title={T("Copy account list to clipboard")}>
           <Share2 size={15} />
         </button>
-        <button className="btn-ghost" onClick={print} title="Print">
+        <button className="btn-ghost" onClick={print} title={T("Print")}>
           <Printer size={15} />
         </button>
         <button
@@ -258,10 +254,10 @@ export default function ChartOfAccountsPage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60 sticky top-0">
               <tr>
-                <th className="th w-32">Account No</th>
-                <th className="th">Name</th>
-                <th className="th w-56">Account Type</th>
-                <th className="th text-right w-48">Balance</th>
+                <th className="th w-32">{T("Account No")}</th>
+                <th className="th">{T("Name")}</th>
+                <th className="th w-56">{T("Account Type")}</th>
+                <th className="th text-right w-48">{T("Balance")}</th>
                 <th className="th w-10 no-print"></th>
               </tr>
             </thead>
@@ -281,7 +277,7 @@ export default function ChartOfAccountsPage() {
                     <td className="td font-mono text-xs">
                       {a.account_no}
                       {a.is_tax && (
-                        <span className="ml-2 chip bg-violet-50 text-violet-700">Tax</span>
+                        <span className="ml-2 chip bg-violet-50 text-violet-700">{T("Tax")}</span>
                       )}
                     </td>
                     <td className="td" style={{ paddingLeft: 16 + indent }}>
@@ -289,7 +285,7 @@ export default function ChartOfAccountsPage() {
                         {a.name}
                       </span>
                       {a.is_suspended && (
-                        <span className="ml-2 chip bg-ink-100 text-ink-600">Suspended</span>
+                        <span className="ml-2 chip bg-ink-100 text-ink-600">{T("Suspended")}</span>
                       )}
                     </td>
                     <td className="td">
@@ -319,8 +315,7 @@ export default function ChartOfAccountsPage() {
                           onMouseLeave={() => setMenuOpen(null)}
                         >
                           <MenuItem icon={<Pencil size={13} />} onClick={() => openEdit(a)}>
-                            Edit
-                          </MenuItem>
+                            {T("Edit")}</MenuItem>
                           <MenuItem
                             icon={a.is_suspended ? <Eye size={13} /> : <EyeOff size={13} />}
                             onClick={() => {
@@ -328,15 +323,14 @@ export default function ChartOfAccountsPage() {
                               setMenuOpen(null);
                             }}
                           >
-                            {a.is_suspended ? "Unsuspend" : "Suspend"}
+                            {a.is_suspended ? T("Unsuspend") : T("Suspend")}
                           </MenuItem>
                           <MenuItem
                             danger
                             icon={<Trash2 size={13} />}
                             onClick={() => { openEdit(a); }}
                           >
-                            Delete…
-                          </MenuItem>
+                            {T("Delete…")}</MenuItem>
                         </div>
                       )}
                     </td>
@@ -346,17 +340,17 @@ export default function ChartOfAccountsPage() {
               {!rows.length && (
                 <tr>
                   <td colSpan={5} className="td text-center muted py-12">
-                    {accounts.isLoading ? "Loading…"
-                      : filtersActive ? "No accounts match your filter."
+                    {accounts.isLoading ? T("Loading…")
+                      : filtersActive ? T("No accounts match your filter.")
                       : (
                         <div className="space-y-3">
-                          <div>No chart of accounts yet.</div>
+                          <div>{T("No chart of accounts yet.")}</div>
                           <button
                             className="btn-primary"
                             disabled={seed.isPending}
                             onClick={() => seed.mutate()}
                           >
-                            {seed.isPending ? "Seeding…" : "Seed default chart of accounts"}
+                            {seed.isPending ? T("Seeding…") : T("Seed default chart of accounts")}
                           </button>
                         </div>
                       )}

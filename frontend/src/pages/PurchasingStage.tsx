@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 type StageKey = "pr" | "rfq" | "gr" | "qc";
 
@@ -62,11 +63,10 @@ export default function PurchasingStagePage() {
   if (!meta) {
     return (
       <div className="card p-10 text-center">
-        <div className="mt-3 font-semibold">Unknown procurement stage</div>
-        <p className="text-sm muted mt-1">"{stage}" isn't a stage we know about.</p>
+        <div className="mt-3 font-semibold">{T("Unknown procurement stage")}</div>
+        <p className="text-sm muted mt-1">"{stage}{T("\" isn't a stage we know about.")}</p>
         <button className="btn-ghost mt-4" onClick={() => nav("/purchasing")}>
-          <ArrowLeft size={14} /> Back to Purchasing
-        </button>
+          <ArrowLeft size={14} /> {T("Back to Purchasing")}</button>
       </div>
     );
   }
@@ -77,20 +77,18 @@ export default function PurchasingStagePage() {
         to="/purchasing"
         className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-brand-700"
       >
-        <ArrowLeft size={14} /> Back to Purchasing
-      </Link>
+        <ArrowLeft size={14} /> {T("Back to Purchasing")}</Link>
 
       <div className="card p-6 lg:p-8">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
-              <meta.icon size={13} className="text-brand-600" /> Procurement stage
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight mt-0.5">{meta.label}</h1>
+              <meta.icon size={13} className="text-brand-600" /> {T("Procurement stage")}</div>
+            <h1 className="text-2xl font-semibold tracking-tight mt-0.5">{T(meta.label)}</h1>
           </div>
-          <span className={clsx("chip text-xs font-semibold", meta.tone)}>{meta.label}</span>
+          <span className={clsx("chip text-xs font-semibold", meta.tone)}>{T(meta.label)}</span>
         </div>
-        <p className="text-sm muted mt-3 max-w-2xl">{meta.description}</p>
+        <p className="text-sm muted mt-3 max-w-2xl">{T(meta.description)}</p>
       </div>
 
       {key === "pr" && <PRWorkspace />}
@@ -106,7 +104,7 @@ export default function PurchasingStagePage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );
@@ -165,7 +163,7 @@ function ItemsEditor({ cols, rows, onChange }: {
           {cols.map((c) => (
             <label key={c.key} className="flex-1 block">
               {i === 0 && (
-                <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{c.label}</span>
+                <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T(c.label)}</span>
               )}
               <input
                 className="input"
@@ -180,21 +178,20 @@ function ItemsEditor({ cols, rows, onChange }: {
             type="button"
             className="btn-ghost text-red-600 shrink-0 mb-0.5"
             onClick={() => onChange(rows.filter((_, idx) => idx !== i))}
-            aria-label="Remove line"
+            aria-label={T("Remove line")}
           >
             <Trash2 size={14} />
           </button>
         </div>
       ))}
       <button type="button" className="btn-ghost text-xs" onClick={() => onChange([...rows, blank()])}>
-        <Plus size={13} /> Add line
-      </button>
+        <Plus size={13} /> {T("Add line")}</button>
     </div>
   );
 }
 
 function StatusChip({ status }: { status: string }) {
-  return <span className="chip bg-ink-100 text-ink-700 capitalize">{status?.replace(/_/g, " ")}</span>;
+  return <span className="chip bg-ink-100 text-ink-700 capitalize">{T(status?.replace(/_/g, " "))}</span>;
 }
 
 function TableShell({ headers, empty, loading, children }: {
@@ -203,11 +200,10 @@ function TableShell({ headers, empty, loading, children }: {
   if (loading) {
     return (
       <div className="px-5 py-10 text-center text-sm muted flex items-center justify-center gap-2">
-        <Loader2 size={14} className="animate-spin" /> Loading…
-      </div>
+        <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
     );
   }
-  if (empty) return <div className="px-5 py-12 text-center text-sm muted">Nothing here yet.</div>;
+  if (empty) return <div className="px-5 py-12 text-center text-sm muted">{T("Nothing here yet.")}</div>;
   return (
     <table className="w-full text-sm">
       <thead className="bg-ink-50/60">
@@ -240,7 +236,7 @@ function PRWorkspace() {
     <div className="space-y-4">
       <Flash flash={flash} onClose={() => setFlash(null)} />
       <div className="flex justify-end">
-        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> New PR</button>
+        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> {T("New PR")}</button>
       </div>
       <div className="card overflow-hidden">
         <TableShell
@@ -253,14 +249,13 @@ function PRWorkspace() {
               <td className="td font-mono text-xs">{r.number}</td>
               <td className="td font-mono text-xs">{r.project_code ?? "—"}</td>
               <td className="td">{r.requested_by_name ?? "—"}</td>
-              <td className="td muted">{(r.items ?? []).length} line(s)</td>
+              <td className="td muted">{(r.items ?? []).length} {T("line(s)")}</td>
               <td className="td"><StatusChip status={r.status} /></td>
               <td className="td text-right">
                 {r.status === "open" && (
                   <button className="btn-ghost text-xs" disabled={close.isPending}
                     onClick={() => close.mutate(r.id)}>
-                    <CheckCircle2 size={13} /> Close
-                  </button>
+                    <CheckCircle2 size={13} /> {T("Close")}</button>
                 )}
               </td>
             </tr>
@@ -307,20 +302,20 @@ function PRModal({ onClose, onDone, onError }: {
   });
 
   return (
-    <ModalShell title="New purchase request" subtitle="Signal demand for materials on a project."
+    <ModalShell title={T("New purchase request")} subtitle={T("Signal demand for materials on a project.")}
       onClose={onClose}>
       <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
         className="flex-1 overflow-auto p-5 space-y-3">
-        <Field label="Project (optional)">
+        <Field label={T("Project (optional)")}>
           <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-            <option value="">No project</option>
+            <option value="">{T("No project")}</option>
             {(projects.data ?? []).map((p: any) => (
               <option key={p.id} value={p.id}>{p.code}{p.status ? ` · ${p.status}` : ""}</option>
             ))}
           </select>
         </Field>
         <div>
-          <span className="block text-xs font-medium text-ink-600 mb-1">Items</span>
+          <span className="block text-xs font-medium text-ink-600 mb-1">{T("Items")}</span>
           <ItemsEditor
             cols={[
               { key: "description", label: "Description", placeholder: "Steel plate 10mm" },
@@ -331,15 +326,14 @@ function PRModal({ onClose, onDone, onError }: {
             onChange={setItems}
           />
         </div>
-        <Field label="Notes (optional)">
+        <Field label={T("Notes (optional)")}>
           <textarea rows={2} className="input" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
           <button type="submit" className="btn-primary" disabled={create.isPending}>
             {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Create PR
-          </button>
+            {T("Create PR")}</button>
         </div>
       </form>
     </ModalShell>
@@ -363,7 +357,7 @@ function RFQWorkspace() {
     <div className="space-y-4">
       <Flash flash={flash} onClose={() => setFlash(null)} />
       <div className="flex justify-end">
-        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> New RFQ</button>
+        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> {T("New RFQ")}</button>
       </div>
       <div className="card overflow-hidden">
         <TableShell
@@ -429,32 +423,32 @@ function RFQModal({ onClose, onDone, onError }: {
 
   const ready = prId && supplierId;
   return (
-    <ModalShell title="Record a supplier quote" subtitle="One row per supplier quoting a PR."
+    <ModalShell title={T("Record a supplier quote")} subtitle={T("One row per supplier quoting a PR.")}
       onClose={onClose}>
       <form onSubmit={(e) => { e.preventDefault(); if (ready) create.mutate(); }}
         className="flex-1 overflow-auto p-5 space-y-3">
-        <Field label="Purchase request *">
+        <Field label={T("Purchase request *")}>
           <select required className="input" value={prId} onChange={(e) => setPrId(e.target.value)}>
-            <option value="">Choose an open PR…</option>
+            <option value="">{T("Choose an open PR…")}</option>
             {(prs.data ?? []).map((p: any) => (
               <option key={p.id} value={p.id}>{p.number}{p.project_code ? ` · ${p.project_code}` : ""}</option>
             ))}
           </select>
         </Field>
-        <Field label="Supplier *">
+        <Field label={T("Supplier *")}>
           <select required className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-            <option value="">Choose a supplier…</option>
+            <option value="">{T("Choose a supplier…")}</option>
             {(suppliers.data ?? []).map((s: any) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
         </Field>
-        <Field label="Quoted lead time (days)">
+        <Field label={T("Quoted lead time (days)")}>
           <input type="number" min={0} className="input" value={leadDays}
             onChange={(e) => setLeadDays(e.target.value)} />
         </Field>
         <div>
-          <span className="block text-xs font-medium text-ink-600 mb-1">Quoted lines</span>
+          <span className="block text-xs font-medium text-ink-600 mb-1">{T("Quoted lines")}</span>
           <ItemsEditor
             cols={[
               { key: "description", label: "Description", placeholder: "Steel plate 10mm" },
@@ -466,15 +460,13 @@ function RFQModal({ onClose, onDone, onError }: {
         </div>
         {!ready && (
           <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800 flex items-start gap-2">
-            <AlertCircle size={13} className="mt-0.5 shrink-0" /> Pick a PR and a supplier first.
-          </div>
+            <AlertCircle size={13} className="mt-0.5 shrink-0" /> {T("Pick a PR and a supplier first.")}</div>
         )}
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
           <button type="submit" className="btn-primary" disabled={create.isPending || !ready}>
             {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Save quote
-          </button>
+            {T("Save quote")}</button>
         </div>
       </form>
     </ModalShell>
@@ -498,7 +490,7 @@ function GRWorkspace() {
     <div className="space-y-4">
       <Flash flash={flash} onClose={() => setFlash(null)} />
       <div className="flex justify-end">
-        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> Receive goods</button>
+        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> {T("Receive goods")}</button>
       </div>
       <div className="card overflow-hidden">
         <TableShell
@@ -510,7 +502,7 @@ function GRWorkspace() {
             <tr key={r.id} className="border-t border-ink-100">
               <td className="td font-mono text-xs">{r.po_number ?? "—"}</td>
               <td className="td muted">{r.received_at ?? "—"}</td>
-              <td className="td muted">{(r.items ?? []).length} line(s)</td>
+              <td className="td muted">{(r.items ?? []).length} {T("line(s)")}</td>
               <td className="td"><StatusChip status={r.status} /></td>
             </tr>
           ))}
@@ -555,13 +547,13 @@ function GRModal({ onClose, onDone, onError }: {
   });
 
   return (
-    <ModalShell title="Receive goods" subtitle="Confirm what arrived against a supplier PO."
+    <ModalShell title={T("Receive goods")} subtitle={T("Confirm what arrived against a supplier PO.")}
       onClose={onClose}>
       <form onSubmit={(e) => { e.preventDefault(); if (poId) create.mutate(); }}
         className="flex-1 overflow-auto p-5 space-y-3">
-        <Field label="Supplier PO *">
+        <Field label={T("Supplier PO *")}>
           <select required className="input" value={poId} onChange={(e) => setPoId(e.target.value)}>
-            <option value="">Choose a PO…</option>
+            <option value="">{T("Choose a PO…")}</option>
             {(pos.data ?? []).map((p: any) => (
               <option key={p.id} value={p.id}>
                 {p.number}{p.supplier_name ? ` · ${p.supplier_name}` : ""}{p.project_code ? ` · ${p.project_code}` : ""}
@@ -569,12 +561,12 @@ function GRModal({ onClose, onDone, onError }: {
             ))}
           </select>
         </Field>
-        <Field label="Received date">
+        <Field label={T("Received date")}>
           <input type="date" className="input" value={receivedAt}
             onChange={(e) => setReceivedAt(e.target.value)} />
         </Field>
         <div>
-          <span className="block text-xs font-medium text-ink-600 mb-1">Received items</span>
+          <span className="block text-xs font-medium text-ink-600 mb-1">{T("Received items")}</span>
           <ItemsEditor
             cols={[
               { key: "description", label: "Description", placeholder: "Steel plate 10mm" },
@@ -585,11 +577,10 @@ function GRModal({ onClose, onDone, onError }: {
           />
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
           <button type="submit" className="btn-primary" disabled={create.isPending || !poId}>
             {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Record receipt
-          </button>
+            {T("Record receipt")}</button>
         </div>
       </form>
     </ModalShell>
@@ -613,7 +604,7 @@ function QCWorkspace() {
     <div className="space-y-4">
       <Flash flash={flash} onClose={() => setFlash(null)} />
       <div className="flex justify-end">
-        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> Log inspection</button>
+        <button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> {T("Log inspection")}</button>
       </div>
       <div className="card overflow-hidden">
         <TableShell
@@ -680,13 +671,13 @@ function QCModal({ onClose, onDone, onError }: {
   });
 
   return (
-    <ModalShell title="Log incoming QC" subtitle="Pass / fail counts feed the supplier's QC fail rate."
+    <ModalShell title={T("Log incoming QC")} subtitle={T("Pass / fail counts feed the supplier's QC fail rate.")}
       onClose={onClose}>
       <form onSubmit={(e) => { e.preventDefault(); if (poId) create.mutate(); }}
         className="flex-1 overflow-auto p-5 space-y-3">
-        <Field label="Supplier PO *">
+        <Field label={T("Supplier PO *")}>
           <select required className="input" value={poId} onChange={(e) => setPoId(e.target.value)}>
-            <option value="">Choose a PO…</option>
+            <option value="">{T("Choose a PO…")}</option>
             {(pos.data ?? []).map((p: any) => (
               <option key={p.id} value={p.id}>
                 {p.number}{p.supplier_name ? ` · ${p.supplier_name}` : ""}
@@ -695,32 +686,31 @@ function QCModal({ onClose, onDone, onError }: {
           </select>
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Pass qty">
+          <Field label={T("Pass qty")}>
             <input type="number" min={0} className="input" value={passQty}
               onChange={(e) => setPassQty(e.target.value)} />
           </Field>
-          <Field label="Fail qty">
+          <Field label={T("Fail qty")}>
             <input type="number" min={0} className="input" value={failQty}
               onChange={(e) => setFailQty(e.target.value)} />
           </Field>
         </div>
-        <Field label="Decision">
+        <Field label={T("Decision")}>
           <select className="input" value={decision} onChange={(e) => setDecision(e.target.value)}>
-            <option value="accepted">Accepted</option>
-            <option value="conditional">Conditional</option>
-            <option value="rejected">Rejected</option>
+            <option value="accepted">{T("Accepted")}</option>
+            <option value="conditional">{T("Conditional")}</option>
+            <option value="rejected">{T("Rejected")}</option>
           </select>
         </Field>
-        <Field label="Findings (optional)">
+        <Field label={T("Findings (optional)")}>
           <textarea rows={2} className="input" value={findings}
             onChange={(e) => setFindings(e.target.value)} />
         </Field>
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
           <button type="submit" className="btn-primary" disabled={create.isPending || !poId}>
             {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Log inspection
-          </button>
+            {T("Log inspection")}</button>
         </div>
       </form>
     </ModalShell>

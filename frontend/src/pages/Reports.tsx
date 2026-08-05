@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 const TABS = [
   { id: "pnl",       label: "P&L",                 icon: TrendingUp },
@@ -81,17 +82,14 @@ export default function ReportsPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <BookOpen size={22} className="text-brand-600" /> Reports
-          </h1>
-          <p className="text-sm muted">Snapshots of the business. Export the current report as PDF, Excel, or CSV.</p>
+            <BookOpen size={22} className="text-brand-600" /> {T("Reports")}</h1>
+          <p className="text-sm muted">{T("Snapshots of the business. Export the current report as PDF, Excel, or CSV.")}</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-ghost" onClick={() => exportServer(tab, "pdf")}>
-            <Download size={15} /> PDF
-          </button>
+            <Download size={15} /> {T("PDF")}</button>
           <button className="btn-ghost" onClick={() => exportServer(tab, "xlsx")}>
-            <Download size={15} /> Excel
-          </button>
+            <Download size={15} /> {T("Excel")}</button>
         </div>
       </div>
 
@@ -105,7 +103,7 @@ export default function ReportsPage() {
               tab === t.id ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-100"
             )}
           >
-            <t.icon size={14} /> {t.label}
+            <t.icon size={14} /> {T(t.label)}
           </button>
         ))}
       </div>
@@ -139,35 +137,35 @@ function PnLReport() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button className="btn-ghost" onClick={doExport}><Download size={14} /> Export CSV</button>
+        <button className="btn-ghost" onClick={doExport}><Download size={14} /> {T("Export CSV")}</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <Stat label="Revenue" value={idrFull(t.revenue ?? 0)} tone="brand" />
-        <Stat label="Gross profit" value={idrFull(t.gross_profit ?? 0)} tone="emerald" />
-        <Stat label="Operating income" value={idrFull(t.operating_income ?? 0)} tone="amber" />
-        <Stat label="Net income" value={idrFull(t.net_income ?? 0)}
+        <Stat label={T("Revenue")} value={idrFull(t.revenue ?? 0)} tone="brand" />
+        <Stat label={T("Gross profit")} value={idrFull(t.gross_profit ?? 0)} tone="emerald" />
+        <Stat label={T("Operating income")} value={idrFull(t.operating_income ?? 0)} tone="amber" />
+        <Stat label={T("Net income")} value={idrFull(t.net_income ?? 0)}
               tone={(t.net_income ?? 0) >= 0 ? "emerald" : "red"} />
       </div>
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
           <tbody>
-            <Row label="Revenue" value={t.revenue} />
-            <Row label="Cost of goods sold" value={-(t.cogs ?? 0)} />
+            <Row label={T("Revenue")} value={t.revenue} />
+            <Row label={T("Cost of goods sold")} value={-(t.cogs ?? 0)} />
             {(t.cogs_committed ?? 0) > 0 && (
               <>
-                <Row label="  · from price-request buying prices"
+                <Row label={T("  · from price-request buying prices")}
                      value={-(t.cogs_committed ?? 0)} sub />
                 {(t.cogs_ledger ?? 0) !== 0 && (
-                  <Row label="  · from the ledger" value={-(t.cogs_ledger ?? 0)} sub />
+                  <Row label={T("  · from the ledger")} value={-(t.cogs_ledger ?? 0)} sub />
                 )}
               </>
             )}
-            <Row label="Gross profit" value={t.gross_profit} bold sep />
-            <Row label="Operating expense" value={-(t.expense ?? 0)} />
-            <Row label="Operating income" value={t.operating_income} bold sep />
-            <Row label="Other income" value={t.other_income} />
-            <Row label="Other expense" value={-(t.other_expense ?? 0)} />
-            <Row label="Net income" value={t.net_income} bold sep big />
+            <Row label={T("Gross profit")} value={t.gross_profit} bold sep />
+            <Row label={T("Operating expense")} value={-(t.expense ?? 0)} />
+            <Row label={T("Operating income")} value={t.operating_income} bold sep />
+            <Row label={T("Other income")} value={t.other_income} />
+            <Row label={T("Other expense")} value={-(t.other_expense ?? 0)} />
+            <Row label={T("Net income")} value={t.net_income} bold sep big />
           </tbody>
         </table>
       </div>
@@ -208,7 +206,7 @@ function ArAgingReport() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button className="btn-ghost" onClick={doExport}><Download size={14} /> Export CSV</button>
+        <button className="btn-ghost" onClick={doExport}><Download size={14} /> {T("Export CSV")}</button>
       </div>
       <div className="card p-4">
         <div className="h-56">
@@ -228,14 +226,14 @@ function ArAgingReport() {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Invoice</th>
-              <th className="th">Customer</th>
-              <th className="th">Due date</th>
-              <th className="th text-right">Days overdue</th>
-              <th className="th">Bucket</th>
-              <th className="th text-right">Invoiced</th>
-              <th className="th text-right">Paid</th>
-              <th className="th text-right">Outstanding</th>
+              <th className="th">{T("Invoice")}</th>
+              <th className="th">{T("Customer")}</th>
+              <th className="th">{T("Due date")}</th>
+              <th className="th text-right">{T("Days overdue")}</th>
+              <th className="th">{T("Bucket")}</th>
+              <th className="th text-right">{T("Invoiced")}</th>
+              <th className="th text-right">{T("Paid")}</th>
+              <th className="th text-right">{T("Outstanding")}</th>
             </tr>
           </thead>
           <tbody>
@@ -258,8 +256,7 @@ function ArAgingReport() {
             ))}
             {!items.length && (
               <tr><td colSpan={8} className="td text-center muted py-10">
-                No outstanding receivables 🎉
-              </td></tr>
+                {T("No outstanding receivables 🎉")}</td></tr>
             )}
           </tbody>
         </table>
@@ -292,16 +289,15 @@ function SalesByPersonReport() {
     <div className="space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-2">
         <label className="text-sm flex items-center gap-2">
-          Last
-          <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}
+          {T("Last")}<select value={days} onChange={(e) => setDays(parseInt(e.target.value))}
             className="input max-w-[120px]">
-            <option value={30}>30 days</option>
-            <option value={90}>90 days</option>
-            <option value={180}>180 days</option>
-            <option value={365}>365 days</option>
+            <option value={30}>{T("30 days")}</option>
+            <option value={90}>{T("90 days")}</option>
+            <option value={180}>{T("180 days")}</option>
+            <option value={365}>{T("365 days")}</option>
           </select>
         </label>
-        <button className="btn-ghost" onClick={doExport}><Download size={14} /> Export CSV</button>
+        <button className="btn-ghost" onClick={doExport}><Download size={14} /> {T("Export CSV")}</button>
       </div>
       <div className="card p-4">
         <div className="h-56">
@@ -319,13 +315,13 @@ function SalesByPersonReport() {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Salesperson</th>
-              <th className="th text-right">Quotations</th>
-              <th className="th text-right">Won</th>
-              <th className="th text-right">Lost</th>
-              <th className="th text-right">Win rate</th>
-              <th className="th text-right">Pipeline value</th>
-              <th className="th text-right">Won revenue</th>
+              <th className="th">{T("Salesperson")}</th>
+              <th className="th text-right">{T("Quotations")}</th>
+              <th className="th text-right">{T("Won")}</th>
+              <th className="th text-right">{T("Lost")}</th>
+              <th className="th text-right">{T("Win rate")}</th>
+              <th className="th text-right">{T("Pipeline value")}</th>
+              <th className="th text-right">{T("Won revenue")}</th>
             </tr>
           </thead>
           <tbody>
@@ -341,7 +337,7 @@ function SalesByPersonReport() {
               </tr>
             ))}
             {!rows.length && (
-              <tr><td colSpan={7} className="td text-center muted py-10">No sales activity in this period.</td></tr>
+              <tr><td colSpan={7} className="td text-center muted py-10">{T("No sales activity in this period.")}</td></tr>
             )}
           </tbody>
         </table>
@@ -377,7 +373,7 @@ function PipelineByStageReport() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button className="btn-ghost" onClick={doExport}><Download size={14} /> Export CSV</button>
+        <button className="btn-ghost" onClick={doExport}><Download size={14} /> {T("Export CSV")}</button>
       </div>
       <div className="card p-4">
         <div className="h-72">
@@ -397,9 +393,9 @@ function PipelineByStageReport() {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Stage</th>
-              <th className="th text-right">Customers</th>
-              <th className="th text-right">Value</th>
+              <th className="th">{T("Stage")}</th>
+              <th className="th text-right">{T("Customers")}</th>
+              <th className="th text-right">{T("Value")}</th>
             </tr>
           </thead>
           <tbody>
@@ -408,7 +404,7 @@ function PipelineByStageReport() {
                 <td className="td capitalize">
                   <span className="inline-flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full" style={{ background: STAGE_COLORS[r.stage] }} />
-                    {r.stage.replace(/_/g, " ")}
+                    {T(r.stage.replace(/_/g, " "))}
                   </span>
                 </td>
                 <td className="td text-right tabular-nums">{r.count}</td>
@@ -451,20 +447,20 @@ function LostDealsReport() {
     <div className="space-y-4">
       <div className="flex justify-between flex-wrap gap-2">
         <div>
-          <Stat label="Lost deals (total)" value={String(items.length)} tone="red" />
+          <Stat label={T("Lost deals (total)")} value={String(items.length)} tone="red" />
         </div>
         <div className="text-right">
-          <div className="text-[11px] uppercase muted">Total lost value</div>
+          <div className="text-[11px] uppercase muted">{T("Total lost value")}</div>
           <div className="text-2xl font-semibold tabular-nums text-red-600">
             {idrFull(q.data?.total_lost_value ?? 0)}
           </div>
         </div>
-        <button className="btn-ghost self-end" onClick={doExport}><Download size={14} /> Export CSV</button>
+        <button className="btn-ghost self-end" onClick={doExport}><Download size={14} /> {T("Export CSV")}</button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="card p-4">
-          <div className="font-semibold mb-2 text-sm">Lost by industry</div>
+          <div className="font-semibold mb-2 text-sm">{T("Lost by industry")}</div>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -477,7 +473,7 @@ function LostDealsReport() {
           </div>
         </div>
         <div className="card p-4">
-          <div className="font-semibold mb-2 text-sm">Lost by reason</div>
+          <div className="font-semibold mb-2 text-sm">{T("Lost by reason")}</div>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -495,12 +491,12 @@ function LostDealsReport() {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Number</th>
-              <th className="th">Customer</th>
-              <th className="th">Industry</th>
-              <th className="th text-right">Discount</th>
-              <th className="th text-right">Total</th>
-              <th className="th">Reason</th>
+              <th className="th">{T("Number")}</th>
+              <th className="th">{T("Customer")}</th>
+              <th className="th">{T("Industry")}</th>
+              <th className="th text-right">{T("Discount")}</th>
+              <th className="th text-right">{T("Total")}</th>
+              <th className="th">{T("Reason")}</th>
             </tr>
           </thead>
           <tbody>
@@ -516,8 +512,7 @@ function LostDealsReport() {
             ))}
             {!items.length && (
               <tr><td colSpan={6} className="td text-center muted py-10">
-                No lost deals on record. Nice work.
-              </td></tr>
+                {T("No lost deals on record. Nice work.")}</td></tr>
             )}
           </tbody>
         </table>
@@ -540,7 +535,7 @@ function Stat({ label, value, tone }: {
   return (
     <div className="card p-4">
       <div className={`inline-block text-[11px] uppercase tracking-wider px-2 py-0.5 rounded ${cls}`}>
-        {label}
+        {T(label)}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>
@@ -553,7 +548,7 @@ function Row({ label, value, bold, sep, big, sub }: {
   const neg = value < 0;
   return (
     <tr className={clsx(sep && "border-t border-ink-200", bold && "bg-ink-50/60")}>
-      <td className={clsx("td", bold && "font-semibold", sub && "text-xs muted pl-6")}>{label}</td>
+      <td className={clsx("td", bold && "font-semibold", sub && "text-xs muted pl-6")}>{T(label)}</td>
       <td className={clsx(
         "td text-right tabular-nums",
         bold && "font-semibold",

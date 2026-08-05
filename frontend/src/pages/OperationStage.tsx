@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { T, locale, t as tt } from "@/store/lang";
 
 const STAGES: Record<string, {
   label: string; tone: string; description: string; nextStage: string | null;
@@ -105,13 +106,11 @@ export default function OperationStagePage() {
     return (
       <div className="card p-10 text-center">
         <AlertCircle size={28} className="mx-auto text-amber-500" />
-        <div className="mt-3 font-semibold">Unknown stage</div>
+        <div className="mt-3 font-semibold">{T("Unknown stage")}</div>
         <p className="text-sm muted mt-1">
-          "{stage}" isn't one of the Operation board stages.
-        </p>
+          "{stage}{T("\" isn't one of the Operation board stages.")}</p>
         <button className="btn-ghost mt-4" onClick={() => nav("/operation")}>
-          <ArrowLeft size={14} /> Back to Operation board
-        </button>
+          <ArrowLeft size={14} /> {T("Back to Operation board")}</button>
       </div>
     );
   }
@@ -124,22 +123,20 @@ export default function OperationStagePage() {
         to="/operation"
         className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-brand-700"
       >
-        <ArrowLeft size={14} /> Operation board
-      </Link>
+        <ArrowLeft size={14} /> {T("Operation board")}</Link>
 
       <div className="card p-6">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
-              <Wrench size={13} className="text-brand-600" /> Stage
-            </div>
+              <Wrench size={13} className="text-brand-600" /> {T("Stage")}</div>
             <h1 className="text-2xl font-semibold tracking-tight mt-0.5">
-              {meta.label}
+              {T(meta.label)}
             </h1>
-            <p className="text-sm muted mt-1 max-w-2xl">{meta.description}</p>
+            <p className="text-sm muted mt-1 max-w-2xl">{T(meta.description)}</p>
           </div>
           <span className={clsx("chip text-xs font-semibold capitalize", meta.tone)}>
-            {meta.label}
+            {T(meta.label)}
           </span>
         </div>
       </div>
@@ -158,20 +155,19 @@ export default function OperationStagePage() {
               tab === k ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
             )}
           >
-            {label}
+            {T(label)}
           </button>
         ))}
       </div>
 
       {q.isLoading ? (
         <div className="card p-10 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading work orders…
-        </div>
+          <Loader2 size={14} className="animate-spin" /> {T("Loading work orders…")}</div>
       ) : q.error ? (
         <div className="card p-5 text-sm text-red-700 flex items-start gap-2">
           <AlertCircle size={16} className="mt-0.5 shrink-0" />
           <div className="flex-1">
-            <div className="font-medium">Couldn't load work orders.</div>
+            <div className="font-medium">{T("Couldn't load work orders.")}</div>
             <div className="text-xs mt-0.5 break-all">
               {(q.error as any)?.response?.data?.detail ?? (q.error as any)?.message}
             </div>
@@ -181,8 +177,10 @@ export default function OperationStagePage() {
         <div className="card p-12 text-center">
           <div className="text-sm muted">
             {tab === "open"
-              ? `No open work orders at ${meta.label}.`
-              : `No completed work orders at ${meta.label}.`}
+              ? tt(`No open work orders at ${meta.label}.`,
+                  `Tidak ada work order terbuka di ${T(meta.label)}.`)
+              : tt(`No completed work orders at ${meta.label}.`,
+                  `Tidak ada work order selesai di ${T(meta.label)}.`)}
           </div>
         </div>
       ) : (
@@ -190,14 +188,14 @@ export default function OperationStagePage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                {!isSales && <th className="th">Code</th>}
-                <th className="th">Project</th>
-                <th className="th">Customer</th>
-                <th className="th">Target delivery</th>
-                {!isSales && <th className="th">Notes</th>}
-                <th className="th">Created</th>
-                {tab === "open" && !isSales && <th className="th text-right">Actions</th>}
-                {tab === "done" && <th className="th">Completed</th>}
+                {!isSales && <th className="th">{T("Code")}</th>}
+                <th className="th">{T("Project")}</th>
+                <th className="th">{T("Customer")}</th>
+                <th className="th">{T("Target delivery")}</th>
+                {!isSales && <th className="th">{T("Notes")}</th>}
+                <th className="th">{T("Created")}</th>
+                {tab === "open" && !isSales && <th className="th text-right">{T("Actions")}</th>}
+                {tab === "done" && <th className="th">{T("Completed")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -227,7 +225,7 @@ export default function OperationStagePage() {
                     <td className="td text-xs">{w.notes ?? <span className="muted">—</span>}</td>
                   )}
                   <td className="td muted text-xs">
-                    {w.created_at ? new Date(w.created_at).toLocaleDateString() : "—"}
+                    {w.created_at ? new Date(w.created_at).toLocaleDateString(locale()) : "—"}
                   </td>
                   {tab === "open" && !isSales && (
                     <td className="td">
@@ -239,23 +237,22 @@ export default function OperationStagePage() {
                             className="btn-ghost text-xs"
                             title={`Move to ${STAGES[meta.nextStage].label}`}
                           >
-                            <ArrowRight size={12} /> {STAGES[meta.nextStage].label}
+                            <ArrowRight size={12} /> {T(STAGES[meta.nextStage].label)}
                           </button>
                         )}
                         <button
                           onClick={() => complete.mutate(w.id)}
                           disabled={complete.isPending}
                           className="btn-ghost text-xs text-emerald-700"
-                          title="Mark this work order complete"
+                          title={T("Mark this work order complete")}
                         >
-                          <CheckCircle2 size={12} /> Done
-                        </button>
+                          <CheckCircle2 size={12} /> {T("Done")}</button>
                       </div>
                     </td>
                   )}
                   {tab === "done" && (
                     <td className="td muted text-xs">
-                      {w.completed_at ? new Date(w.completed_at).toLocaleString() : "—"}
+                      {w.completed_at ? new Date(w.completed_at).toLocaleString(locale()) : "—"}
                     </td>
                   )}
                 </tr>

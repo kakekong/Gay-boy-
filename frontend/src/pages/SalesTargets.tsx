@@ -4,6 +4,7 @@ import { Target, Plus, Loader2, Trash2, Pencil, Save, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 interface TargetRow {
   id: string;
@@ -92,12 +93,11 @@ export default function SalesTargetsPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Target size={22} className="text-brand-600" /> Sales Targets
-          </h1>
+            <Target size={22} className="text-brand-600" /> {T("Sales Targets")}</h1>
           <p className="text-sm muted">
             {isDirector
-              ? "Set monthly revenue targets. Achievement is the sum of won quotations in the period."
-              : "Your monthly target and live progress, based on won quotations."}
+              ? T("Set monthly revenue targets. Achievement is the sum of won quotations in the period.")
+              : T("Your monthly target and live progress, based on won quotations.")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -109,19 +109,18 @@ export default function SalesTargetsPage() {
           />
           {isDirector && (
             <button className="btn-primary" onClick={() => setShowNew(true)}>
-              <Plus size={14} /> Set target
-            </button>
+              <Plus size={14} /> {T("Set target")}</button>
           )}
         </div>
       </div>
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card label="Targets set"  value={String(summary.count)} tone="brand" />
-        <Card label="Total target" value={idr(summary.target)}    tone="brand" />
-        <Card label="Achieved"     value={idr(summary.achieved)}  tone="emerald" />
+        <Card label={T("Targets set")}  value={String(summary.count)} tone="brand" />
+        <Card label={T("Total target")} value={idr(summary.target)}    tone="brand" />
+        <Card label={T("Achieved")}     value={idr(summary.achieved)}  tone="emerald" />
         <Card
-          label="Org progress"
+          label={T("Org progress")}
           value={summary.target ? `${Math.round((summary.achieved / summary.target) * 100)}%` : "—"}
           tone="amber"
         />
@@ -130,28 +129,28 @@ export default function SalesTargetsPage() {
       {/* New target row */}
       {isDirector && showNew && (
         <div className="card p-4 space-y-3">
-          <div className="font-semibold text-sm">New target for {period}</div>
+          <div className="font-semibold text-sm">{T("New target for")}{" "}{period}</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <label className="block">
-              <span className="block text-[11px] uppercase muted mb-0.5">Salesperson</span>
+              <span className="block text-[11px] uppercase muted mb-0.5">{T("Salesperson")}</span>
               <select className="input" value={newUserId}
                 onChange={(e) => setNewUserId(e.target.value)}>
-                <option value="">— pick someone —</option>
+                <option value="">{T("— pick someone —")}</option>
                 {(employees.data ?? []).map((u) => (
                   <option key={u.id} value={u.id}>{u.full_name}</option>
                 ))}
               </select>
             </label>
             <label className="block">
-              <span className="block text-[11px] uppercase muted mb-0.5">Target (IDR)</span>
+              <span className="block text-[11px] uppercase muted mb-0.5">{T("Target (IDR)")}</span>
               <input type="number" min={0} step="any" className="input"
                 value={newAmount}
                 onChange={(e) => setNewAmount(parseFloat(e.target.value || "0"))} />
             </label>
             <label className="block">
-              <span className="block text-[11px] uppercase muted mb-0.5">Notes</span>
+              <span className="block text-[11px] uppercase muted mb-0.5">{T("Notes")}</span>
               <input className="input" value={newNotes}
-                onChange={(e) => setNewNotes(e.target.value)} placeholder="optional" />
+                onChange={(e) => setNewNotes(e.target.value)} placeholder={T("optional")} />
             </label>
           </div>
           {err && (
@@ -161,16 +160,14 @@ export default function SalesTargetsPage() {
           )}
           <div className="flex justify-end gap-2">
             <button className="btn-ghost" onClick={() => { setShowNew(false); setErr(null); }}>
-              Cancel
-            </button>
+              {T("Cancel")}</button>
             <button
               className="btn-primary"
               disabled={!newUserId || !newAmount || create.isPending}
               onClick={() => { setErr(null); create.mutate(); }}
             >
               {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save target
-            </button>
+              {T("Save target")}</button>
           </div>
         </div>
       )}
@@ -187,9 +184,7 @@ export default function SalesTargetsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold">{t.user_name ?? "—"}</div>
                   <div className="text-xs muted">
-                    Target: <b className="tabular-nums">{idr(t.target_amount)}</b> ·
-                    Achieved: <b className="tabular-nums">{idr(t.achieved_amount)}</b> ·
-                    Remaining: <b className="tabular-nums">{idr(t.remaining)}</b>
+                    {T("Target:")}{" "}<b className="tabular-nums">{idr(t.target_amount)}</b> {T("· Achieved:")}{" "}<b className="tabular-nums">{idr(t.achieved_amount)}</b> {T("· Remaining:")}{" "}<b className="tabular-nums">{idr(t.remaining)}</b>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -210,8 +205,7 @@ export default function SalesTargetsPage() {
                           onChange={(e) => setEditAmount(parseFloat(e.target.value || "0"))} />
                         <button className="btn-success" onClick={() => update.mutate(t.id)}
                           disabled={update.isPending}>
-                          <Save size={13} /> Save
-                        </button>
+                          <Save size={13} /> {T("Save")}</button>
                         <button className="btn-ghost" onClick={() => setEditing(null)}>
                           <X size={13} />
                         </button>
@@ -249,8 +243,8 @@ export default function SalesTargetsPage() {
         })}
         {!targets.data?.length && (
           <div className="card p-12 text-center text-sm muted">
-            No targets set for {period}.
-            {isDirector && (<>{" "}Click <b>+ Set target</b> to add one.</>)}
+            {T("No targets set for")}{" "}{period}.
+            {isDirector && (<>{" "}{T("Click")}{" "}<b>{T("+ Set target")}</b> {T("to add one.")}</>)}
           </div>
         )}
       </div>
@@ -269,7 +263,7 @@ function Card({ label, value, tone }: {
   return (
     <div className="card p-4">
       <div className={`inline-block text-[11px] uppercase tracking-wider px-2 py-0.5 rounded ${cls}`}>
-        {label}
+        {T(label)}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>

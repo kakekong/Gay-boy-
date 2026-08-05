@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT } from "@/store/lang";
+import { useT, T } from "@/store/lang";
 
 interface Targets {
   channels: { id: string; kind: "dm" | "channel"; title: string; member_count: number }[];
@@ -120,7 +120,7 @@ export function ForwardDialog({
             <Forward size={16} className="text-brand-600" />
             <span className="text-lg font-semibold">{t("Forward to…", "Teruskan ke…")}</span>
             <button onClick={onClose} className="ml-auto text-ink-400 hover:text-ink-800"
-                    aria-label="Close">
+                    aria-label={T("Close")}>
               <X size={16} />
             </button>
           </div>

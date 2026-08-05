@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { T, locale } from "@/store/lang";
 
 interface Contact { name?: string; phone?: string; email?: string }
 
@@ -75,8 +76,7 @@ export default function SupplierDetailPage() {
   if (q.isLoading) {
     return (
       <div className="card p-12 text-center text-sm muted flex items-center justify-center gap-2">
-        <Loader2 size={14} className="animate-spin" /> Loading supplier…
-      </div>
+        <Loader2 size={14} className="animate-spin" /> {T("Loading supplier…")}</div>
     );
   }
   if (q.error || !q.data) {
@@ -85,14 +85,13 @@ export default function SupplierDetailPage() {
       <div className="card p-10 text-center">
         <AlertCircle size={28} className="mx-auto text-amber-500" />
         <div className="mt-3 font-semibold">
-          {httpStatus === 404 ? "Supplier not found" : "Couldn't load supplier"}
+          {httpStatus === 404 ? T("Supplier not found") : T("Couldn't load supplier")}
         </div>
         <p className="text-sm muted mt-1 max-w-md mx-auto">
-          {(q.error as any)?.response?.data?.detail ?? "Try again."}
+          {(q.error as any)?.response?.data?.detail ?? T("Try again.")}
         </p>
         <button className="btn-ghost mt-4" onClick={() => nav("/purchasing")}>
-          <ArrowLeft size={14} /> Back to Purchasing
-        </button>
+          <ArrowLeft size={14} /> {T("Back to Purchasing")}</button>
       </div>
     );
   }
@@ -111,21 +110,19 @@ export default function SupplierDetailPage() {
         to="/purchasing"
         className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-brand-700"
       >
-        <ArrowLeft size={14} /> Back to Purchasing
-      </Link>
+        <ArrowLeft size={14} /> {T("Back to Purchasing")}</Link>
 
       <div className="card p-6 lg:p-8 space-y-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
-              <Building2 size={13} className="text-brand-600" /> Supplier
-            </div>
+              <Building2 size={13} className="text-brand-600" /> {T("Supplier")}</div>
             <h1 className="text-2xl font-semibold tracking-tight mt-0.5">{s.name}</h1>
-            <div className="text-xs muted mt-1">{s.category ?? "Uncategorised"}</div>
+            <div className="text-xs muted mt-1">{s.category ?? T("Uncategorised")}</div>
           </div>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <Stat
-              label="Rating"
+              label={T("Rating")}
               value={
                 <span className="inline-flex items-center gap-1 tabular-nums">
                   <Star size={13} className="text-amber-500" />
@@ -133,9 +130,9 @@ export default function SupplierDetailPage() {
                 </span>
               }
             />
-            <Stat label="Avg lead" value={`${s.lead_time_days_avg.toFixed(1)} d`} />
-            <Stat label="QC fail" value={`${(s.qc_fail_rate * 100).toFixed(1)}%`} />
-            <Stat label="Volatility" value={s.price_volatility.toFixed(2)} />
+            <Stat label={T("Avg lead")} value={`${s.lead_time_days_avg.toFixed(1)} d`} />
+            <Stat label={T("QC fail")} value={`${(s.qc_fail_rate * 100).toFixed(1)}%`} />
+            <Stat label={T("Volatility")} value={s.price_volatility.toFixed(2)} />
           </div>
         </div>
 
@@ -144,13 +141,13 @@ export default function SupplierDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm border-t border-ink-100 pt-4">
             {c.name && (
               <div>
-                <div className="text-[10px] uppercase tracking-wider muted">Contact</div>
+                <div className="text-[10px] uppercase tracking-wider muted">{T("Contact")}</div>
                 <div className="mt-0.5">{c.name}</div>
               </div>
             )}
             {c.phone && (
               <div>
-                <div className="text-[10px] uppercase tracking-wider muted">Phone</div>
+                <div className="text-[10px] uppercase tracking-wider muted">{T("Phone")}</div>
                 <a
                   href={`tel:${c.phone}`}
                   className="mt-0.5 inline-flex items-center gap-1 text-brand-700 hover:underline"
@@ -161,7 +158,7 @@ export default function SupplierDetailPage() {
             )}
             {c.email && (
               <div>
-                <div className="text-[10px] uppercase tracking-wider muted">Email</div>
+                <div className="text-[10px] uppercase tracking-wider muted">{T("Email")}</div>
                 <a
                   href={`mailto:${c.email}`}
                   className="mt-0.5 inline-flex items-center gap-1 text-brand-700 hover:underline"
@@ -176,32 +173,31 @@ export default function SupplierDetailPage() {
 
       {/* PO history */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-        <BigStat label="POs issued" value={s.po_count} />
-        <BigStat label="Open POs" value={s.open_po_count} tone="amber" />
-        <BigStat label="Lifetime spend" value={idr(s.lifetime_value)} />
+        <BigStat label={T("POs issued")} value={s.po_count} />
+        <BigStat label={T("Open POs")} value={s.open_po_count} tone="amber" />
+        <BigStat label={T("Lifetime spend")} value={idr(s.lifetime_value)} />
       </div>
 
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
           <Truck size={15} className="text-brand-600" />
-          <span className="font-semibold">Purchase orders</span>
+          <span className="font-semibold">{T("Purchase orders")}</span>
           <span className="text-[10px] uppercase tracking-wider muted ml-auto">
             {s.purchase_orders.length}
           </span>
         </header>
         {!s.purchase_orders.length ? (
           <div className="p-8 text-center text-sm muted">
-            No POs issued to this supplier yet.
-          </div>
+            {T("No POs issued to this supplier yet.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">PO number</th>
-                <th className="th">PO date</th>
-                <th className="th">Project</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Total</th>
+                <th className="th">{T("PO number")}</th>
+                <th className="th">{T("PO date")}</th>
+                <th className="th">{T("Project")}</th>
+                <th className="th">{T("Status")}</th>
+                <th className="th text-right">{T("Total")}</th>
               </tr>
             </thead>
             <tbody>
@@ -224,7 +220,7 @@ export default function SupplierDetailPage() {
                       "chip capitalize",
                       POSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
                     )}>
-                      {p.status.replace(/_/g, " ")}
+                      {T(p.status.replace(/_/g, " "))}
                     </span>
                   </td>
                   <td className="td text-right tabular-nums">{idr(p.total)}</td>
@@ -239,15 +235,15 @@ export default function SupplierDetailPage() {
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
           <Briefcase size={15} className="text-brand-600" />
-          <span className="font-semibold">Projects supplied</span>
+          <span className="font-semibold">{T("Projects supplied")}</span>
           <span className="text-[10px] uppercase tracking-wider muted ml-auto">{projects.length}</span>
         </header>
         {!projects.length ? (
-          <div className="p-8 text-center text-sm muted">Not linked to any project yet.</div>
+          <div className="p-8 text-center text-sm muted">{T("Not linked to any project yet.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
-              <tr><th className="th">Code</th><th className="th">Status</th><th className="th">Target delivery</th></tr>
+              <tr><th className="th">{T("Code")}</th><th className="th">{T("Status")}</th><th className="th">{T("Target delivery")}</th></tr>
             </thead>
             <tbody>
               {projects.map((p) => (
@@ -257,7 +253,7 @@ export default function SupplierDetailPage() {
                     <Link to={`/projects/${p.id}`} onClick={(e) => e.stopPropagation()}
                       className="text-brand-700 hover:underline">{p.code}</Link>
                   </td>
-                  <td className="td capitalize">{p.status?.replace(/_/g, " ")}</td>
+                  <td className="td capitalize">{T(p.status?.replace(/_/g, " "))}</td>
                   <td className="td muted">{p.target_delivery ?? "—"}</td>
                 </tr>
               ))}
@@ -271,22 +267,22 @@ export default function SupplierDetailPage() {
         <div className="card overflow-hidden">
           <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
             <PackageCheck size={15} className="text-brand-600" />
-            <span className="font-semibold">Goods receipts</span>
+            <span className="font-semibold">{T("Goods receipts")}</span>
             <span className="text-[10px] uppercase tracking-wider muted ml-auto">{goodsReceipts.length}</span>
           </header>
           {!goodsReceipts.length ? (
-            <div className="p-6 text-center text-sm muted">No receipts yet.</div>
+            <div className="p-6 text-center text-sm muted">{T("No receipts yet.")}</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
-                <tr><th className="th">PO</th><th className="th">Received</th><th className="th">Items</th><th className="th">Status</th></tr>
+                <tr><th className="th">{T("PO")}</th><th className="th">{T("Received")}</th><th className="th">{T("Items")}</th><th className="th">{T("Status")}</th></tr>
               </thead>
               <tbody>
                 {goodsReceipts.map((g) => (
                   <tr key={g.id} className="border-t border-ink-100">
                     <td className="td font-mono text-xs">{g.po_number ?? "—"}</td>
                     <td className="td muted">{g.received_at ?? "—"}</td>
-                    <td className="td muted">{(g.items ?? []).length} line(s)</td>
+                    <td className="td muted">{(g.items ?? []).length} {T("line(s)")}</td>
                     <td className="td capitalize">{g.status}</td>
                   </tr>
                 ))}
@@ -297,15 +293,15 @@ export default function SupplierDetailPage() {
         <div className="card overflow-hidden">
           <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
             <CheckCircle2 size={15} className="text-brand-600" />
-            <span className="font-semibold">QC reports</span>
+            <span className="font-semibold">{T("QC reports")}</span>
             <span className="text-[10px] uppercase tracking-wider muted ml-auto">{qcReports.length}</span>
           </header>
           {!qcReports.length ? (
-            <div className="p-6 text-center text-sm muted">No inspections yet.</div>
+            <div className="p-6 text-center text-sm muted">{T("No inspections yet.")}</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
-                <tr><th className="th">PO</th><th className="th text-right">Pass</th><th className="th text-right">Fail</th><th className="th">Decision</th></tr>
+                <tr><th className="th">{T("PO")}</th><th className="th text-right">{T("Pass")}</th><th className="th text-right">{T("Fail")}</th><th className="th">{T("Decision")}</th></tr>
               </thead>
               <tbody>
                 {qcReports.map((r) => (
@@ -331,11 +327,11 @@ export default function SupplierDetailPage() {
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
           <Paperclip size={15} className="text-brand-600" />
-          <span className="font-semibold">Files</span>
+          <span className="font-semibold">{T("Files")}</span>
           <span className="text-[10px] uppercase tracking-wider muted ml-auto">{files.length}</span>
         </header>
         {!files.length ? (
-          <div className="p-8 text-center text-sm muted">No files uploaded for this supplier yet.</div>
+          <div className="p-8 text-center text-sm muted">{T("No files uploaded for this supplier yet.")}</div>
         ) : (
           <ul className="divide-y divide-ink-100">
             {files.map((f) => (
@@ -343,11 +339,11 @@ export default function SupplierDetailPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{f.filename}</div>
                   <div className="text-[11px] muted">
-                    {f.po_number ? `PO ${f.po_number} · ` : ""}{new Date(f.uploaded_at).toLocaleString()}
+                    {f.po_number ? `PO ${f.po_number} · ` : ""}{new Date(f.uploaded_at).toLocaleString(locale())}
                   </div>
                 </div>
-                <button className="btn-ghost" title="View" onClick={() => setPreview(f)}><Eye size={14} /></button>
-                <button className="btn-ghost" title="Download"
+                <button className="btn-ghost" title={T("View")} onClick={() => setPreview(f)}><Eye size={14} /></button>
+                <button className="btn-ghost" title={T("Download")}
                   onClick={() => downloadFile(`/attachments/${f.id}/download`, f.filename)}>
                   <Download size={14} />
                 </button>
@@ -372,7 +368,7 @@ export default function SupplierDetailPage() {
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider muted">{T(label)}</div>
       <div className="mt-0.5 font-semibold tabular-nums">{value}</div>
     </div>
   );
@@ -383,7 +379,7 @@ function BigStat({ label, value, tone }: {
 }) {
   return (
     <div className="card p-4">
-      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider muted">{T(label)}</div>
       <div className={clsx(
         "text-2xl font-semibold tabular-nums mt-1",
         tone === "amber" && "text-amber-700",

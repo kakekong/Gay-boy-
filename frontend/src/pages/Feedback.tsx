@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Inbox, Loader2, MessageSquarePlus } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT } from "@/store/lang";
+import { useT, T, locale } from "@/store/lang";
 
 /** Director-only inbox for feedback sent by any account. */
 export default function FeedbackPage() {
@@ -52,7 +52,7 @@ export default function FeedbackPage() {
               filter === key ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-100",
             )}
           >
-            {label}
+            {T(label)}
           </button>
         ))}
       </div>
@@ -76,7 +76,7 @@ export default function FeedbackPage() {
               )}
               {f.page && <span className="muted font-mono">{f.page}</span>}
               <span className="muted ml-auto">
-                {f.created_at ? new Date(f.created_at).toLocaleString() : "—"}
+                {f.created_at ? new Date(f.created_at).toLocaleString(locale()) : "—"}
               </span>
               <span className={clsx("chip text-[10px]",
                 f.status === "new" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700")}>

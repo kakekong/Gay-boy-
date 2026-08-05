@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
+import { T } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -50,8 +51,7 @@ export default function FinancialReportsPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Banknote size={22} className="text-brand-600" /> Financial reports
-          </h1>
+            <Banknote size={22} className="text-brand-600" /> {T("Financial reports")}</h1>
           <p className="text-sm muted">
             Every transaction logged. Print any report — Profit &amp; Loss,
             Balance Sheet, Assets, Debt — for the chosen period.
@@ -62,13 +62,13 @@ export default function FinancialReportsPage() {
 
       {/* Cash KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="Cash on hand" tone="brand" icon={<Wallet size={15} />}
+        <Kpi label={T("Cash on hand")} tone="brand" icon={<Wallet size={15} />}
           value={idr(cash.data?.total_held)} sub="across all bank + cash accounts" />
-        <Kpi label="Money in" tone="emerald" icon={<ArrowDownLeft size={15} />}
+        <Kpi label={T("Money in")} tone="emerald" icon={<ArrowDownLeft size={15} />}
           value={idr(cash.data?.money_in)} sub={cash.data?.period} />
-        <Kpi label="Money out" tone="red" icon={<ArrowUpRight size={15} />}
+        <Kpi label={T("Money out")} tone="red" icon={<ArrowUpRight size={15} />}
           value={idr(cash.data?.money_out)} sub={cash.data?.period} />
-        <Kpi label="Net cash flow" tone={(cash.data?.net_flow ?? 0) >= 0 ? "emerald" : "red"}
+        <Kpi label={T("Net cash flow")} tone={(cash.data?.net_flow ?? 0) >= 0 ? "emerald" : "red"}
           icon={<Banknote size={15} />}
           value={idr(cash.data?.net_flow)} sub={cash.data?.period} />
       </div>
@@ -80,7 +80,7 @@ export default function FinancialReportsPage() {
             onClick={() => { setTab(t.id); setSalesId(null); }}
             className={clsx("chip gap-1.5",
               tab === t.id ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700 hover:bg-ink-200")}>
-            <t.icon size={13} /> {t.label}
+            <t.icon size={13} /> {T(t.label)}
           </button>
         ))}
       </div>
@@ -97,7 +97,7 @@ export default function FinancialReportsPage() {
 function PeriodPicker({ period, onChange }: { period: string; onChange: (p: string) => void }) {
   return (
     <select className="input w-auto" value={period} onChange={(e) => onChange(e.target.value)}>
-      {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+      {PERIODS.map((p) => <option key={p.key} value={p.key}>{T(p.label)}</option>)}
     </select>
   );
 }
@@ -110,12 +110,10 @@ function ExportButtons({ report, period, params }: {
     <div className="flex gap-2">
       <button className="btn-ghost"
         onClick={() => downloadFile(`/finance/reports/export/${report}.pdf`, `finance-${report}.pdf`, q)}>
-        <FileDown size={15} /> Print PDF
-      </button>
+        <FileDown size={15} /> {T("Print PDF")}</button>
       <button className="btn-ghost"
         onClick={() => downloadFile(`/finance/reports/export/${report}.xlsx`, `finance-${report}.xlsx`, q)}>
-        <FileSpreadsheet size={15} /> Excel
-      </button>
+        <FileSpreadsheet size={15} /> {T("Excel")}</button>
     </div>
   );
 }
@@ -136,13 +134,13 @@ function ReportPanel({ tab, period, onPickSales }: {
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div className="font-semibold flex items-center gap-2">
-          {TABS.find((t) => t.id === tab)?.label}
+          {T(TABS.find((t) => t.id === tab)?.label)}
           <span className="chip bg-ink-100 text-ink-600 text-[11px]">{q.data?.period ?? "…"}</span>
         </div>
         <ExportButtons report={tab} period={period} />
       </div>
-      {q.isLoading ? <div className="p-8 muted text-sm">Loading…</div>
-        : q.isError ? <div className="p-8 text-sm text-red-700">Failed to load report.</div>
+      {q.isLoading ? <div className="p-8 muted text-sm">{T("Loading…")}</div>
+        : q.isError ? <div className="p-8 text-sm text-red-700">{T("Failed to load report.")}</div>
         : tab === "profit-loss" ? <PnL d={q.data} />
         : tab === "balance-sheet" ? <BalanceSheet d={q.data} />
         : tab === "assets" ? <AssetsOrDebt d={q.data} side="assets" />
@@ -160,7 +158,7 @@ function Row({ label, value, bold, indent }: {
   return (
     <div className={clsx("flex items-center justify-between py-1.5 border-b border-ink-50",
       bold && "font-semibold", indent && "pl-4")}>
-      <span className={clsx(bold ? "text-ink-900" : "text-ink-600", "text-sm")}>{label}</span>
+      <span className={clsx(bold ? "text-ink-900" : "text-ink-600", "text-sm")}>{T(label)}</span>
       <span className="tabular-nums text-sm">{value}</span>
     </div>
   );
@@ -172,19 +170,17 @@ function PnL({ d }: { d: any }) {
     <div className="p-5 max-w-2xl">
       {d?.source === "balances" && (
         <p className="text-[11px] muted mb-3">
-          All-time figures from current account balances. Pick a specific
-          month / quarter / year above to slice activity from the journal.
-        </p>
+          {T("All-time figures from current account balances. Pick a specific month / quarter / year above to slice activity from the journal.")}</p>
       )}
-      <Row label="Revenue" value={idr(t.revenue)} />
-      <Row label="Cost of goods sold" value={idr(t.cogs)} indent />
-      <Row label="Gross profit" value={idr(t.gross_profit)} bold />
-      <Row label="Operating expense" value={idr(t.expense)} indent />
-      <Row label="Operating income" value={idr(t.operating_income)} bold />
-      <Row label="Other income" value={idr(t.other_income)} indent />
-      <Row label="Other expense" value={idr(t.other_expense)} indent />
+      <Row label={T("Revenue")} value={idr(t.revenue)} />
+      <Row label={T("Cost of goods sold")} value={idr(t.cogs)} indent />
+      <Row label={T("Gross profit")} value={idr(t.gross_profit)} bold />
+      <Row label={T("Operating expense")} value={idr(t.expense)} indent />
+      <Row label={T("Operating income")} value={idr(t.operating_income)} bold />
+      <Row label={T("Other income")} value={idr(t.other_income)} indent />
+      <Row label={T("Other expense")} value={idr(t.other_expense)} indent />
       <div className="mt-2">
-        <Row label="Net income" value={idr(t.net_income)} bold />
+        <Row label={T("Net income")} value={idr(t.net_income)} bold />
       </div>
     </div>
   );
@@ -210,28 +206,28 @@ function BalanceSheet({ d }: { d: any }) {
     <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-8">
       <div>
         <div className="font-semibold mb-2 flex items-center justify-between">
-          <span>Assets</span><span className="tabular-nums">{idr(d?.assets?.total)}</span>
+          <span>{T("Assets")}</span><span className="tabular-nums">{idr(d?.assets?.total)}</span>
         </div>
         <TypeGroups groups={d?.assets?.by_type} />
       </div>
       <div className="space-y-6">
         <div>
           <div className="font-semibold mb-2 flex items-center justify-between">
-            <span>Liabilities</span><span className="tabular-nums">{idr(d?.liabilities?.total)}</span>
+            <span>{T("Liabilities")}</span><span className="tabular-nums">{idr(d?.liabilities?.total)}</span>
           </div>
           <TypeGroups groups={d?.liabilities?.by_type} />
         </div>
         <div>
           <div className="font-semibold mb-2 flex items-center justify-between">
-            <span>Equity</span><span className="tabular-nums">{idr(d?.equity?.total)}</span>
+            <span>{T("Equity")}</span><span className="tabular-nums">{idr(d?.equity?.total)}</span>
           </div>
           <TypeGroups groups={d?.equity?.by_type} />
-          <Row label="Current earnings" value={idr(d?.equity?.current_earnings)} indent />
+          <Row label={T("Current earnings")} value={idr(d?.equity?.current_earnings)} indent />
         </div>
         <div className={clsx("rounded-lg px-3 py-2 text-sm",
           d?.balanced ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
-          {d?.balanced ? "Balanced: assets = liabilities + equity + earnings."
-            : "Note: assets and liabilities + equity don't tie out exactly."}
+          {d?.balanced ? T("Balanced: assets = liabilities + equity + earnings.")
+            : T("Note: assets and liabilities + equity don't tie out exactly.")}
         </div>
       </div>
     </div>
@@ -243,7 +239,7 @@ function AssetsOrDebt({ d, side }: { d: any; side: "assets" | "liabilities" }) {
   return (
     <div className="p-5 max-w-2xl">
       <div className="font-semibold mb-3 flex items-center justify-between">
-        <span>{side === "assets" ? "Total assets" : "Total debt"}</span>
+        <span>{side === "assets" ? T("Total assets") : T("Total debt")}</span>
         <span className="tabular-nums">{idr(blk.total)}</span>
       </div>
       <TypeGroups groups={blk.by_type} />
@@ -256,20 +252,18 @@ function Transactions({ d }: { d: any }) {
   return (
     <div>
       <div className="px-5 py-2 text-xs muted border-b border-ink-100">
-        {d?.count ?? 0} entries · in {idr(d?.cash_in)} · out {idr(d?.cash_out)}
+        {d?.count ?? 0} {T("entries · in")}{" "}{idr(d?.cash_in)} {T("· out")}{" "}{idr(d?.cash_out)}
       </div>
       {rows.length === 0 ? (
         <div className="p-8 text-center muted text-sm">
-          No transactions in this period yet. Posted quotations, verified
-          payments and payroll appear here automatically.
-        </div>
+          {T("No transactions in this period yet. Posted quotations, verified payments and payroll appear here automatically.")}</div>
       ) : (
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Date</th><th className="th">Account</th>
-              <th className="th">Source</th><th className="th text-right">Amount</th>
-              <th className="th text-right">Cash</th>
+              <th className="th">{T("Date")}</th><th className="th">{T("Account")}</th>
+              <th className="th">{T("Source")}</th><th className="th text-right">{T("Amount")}</th>
+              <th className="th text-right">{T("Cash")}</th>
             </tr>
           </thead>
           <tbody>
@@ -304,8 +298,8 @@ function BySalesperson({ d, onPick }: { d: any; onPick: (id: string) => void }) 
     <table className="w-full text-sm">
       <thead className="bg-ink-50/60">
         <tr>
-          <th className="th">Salesperson</th><th className="th text-right">Deals won</th>
-          <th className="th text-right">Revenue</th><th className="th text-right">Cash collected</th>
+          <th className="th">{T("Salesperson")}</th><th className="th text-right">{T("Deals won")}</th>
+          <th className="th text-right">{T("Revenue")}</th><th className="th text-right">{T("Cash collected")}</th>
           <th className="th"></th>
         </tr>
       </thead>
@@ -317,11 +311,11 @@ function BySalesperson({ d, onPick }: { d: any; onPick: (id: string) => void }) 
             <td className="td text-right tabular-nums">{r.deals_won}</td>
             <td className="td text-right tabular-nums">{idr(r.revenue)}</td>
             <td className="td text-right tabular-nums">{idr(r.cash_collected)}</td>
-            <td className="td text-right"><span className="text-brand-700 text-xs">View report →</span></td>
+            <td className="td text-right"><span className="text-brand-700 text-xs">{T("View report →")}</span></td>
           </tr>
         ))}
         {rows.length === 0 && (
-          <tr><td colSpan={5} className="td text-center muted py-8">No sales activity in this period.</td></tr>
+          <tr><td colSpan={5} className="td text-center muted py-8">{T("No sales activity in this period.")}</td></tr>
         )}
       </tbody>
     </table>
@@ -341,24 +335,24 @@ function SalespersonReport({ userId, period, onBack }: {
   return (
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
-        <button className="btn-ghost -ml-3" onClick={onBack}><ArrowLeft size={15} /> Back</button>
-        <div className="font-semibold">{d?.user?.full_name ?? "Salesperson"}</div>
+        <button className="btn-ghost -ml-3" onClick={onBack}><ArrowLeft size={15} /> {T("Back")}</button>
+        <div className="font-semibold">{d?.user?.full_name ?? T("Salesperson")}</div>
         <ExportButtons report="salesperson" period={period} params={{ user_id: userId }} />
       </div>
-      {q.isLoading ? <div className="p-8 muted text-sm">Loading…</div> : (
+      {q.isLoading ? <div className="p-8 muted text-sm">{T("Loading…")}</div> : (
         <div className="p-5 space-y-5">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Kpi label="Deals won" tone="brand" value={String(s.deals_won ?? 0)} />
-            <Kpi label="Revenue" tone="emerald" value={idr(s.revenue)} />
-            <Kpi label="Won total" tone="brand" value={idr(s.won_total)} />
-            <Kpi label="Cash collected" tone="emerald" value={idr(s.cash_collected)} />
+            <Kpi label={T("Deals won")} tone="brand" value={String(s.deals_won ?? 0)} />
+            <Kpi label={T("Revenue")} tone="emerald" value={idr(s.revenue)} />
+            <Kpi label={T("Won total")} tone="brand" value={idr(s.won_total)} />
+            <Kpi label={T("Cash collected")} tone="emerald" value={idr(s.cash_collected)} />
           </div>
           <div>
-            <div className="font-semibold mb-2 text-sm">Won quotations</div>
+            <div className="font-semibold mb-2 text-sm">{T("Won quotations")}</div>
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60"><tr>
-                <th className="th">Quotation</th><th className="th">Customer</th>
-                <th className="th text-right">Revenue</th><th className="th text-right">Total</th>
+                <th className="th">{T("Quotation")}</th><th className="th">{T("Customer")}</th>
+                <th className="th text-right">{T("Revenue")}</th><th className="th text-right">{T("Total")}</th>
               </tr></thead>
               <tbody>
                 {(d?.quotations ?? []).map((qt: any, i: number) => (
@@ -370,7 +364,7 @@ function SalespersonReport({ userId, period, onBack }: {
                   </tr>
                 ))}
                 {(d?.quotations ?? []).length === 0 && (
-                  <tr><td colSpan={4} className="td text-center muted py-6">No won quotations in this period.</td></tr>
+                  <tr><td colSpan={4} className="td text-center muted py-6">{T("No won quotations in this period.")}</td></tr>
                 )}
               </tbody>
             </table>
@@ -392,7 +386,7 @@ function Kpi({ label, value, sub, tone, icon }: {
   return (
     <div className="card p-4">
       <div className={clsx("inline-flex items-center gap-1 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded", cls)}>
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
       {sub && <div className="text-[11px] muted mt-0.5">{sub}</div>}

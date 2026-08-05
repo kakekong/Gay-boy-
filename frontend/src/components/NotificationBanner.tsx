@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { isPushSupported, resyncPush, subscribePush, unsubscribePush } from "@/lib/push";
+import { T } from "@/store/lang";
 
 interface Banner {
   id: number;
@@ -269,13 +270,12 @@ function BannerCard({
           <div className="font-semibold text-sm">{banner.title}</div>
           <div className="text-xs opacity-80 mt-0.5">{banner.body}</div>
           <div className="text-[10px] uppercase tracking-wider opacity-60 mt-1">
-            Tap to open →
-          </div>
+            {T("Tap to open →")}</div>
         </div>
       </button>
       <button
         type="button"
-        aria-label="Dismiss"
+        aria-label={T("Dismiss")}
         onClick={onClose}
         className="absolute top-2 right-2 p-1 rounded hover:bg-black/5 opacity-60 hover:opacity-100"
       >
@@ -372,8 +372,7 @@ export function NotificationStripe({ sources }: { sources: BadgeSource[] }) {
         : "bg-amber-50 border-amber-200 text-amber-900",
     )}>
       <span className="font-semibold flex items-center gap-1.5 shrink-0">
-        <Bell size={13} /> Pending
-      </span>
+        <Bell size={13} /> {T("Pending")}</span>
       {items.map((s) => (
         <button
           key={s.key}

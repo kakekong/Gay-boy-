@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { T, locale } from "@/store/lang";
 
 interface AttachmentRow {
   id: string;
@@ -164,21 +165,18 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Paperclip size={15} className="text-brand-600" /> Attachments
-          </div>
+            <Paperclip size={15} className="text-brand-600" /> {T("Attachments")}</div>
           <div className="text-xs muted">
-            Upload a file (max 20 MB), or paste a link (Drive, Dropbox…) — links stay even after a restart.
-          </div>
+            {T("Upload a file (max 20 MB), or paste a link (Drive, Dropbox…) — links stay even after a restart.")}</div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             className="btn-ghost"
             onClick={() => { setShowLink((v) => !v); setErr(null); }}
-            title="Attach a link instead of a file"
+            title={T("Attach a link instead of a file")}
           >
-            <Link2 size={14} /> Link
-          </button>
+            <Link2 size={14} /> {T("Link")}</button>
           <button
             type="button"
             className="btn-primary"
@@ -186,8 +184,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
             disabled={upload.isPending}
           >
             {upload.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            Upload
-          </button>
+            {T("Upload")}</button>
         </div>
         <input
           ref={inputRef}
@@ -211,7 +208,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
             />
             <input
               className="input text-sm py-1 flex-1 min-w-[140px]"
-              placeholder="Label (optional)"
+              placeholder={T("Label (optional)")}
               value={linkLabel}
               onChange={(e) => setLinkLabel(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && linkUrl.trim()) addLink.mutate(); }}
@@ -223,8 +220,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
               onClick={() => addLink.mutate()}
             >
               {addLink.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              Add
-            </button>
+              {T("Add")}</button>
           </div>
         </div>
       )}
@@ -247,11 +243,10 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
       >
         {forbidden ? (
           <div className="p-8 text-center text-sm muted">
-            Please only upload customer details.
-          </div>
+            {T("Please only upload customer details.")}</div>
         ) : (q.data ?? []).length === 0 ? (
           <div className="p-8 text-center text-sm muted">
-            {dragOver ? "Drop to upload" : "Please only upload customer details. Drop a file here, or click Upload."}
+            {dragOver ? T("Drop to upload") : T("Please only upload customer details. Drop a file here, or click Upload.")}
           </div>
         ) : (
           <ul className="divide-y divide-ink-100 p-1">
@@ -274,7 +269,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
                         ? a.external_url
                         : fmtSize(a.size)}
                       {a.uploaded_by_name && <> · {a.uploaded_by_name}</>}
-                      {" · "}{new Date(a.uploaded_at).toLocaleString()}
+                      {" · "}{new Date(a.uploaded_at).toLocaleString(locale())}
                     </div>
                   </div>
                   {a.is_link ? (
@@ -283,7 +278,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="btn-ghost"
-                      title="Open link"
+                      title={T("Open link")}
                     >
                       <ExternalLink size={14} />
                     </a>
@@ -292,14 +287,14 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
                       <button
                         onClick={() => view(a)}
                         className="btn-ghost"
-                        title="View in browser"
+                        title={T("View in browser")}
                       >
                         <Eye size={14} />
                       </button>
                       <button
                         onClick={() => download(a)}
                         className="btn-ghost"
-                        title="Download"
+                        title={T("Download")}
                       >
                         <Download size={14} />
                       </button>
@@ -311,7 +306,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
                         if (window.confirm(`Delete "${a.filename}"?`)) del.mutate(a.id);
                       }}
                       className="btn-ghost text-red-600 hover:bg-red-50"
-                      title="Delete"
+                      title={T("Delete")}
                     >
                       <Trash2 size={14} />
                     </button>

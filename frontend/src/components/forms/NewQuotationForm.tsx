@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T } from "@/store/lang";
 import type { Customer } from "@/types";
 
 interface Props {
@@ -372,7 +372,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
               <div className="text-2xl font-semibold tabular-nums">{discountPct}%</div>
             </div>
             <span className={clsx("chip ring-1", TIER_META.cls)}>
-              <TIER_META.Icon size={12} /> {TIER_META.label}
+              <TIER_META.Icon size={12} /> {T(TIER_META.label)}
             </span>
           </div>
           <input type="range" min={0} max={30} step={0.5} value={discountPct}
@@ -425,7 +425,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );
@@ -433,7 +433,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between py-0.5">
-      <span className="muted">{label}</span>
+      <span className="muted">{T(label)}</span>
       <span className="tabular-nums">{value}</span>
     </div>
   );

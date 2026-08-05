@@ -18,7 +18,7 @@ import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { ContactsSection } from "@/components/ContactsSection";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T, locale } from "@/store/lang";
 
 // Indonesian display labels for backend stage/status keys. Display only —
 // the keys themselves are still what the code compares and sends.
@@ -291,17 +291,13 @@ export default function CustomerDetailPage() {
               <Pencil size={15} /> {t("Edit", "Edit")}
             </button>
             <button className="btn-ghost" onClick={() => exportAs("pdf")} title={t("Download a complete customer report as PDF", "Unduh laporan lengkap pelanggan sebagai PDF")}>
-              <Download size={15} /> PDF
-            </button>
+              <Download size={15} /> {T("PDF")}</button>
             <button className="btn-ghost" onClick={() => exportAs("xlsx")} title={t("Download a complete customer report as Excel", "Unduh laporan lengkap pelanggan sebagai Excel")}>
-              <Download size={15} /> Excel
-            </button>
+              <Download size={15} /> {T("Excel")}</button>
             <button className="btn-ghost" onClick={() => exportAs("csv")} title={t("Download a complete customer report as CSV", "Unduh laporan lengkap pelanggan sebagai CSV")}>
-              <Download size={15} /> CSV
-            </button>
+              <Download size={15} /> {T("CSV")}</button>
             <button className="btn-ghost" onClick={openWhatsApp}>
-              <MessageCircle size={15} /> WhatsApp
-            </button>
+              <MessageCircle size={15} /> {T("WhatsApp")}</button>
             <button
               className="btn-primary"
               onClick={() => { setOpenAI(true); aiSuggest.mutate(); }}
@@ -315,8 +311,8 @@ export default function CustomerDetailPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 text-sm">
           <Field icon={<Phone size={14} />} label={t("Phone", "Telepon")} value={c.phone} />
-          <Field icon={<MessageCircle size={14} />} label="WhatsApp" value={c.whatsapp} />
-          <Field icon={<Mail size={14} />} label="Email" value={c.email} />
+          <Field icon={<MessageCircle size={14} />} label={T("WhatsApp")} value={c.whatsapp} />
+          <Field icon={<Mail size={14} />} label={T("Email")} value={c.email} />
           <Field icon={<MapPin size={14} />} label={t("Address", "Alamat")} value={c.company_address} />
         </div>
       </div>
@@ -394,7 +390,7 @@ export default function CustomerDetailPage() {
                         {(pr.items ?? []).length}
                       </td>
                       <td className="td muted">
-                        {pr.created_at ? new Date(pr.created_at).toLocaleDateString() : "—"}
+                        {pr.created_at ? new Date(pr.created_at).toLocaleDateString(locale()) : "—"}
                       </td>
                       <td className="td">
                         {pr.quotation_id ? (
@@ -597,7 +593,7 @@ export default function CustomerDetailPage() {
           <ul className="mt-3 space-y-2">
             {(score.data?.drivers ?? []).slice(0, 5).map((d: any) => (
               <li key={d.feature} className="flex items-center gap-3 text-sm">
-                <span className="w-44 truncate text-ink-700">{d.feature.replace(/_/g, " ")}</span>
+                <span className="w-44 truncate text-ink-700">{T(d.feature.replace(/_/g, " "))}</span>
                 <div className="flex-1 h-1.5 bg-ink-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-brand-500"
@@ -629,7 +625,7 @@ export default function CustomerDetailPage() {
             <div className="text-xs muted flex items-center gap-1.5">
               <Clock size={12} /> {t("Last contact:", "Kontak terakhir:")}{" "}
               <b className="text-ink-700">
-                {new Date(summary.data.stats.last_activity_at).toLocaleString()}
+                {new Date(summary.data.stats.last_activity_at).toLocaleString(locale())}
               </b>
               {" · "}{t("known", "dikenal")} {summary.data.stats.days_known} {t("day(s)", "hari")} ·{" "}
               {summary.data.stats.total_quotations} {t("quotation(s) ever", "penawaran total")} ·{" "}
@@ -779,7 +775,7 @@ export default function CustomerDetailPage() {
                 {summary.data.payments.map((p: any) => (
                   <tr key={p.id} className="border-t border-ink-100">
                     <td className="td font-mono text-xs">{invMap[p.invoice_id] ?? p.invoice_id.slice(0, 8)}</td>
-                    <td className="td muted">{p.paid_at ? new Date(p.paid_at).toLocaleDateString() : "—"}</td>
+                    <td className="td muted">{p.paid_at ? new Date(p.paid_at).toLocaleDateString(locale()) : "—"}</td>
                     <td className="td muted">{p.method ?? "—"}</td>
                     <td className="td font-mono text-xs">{p.reference ?? "—"}</td>
                     <td className="td text-right tabular-nums font-medium text-emerald-700">
@@ -825,7 +821,7 @@ export default function CustomerDetailPage() {
                   </div>
                   {a.notes && <div className="text-xs muted mt-0.5">{a.notes}</div>}
                   <div className="text-[11px] text-ink-400 mt-0.5">
-                    {new Date(a.occurred_at).toLocaleString()}
+                    {new Date(a.occurred_at).toLocaleString(locale())}
                   </div>
                 </div>
               </li>
@@ -950,7 +946,7 @@ function Field({ icon, label, value }: {
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-ink-900 truncate">{value ?? "—"}</div>
     </div>
@@ -971,7 +967,7 @@ function Kpi({ label, value, Icon, tone }: {
   return (
     <div className="card p-3 min-w-0 overflow-hidden">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider muted min-w-0">{label}</div>
+        <div className="text-[10px] uppercase tracking-wider muted min-w-0">{T(label)}</div>
         <div className={`h-6 w-6 rounded ${cls} grid place-items-center shrink-0`}>
           <Icon size={12} />
         </div>
@@ -1106,7 +1102,7 @@ function StageChecklistRow({
   const dueMs = item.due_at ? new Date(item.due_at).getTime() : null;
   const isOverdue = item.status === "pending" && dueMs !== null && dueMs <= now;
   const dueLabel = dueMs
-    ? new Date(dueMs).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    ? new Date(dueMs).toLocaleDateString(locale(),  { month: "short", day: "numeric" })
     : "—";
 
   function save() {
@@ -1152,7 +1148,7 @@ function StageChecklistRow({
         >
           {item.title}
         </div>
-        <div className="text-xs muted mt-0.5">{item.hint}</div>
+        <div className="text-xs muted mt-0.5">{T(item.hint)}</div>
         {item.note && !editing && (
           <div className="text-xs mt-1 rounded-md bg-white border border-ink-200 px-2 py-1">
             <span className="muted">{t("Note: ", "Catatan: ")}</span>{item.note}
@@ -1385,7 +1381,7 @@ function StageHistoryPanel({
                   {t(...(STATUS_LABEL[e.status] ?? [e.status, e.status]))}
                 </span>
                 <span className="muted ml-auto">
-                  {e.at ? new Date(e.at).toLocaleString() : "—"}
+                  {e.at ? new Date(e.at).toLocaleString(locale()) : "—"}
                 </span>
               </div>
               {e.reason ? (
@@ -1506,8 +1502,8 @@ function StageActions({ stage, customerId }: { stage: string; customerId: string
                 <Icon size={14} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">{a.label}</div>
-                <div className="text-xs muted">{a.hint}</div>
+                <div className="text-sm font-medium">{T(a.label)}</div>
+                <div className="text-xs muted">{T(a.hint)}</div>
               </div>
               <ChevronRight size={14} className="text-ink-300 self-center" />
             </div>
@@ -1644,7 +1640,7 @@ function StageMoveRequestModal({
                 {files.map((f, i) => (
                   <li key={i} className="flex items-center justify-between rounded-md bg-ink-50 border border-ink-100 px-2 py-1">
                     <span className="truncate flex-1">{f.name}</span>
-                    <span className="muted tabular-nums">{(f.size / 1024).toFixed(1)} KB</span>
+                    <span className="muted tabular-nums">{(f.size / 1024).toFixed(1)} {T("KB")}</span>
                   </li>
                 ))}
               </ul>

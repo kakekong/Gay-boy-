@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T } from "@/store/lang";
 
 interface CPORow {
   id: string;
@@ -189,14 +189,11 @@ export default function CustomerPOsPage() {
         </div>
         <div className="ml-auto flex gap-1.5">
           <button className="btn-ghost text-xs" onClick={() => download("csv")}>
-            <Download size={12} /> CSV
-          </button>
+            <Download size={12} /> {T("CSV")}</button>
           <button className="btn-ghost text-xs" onClick={() => download("xlsx")}>
-            <Download size={12} /> Excel
-          </button>
+            <Download size={12} /> {T("Excel")}</button>
           <button className="btn-ghost text-xs" onClick={() => download("pdf")}>
-            <Download size={12} /> PDF
-          </button>
+            <Download size={12} /> {T("PDF")}</button>
         </div>
       </div>
 

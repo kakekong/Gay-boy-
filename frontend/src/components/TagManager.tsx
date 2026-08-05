@@ -4,6 +4,7 @@ import { Plus, Loader2, Trash2, Save, Pencil, X as XIcon } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { TAG_COLORS, TagChip, type TagColor } from "@/components/TagChip";
+import { T } from "@/store/lang";
 
 export interface TagRecord {
   id: string;
@@ -60,16 +61,15 @@ export function TagManager({ onClose }: { onClose: () => void }) {
       {/* Create row */}
       <div className="card p-3">
         <div className="text-xs font-semibold uppercase tracking-wider muted mb-2">
-          Create a new tag
-        </div>
+          {T("Create a new tag")}</div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex-1 min-w-[180px]">
-            <span className="block text-[11px] uppercase muted mb-0.5">Name</span>
+            <span className="block text-[11px] uppercase muted mb-0.5">{T("Name")}</span>
             <input
               className="input"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. Top performer, Onboarding…"
+              placeholder={T("e.g. Top performer, Onboarding…")}
             />
           </div>
           <ColorPicker value={newColor} onChange={setNewColor} />
@@ -79,12 +79,11 @@ export function TagManager({ onClose }: { onClose: () => void }) {
             onClick={(e) => { e.preventDefault(); setErr(null); create.mutate(); }}
           >
             {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Add
-          </button>
+            {T("Add")}</button>
         </div>
         {newName && (
           <div className="mt-2">
-            <span className="text-[11px] muted mr-2">Preview:</span>
+            <span className="text-[11px] muted mr-2">{T("Preview:")}</span>
             <TagChip name={newName} color={newColor} />
           </div>
         )}
@@ -102,10 +101,10 @@ export function TagManager({ onClose }: { onClose: () => void }) {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Tag</th>
-              <th className="th">Color</th>
-              <th className="th text-right">In use</th>
-              <th className="th text-right">Actions</th>
+              <th className="th">{T("Tag")}</th>
+              <th className="th">{T("Color")}</th>
+              <th className="th text-right">{T("In use")}</th>
+              <th className="th text-right">{T("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -138,11 +137,9 @@ export function TagManager({ onClose }: { onClose: () => void }) {
                         <>
                           <button className="btn-success" onClick={() => save.mutate(t.id)}
                             disabled={save.isPending}>
-                            <Save size={13} /> Save
-                          </button>
+                            <Save size={13} /> {T("Save")}</button>
                           <button className="btn-ghost" onClick={() => setEditing(null)}>
-                            Cancel
-                          </button>
+                            {T("Cancel")}</button>
                         </>
                       ) : (
                         <>
@@ -167,15 +164,14 @@ export function TagManager({ onClose }: { onClose: () => void }) {
             })}
             {!tags.data?.length && (
               <tr><td colSpan={4} className="td text-center muted py-8">
-                No tags yet. Create one above.
-              </td></tr>
+                {T("No tags yet. Create one above.")}</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       <div className="flex justify-end">
-        <button className="btn-primary" onClick={onClose}>Done</button>
+        <button className="btn-primary" onClick={onClose}>{T("Done")}</button>
       </div>
     </div>
   );
@@ -187,7 +183,7 @@ function ColorPicker({ value, onChange }: {
 }) {
   return (
     <div>
-      <span className="block text-[11px] uppercase muted mb-0.5">Color</span>
+      <span className="block text-[11px] uppercase muted mb-0.5">{T("Color")}</span>
       <div className="flex flex-wrap gap-1">
         {TAG_COLORS.map((c) => (
           <button

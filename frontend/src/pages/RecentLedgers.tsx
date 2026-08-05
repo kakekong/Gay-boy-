@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { BookOpen, RefreshCw, FileText, Building2 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T, locale } from "@/store/lang";
 
 interface LedgerEntry {
   posted_at: string;
@@ -42,12 +43,9 @@ export default function RecentLedgersPage() {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <BookOpen size={22} className="text-brand-600" /> Recent ledgers
-          </h1>
+            <BookOpen size={22} className="text-brand-600" /> {T("Recent ledgers")}</h1>
           <p className="text-sm muted">
-            Latest account movements from posted quotations. Each row is one
-            posting — newest first.
-          </p>
+            {T("Latest account movements from posted quotations. Each row is one posting — newest first.")}</p>
         </div>
         <button
           className="btn-ghost"
@@ -55,29 +53,26 @@ export default function RecentLedgersPage() {
           disabled={q.isFetching}
         >
           <RefreshCw size={14} className={clsx(q.isFetching && "animate-spin")} />
-          Refresh
-        </button>
+          {T("Refresh")}</button>
       </div>
 
       <div className="card overflow-hidden">
         {q.isLoading ? (
-          <div className="p-12 text-center muted text-sm">Loading…</div>
+          <div className="p-12 text-center muted text-sm">{T("Loading…")}</div>
         ) : entries.length === 0 ? (
           <div className="p-12 text-center muted text-sm">
-            No posted ledger entries yet. They show up here when a Won quotation
-            is posted to the ledger.
-          </div>
+            {T("No posted ledger entries yet. They show up here when a Won quotation is posted to the ledger.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Posted</th>
-                <th className="th">Quotation</th>
-                <th className="th">Customer</th>
-                <th className="th">Account</th>
-                <th className="th">Role</th>
-                <th className="th text-right">Amount</th>
-                <th className="th text-right">Balance after</th>
+                <th className="th">{T("Posted")}</th>
+                <th className="th">{T("Quotation")}</th>
+                <th className="th">{T("Customer")}</th>
+                <th className="th">{T("Account")}</th>
+                <th className="th">{T("Role")}</th>
+                <th className="th text-right">{T("Amount")}</th>
+                <th className="th text-right">{T("Balance after")}</th>
               </tr>
             </thead>
             <tbody>
@@ -85,7 +80,7 @@ export default function RecentLedgersPage() {
                 <tr key={i} className="border-t border-ink-100 hover:bg-ink-50/40">
                   <td className="td whitespace-nowrap muted">
                     {e.posted_at
-                      ? new Date(e.posted_at).toLocaleString()
+                      ? new Date(e.posted_at).toLocaleString(locale())
                       : "—"}
                   </td>
                   <td className="td">
@@ -139,9 +134,7 @@ export default function RecentLedgersPage() {
 
       {q.data && (
         <div className="text-xs muted">
-          Showing {q.data.count} {q.data.count === 1 ? "entry" : "entries"} from
-          the most recently posted quotations.
-        </div>
+          {T("Showing")}{" "}{q.data.count} {q.data.count === 1 ? T("entry") : T("entries")} {T("from the most recently posted quotations.")}</div>
       )}
     </div>
   );

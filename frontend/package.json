@@ -8,7 +8,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host",
-    "lint": "eslint . --ext ts,tsx --max-warnings 0"
+    "lint": "eslint . --ext ts,tsx --max-warnings 0",
+    "i18n:check": "node scripts/i18n-check.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

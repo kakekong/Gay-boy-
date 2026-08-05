@@ -5,6 +5,7 @@ import { Shell, ROLE_PAGE_ALLOWLIST, requiredRolesForPath } from "@/layouts/Shel
 import { CommandPalette } from "@/components/CommandPalette";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuthStore } from "@/store/auth";
+import { useLangStore, T } from "@/store/lang";
 
 import LoginPage from "@/pages/Login";
 import DashboardPage from "@/pages/Dashboard";
@@ -101,7 +102,7 @@ function PageFallback() {
     <div className="min-h-[50vh] grid place-items-center text-ink-400">
       <div className="flex flex-col items-center gap-2">
         <Loader2 size={20} className="animate-spin" />
-        <span className="text-xs uppercase tracking-wider">Loading…</span>
+        <span className="text-xs uppercase tracking-wider">{T("Loading…")}</span>
       </div>
     </div>
   );
@@ -114,7 +115,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-full bg-ink-50">
       <header className="h-14 bg-white border-b border-ink-200 px-4 lg:px-6 flex items-center sticky top-0 z-20">
         <div className="font-semibold text-sm">
-          {user?.role === "customer" ? "🏢 Customer portal" : "🏭 Supplier portal"}
+          {user?.role === "customer" ? T("🏢 Customer portal") : T("🏭 Supplier portal")}
         </div>
         <div className="ml-auto flex items-center gap-3 text-sm">
           <span className="text-ink-600 hidden sm:inline">{user?.full_name}</span>
@@ -122,8 +123,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
             onClick={() => logout()}
             className="px-3 py-1.5 rounded-lg border border-ink-200 bg-white hover:bg-ink-50 text-xs"
           >
-            Sign out
-          </button>
+            {T("Sign out")}</button>
         </div>
       </header>
       <main className="max-w-5xl mx-auto px-4 lg:px-8 py-6 lg:py-8">{children}</main>
@@ -236,8 +236,15 @@ function MainApp() {
 }
 
 export default function App() {
+  // Remounting on a language change is what makes `T()` re-evaluate. It reads
+  // the dictionary imperatively rather than through a hook — otherwise every
+  // component holding a translated string would have to subscribe, including
+  // the plain helper functions that aren't components at all. Switching
+  // language is a rare, deliberate action, so paying a remount for it beats
+  // threading a hook through forty screens.
+  const lang = useLangStore((s) => s.lang);
   return (
-    <Routes>
+    <Routes key={lang}>
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/*"

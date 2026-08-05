@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { T } from "@/store/lang";
 
 interface Props {
   children: ReactNode;
@@ -62,8 +63,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="min-h-[40vh] grid place-items-center p-6">
           <div className="flex items-center gap-2 text-sm text-ink-500">
-            <RefreshCw size={14} className="animate-spin" /> Updating to the latest version…
-          </div>
+            <RefreshCw size={14} className="animate-spin" /> {T("Updating to the latest version…")}</div>
         </div>
       );
     }
@@ -74,11 +74,11 @@ export class ErrorBoundary extends Component<Props, State> {
             <AlertCircle size={20} />
           </div>
           <div className="font-semibold">
-            {isChunk ? "Couldn't load this page" : "Something went wrong"}
+            {isChunk ? T("Couldn't load this page") : T("Something went wrong")}
           </div>
           <p className="text-sm text-ink-600">
             {isChunk
-              ? "The app couldn't fetch one of its files — your connection blinked, or a fresh deploy hadn't finished propagating yet."
+              ? T("The app couldn't fetch one of its files — your connection blinked, or a fresh deploy hadn't finished propagating yet.")
               : this.state.error.message}
           </p>
           <div className="flex gap-2 justify-center pt-1">
@@ -86,14 +86,12 @@ export class ErrorBoundary extends Component<Props, State> {
               className="btn-primary"
               onClick={() => window.location.reload()}
             >
-              <RefreshCw size={14} /> Refresh page
-            </button>
+              <RefreshCw size={14} /> {T("Refresh page")}</button>
             <button
               className="btn-ghost"
               onClick={() => this.setState({ error: null })}
             >
-              Try again
-            </button>
+              {T("Try again")}</button>
           </div>
         </div>
       </div>

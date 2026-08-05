@@ -8,7 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T, locale } from "@/store/lang";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { LogActivityForm } from "@/components/forms/LogActivityForm";
@@ -140,7 +140,7 @@ export default function PriceRequestsPage() {
                   <th className="th">{t("Number", "Nomor")}</th>
                   <th className="th">{role === "purchasing" ? t("Order", "Pesanan") : t("Customer", "Pelanggan")}</th>
                   <th className="th">{t("Lines", "Baris")}</th>
-                  <th className="th">Status</th>
+                  <th className="th">{T("Status")}</th>
                   {role !== "purchasing" && <th className="th text-right">{t("Sell total", "Total jual")}</th>}
                 </tr>
               </thead>
@@ -305,7 +305,7 @@ function CreateForm({
               <li key={`${f.name}-${i}`} className="flex items-center gap-2">
                 <FileText size={13} className="text-ink-400 shrink-0" />
                 <span className="truncate">{f.name}</span>
-                <span className="muted text-xs">({Math.ceil(f.size / 1024)} KB)</span>
+                <span className="muted text-xs">({Math.ceil(f.size / 1024)} {T("KB)")}</span>
                 <button
                   className="btn-ghost text-red-600 p-1 ml-auto"
                   onClick={() => setFiles((cur) => cur.filter((_, idx) => idx !== i))}
@@ -816,7 +816,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                   </span>
                   <span className="muted text-xs">{rv.requested_by_name}</span>
                   <span className="muted text-xs">
-                    {rv.requested_at ? new Date(rv.requested_at).toLocaleString() : ""}
+                    {rv.requested_at ? new Date(rv.requested_at).toLocaleString(locale()) : ""}
                   </span>
                   {rv.decided_by_name && (
                     <span className="muted text-xs ml-auto">

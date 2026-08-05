@@ -11,6 +11,7 @@ import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { UserLink } from "@/components/UserLink";
 import { useAuthStore } from "@/store/auth";
+import { T, locale, t as tt } from "@/store/lang";
 
 interface POItem { description?: string; qty?: number }
 interface PO {
@@ -116,8 +117,7 @@ export default function PurchaseOrderDetailPage() {
   if (q.isLoading) {
     return (
       <div className="card p-12 text-center text-sm muted flex items-center justify-center gap-2">
-        <Loader2 size={14} className="animate-spin" /> Loading PO…
-      </div>
+        <Loader2 size={14} className="animate-spin" /> {T("Loading PO…")}</div>
     );
   }
   if (q.error || !q.data) {
@@ -147,7 +147,7 @@ export default function PurchaseOrderDetailPage() {
         <div className="mt-3 font-semibold">{title}</div>
         <p className="text-sm muted mt-1 max-w-md mx-auto">{body}</p>
         <div className="text-[10px] muted mt-2 font-mono">
-          GET /purchasing/po/{id}
+          {T("GET /purchasing/po/")}{id}
         </div>
         <div className="flex gap-2 justify-center mt-4">
           <button className="btn-ghost" onClick={() => q.refetch()}>
@@ -155,11 +155,9 @@ export default function PurchaseOrderDetailPage() {
               size={13}
               className={clsx(q.isFetching && "animate-spin")}
             />
-            Retry
-          </button>
+            {T("Retry")}</button>
           <button className="btn-ghost" onClick={() => nav("/purchase-orders")}>
-            <ArrowLeft size={14} /> Back to Purchase Orders
-          </button>
+            <ArrowLeft size={14} /> {T("Back to Purchase Orders")}</button>
         </div>
       </div>
     );
@@ -194,19 +192,15 @@ export default function PurchaseOrderDetailPage() {
   return (
     <div className="space-y-5">
       <Link to="/purchase-orders" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-brand-700">
-        <ArrowLeft size={14} /> All purchase orders
-      </Link>
+        <ArrowLeft size={14} /> {T("All purchase orders")}</Link>
 
       {!isDirector && (
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <div>
-            <div className="font-medium">Approval required for every change</div>
+            <div className="font-medium">{T("Approval required for every change")}</div>
             <div className="text-xs mt-0.5">
-              Edits you make here are queued for director approval. The PO
-              won't show your change until the director approves it from
-              the Approvals page.
-            </div>
+              {T("Edits you make here are queued for director approval. The PO won't show your change until the director approves it from the Approvals page.")}</div>
           </div>
         </div>
       )}
@@ -214,11 +208,9 @@ export default function PurchaseOrderDetailPage() {
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <div>
-            <div className="font-medium">Waiting on director approval</div>
+            <div className="font-medium">{T("Waiting on director approval")}</div>
             <div className="text-xs mt-0.5">
-              This PO was just created and is pending the director's sign-off.
-              Suppliers won't see it until it's approved.
-            </div>
+              {T("This PO was just created and is pending the director's sign-off. Suppliers won't see it until it's approved.")}</div>
           </div>
         </div>
       )}
@@ -227,8 +219,7 @@ export default function PurchaseOrderDetailPage() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
-              <Truck size={13} className="text-brand-600" /> Purchase Order
-            </div>
+              <Truck size={13} className="text-brand-600" /> {T("Purchase Order")}</div>
             {editingNumber ? (
               <div className="flex items-center gap-2">
                 <input
@@ -246,13 +237,13 @@ export default function PurchaseOrderDetailPage() {
                   className="btn-ghost text-emerald-700"
                   onClick={commitNumber}
                   disabled={patch.isPending}
-                  title="Save"
+                  title={T("Save")}
                 >
                   {patch.isPending
                     ? <Loader2 size={14} className="animate-spin" />
                     : <Check size={14} />}
                 </button>
-                <button className="btn-ghost" onClick={() => setEditingNumber(false)} title="Cancel">
+                <button className="btn-ghost" onClick={() => setEditingNumber(false)} title={T("Cancel")}>
                   <X size={14} />
                 </button>
               </div>
@@ -260,14 +251,14 @@ export default function PurchaseOrderDetailPage() {
               <button
                 className="text-2xl font-semibold tracking-tight font-mono inline-flex items-center gap-2 hover:text-brand-700"
                 onClick={startNumberEdit}
-                title="Rename PO"
+                title={T("Rename PO")}
               >
                 {p.number}
                 <Pencil size={14} className="opacity-50" />
               </button>
             )}
             <div className="text-xs muted">
-              Issued {new Date(p.created_at).toLocaleString()}
+              {T("Issued")}{" "}{new Date(p.created_at).toLocaleString(locale())}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -285,7 +276,7 @@ export default function PurchaseOrderDetailPage() {
               ))}
             </select>
             <div className="text-right">
-              <div className="text-[10px] uppercase muted tracking-wider">Total</div>
+              <div className="text-[10px] uppercase muted tracking-wider">{T("Total")}</div>
               <div className="text-xl font-semibold tabular-nums">{idr(p.total)}</div>
             </div>
           </div>
@@ -306,13 +297,13 @@ export default function PurchaseOrderDetailPage() {
         )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 text-sm">
-          <Meta label="Supplier" icon={<Building2 size={12} />}>
+          <Meta label={T("Supplier")} icon={<Building2 size={12} />}>
             {p.supplier_name ?? "—"}
             {p.supplier_category && (
               <span className="block text-[11px] muted">{p.supplier_category}</span>
             )}
           </Meta>
-          <Meta label="Project" icon={<Briefcase size={12} />}>
+          <Meta label={T("Project")} icon={<Briefcase size={12} />}>
             {p.project_id ? (
               <Link
                 to={`/projects/${p.project_id}`}
@@ -323,20 +314,20 @@ export default function PurchaseOrderDetailPage() {
             ) : "—"}
             {p.project_status && (
               <span className="block text-[11px] muted capitalize">
-                {p.project_status.replace(/_/g, " ")}
+                {T(p.project_status.replace(/_/g, " "))}
               </span>
             )}
           </Meta>
-          <Meta label="Sales in charge">
+          <Meta label={T("Sales in charge")}>
             {p.sales_pic_name ? <UserLink id={p.sales_pic_id} name={p.sales_pic_name} /> : "—"}
           </Meta>
           {p.price_request_number && (
-            <Meta label="Price request">
+            <Meta label={T("Price request")}>
               <span className="font-mono text-xs">{p.price_request_number}</span>
-              <span className="block text-[11px] muted">buying price sourced from here</span>
+              <span className="block text-[11px] muted">{T("buying price sourced from here")}</span>
             </Meta>
           )}
-          <Meta label="PO date" icon={<Calendar size={12} />}>
+          <Meta label={T("PO date")} icon={<Calendar size={12} />}>
             <input
               type="date"
               value={p.po_date ?? ""}
@@ -347,7 +338,7 @@ export default function PurchaseOrderDetailPage() {
               className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
             />
           </Meta>
-          <Meta label="Lead time (days)">
+          <Meta label={T("Lead time (days)")}>
             <input
               type="number"
               min={0}
@@ -364,7 +355,7 @@ export default function PurchaseOrderDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm border-t border-ink-100 pt-4">
-          <Meta label="Total (Rp)">
+          <Meta label={T("Total (Rp)")}>
             <input
               type="number"
               min={0}
@@ -378,10 +369,10 @@ export default function PurchaseOrderDetailPage() {
               className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
             />
           </Meta>
-          <Meta label="Project target delivery">
+          <Meta label={T("Project target delivery")}>
             {p.project_target_delivery ?? "—"}
           </Meta>
-          <Meta label="Project actual delivery">
+          <Meta label={T("Project actual delivery")}>
             {p.project_actual_delivery ?? "—"}
           </Meta>
         </div>
@@ -398,18 +389,16 @@ export default function PurchaseOrderDetailPage() {
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-2">
           <div>
-            <div className="font-semibold">Items</div>
-            <div className="text-xs muted">What this PO covers.</div>
+            <div className="font-semibold">{T("Items")}</div>
+            <div className="text-xs muted">{T("What this PO covers.")}</div>
           </div>
           {!editingItems ? (
             <button className="btn-ghost" onClick={startItemsEdit}>
-              <Pencil size={13} /> Edit items
-            </button>
+              <Pencil size={13} /> {T("Edit items")}</button>
           ) : (
             <div className="flex gap-2">
               <button className="btn-ghost" onClick={() => setEditingItems(false)}>
-                Cancel
-              </button>
+                {T("Cancel")}</button>
               <button
                 className="btn-primary"
                 onClick={commitItems}
@@ -418,8 +407,7 @@ export default function PurchaseOrderDetailPage() {
                 {patch.isPending
                   ? <Loader2 size={13} className="animate-spin" />
                   : <Save size={13} />}
-                Save items
-              </button>
+                {T("Save items")}</button>
             </div>
           )}
         </header>
@@ -429,7 +417,7 @@ export default function PurchaseOrderDetailPage() {
             {draftItems.map((it, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-end">
                 <div className="col-span-9">
-                  <span className="text-[10px] uppercase muted">Description</span>
+                  <span className="text-[10px] uppercase muted">{T("Description")}</span>
                   <input
                     className="input"
                     value={it.description ?? ""}
@@ -441,7 +429,7 @@ export default function PurchaseOrderDetailPage() {
                   />
                 </div>
                 <div className="col-span-2">
-                  <span className="text-[10px] uppercase muted">Qty</span>
+                  <span className="text-[10px] uppercase muted">{T("Qty")}</span>
                   <input
                     type="number"
                     min={0}
@@ -461,7 +449,7 @@ export default function PurchaseOrderDetailPage() {
                   type="button"
                   className="col-span-1 text-red-600 hover:bg-red-50 rounded p-2"
                   onClick={() => setDraftItems((cur) => cur.filter((_, j) => j !== i))}
-                  title="Remove"
+                  title={T("Remove")}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -472,20 +460,18 @@ export default function PurchaseOrderDetailPage() {
               className="btn-ghost"
               onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1 }])}
             >
-              <Plus size={13} /> Add line
-            </button>
+              <Plus size={13} /> {T("Add line")}</button>
           </div>
         ) : !p.items?.length ? (
           <div className="p-8 text-center text-sm muted">
-            No items yet. Click "Edit items" to add a description and quantity.
-          </div>
+            {T("No items yet. Click \"Edit items\" to add a description and quantity.")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
                 <th className="th">#</th>
-                <th className="th">Description</th>
-                <th className="th text-right">Qty</th>
+                <th className="th">{T("Description")}</th>
+                <th className="th text-right">{T("Qty")}</th>
               </tr>
             </thead>
             <tbody>
@@ -515,7 +501,7 @@ function ShippingPanel({ poDate, leadDays, targetDelivery, actualDelivery }: {
   targetDelivery: string | null;
   actualDelivery: string | null;
 }) {
-  const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
+  const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString(locale()) : "—");
   // Expected supplier delivery = PO date + quoted lead time.
   let expected: Date | null = null;
   if (poDate && leadDays != null) {
@@ -539,21 +525,21 @@ function ShippingPanel({ poDate, leadDays, targetDelivery, actualDelivery }: {
         <Truck size={15} className="text-brand-600" /> Shipping &amp; ETA
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <Meta label="PO date" icon={<Calendar size={12} />}>{fmt(poDate)}</Meta>
-        <Meta label="Lead time">{leadDays != null ? `${leadDays} days` : "—"}</Meta>
-        <Meta label="Expected arrival">
-          {expected ? expected.toLocaleDateString() : <span className="muted">set a lead time</span>}
+        <Meta label={T("PO date")} icon={<Calendar size={12} />}>{fmt(poDate)}</Meta>
+        <Meta label={T("Lead time")}>{leadDays != null ? tt(`${leadDays} days`, `${leadDays} hari`) : "—"}</Meta>
+        <Meta label={T("Expected arrival")}>
+          {expected ? expected.toLocaleDateString(locale()) : <span className="muted">{T("set a lead time")}</span>}
         </Meta>
-        <Meta label="Customer target">
+        <Meta label={T("Customer target")}>
           <span className="inline-flex items-center gap-2">
             {fmt(targetDelivery)}
-            {risk && <span className={clsx("chip text-[10px] uppercase", risk.cls)}>{risk.label}</span>}
+            {risk && <span className={clsx("chip text-[10px] uppercase", risk.cls)}>{T(risk.label)}</span>}
           </span>
         </Meta>
       </div>
       {actualDelivery && (
         <div className="mt-2 text-xs muted">
-          Delivered to customer: <b className="text-emerald-700">{fmt(actualDelivery)}</b>
+          {T("Delivered to customer:")}{" "}<b className="text-emerald-700">{fmt(actualDelivery)}</b>
         </div>
       )}
     </div>
@@ -570,7 +556,7 @@ function Meta({
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
-        {icon} {label}
+        {icon} {T(label)}
       </div>
       <div className="mt-1 text-ink-900">{children}</div>
     </div>

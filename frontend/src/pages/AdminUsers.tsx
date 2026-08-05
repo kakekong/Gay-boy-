@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { startViewAs } from "@/lib/viewAs";
+import { T } from "@/store/lang";
 
 interface User {
   id: string;
@@ -175,13 +176,11 @@ export default function AdminUsersPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Shield size={22} className="text-brand-600" /> Users
-          </h1>
-          <p className="text-sm muted">Create employees, customer-portal logins, and supplier-portal logins.</p>
+            <Shield size={22} className="text-brand-600" /> {T("Users")}</h1>
+          <p className="text-sm muted">{T("Create employees, customer-portal logins, and supplier-portal logins.")}</p>
         </div>
         <button className="btn-primary" onClick={() => setOpenNew(true)}>
-          <Plus size={14} /> New user
-        </button>
+          <Plus size={14} /> {T("New user")}</button>
       </div>
 
       {flash && (
@@ -200,12 +199,12 @@ export default function AdminUsersPage() {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Name</th>
-              <th className="th">Email</th>
-              <th className="th">Role</th>
-              <th className="th">Phone</th>
-              <th className="th">Status</th>
-              <th className="th text-right">Actions</th>
+              <th className="th">{T("Name")}</th>
+              <th className="th">{T("Email")}</th>
+              <th className="th">{T("Role")}</th>
+              <th className="th">{T("Phone")}</th>
+              <th className="th">{T("Status")}</th>
+              <th className="th text-right">{T("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -229,9 +228,9 @@ export default function AdminUsersPage() {
                 <td className="td muted">{u.phone ?? "—"}</td>
                 <td className="td">
                   {u.is_active ? (
-                    <span className="chip bg-emerald-50 text-emerald-700">active</span>
+                    <span className="chip bg-emerald-50 text-emerald-700">{T("active")}</span>
                   ) : (
-                    <span className="chip bg-ink-100 text-ink-600">inactive</span>
+                    <span className="chip bg-ink-100 text-ink-600">{T("inactive")}</span>
                   )}
                 </td>
                 <td className="td text-right">
@@ -258,7 +257,7 @@ export default function AdminUsersPage() {
                     {u.is_active ? (
                       <button
                         className="btn-ghost text-red-600 hover:bg-red-50"
-                        title="Deactivate (keeps history)"
+                        title={T("Deactivate (keeps history)")}
                         onClick={() => {
                           if (window.confirm(`Deactivate ${u.full_name}? They won't be able to log in. Records they created stay intact.`))
                             del.mutate(u.id);
@@ -268,12 +267,12 @@ export default function AdminUsersPage() {
                       <>
                         <button
                           className="btn-ghost text-emerald-700"
-                          title="Reactivate"
+                          title={T("Reactivate")}
                           onClick={() => patch.mutate({ id: u.id, body: { is_active: true } })}
                         ><UserCheck size={13} /></button>
                         <button
                           className="btn-ghost text-red-700 hover:bg-red-50"
-                          title="Permanently delete (removes the user row entirely)"
+                          title={T("Permanently delete (removes the user row entirely)")}
                           onClick={() => {
                             if (window.confirm(
                               `PERMANENTLY delete ${u.full_name}?\n\n` +
@@ -291,7 +290,7 @@ export default function AdminUsersPage() {
               </tr>
             ))}
             {!users.data?.length && (
-              <tr><td colSpan={6} className="td text-center muted py-10">No users.</td></tr>
+              <tr><td colSpan={6} className="td text-center muted py-10">{T("No users.")}</td></tr>
             )}
           </tbody>
         </table>
@@ -299,7 +298,7 @@ export default function AdminUsersPage() {
 
       {/* New user modal */}
       {openNew && (
-        <Modal title="New user" subtitle="Director can create any role — employees, customer portal, supplier portal."
+        <Modal title={T("New user")} subtitle={T("Director can create any role — employees, customer portal, supplier portal.")}
                onClose={() => setOpenNew(false)}>
           <UserForm
             form={form} setForm={setForm}
@@ -400,36 +399,32 @@ function CustomRolesManager() {
       <header className="px-5 py-4 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Shield size={15} className="text-brand-600" /> Custom roles
-          </div>
+            <Shield size={15} className="text-brand-600" /> {T("Custom roles")}</div>
           <div className="text-xs muted">
-            Build your own roles — pick a name, a base access tier, and the pages they can see.
-          </div>
+            {T("Build your own roles — pick a name, a base access tier, and the pages they can see.")}</div>
         </div>
         <button className="btn-primary" onClick={startNew}>
-          <Plus size={14} /> New custom role
-        </button>
+          <Plus size={14} /> {T("New custom role")}</button>
       </header>
 
       {roles.isLoading ? (
-        <div className="p-6 text-center text-sm muted">Loading…</div>
+        <div className="p-6 text-center text-sm muted">{T("Loading…")}</div>
       ) : !roles.data?.length ? (
         <div className="p-8 text-center text-sm muted">
-          No custom roles yet. Create one, then assign it to a user above.
-        </div>
+          {T("No custom roles yet. Create one, then assign it to a user above.")}</div>
       ) : (
         <ul className="divide-y divide-ink-100">
           {roles.data.map((r) => (
             <li key={r.id} className="px-5 py-3 flex items-center gap-3 flex-wrap">
               <span className="chip bg-indigo-50 text-indigo-700">{r.name}</span>
-              <span className="text-[11px] uppercase muted">base: {r.base_role}</span>
-              <span className="text-xs muted flex-1">{r.pages.length} page(s)</span>
-              <button className="btn-ghost" onClick={() => startEdit(r)} title="Edit">
+              <span className="text-[11px] uppercase muted">{T("base:")}{" "}{r.base_role}</span>
+              <span className="text-xs muted flex-1">{r.pages.length} {T("page(s)")}</span>
+              <button className="btn-ghost" onClick={() => startEdit(r)} title={T("Edit")}>
                 <Pencil size={13} />
               </button>
               <button
                 className="btn-ghost text-red-600 hover:bg-red-50"
-                title="Delete (users keep their base role)"
+                title={T("Delete (users keep their base role)")}
                 onClick={() => {
                   if (window.confirm(`Delete custom role "${r.name}"? Users on it revert to their base role.`))
                     del.mutate(r.id);
@@ -445,31 +440,30 @@ function CustomRolesManager() {
       {open && (
         <Modal
           title={editing ? `Edit role: ${editing.name}` : "New custom role"}
-          subtitle="Name it, pick the base access tier, tick the pages it can open."
+          subtitle={T("Name it, pick the base access tier, tick the pages it can open.")}
           onClose={() => setOpen(false)}
         >
           <div className="space-y-3">
-            <Field label="Role name *">
+            <Field label={T("Role name *")}>
               <input className="input" value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Finance Manager" />
+                placeholder={T("e.g. Finance Manager")} />
             </Field>
-            <Field label="Base access tier *">
+            <Field label={T("Base access tier *")}>
               <select className="input" value={form.base_role}
                 onChange={(e) => setForm({ ...form, base_role: e.target.value })}>
                 {(catalog.data?.base_roles ?? ["sales", "admin", "hr", "finance", "purchasing", "manager", "director"])
                   .map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
               <span className="block text-[11px] text-ink-400 mt-1">
-                Controls what the API allows. Pages below control what they see.
-              </span>
+                {T("Controls what the API allows. Pages below control what they see.")}</span>
             </Field>
-            <Field label="Description">
+            <Field label={T("Description")}>
               <input className="input" value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </Field>
             <div>
-              <span className="block text-xs font-medium text-ink-600 mb-1">Pages they can access</span>
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Pages they can access")}</span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[280px] overflow-y-auto rounded-lg border border-ink-200 p-2">
                 {(catalog.data?.pages ?? []).map((p) => (
                   <label key={p.path} className="flex items-center gap-2 text-sm px-2 py-1 rounded hover:bg-ink-50">
@@ -479,7 +473,7 @@ function CustomRolesManager() {
                       onChange={() => togglePage(p.path)}
                       className="h-4 w-4 rounded border-ink-300 text-brand-600"
                     />
-                    {p.label}
+                    {T(p.label)}
                   </label>
                 ))}
               </div>
@@ -490,11 +484,11 @@ function CustomRolesManager() {
               </div>
             )}
             <div className="flex justify-end gap-2 pt-1">
-              <button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+              <button className="btn-ghost" onClick={() => setOpen(false)}>{T("Cancel")}</button>
               <button className="btn-primary" disabled={save.isPending || !form.name.trim()}
                 onClick={() => { setErr(null); save.mutate(); }}>
                 {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                {editing ? "Save role" : "Create role"}
+                {editing ? T("Save role") : T("Create role")}
               </button>
             </div>
           </div>
@@ -529,22 +523,22 @@ function UserForm({
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Full name *">
+        <Field label={T("Full name *")}>
           <input className="input" required value={form.full_name}
             onChange={(e: any) => setForm({ ...form, full_name: e.target.value })} />
         </Field>
-        <Field label="Email *">
+        <Field label={T("Email *")}>
           <input className="input" type="email" required value={form.email}
             onChange={(e: any) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Role *">
+        <Field label={T("Role *")}>
           <select className="input" value={form.role}
             disabled={!!form.custom_role_id}
             onChange={(e: any) => setForm({ ...form, role: e.target.value })}>
             {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </Field>
-        <Field label="Custom role">
+        <Field label={T("Custom role")}>
           <select className="input" value={form.custom_role_id}
             onChange={(e: any) => {
               const cr = (customRoles.data ?? []).find((x: CustomRole) => x.id === e.target.value);
@@ -555,26 +549,26 @@ function UserForm({
                 role: cr ? cr.base_role : form.role,
               });
             }}>
-            <option value="">— none (use base role) —</option>
+            <option value="">{T("— none (use base role) —")}</option>
             {(customRoles.data ?? []).map((cr: CustomRole) => (
-              <option key={cr.id} value={cr.id}>{cr.name} (base: {cr.base_role})</option>
+              <option key={cr.id} value={cr.id}>{cr.name} {T("(base:")}{" "}{cr.base_role})</option>
             ))}
           </select>
         </Field>
-        <Field label="Password *">
+        <Field label={T("Password *")}>
           <input className="input" type="text" required value={form.password}
             onChange={(e: any) => setForm({ ...form, password: e.target.value })}
-            placeholder="min 6 chars" />
+            placeholder={T("min 6 chars")} />
         </Field>
-        <Field label="Phone">
+        <Field label={T("Phone")}>
           <input className="input" value={form.phone}
             onChange={(e: any) => setForm({ ...form, phone: e.target.value })} />
         </Field>
         {form.role === "customer" && (
           <div className="md:col-span-2">
             <SearchablePicker
-              label="Link to customer *"
-              placeholder="Search customers by name…"
+              label={T("Link to customer *")}
+              placeholder={T("Search customers by name…")}
               items={customers}
               loading={customersLoading}
               error={customersError}
@@ -588,7 +582,7 @@ function UserForm({
                   to="/customers"
                   className="inline-flex items-center gap-1 text-brand-700 hover:underline"
                 >
-                  Open CRM and create a customer first <ExternalLink size={12} />
+                  {T("Open CRM and create a customer first")}{" "}<ExternalLink size={12} />
                 </Link>
               }
             />
@@ -597,8 +591,8 @@ function UserForm({
         {form.role === "supplier" && (
           <div className="md:col-span-2">
             <SearchablePicker
-              label="Link to supplier *"
-              placeholder="Search suppliers by name…"
+              label={T("Link to supplier *")}
+              placeholder={T("Search suppliers by name…")}
               items={suppliers}
               loading={suppliersLoading}
               error={suppliersError}
@@ -612,7 +606,7 @@ function UserForm({
                   to="/purchasing"
                   className="inline-flex items-center gap-1 text-brand-700 hover:underline"
                 >
-                  Open Purchasing and add a supplier first <ExternalLink size={12} />
+                  {T("Open Purchasing and add a supplier first")}{" "}<ExternalLink size={12} />
                 </Link>
               }
             />
@@ -620,7 +614,7 @@ function UserForm({
         )}
       </div>
       <div className="flex justify-end gap-2 pt-2">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onCancel}>{T("Cancel")}</button>
         <button type="submit" className="btn-primary" disabled={isPending}>
           {isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
           {submitLabel}
@@ -666,22 +660,21 @@ function SearchablePicker<T>({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className="block text-xs font-medium text-ink-600">{label}</span>
+        <span className="block text-xs font-medium text-ink-600">{T(label)}</span>
         {!loading && !error && (
-          <span className="text-[10px] muted">{items.length} available</span>
+          <span className="text-[10px] muted">{items.length} {T("available")}</span>
         )}
       </div>
 
       {loading ? (
         <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading…
-        </div>
+          <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
       ) : error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <div className="flex-1">
             <div className="font-medium">
-              Couldn't load list{errStatus ? ` (HTTP ${errStatus})` : ""}.
+              {T("Couldn't load list")}{errStatus ? ` (HTTP ${errStatus})` : ""}.
             </div>
             <div className="text-xs mt-0.5 break-all">{String(errText)}</div>
             {onRetry && (
@@ -690,8 +683,7 @@ function SearchablePicker<T>({
                 onClick={onRetry}
                 className="mt-2 text-xs underline hover:no-underline"
               >
-                Retry
-              </button>
+                {T("Retry")}</button>
             )}
           </div>
         </div>
@@ -706,8 +698,7 @@ function SearchablePicker<T>({
                 onClick={onRetry}
                 className="ml-2 text-xs underline hover:no-underline"
               >
-                Refresh
-              </button>
+                {T("Refresh")}</button>
             )}
             {extraInput}
           </div>
@@ -721,7 +712,7 @@ function SearchablePicker<T>({
                 type="button"
                 onClick={() => onChange("")}
                 className="opacity-70 hover:opacity-100"
-                aria-label="Clear selection"
+                aria-label={T("Clear selection")}
               >
                 <X size={12} />
               </button>
@@ -735,7 +726,7 @@ function SearchablePicker<T>({
           />
           <ul className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-ink-200 bg-white">
             {filtered.length === 0 ? (
-              <li className="px-3 py-2 text-xs muted">No matches.</li>
+              <li className="px-3 py-2 text-xs muted">{T("No matches.")}</li>
             ) : (
               filtered.map((it) => {
                 const id = getId(it);
@@ -806,34 +797,34 @@ function EditForm({ user, onClose, patch }: any) {
   }
   return (
     <div className="space-y-3">
-      <Field label="Full name">
+      <Field label={T("Full name")}>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Role">
+      <Field label={T("Role")}>
         <select className="input" value={role} disabled={!!customRoleId}
           onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
       </Field>
-      <Field label="Custom role">
+      <Field label={T("Custom role")}>
         <select className="input" value={customRoleId}
           onChange={(e) => {
             const cr = (customRoles.data ?? []).find((x) => x.id === e.target.value);
             setCustomRoleId(e.target.value);
             if (cr) setRole(cr.base_role);
           }}>
-          <option value="">— none (use base role) —</option>
+          <option value="">{T("— none (use base role) —")}</option>
           {(customRoles.data ?? []).map((cr) => (
-            <option key={cr.id} value={cr.id}>{cr.name} (base: {cr.base_role})</option>
+            <option key={cr.id} value={cr.id}>{cr.name} {T("(base:")}{" "}{cr.base_role})</option>
           ))}
         </select>
       </Field>
-      <Field label="Phone">
+      <Field label={T("Phone")}>
         <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
-      <Field label="Reset password (leave blank to keep)">
+      <Field label={T("Reset password (leave blank to keep)")}>
         <input className="input" type="text" value={pwd} onChange={(e) => setPwd(e.target.value)}
-          placeholder="new password (optional)" />
+          placeholder={T("new password (optional)")} />
       </Field>
 
       <div className="rounded-xl border border-ink-200 bg-ink-50/40 p-3 space-y-3">
@@ -854,35 +845,29 @@ function EditForm({ user, onClose, patch }: any) {
             }}
           />
           <div className="flex-1">
-            <div className="text-sm font-medium">Override sidebar pages for this user</div>
+            <div className="text-sm font-medium">{T("Override sidebar pages for this user")}</div>
             <div className="text-[11px] muted">
-              When on, this user sees only the ticked pages (plus Help) —
-              overrides their role / custom-role defaults. Off = fall back to
-              the role's pages.
-            </div>
+              {T("When on, this user sees only the ticked pages (plus Help) — overrides their role / custom-role defaults. Off = fall back to the role's pages.")}</div>
           </div>
         </label>
         {overrideOn && (
           <>
             <div className="flex items-center justify-between text-[11px]">
               <span className="muted">
-                {pages.length} of {catalog.data?.pages.length ?? 0} pages selected
-              </span>
+                {pages.length} {T("of")}{" "}{catalog.data?.pages.length ?? 0} {T("pages selected")}</span>
               <div className="flex gap-2">
                 <button
                   type="button"
                   className="text-brand-700 hover:underline"
                   onClick={() => setPages((catalog.data?.pages ?? []).map((p) => p.path))}
                 >
-                  Select all
-                </button>
+                  {T("Select all")}</button>
                 <button
                   type="button"
                   className="text-brand-700 hover:underline"
                   onClick={() => setPages([])}
                 >
-                  Clear
-                </button>
+                  {T("Clear")}</button>
               </div>
             </div>
             <div className="max-h-64 overflow-y-auto rounded-lg border border-ink-200 bg-white p-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
@@ -897,7 +882,7 @@ function EditForm({ user, onClose, patch }: any) {
                     checked={pages.includes(p.path)}
                     onChange={() => togglePage(p.path)}
                   />
-                  <span className="flex-1 truncate">{p.label}</span>
+                  <span className="flex-1 truncate">{T(p.label)}</span>
                   <span className="text-[10px] text-ink-400 font-mono">{p.path}</span>
                 </label>
               ))}
@@ -907,11 +892,10 @@ function EditForm({ user, onClose, patch }: any) {
       </div>
 
       <div className="flex justify-end gap-2 pt-2">
-        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
         <button className="btn-primary" disabled={patch.isPending} onClick={save}>
           {patch.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          Save changes
-        </button>
+          {T("Save changes")}</button>
       </div>
     </div>
   );
@@ -920,7 +904,7 @@ function EditForm({ user, onClose, patch }: any) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );

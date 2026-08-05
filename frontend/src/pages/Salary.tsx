@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { NewSalaryForm } from "@/components/forms/NewSalaryForm";
+import { T } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -97,11 +98,9 @@ export default function SalaryPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Wallet size={22} className="text-brand-600" /> Salary
-          </h1>
+            <Wallet size={22} className="text-brand-600" /> {T("Salary")}</h1>
           <p className="text-sm muted">
-            Monthly payroll. Posting to ledger auto-updates Beban Gaji, Hutang Gaji, and Hutang PPh 21.
-          </p>
+            {T("Monthly payroll. Posting to ledger auto-updates Beban Gaji, Hutang Gaji, and Hutang PPh 21.")}</p>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -111,17 +110,16 @@ export default function SalaryPage() {
             onChange={(e) => setPeriod(e.target.value)}
           />
           <button className="btn-primary" onClick={() => { setEditing(null); setOpenNew(true); }}>
-            <Plus size={14} /> New salary
-          </button>
+            <Plus size={14} /> {T("New salary")}</button>
         </div>
       </div>
 
       {/* Period summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card label="Employees paid" value={String(totals.count)} tone="brand" />
-        <Card label="Gross"      value={idr(totals.gross)} tone="brand" />
-        <Card label="PPh 21 withheld" value={idr(totals.tax)}   tone="amber" />
-        <Card label="Net paid"   value={idr(totals.net)}   tone="emerald" />
+        <Card label={T("Employees paid")} value={String(totals.count)} tone="brand" />
+        <Card label={T("Gross")}      value={idr(totals.gross)} tone="brand" />
+        <Card label={T("PPh 21 withheld")} value={idr(totals.tax)}   tone="amber" />
+        <Card label={T("Net paid")}   value={idr(totals.net)}   tone="emerald" />
       </div>
 
       {/* Table */}
@@ -129,13 +127,13 @@ export default function SalaryPage() {
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Employee</th>
-              <th className="th">Period</th>
-              <th className="th">Status</th>
-              <th className="th text-right">Gross</th>
-              <th className="th text-right">PPh 21</th>
-              <th className="th text-right">Net</th>
-              <th className="th text-right">Actions</th>
+              <th className="th">{T("Employee")}</th>
+              <th className="th">{T("Period")}</th>
+              <th className="th">{T("Status")}</th>
+              <th className="th text-right">{T("Gross")}</th>
+              <th className="th text-right">{T("PPh 21")}</th>
+              <th className="th text-right">{T("Net")}</th>
+              <th className="th text-right">{T("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -148,7 +146,7 @@ export default function SalaryPage() {
                     {s.status}
                   </span>
                   {s.is_posted && (
-                    <span className="ml-2 chip bg-brand-50 text-brand-700">posted</span>
+                    <span className="ml-2 chip bg-brand-50 text-brand-700">{T("posted")}</span>
                   )}
                 </td>
                 <td className="td text-right tabular-nums">{idr(s.gross_salary)}</td>
@@ -160,13 +158,11 @@ export default function SalaryPage() {
                       <>
                         <button className="btn-ghost text-brand-700"
                           onClick={() => { setEditing(s); setOpenNew(true); }}>
-                          Edit
-                        </button>
+                          {T("Edit")}</button>
                         <button className="btn-success"
                           disabled={post.isPending}
                           onClick={() => post.mutate(s.id)}>
-                          <BookOpen size={13} /> Post
-                        </button>
+                          <BookOpen size={13} /> {T("Post")}</button>
                         <button className="btn-ghost text-red-600 hover:bg-red-50"
                           disabled={del.isPending}
                           onClick={() => {
@@ -181,15 +177,13 @@ export default function SalaryPage() {
                         <button className="btn-success"
                           disabled={pay.isPending}
                           onClick={() => pay.mutate(s.id)}>
-                          <CheckCircle size={13} /> Mark paid
-                        </button>
+                          <CheckCircle size={13} /> {T("Mark paid")}</button>
                         <button className="btn-ghost text-red-600"
                           disabled={reverse.isPending}
                           onClick={() => {
                             if (window.confirm("Reverse the posting?")) reverse.mutate(s.id);
                           }}>
-                          <Undo2 size={13} /> Reverse
-                        </button>
+                          <Undo2 size={13} /> {T("Reverse")}</button>
                       </>
                     )}
                   </div>
@@ -199,8 +193,7 @@ export default function SalaryPage() {
             {!salaries.data?.length && (
               <tr>
                 <td colSpan={7} className="td text-center muted py-12">
-                  No salary records for {period}. Click "+ New salary" to create one.
-                </td>
+                  {T("No salary records for")}{" "}{period}{T(". Click \"+ New salary\" to create one.")}</td>
               </tr>
             )}
           </tbody>
@@ -210,14 +203,10 @@ export default function SalaryPage() {
       <div className="card p-4 flex items-start gap-3 text-sm">
         <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
         <div>
-          <div className="font-medium">How posting works</div>
+          <div className="font-medium">{T("How posting works")}</div>
           <p className="muted">
-            "Post to ledger" adds the gross salary to <b>6000-04 Beban Gaji Karyawan</b>,
-            credits PPh 21 to <b>2102-04 Hutang Pph 21</b>, and credits the net amount to{" "}
-            <b>2102-02 Hutang Gaji Karyawan</b>. "Mark paid" clears the salary liability
-            and reduces the bank account (default <b>1101-01 Bank BCA</b>).
-            "Reverse" rolls back the posting (only available before payment).
-          </p>
+            {T("\"Post to ledger\" adds the gross salary to")}{" "}<b>{T("6000-04 Beban Gaji Karyawan")}</b>{T(", credits PPh 21 to")}{" "}<b>{T("2102-04 Hutang Pph 21")}</b>{T(", and credits the net amount to")}{" "}
+            <b>{T("2102-02 Hutang Gaji Karyawan")}</b>{T(". \"Mark paid\" clears the salary liability and reduces the bank account (default")}{" "}<b>{T("1101-01 Bank BCA")}</b>{T("). \"Reverse\" rolls back the posting (only available before payment).")}</p>
         </div>
       </div>
 
@@ -246,7 +235,7 @@ function Card({ label, value, tone }: {
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between">
-        <div className="text-[11px] uppercase tracking-wider muted">{label}</div>
+        <div className="text-[11px] uppercase tracking-wider muted">{T(label)}</div>
         <div className={`h-7 w-7 rounded ${cls} grid place-items-center`}>
           <Wallet size={13} />
         </div>

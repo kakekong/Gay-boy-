@@ -9,6 +9,7 @@ import { useAuthStore } from "@/store/auth";
 import {
   DailyLogSection, DailyLogHistory, TeamDailyLogs,
 } from "@/components/DailyLogSection";
+import { T, locale, t as tt } from "@/store/lang";
 
 interface AttendanceRow {
   id: string;
@@ -107,11 +108,9 @@ export default function AttendancePage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Clock size={22} className="text-brand-600" /> Attendance
-        </h1>
+          <Clock size={22} className="text-brand-600" /> {T("Attendance")}</h1>
         <p className="text-sm muted">
-          Clock in when you start the day, out when you leave. Hours feed into your payroll.
-        </p>
+          {T("Clock in when you start the day, out when you leave. Hours feed into your payroll.")}</p>
       </div>
 
       {flash && (
@@ -131,29 +130,28 @@ export default function AttendancePage() {
 
       {/* Today card */}
       <div className="card p-5 lg:p-8">
-        <div className="text-xs uppercase tracking-wider muted">Today</div>
+        <div className="text-xs uppercase tracking-wider muted">{T("Today")}</div>
         <div className="mt-1 flex items-end gap-3 flex-wrap">
           <div className="text-3xl lg:text-4xl font-semibold tracking-tight">
-            {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+            {new Date().toLocaleDateString(locale(),  { weekday: "long", day: "numeric", month: "long" })}
           </div>
           {t?.status && (
             <span className={clsx("chip uppercase",
               STATUS_CHIP[t.status] ?? "bg-ink-100 text-ink-700")}>
-              {t.status.replace(/_/g, " ")}
+              {T(t.status.replace(/_/g, " "))}
             </span>
           )}
         </div>
 
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Card label="Clock in"  value={fmtTime(t?.clock_in)} />
-          <Card label="Clock out" value={fmtTime(t?.clock_out)} />
-          <Card label="Hours"     value={t?.hours ? `${Number(t.hours).toFixed(2)}h` : "—"} />
+          <Card label={T("Clock in")}  value={fmtTime(t?.clock_in)} />
+          <Card label={T("Clock out")} value={fmtTime(t?.clock_out)} />
+          <Card label={T("Hours")}     value={t?.hours ? `${Number(t.hours).toFixed(2)}h` : "—"} />
         </div>
 
         <div className="mt-5">
           <label className="text-xs uppercase tracking-wider muted" htmlFor="clock-note">
-            Note (optional)
-          </label>
+            {T("Note (optional)")}</label>
           <textarea
             id="clock-note"
             className="input mt-1 w-full"
@@ -161,18 +159,19 @@ export default function AttendancePage() {
             value={clockNote}
             onChange={(e) => setClockNote(e.target.value)}
             disabled={hasIn && hasOut}
-            placeholder="e.g. Late — traffic on the toll road. Leaving early for the PT Bara site visit."
+            placeholder={T("e.g. Late — traffic on the toll road. Leaving early for the PT Bara site visit.")}
           />
           <p className="mt-1 text-xs muted">
             {hasIn && hasOut
-              ? "You are done for today — the note is closed."
-              : `Saved against today's attendance when you press Clock ${hasIn ? "OUT" : "IN"}.`}
+              ? T("You are done for today — the note is closed.")
+              : tt(`Saved against today's attendance when you press Clock ${hasIn ? "OUT" : "IN"}.`,
+                 `Tersimpan pada absensi hari ini saat Anda menekan ABSEN ${hasIn ? "KELUAR" : "MASUK"}.`)}
           </p>
         </div>
 
         {t?.notes && (
           <div className="mt-3 rounded-xl bg-ink-50 px-4 py-3 text-sm whitespace-pre-line">
-            <div className="text-xs uppercase tracking-wider muted mb-1">Today's note</div>
+            <div className="text-xs uppercase tracking-wider muted mb-1">{T("Today's note")}</div>
             {t.notes}
           </div>
         )}
@@ -193,9 +192,9 @@ export default function AttendancePage() {
                 ? <Loader2 size={22} className="animate-spin text-emerald-700" />
                 : <LogIn size={22} className="text-emerald-700" />}
               <div>
-                <div className="text-lg font-semibold">Clock IN</div>
+                <div className="text-lg font-semibold">{T("Clock IN")}</div>
                 <div className="text-xs muted">
-                  {hasIn ? `Done at ${fmtTime(t?.clock_in)}` : "Start your work day"}
+                  {hasIn ? tt(`Done at ${fmtTime(t?.clock_in)}`, `Selesai pukul ${fmtTime(t?.clock_in)}`) : T("Start your work day")}
                 </div>
               </div>
             </div>
@@ -215,10 +214,10 @@ export default function AttendancePage() {
                 ? <Loader2 size={22} className="animate-spin text-brand-700" />
                 : <LogOut size={22} className="text-brand-700" />}
               <div>
-                <div className="text-lg font-semibold">Clock OUT</div>
+                <div className="text-lg font-semibold">{T("Clock OUT")}</div>
                 <div className="text-xs muted">
-                  {hasOut ? `Done at ${fmtTime(t?.clock_out)}`
-                          : hasIn ? "End your work day" : "Clock in first"}
+                  {hasOut ? tt(`Done at ${fmtTime(t?.clock_out)}`, `Selesai pukul ${fmtTime(t?.clock_out)}`)
+                          : hasIn ? T("End your work day") : T("Clock in first")}
                 </div>
               </div>
             </div>
@@ -237,20 +236,19 @@ export default function AttendancePage() {
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between">
           <div className="font-semibold flex items-center gap-2">
-            <CalIcon size={15} /> My recent attendance
-          </div>
-          <div className="text-xs muted">last 30 days</div>
+            <CalIcon size={15} /> {T("My recent attendance")}</div>
+          <div className="text-xs muted">{T("last 30 days")}</div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Date</th>
-                <th className="th">Status</th>
-                <th className="th">Clock in</th>
-                <th className="th">Clock out</th>
-                <th className="th text-right">Hours</th>
-                <th className="th">Note</th>
+                <th className="th">{T("Date")}</th>
+                <th className="th">{T("Status")}</th>
+                <th className="th">{T("Clock in")}</th>
+                <th className="th">{T("Clock out")}</th>
+                <th className="th text-right">{T("Hours")}</th>
+                <th className="th">{T("Note")}</th>
               </tr>
             </thead>
             <tbody>
@@ -260,7 +258,7 @@ export default function AttendancePage() {
                   <td className="td">
                     <span className={clsx("chip uppercase",
                       STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
-                      {r.status.replace(/_/g, " ")}
+                      {T(r.status.replace(/_/g, " "))}
                     </span>
                   </td>
                   <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}</td>
@@ -270,7 +268,7 @@ export default function AttendancePage() {
                 </tr>
               ))}
               {!myHistory.data?.length && (
-                <tr><td colSpan={6} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
+                <tr><td colSpan={6} className="td text-center muted py-8">{T("No attendance recorded yet.")}</td></tr>
               )}
             </tbody>
           </table>
@@ -282,10 +280,9 @@ export default function AttendancePage() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="font-semibold">Attendance summary</div>
+              <div className="font-semibold">{T("Attendance summary")}</div>
               <div className="text-xs muted">
-                Per-employee roll-up · {summary.data?.workdays_in_month ?? "—"} workdays in month
-              </div>
+                {T("Per-employee roll-up ·")}{" "}{summary.data?.workdays_in_month ?? "—"} {T("workdays in month")}</div>
             </div>
             <input
               type="month"
@@ -298,13 +295,13 @@ export default function AttendancePage() {
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Employee</th>
-                  <th className="th">Role</th>
-                  <th className="th text-right">Present</th>
-                  <th className="th text-right">Absent</th>
-                  <th className="th text-right">Half day</th>
-                  <th className="th text-right">Leave/Sick</th>
-                  <th className="th text-right">Hours</th>
+                  <th className="th">{T("Employee")}</th>
+                  <th className="th">{T("Role")}</th>
+                  <th className="th text-right">{T("Present")}</th>
+                  <th className="th text-right">{T("Absent")}</th>
+                  <th className="th text-right">{T("Half day")}</th>
+                  <th className="th text-right">{T("Leave/Sick")}</th>
+                  <th className="th text-right">{T("Hours")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -321,7 +318,7 @@ export default function AttendancePage() {
                 ))}
                 {!summary.data?.rows?.length && (
                   <tr><td colSpan={7} className="td text-center muted py-8">
-                    {summary.isLoading ? "Loading…" : "No data for this month."}
+                    {summary.isLoading ? T("Loading…") : T("No data for this month.")}
                   </td></tr>
                 )}
               </tbody>
@@ -334,20 +331,20 @@ export default function AttendancePage() {
       {canManage && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
-            <div className="font-semibold">All employees · today + recent</div>
-            <div className="text-xs muted">HR / Director view</div>
+            <div className="font-semibold">{T("All employees · today + recent")}</div>
+            <div className="text-xs muted">{T("HR / Director view")}</div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
-                  <th className="th">Date</th>
-                  <th className="th">Employee</th>
-                  <th className="th">Status</th>
-                  <th className="th">Clock in</th>
-                  <th className="th">Clock out</th>
-                  <th className="th text-right">Hours</th>
-                  <th className="th">Note</th>
+                  <th className="th">{T("Date")}</th>
+                  <th className="th">{T("Employee")}</th>
+                  <th className="th">{T("Status")}</th>
+                  <th className="th">{T("Clock in")}</th>
+                  <th className="th">{T("Clock out")}</th>
+                  <th className="th text-right">{T("Hours")}</th>
+                  <th className="th">{T("Note")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -358,7 +355,7 @@ export default function AttendancePage() {
                     <td className="td">
                       <span className={clsx("chip uppercase",
                         STATUS_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
-                        {r.status.replace(/_/g, " ")}
+                        {T(r.status.replace(/_/g, " "))}
                       </span>
                     </td>
                     <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}</td>
@@ -368,7 +365,7 @@ export default function AttendancePage() {
                   </tr>
                 ))}
                 {!all.data?.length && (
-                  <tr><td colSpan={7} className="td text-center muted py-8">No attendance recorded yet.</td></tr>
+                  <tr><td colSpan={7} className="td text-center muted py-8">{T("No attendance recorded yet.")}</td></tr>
                 )}
               </tbody>
             </table>
@@ -410,7 +407,7 @@ function AttendanceNote({ text }: { text: string | null }) {
           className="text-xs text-brand-700 hover:underline"
           onClick={() => setOpen((v) => !v)}
         >
-          {open ? "Show less" : `+${lines.length - 2} more`}
+          {open ? T("Show less") : tt(`+${lines.length - 2} more`, `+${lines.length - 2} lagi`)}
         </button>
       )}
     </div>
@@ -420,7 +417,7 @@ function AttendanceNote({ text }: { text: string | null }) {
 function Card({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-ink-50 border border-ink-100 p-4">
-      <div className="text-[10px] uppercase tracking-wider muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider muted">{T(label)}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>
   );

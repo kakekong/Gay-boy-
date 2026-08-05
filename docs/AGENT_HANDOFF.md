@@ -97,6 +97,30 @@ backend/tests/        pytest unit suites + tests/e2e/ (see §5)
 **Frontend** — React 18 + Vite + TypeScript, TanStack Query, Zustand, Tailwind,
 lucide-react, `frontend/src/pages/*.tsx` one page per screen.
 
+**Translation.** The UI is bilingual EN/ID through two mechanisms in
+`src/store/lang.ts`:
+
+* `t(en, id)` — both languages at the call site. Use it for anything with an
+  interpolated value, where a dictionary key can't be a fixed string.
+* `T(en)` — looks the English up in `src/i18n/id.ts`. A miss returns the
+  English unchanged, so a new string ships safely before anyone translates it.
+  Use this for ordinary static text; it is what the ~1,000 wrapped strings use.
+
+`T` is deliberately **not** reactive — `App` carries `key={lang}` and remounts
+the tree on a language change, which is what re-evaluates every `T`. That
+avoids threading a hook through forty screens and through plain helper
+functions that aren't components.
+
+`id.ts` has two blocks. `ID_STATIC` is checkable: every key must appear as a
+literal `T("…")` somewhere. `ID_RUNTIME` holds keys that arrive as *data* —
+API status enums (`pending_approval` renders as "pending approval"), industry
+values — which never appear as a literal. **Run `npm run i18n:check` after
+rewording any UI text**: it reports dictionary entries whose English no longer
+exists (a silent fall back to English) and strings with no translation yet.
+
+Dates and numbers go through `locale()` from the same module, not the browser's
+locale — otherwise an Indonesian UI still prints "Wednesday, August 5".
+
 **File storage goes through `app/services/storage.py`** — never write to disk
 directly. Keys are built by `build_key()` as
 `attachments/<owner_type>/<year>/<month>/<owner_id>/<uuid8>_<label>_<name>`, so

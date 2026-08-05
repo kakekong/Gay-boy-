@@ -7,6 +7,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { T, locale } from "@/store/lang";
 
 interface LogLink { label: string; url: string; }
 interface DailyLog {
@@ -25,7 +26,7 @@ interface DailyLog {
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 function fmtDay(d: string) {
-  return new Date(d + "T00:00:00").toLocaleDateString(undefined, {
+  return new Date(d + "T00:00:00").toLocaleDateString(locale(),  {
     weekday: "short", day: "numeric", month: "short",
   });
 }
@@ -95,8 +96,7 @@ export function DailyLogSection() {
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div className="font-semibold flex items-center gap-2">
-          <NotebookPen size={15} className="text-brand-600" /> Daily log
-        </div>
+          <NotebookPen size={15} className="text-brand-600" /> {T("Daily log")}</div>
         <div className="flex items-center gap-2">
           <input
             type="date"
@@ -106,7 +106,7 @@ export function DailyLogSection() {
             className="input max-w-[160px] py-1 text-sm"
           />
           {date === todayStr() && (
-            <span className="chip bg-brand-50 text-brand-700">Today</span>
+            <span className="chip bg-brand-50 text-brand-700">{T("Today")}</span>
           )}
         </div>
       </div>
@@ -114,13 +114,12 @@ export function DailyLogSection() {
       <div className="p-5 space-y-4">
         <div>
           <label className="text-xs uppercase tracking-wider muted">
-            What did you work on?
-          </label>
+            {T("What did you work on?")}</label>
           <textarea
             className="input mt-1 w-full"
             rows={5}
             value={body}
-            placeholder="e.g. Followed up with PT Bara Kalsel on the pump quotation, drafted the revised BOM, joined the site-survey call…"
+            placeholder={T("e.g. Followed up with PT Bara Kalsel on the pump quotation, drafted the revised BOM, joined the site-survey call…")}
             onChange={(e) => setBody(e.target.value)}
           />
         </div>
@@ -129,23 +128,20 @@ export function DailyLogSection() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label className="text-xs uppercase tracking-wider muted flex items-center gap-1.5">
-              <Link2 size={12} /> Links
-            </label>
+              <Link2 size={12} /> {T("Links")}</label>
             <button type="button" onClick={addLink}
               className="text-xs text-brand-700 hover:underline inline-flex items-center gap-1">
-              <Plus size={12} /> Add link
-            </button>
+              <Plus size={12} /> {T("Add link")}</button>
           </div>
           {links.length === 0 && (
             <div className="text-xs muted">
-              Attach references — a Google Doc, a drawing, a spreadsheet, a ticket.
-            </div>
+              {T("Attach references — a Google Doc, a drawing, a spreadsheet, a ticket.")}</div>
           )}
           {links.map((l, i) => (
             <div key={i} className="flex items-center gap-2">
               <input
                 className="input text-sm py-1 flex-1 min-w-0"
-                placeholder="Label (optional)"
+                placeholder={T("Label (optional)")}
                 value={l.label}
                 onChange={(e) => setLink(i, "label", e.target.value)}
               />
@@ -157,7 +153,7 @@ export function DailyLogSection() {
               />
               <button type="button" onClick={() => removeLink(i)}
                 className="shrink-0 p-1.5 rounded-lg text-ink-400 hover:text-red-600 hover:bg-red-50"
-                aria-label="Remove link">
+                aria-label={T("Remove link")}>
                 <Trash2 size={14} />
               </button>
             </div>
@@ -173,24 +169,22 @@ export function DailyLogSection() {
           >
             {save.isPending ? <Loader2 size={14} className="animate-spin" />
               : saved ? <Check size={14} /> : null}
-            {saved ? "Saved" : "Save log"}
+            {saved ? T("Saved") : T("Save log")}
           </button>
           {dirty && !save.isPending && (
-            <span className="text-xs muted">Unsaved changes</span>
+            <span className="text-xs muted">{T("Unsaved changes")}</span>
           )}
         </div>
 
         {/* Files — need a saved row (owner id) before we can attach */}
         <div className="pt-2 border-t border-ink-100">
           <div className="text-xs uppercase tracking-wider muted flex items-center gap-1.5 mb-2">
-            <Paperclip size={12} /> Files
-          </div>
+            <Paperclip size={12} /> {T("Files")}</div>
           {logId ? (
             <AttachmentsSection ownerType="daily_log" ownerId={logId} />
           ) : (
             <div className="text-xs muted rounded-lg bg-ink-50 border border-ink-100 px-3 py-2">
-              Save your log once to attach files.
-            </div>
+              {T("Save your log once to attach files.")}</div>
           )}
         </div>
       </div>
@@ -212,8 +206,7 @@ export function DailyLogHistory() {
   return (
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 font-semibold flex items-center gap-2">
-        <NotebookPen size={15} /> My recent logs
-      </div>
+        <NotebookPen size={15} /> {T("My recent logs")}</div>
       <ul className="divide-y divide-ink-100">
         {rows.map((l) => <LogEntry key={l.id} log={l} />)}
       </ul>
@@ -251,11 +244,10 @@ export function TeamDailyLogs() {
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div className="font-semibold flex items-center gap-2">
-          <Users size={15} /> Team daily logs
-        </div>
+          <Users size={15} /> {T("Team daily logs")}</div>
         <div className="flex items-center gap-1">
           <button className="btn-ghost px-2 py-1" onClick={() => shift(-1)}
-                  title="Previous day" aria-label="Previous day">
+                  title={T("Previous day")} aria-label={T("Previous day")}>
             <ChevronLeft size={15} />
           </button>
           <input
@@ -267,7 +259,7 @@ export function TeamDailyLogs() {
           />
           <button className="btn-ghost px-2 py-1 disabled:opacity-40"
                   onClick={() => shift(1)} disabled={date >= todayStr()}
-                  title="Next day" aria-label="Next day">
+                  title={T("Next day")} aria-label={T("Next day")}>
             <ChevronRight size={15} />
           </button>
         </div>
@@ -275,7 +267,7 @@ export function TeamDailyLogs() {
 
       {recent.length > 0 && (
         <div className="px-5 py-2.5 border-b border-ink-100 flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider muted">Days with logs</span>
+          <span className="text-[10px] uppercase tracking-wider muted">{T("Days with logs")}</span>
           {recent.map((d) => (
             <button key={d.date} onClick={() => setDate(d.date)}
                     className="chip bg-ink-100 text-ink-700 hover:bg-brand-50 hover:text-brand-700">
@@ -286,19 +278,18 @@ export function TeamDailyLogs() {
       )}
 
       {q.isLoading ? (
-        <div className="p-6 text-center text-sm muted">Loading…</div>
+        <div className="p-6 text-center text-sm muted">{T("Loading…")}</div>
       ) : !rows.length ? (
         <div className="p-6 text-center text-sm muted">
-          Nobody has written a log for {fmtDay(date)}.
+          {T("Nobody has written a log for")}{" "}{fmtDay(date)}.
           {recent.length > 0 && (
             <>
               {" "}
               <button className="text-brand-700 hover:underline"
                       onClick={() => setDate(recent[0].date)}>
-                Jump to {fmtDay(recent[0].date)}
+                {T("Jump to")}{" "}{fmtDay(recent[0].date)}
               </button>
-              , the most recent day that has any.
-            </>
+              {T(", the most recent day that has any.")}</>
           )}
         </div>
       ) : (

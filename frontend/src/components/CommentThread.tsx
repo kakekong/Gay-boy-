@@ -9,7 +9,7 @@ import { api } from "@/api/client";
 import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
 import { MessageQuote } from "@/components/MessageQuote";
 import { useAuthStore } from "@/store/auth";
-import { useT } from "@/store/lang";
+import { useT, T, locale } from "@/store/lang";
 
 interface Mentioned { id: string; name: string }
 interface Comment {
@@ -179,19 +179,17 @@ export function CommentThread({
         <MessageCircle size={15} className="text-brand-600" />
         <span className="font-semibold">{title}</span>
         <span className="text-[10px] uppercase tracking-wider muted ml-auto">
-          {rows.length} message{rows.length === 1 ? "" : "s"}
+          {rows.length} {T("message")}{rows.length === 1 ? "" : "s"}
         </span>
       </header>
 
       <div className="p-4 space-y-3 max-h-[420px] overflow-y-auto">
         {q.isLoading ? (
           <div className="text-center text-sm muted flex items-center justify-center gap-2 py-6">
-            <Loader2 size={14} className="animate-spin" /> Loading…
-          </div>
+            <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
         ) : !rows.length ? (
           <div className="text-center text-sm muted py-6">
-            No messages yet. Start the conversation below.
-          </div>
+            {T("No messages yet. Start the conversation below.")}</div>
         ) : (
           rows.map((c) => {
             const mine = !!me && c.author_id === me.id;
@@ -253,7 +251,7 @@ export function CommentThread({
                 )}>
                   {!mine && (
                     <div className="text-[10px] font-semibold opacity-70 mb-0.5">
-                      {c.author_name ?? "Unknown"}
+                      {c.author_name ?? T("Unknown")}
                       {c.author_role && <span className="uppercase"> · {c.author_role}</span>}
                     </div>
                   )}
@@ -281,7 +279,7 @@ export function CommentThread({
                   <div className={
                     "text-[10px] mt-0.5 " + (mine ? "text-white/70" : "text-ink-500")
                   }>
-                    {new Date(c.created_at).toLocaleString()}
+                    {new Date(c.created_at).toLocaleString(locale())}
                   </div>
                 </div>
               </div>
@@ -379,8 +377,7 @@ export function CommentThread({
           disabled={send.isPending || !draft.trim()}
         >
           {send.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          Send
-        </button>
+          {T("Send")}</button>
       </div>
 
       {forwarding && (

@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { UserLink } from "@/components/UserLink";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 const STATUS_COLOR: Record<string, string> = {
   new:               "bg-ink-100 text-ink-700",
@@ -50,15 +51,14 @@ export default function ProjectsPage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Briefcase size={22} className="text-brand-600" /> Projects
-          </h1>
-          <p className="text-sm muted">Won deals turned into deliverables.</p>
+            <Briefcase size={22} className="text-brand-600" /> {T("Projects")}</h1>
+          <p className="text-sm muted">{T("Won deals turned into deliverables.")}</p>
         </div>
       </div>
 
       <ProjectSection
-        title="Ongoing"
-        subtitle="Still in production, shipping or billing."
+        title={T("Ongoing")}
+        subtitle={T("Still in production, shipping or billing.")}
         icon={<Loader2 size={15} className="text-brand-600" />}
         rows={ongoing}
         emptyText={q.isLoading ? "Loading…" : "No ongoing projects."}
@@ -67,8 +67,8 @@ export default function ProjectsPage() {
       />
 
       <ProjectSection
-        title="Closed"
-        subtitle="Delivered, paid and wrapped up."
+        title={T("Closed")}
+        subtitle={T("Delivered, paid and wrapped up.")}
         icon={<CheckCircle2 size={15} className="text-emerald-600" />}
         rows={closed}
         emptyText={q.isLoading ? "Loading…" : "No closed projects yet."}
@@ -109,7 +109,7 @@ function ProjectSection({
         </div>
         {showMoney && rows.length > 0 && (
           <div className="text-xs muted tabular-nums">
-            Total PO value <span className="font-medium text-ink-700">{idr(total)}</span>
+            {T("Total PO value")}{" "}<span className="font-medium text-ink-700">{idr(total)}</span>
           </div>
         )}
       </div>
@@ -118,11 +118,11 @@ function ProjectSection({
         <table className="w-full">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">Code</th>
-              <th className="th">Status</th>
-              {showMoney && <th className="th text-right">PO Value</th>}
-              {showCustomer && <th className="th">Customer</th>}
-              {showCustomer && <th className="th">Sales rep</th>}
+              <th className="th">{T("Code")}</th>
+              <th className="th">{T("Status")}</th>
+              {showMoney && <th className="th text-right">{T("PO Value")}</th>}
+              {showCustomer && <th className="th">{T("Customer")}</th>}
+              {showCustomer && <th className="th">{T("Sales rep")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -144,7 +144,7 @@ function ProjectSection({
                 <td className="td">
                   <span className={clsx("chip capitalize",
                     STATUS_COLOR[p.status] ?? "bg-ink-100 text-ink-600")}>
-                    {p.status.replace(/_/g, " ")}
+                    {T(p.status.replace(/_/g, " "))}
                   </span>
                 </td>
                 {showMoney && (

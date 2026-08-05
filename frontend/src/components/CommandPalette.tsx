@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 interface SearchItem {
   id: string;
@@ -181,17 +182,17 @@ export function CommandPalette() {
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search customers, quotes, projects, pages…"
+            placeholder={T("Search customers, quotes, projects, pages…")}
             className="flex-1 bg-transparent outline-none text-sm"
           />
           {search.isFetching && <Loader2 size={14} className="animate-spin text-ink-400" />}
-          <span className="kbd">esc</span>
+          <span className="kbd">{T("esc")}</span>
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
           {Object.keys(grouped).length === 0 ? (
             <div className="px-4 py-8 text-center text-sm muted">
-              {search.isFetching ? "Searching…" : debounced ? `Nothing matches "${debounced}"` : "Start typing to search"}
+              {search.isFetching ? T("Searching…") : debounced ? `Nothing matches "${debounced}"` : T("Start typing to search")}
             </div>
           ) : (
             Object.entries(grouped).map(([groupLabel, items]) => (
@@ -240,9 +241,9 @@ export function CommandPalette() {
         </div>
 
         <div className="border-t border-ink-100 px-4 py-2 text-[11px] muted flex items-center gap-3">
-          <span className="flex items-center gap-1"><span className="kbd">↑</span><span className="kbd">↓</span> navigate</span>
-          <span className="flex items-center gap-1"><span className="kbd">⏎</span> open</span>
-          <span className="ml-auto flex items-center gap-1"><span className="kbd">⌘</span><span className="kbd">K</span> toggle</span>
+          <span className="flex items-center gap-1"><span className="kbd">↑</span><span className="kbd">↓</span> {T("navigate")}</span>
+          <span className="flex items-center gap-1"><span className="kbd">⏎</span> {T("open")}</span>
+          <span className="ml-auto flex items-center gap-1"><span className="kbd">⌘</span><span className="kbd">K</span> {T("toggle")}</span>
         </div>
       </div>
     </div>

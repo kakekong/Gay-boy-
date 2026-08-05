@@ -10,6 +10,7 @@ import { Modal } from "@/components/Modal";
 import { InventoryItemForm } from "@/components/forms/InventoryItemForm";
 import { AdjustStockForm } from "@/components/forms/AdjustStockForm";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 interface Item {
   id: string;
@@ -80,31 +81,26 @@ export default function InventoryPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Package size={22} className="text-brand-600" /> Inventory
-          </h1>
+            <Package size={22} className="text-brand-600" /> {T("Inventory")}</h1>
           <p className="text-sm muted">
-            Check what's in stock before promising delivery. Need more? Click
-            "Request order" to raise a purchase request.
-          </p>
+            {T("Check what's in stock before promising delivery. Need more? Click \"Request order\" to raise a purchase request.")}</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-primary" onClick={() => setOpenRequest(true)}>
-            <ShoppingCart size={14} /> Request order
-          </button>
+            <ShoppingCart size={14} /> {T("Request order")}</button>
           {canAdd && (
             <button className="btn-ghost" onClick={() => setOpenBulk(true)}>
-              <Plus size={14} /> New item
-            </button>
+              <Plus size={14} /> {T("New item")}</button>
           )}
         </div>
       </div>
 
       {/* Stat strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Card label="Items tracked" value={String((items.data ?? []).length)} Icon={Boxes} tone="brand" />
-        <Card label="Low / out of stock" value={String(lowCount)} Icon={AlertTriangle}
+        <Card label={T("Items tracked")} value={String((items.data ?? []).length)} Icon={Boxes} tone="brand" />
+        <Card label={T("Low / out of stock")} value={String(lowCount)} Icon={AlertTriangle}
               tone={lowCount > 0 ? "amber" : "emerald"} />
-        <Card label="Total stock value" value={`Rp ${idr(totalValue)}`} Icon={Wrench} tone="violet" />
+        <Card label={T("Total stock value")} value={`Rp ${idr(totalValue)}`} Icon={Wrench} tone="violet" />
       </div>
 
       {/* Toolbar */}
@@ -112,12 +108,11 @@ export default function InventoryPage() {
         <div className="relative flex-1 min-w-[220px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by SKU or name…" className="input pl-9" />
+            placeholder={T("Search by SKU or name…")} className="input pl-9" />
         </div>
         <label className="flex items-center gap-2 text-sm select-none cursor-pointer">
           <input type="checkbox" checked={onlyLow} onChange={(e) => setOnlyLow(e.target.checked)} />
-          Show only low / out of stock
-        </label>
+          {T("Show only low / out of stock")}</label>
       </div>
 
       {/* Table */}
@@ -126,14 +121,14 @@ export default function InventoryPage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">SKU</th>
-                <th className="th">Name</th>
-                <th className="th">Category</th>
-                <th className="th text-right">Stock</th>
-                <th className="th text-right">Reorder at</th>
-                <th className="th text-right">Unit cost</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Actions</th>
+                <th className="th">{T("SKU")}</th>
+                <th className="th">{T("Name")}</th>
+                <th className="th">{T("Category")}</th>
+                <th className="th text-right">{T("Stock")}</th>
+                <th className="th text-right">{T("Reorder at")}</th>
+                <th className="th text-right">{T("Unit cost")}</th>
+                <th className="th">{T("Status")}</th>
+                <th className="th text-right">{T("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -153,10 +148,10 @@ export default function InventoryPage() {
                     <td className="td text-right tabular-nums muted">
                       {i.reorder_point} {i.uom}
                     </td>
-                    <td className="td text-right tabular-nums">Rp {idr(i.unit_cost)}</td>
+                    <td className="td text-right tabular-nums">{T("Rp")}{" "}{idr(i.unit_cost)}</td>
                     <td className="td">
                       <span className={clsx("chip ring-1", M.tone)}>
-                        <M.Icon size={11} /> {M.label}
+                        <M.Icon size={11} /> {T(M.label)}
                       </span>
                     </td>
                     <td className="td text-right">
@@ -169,27 +164,25 @@ export default function InventoryPage() {
                             title={`Create PR for ${i.reorder_qty || "?"} ${i.uom}`}
                           >
                             {order.isPending ? <Loader2 size={13} className="animate-spin" /> : <ShoppingCart size={13} />}
-                            Request order
-                          </button>
+                            {T("Request order")}</button>
                         ) : (
                           <button
                             className="btn-ghost"
                             onClick={() => order.mutate({ id: i.id })}
-                            title="Reorder even though stock is OK"
+                            title={T("Reorder even though stock is OK")}
                           >
-                            <ShoppingCart size={13} /> Order
-                          </button>
+                            <ShoppingCart size={13} /> {T("Order")}</button>
                         )}
                         {canEdit && (
                           <>
                             <button className="btn-ghost"
                               onClick={() => setAdjusting(i)}
-                              title="Adjust stock">
+                              title={T("Adjust stock")}>
                               <ArrowDownUp size={13} />
                             </button>
                             <button className="btn-ghost"
                               onClick={() => { setEditing(i); setOpenNew(true); }}
-                              title="Edit item">
+                              title={T("Edit item")}>
                               <Pencil size={13} />
                             </button>
                           </>
@@ -203,10 +196,10 @@ export default function InventoryPage() {
                 <tr>
                   <td colSpan={8} className="td text-center muted py-12">
                     {items.isLoading
-                      ? "Loading…"
-                      : "No inventory items yet."}
+                      ? T("Loading…")
+                      : T("No inventory items yet.")}
                     {canEdit && !items.isLoading && (
-                      <> Click <b>+ New item</b> to add one.</>
+                      <> {T("Click")}{" "}<b>{T("+ New item")}</b> {T("to add one.")}</>
                     )}
                   </td>
                 </tr>
@@ -229,8 +222,8 @@ export default function InventoryPage() {
       <Modal
         open={!!adjusting}
         onClose={() => setAdjusting(null)}
-        title="Adjust stock"
-        subtitle="Record stock in / out with a reason."
+        title={T("Adjust stock")}
+        subtitle={T("Record stock in / out with a reason.")}
         size="md"
       >
         {adjusting && <AdjustStockForm item={adjusting} onClose={() => setAdjusting(null)} />}
@@ -239,7 +232,7 @@ export default function InventoryPage() {
       <Modal
         open={openBulk}
         onClose={() => setOpenBulk(false)}
-        title="Add inventory items"
+        title={T("Add inventory items")}
         subtitle={isDirector
           ? "Add one or more items. They're created immediately."
           : "Add one or more items. Each batch is sent to the director for approval before it becomes stock."}
@@ -251,8 +244,8 @@ export default function InventoryPage() {
       <Modal
         open={openRequest}
         onClose={() => setOpenRequest(false)}
-        title="Request order"
-        subtitle="Raise a purchase request for materials — even ones not stocked yet. Purchasing picks it up."
+        title={T("Request order")}
+        subtitle={T("Raise a purchase request for materials — even ones not stocked yet. Purchasing picks it up.")}
         size="lg"
       >
         <RequestOrderForm onClose={() => setOpenRequest(false)} />
@@ -345,14 +338,14 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
         <table className="w-full text-sm min-w-[680px]">
           <thead>
             <tr className="text-[10px] uppercase text-ink-500 text-left">
-              <th className="pb-1 pr-2">SKU *</th>
-              <th className="pb-1 pr-2">Name *</th>
-              <th className="pb-1 pr-2">Category</th>
-              <th className="pb-1 pr-2">UoM</th>
-              <th className="pb-1 pr-2">Unit cost</th>
-              <th className="pb-1 pr-2">Stock</th>
-              <th className="pb-1 pr-2">Reorder pt</th>
-              <th className="pb-1 pr-2">Reorder qty</th>
+              <th className="pb-1 pr-2">{T("SKU *")}</th>
+              <th className="pb-1 pr-2">{T("Name *")}</th>
+              <th className="pb-1 pr-2">{T("Category")}</th>
+              <th className="pb-1 pr-2">{T("UoM")}</th>
+              <th className="pb-1 pr-2">{T("Unit cost")}</th>
+              <th className="pb-1 pr-2">{T("Stock")}</th>
+              <th className="pb-1 pr-2">{T("Reorder pt")}</th>
+              <th className="pb-1 pr-2">{T("Reorder qty")}</th>
               <th className="pb-1"></th>
             </tr>
           </thead>
@@ -370,7 +363,7 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
                 <td className="pb-1.5">
                   <button type="button" className="btn-ghost text-red-600"
                     onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
-                    disabled={rows.length === 1} aria-label="Remove row">
+                    disabled={rows.length === 1} aria-label={T("Remove row")}>
                     <Trash2 size={14} />
                   </button>
                 </td>
@@ -381,12 +374,10 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
       </div>
       <div className="flex items-center gap-3 flex-wrap">
         <button type="button" className="btn-ghost text-xs" onClick={() => setRows([...rows, blank()])}>
-          <Plus size={13} /> Add row
-        </button>
+          <Plus size={13} /> {T("Add row")}</button>
         <label className="btn-ghost text-xs cursor-pointer">
           {importFile.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-          Import from file
-          <input
+          {T("Import from file")}<input
             type="file"
             className="hidden"
             accept=".xlsx,.csv,.pdf,.doc,.docx,application/pdf,text/csv"
@@ -397,7 +388,7 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
             }}
           />
         </label>
-        <span className="text-[11px] muted">Excel, CSV, PDF or Word — review before submitting.</span>
+        <span className="text-[11px] muted">{T("Excel, CSV, PDF or Word — review before submitting.")}</span>
       </div>
 
       {importWarn.length > 0 && (
@@ -411,10 +402,10 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
       )}
 
       <div className="flex justify-end gap-2 pt-1">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
         <button type="submit" className="btn-primary" disabled={save.isPending}>
           {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          {isDirector ? "Add items" : "Submit for approval"}
+          {isDirector ? T("Add items") : T("Submit for approval")}
         </button>
       </div>
     </form>
@@ -470,9 +461,9 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); attempt(); }} className="space-y-4">
       <label className="block">
-        <span className="block text-xs font-medium text-ink-600 mb-1">Project (optional)</span>
+        <span className="block text-xs font-medium text-ink-600 mb-1">{T("Project (optional)")}</span>
         <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-          <option value="">No project</option>
+          <option value="">{T("No project")}</option>
           {(projects.data ?? []).map((p: any) => (
             <option key={p.id} value={p.id}>{p.code}{p.status ? ` · ${p.status}` : ""}</option>
           ))}
@@ -480,41 +471,40 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
       </label>
 
       <div>
-        <span className="block text-xs font-medium text-ink-600 mb-1">Items</span>
+        <span className="block text-xs font-medium text-ink-600 mb-1">{T("Items")}</span>
         <div className="space-y-2">
           {lines.map((l, i) => (
             <div key={i} className="flex items-end gap-2">
               <label className="flex-[3] block">
-                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Item</span>}
-                <input className="input" placeholder="Steel plate 10mm"
+                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("Item")}</span>}
+                <input className="input" placeholder={T("Steel plate 10mm")}
                   value={l.name} onChange={(e) => update(i, "name", e.target.value)} />
               </label>
               <label className="flex-1 block">
-                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">Qty</span>}
+                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("Qty")}</span>}
                 <input className="input" type="number" min={0} placeholder="0"
                   value={l.qty} onChange={(e) => update(i, "qty", e.target.value)} />
               </label>
               <label className="flex-1 block">
-                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">UoM</span>}
-                <input className="input" placeholder="pcs"
+                {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("UoM")}</span>}
+                <input className="input" placeholder={T("pcs")}
                   value={l.uom} onChange={(e) => update(i, "uom", e.target.value)} />
               </label>
               <button type="button" className="btn-ghost text-red-600 shrink-0 mb-0.5"
                 onClick={() => setLines(lines.filter((_, idx) => idx !== i))}
-                aria-label="Remove line" disabled={lines.length === 1}>
+                aria-label={T("Remove line")} disabled={lines.length === 1}>
                 <Trash2 size={14} />
               </button>
             </div>
           ))}
           <button type="button" className="btn-ghost text-xs"
             onClick={() => setLines([...lines, { name: "", qty: "", uom: "pcs" }])}>
-            <Plus size={13} /> Add line
-          </button>
+            <Plus size={13} /> {T("Add line")}</button>
         </div>
       </div>
 
       <label className="block">
-        <span className="block text-xs font-medium text-ink-600 mb-1">Notes (optional)</span>
+        <span className="block text-xs font-medium text-ink-600 mb-1">{T("Notes (optional)")}</span>
         <textarea rows={2} className="input" value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
 
@@ -525,11 +515,10 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
       )}
 
       <div className="flex justify-end gap-2 pt-1">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
         <button type="submit" className="btn-primary" disabled={submit.isPending}>
           {submit.isPending ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
-          Send request
-        </button>
+          {T("Send request")}</button>
       </div>
     </form>
   );
@@ -548,7 +537,7 @@ function Card({ label, value, Icon, tone }: {
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between">
-        <div className="text-[11px] uppercase tracking-wider muted">{label}</div>
+        <div className="text-[11px] uppercase tracking-wider muted">{T(label)}</div>
         <div className={`h-7 w-7 rounded ${cls} grid place-items-center`}>
           <Icon size={13} />
         </div>

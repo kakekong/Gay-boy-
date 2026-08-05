@@ -9,6 +9,7 @@ import { api } from "@/api/client";
 import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
 import { MessageQuote } from "@/components/MessageQuote";
 import { useAuthStore } from "@/store/auth";
+import { T, locale, t as tt } from "@/store/lang";
 
 interface Channel {
   id: string;
@@ -61,7 +62,7 @@ function fmtTime(iso: string | null | undefined): string {
   const sameDay = d.toDateString() === now.toDateString();
   return sameDay
     ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString();
+    : d.toLocaleDateString(locale());
 }
 
 export default function ChatPage() {
@@ -262,11 +263,9 @@ export default function ChatPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <MessageCircle size={22} className="text-brand-600" /> Chat
-          </h1>
+            <MessageCircle size={22} className="text-brand-600" /> {T("Chat")}</h1>
           <p className="text-sm muted">
-            Direct messages between employees. Polls every 5 seconds for new messages.
-          </p>
+            {T("Direct messages between employees. Polls every 5 seconds for new messages.")}</p>
         </div>
       </div>
 
@@ -285,7 +284,7 @@ export default function ChatPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search conversations…"
+                placeholder={T("Search conversations…")}
                 className="input pl-9"
               />
             </div>
@@ -293,8 +292,7 @@ export default function ChatPage() {
               onClick={() => setShowPicker(true)}
               className="btn-primary w-full justify-center"
             >
-              <Plus size={14} /> New chat
-            </button>
+              <Plus size={14} /> {T("New chat")}</button>
             {isDirector && (
               <button
                 onClick={() => { setMonitorMode((v) => !v); setActive(null); }}
@@ -304,16 +302,16 @@ export default function ChatPage() {
                     ? "bg-amber-50 border-amber-200 text-amber-800"
                     : "border-ink-200 text-ink-600 hover:bg-ink-50",
                 )}
-                title="Silently view chats that span departments"
+                title={T("Silently view chats that span departments")}
               >
-                {monitorMode ? "Viewing cross-dept chats" : "Monitor cross-dept"}
+                {monitorMode ? T("Viewing cross-dept chats") : T("Monitor cross-dept")}
               </button>
             )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {filteredChannels.length === 0 ? (
               <div className="p-6 text-center text-sm muted">
-                {channels.isLoading ? "Loading…" : "No conversations yet. Click 'New chat' to start one."}
+                {channels.isLoading ? T("Loading…") : T("No conversations yet. Click 'New chat' to start one.")}
               </div>
             ) : (
               <ul>
@@ -346,7 +344,7 @@ export default function ChatPage() {
                           </div>
                           <div className="flex items-center justify-between gap-2 mt-0.5">
                             <div className="text-xs muted truncate">
-                              {c.last_message?.body ?? <i>no messages yet</i>}
+                              {c.last_message?.body ?? <i>{T("no messages yet")}</i>}
                             </div>
                             {c.unread > 0 && (
                               <span className="chip bg-brand-600 text-white">
@@ -373,8 +371,7 @@ export default function ChatPage() {
             <div className="flex-1 grid place-items-center text-center muted text-sm p-8">
               <div>
                 <MessageCircle size={40} className="mx-auto text-ink-300 mb-2" />
-                Pick a conversation or click <b>New chat</b> to start one.
-              </div>
+                {T("Pick a conversation or click")}{" "}<b>{T("New chat")}</b> {T("to start one.")}</div>
             </div>
           ) : (
             <>
@@ -383,12 +380,12 @@ export default function ChatPage() {
                   type="button"
                   onClick={() => setActive(null)}
                   className="lg:hidden p-1.5 -ml-1 rounded-lg text-ink-500 hover:bg-ink-100 shrink-0"
-                  aria-label="Back to conversations"
+                  aria-label={T("Back to conversations")}
                 >
                   <ChevronLeft size={18} />
                 </button>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold truncate">{activeChannel?.title ?? "Conversation"}</div>
+                  <div className="font-semibold truncate">{activeChannel?.title ?? T("Conversation")}</div>
                   {activeChannel?.members?.[0] && (
                     <div className="text-[11px] muted uppercase tracking-wider">
                       {activeChannel.members[0].role}
@@ -420,7 +417,7 @@ export default function ChatPage() {
                             onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}
                             className="grid place-items-center min-h-[36px] min-w-[30px] rounded-lg
                                        text-ink-400 hover:text-ink-800 hover:bg-ink-100"
-                            aria-label="Message actions"
+                            aria-label={T("Message actions")}
                           >
                             <MoreVertical size={14} />
                           </button>
@@ -436,8 +433,7 @@ export default function ChatPage() {
                                              hover:bg-ink-100 flex items-center gap-2"
                                   onClick={() => { setReplyTo(m); setMenuFor(null); }}
                                 >
-                                  <Reply size={13} /> Reply
-                                </button>
+                                  <Reply size={13} /> {T("Reply")}</button>
                                 <button
                                   className="w-full text-left px-2 py-1.5 rounded-lg text-sm
                                              hover:bg-ink-100 flex items-center gap-2"
@@ -449,8 +445,7 @@ export default function ChatPage() {
                                     setMenuFor(null);
                                   }}
                                 >
-                                  <Forward size={13} /> Forward
-                                </button>
+                                  <Forward size={13} /> {T("Forward")}</button>
                                 {m.is_mine && (
                                   <>
                                     <button
@@ -460,8 +455,7 @@ export default function ChatPage() {
                                         setEditingId(m.id); setEditDraft(m.body); setMenuFor(null);
                                       }}
                                     >
-                                      <Pencil size={13} /> Edit
-                                    </button>
+                                      <Pencil size={13} /> {T("Edit")}</button>
                                     <button
                                       className="w-full text-left px-2 py-1.5 rounded-lg text-sm
                                                  text-red-600 hover:bg-red-50 flex items-center gap-2"
@@ -470,8 +464,7 @@ export default function ChatPage() {
                                         if (window.confirm("Delete this message?")) del.mutate(m.id);
                                       }}
                                     >
-                                      <Trash2 size={13} /> Delete
-                                    </button>
+                                      <Trash2 size={13} /> {T("Delete")}</button>
                                   </>
                                 )}
                               </div>
@@ -481,7 +474,7 @@ export default function ChatPage() {
                       )}
                       <div className={clsx("max-w-[75%] min-w-0", grouped && "mt-0.5")}>
                         {!grouped && !m.is_mine && (
-                          <div className="text-[11px] muted ml-2 mb-0.5">{m.user_name ?? "Unknown"}</div>
+                          <div className="text-[11px] muted ml-2 mb-0.5">{m.user_name ?? T("Unknown")}</div>
                         )}
                         <div className="relative">
                           {editingId === m.id ? (
@@ -497,7 +490,7 @@ export default function ChatPage() {
                                 }}
                               />
                               <button onClick={() => edit.mutate({ id: m.id, body: editDraft })}
-                                className="btn-success">Save</button>
+                                className="btn-success">{T("Save")}</button>
                               <button onClick={() => setEditingId(null)} className="btn-ghost">
                                 <X size={14} />
                               </button>
@@ -518,8 +511,9 @@ export default function ChatPage() {
                                 )}>
                                   <Forward size={10} />
                                   {m.forwarded.author_name
-                                    ? `Forwarded · originally from ${m.forwarded.author_name}`
-                                    : "Forwarded"}
+                                    ? tt(`Forwarded · originally from ${m.forwarded.author_name}`,
+                        `Diteruskan · asalnya dari ${m.forwarded.author_name}`)
+                                    : T("Forwarded")}
                                 </div>
                               )}
                               {m.reply_to && (
@@ -538,8 +532,7 @@ export default function ChatPage() {
                                     "ml-1 text-[10px]",
                                     m.is_mine ? "text-white/70" : "muted"
                                   )}>
-                                    (edited)
-                                  </span>
+                                    {T("(edited)")}</span>
                                 )}
                               </div>
                             </div>
@@ -556,8 +549,7 @@ export default function ChatPage() {
                 })}
                 {!messages.data?.length && !messages.isLoading && (
                   <div className="text-center muted text-sm py-8">
-                    Say hello — be the first to write 👋
-                  </div>
+                    {T("Say hello — be the first to write 👋")}</div>
                 )}
               </div>
 
@@ -589,8 +581,7 @@ export default function ChatPage() {
                   disabled={!draft.trim() || send.isPending}
                 >
                   {send.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  Send
-                </button>
+                  {T("Send")}</button>
               </form>
             </>
           )}
@@ -611,18 +602,18 @@ export default function ChatPage() {
           <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={() => setShowPicker(false)} />
           <div className="relative w-full max-w-md bg-white rounded-2xl shadow-card max-h-[80vh] flex flex-col">
             <header className="p-4 border-b border-ink-100">
-              <div className="text-lg font-semibold">Start a new chat</div>
+              <div className="text-lg font-semibold">{T("Start a new chat")}</div>
               <div className="mt-2 inline-flex rounded-lg border border-ink-200 p-0.5 text-sm">
                 <button
                   onClick={() => setPickerMode("dm")}
                   className={clsx("px-3 py-1 rounded-md",
                     pickerMode === "dm" ? "bg-brand-50 text-brand-700" : "text-ink-600")}
-                >Direct message</button>
+                >{T("Direct message")}</button>
                 <button
                   onClick={() => setPickerMode("group")}
                   className={clsx("px-3 py-1 rounded-md",
                     pickerMode === "group" ? "bg-brand-50 text-brand-700" : "text-ink-600")}
-                >Group chat</button>
+                >{T("Group chat")}</button>
               </div>
             </header>
 
@@ -632,12 +623,11 @@ export default function ChatPage() {
                   autoFocus
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
-                  placeholder="Group name (e.g. #sales, Project PRJ-2026-0042)"
+                  placeholder={T("Group name (e.g. #sales, Project PRJ-2026-0042)")}
                   className="input"
                 />
                 <div className="text-[11px] muted mt-1">
-                  {groupMembers.size} member(s) selected — you'll be added automatically
-                </div>
+                  {groupMembers.size} {T("member(s) selected — you'll be added automatically")}</div>
               </div>
             )}
 
@@ -673,16 +663,16 @@ export default function ChatPage() {
                       <div className="font-medium truncate">{u.full_name}</div>
                       <div className="text-xs muted truncate">
                         {waiting
-                          ? "Waiting for the director to approve this conversation"
+                          ? T("Waiting for the director to approve this conversation")
                           : blocked
-                            ? "Different department — asks the director first"
+                            ? T("Different department — asks the director first")
                             : u.email}
                       </div>
                     </div>
                     {waiting ? (
-                      <span className="chip bg-amber-100 text-amber-800">asked</span>
+                      <span className="chip bg-amber-100 text-amber-800">{T("asked")}</span>
                     ) : blocked ? (
-                      <span className="chip bg-brand-100 text-brand-700">ask director</span>
+                      <span className="chip bg-brand-100 text-brand-700">{T("ask director")}</span>
                     ) : null}
                     <span className="chip bg-ink-100 text-ink-700 uppercase">{u.role}</span>
                   </button>
@@ -716,15 +706,15 @@ export default function ChatPage() {
                 );
               })}
               {contacts.isLoading && (
-                <div className="p-6 text-center text-sm muted">Loading…</div>
+                <div className="p-6 text-center text-sm muted">{T("Loading…")}</div>
               )}
               {!contacts.isLoading && filteredContacts.length === 0 && (
-                <div className="p-6 text-center text-sm muted">No one matches that search.</div>
+                <div className="p-6 text-center text-sm muted">{T("No one matches that search.")}</div>
               )}
             </div>
 
             <footer className="p-3 border-t border-ink-100 flex justify-end gap-2">
-              <button className="btn-ghost" onClick={() => setShowPicker(false)}>Cancel</button>
+              <button className="btn-ghost" onClick={() => setShowPicker(false)}>{T("Cancel")}</button>
               {pickerMode === "group" && (
                 <button
                   className="btn-primary"
@@ -732,7 +722,7 @@ export default function ChatPage() {
                   onClick={() => createGroup.mutate()}
                 >
                   {createGroup.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  Create group ({groupMembers.size + 1})
+                  {T("Create group (")}{groupMembers.size + 1})
                 </button>
               )}
             </footer>

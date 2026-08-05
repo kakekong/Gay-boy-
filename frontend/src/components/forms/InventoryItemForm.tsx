@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { T } from "@/store/lang";
 
 interface Props {
   initial?: any;
@@ -49,53 +50,53 @@ export function InventoryItemForm({ initial, onClose }: Props) {
     <form onSubmit={(e) => { e.preventDefault(); setErr(null); save.mutate(); }}
           className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="SKU *">
+        <Field label={T("SKU *")}>
           <input className="input" required disabled={editing} value={form.sku}
             onChange={(e) => setForm({ ...form, sku: e.target.value })}
-            placeholder="e.g. CHAIN-12IN-CS" />
+            placeholder={T("e.g. CHAIN-12IN-CS")} />
         </Field>
-        <Field label="Name *">
+        <Field label={T("Name *")}>
           <input className="input" required value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </Field>
-        <Field label="Category">
+        <Field label={T("Category")}>
           <input className="input" value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })}
-            placeholder="e.g. Chain, Bearing, Liner…" />
+            placeholder={T("e.g. Chain, Bearing, Liner…")} />
         </Field>
-        <Field label="UoM">
+        <Field label={T("UoM")}>
           <input className="input" value={form.uom}
             onChange={(e) => setForm({ ...form, uom: e.target.value })} />
         </Field>
-        <Field label="Unit cost (IDR)">
+        <Field label={T("Unit cost (IDR)")}>
           <input type="number" min={0} step="any" className="input" value={form.unit_cost}
             onChange={(e) => setForm({ ...form, unit_cost: parseFloat(e.target.value || "0") })} />
         </Field>
         {!editing && (
-          <Field label="Opening stock">
+          <Field label={T("Opening stock")}>
             <input type="number" min={0} step="any" className="input" value={form.current_stock}
               onChange={(e) => setForm({ ...form, current_stock: parseFloat(e.target.value || "0") })} />
           </Field>
         )}
-        <Field label="Reorder point">
+        <Field label={T("Reorder point")}>
           <input type="number" min={0} step="any" className="input" value={form.reorder_point}
             onChange={(e) => setForm({ ...form, reorder_point: parseFloat(e.target.value || "0") })} />
         </Field>
-        <Field label="Reorder quantity">
+        <Field label={T("Reorder quantity")}>
           <input type="number" min={0} step="any" className="input" value={form.reorder_qty}
             onChange={(e) => setForm({ ...form, reorder_qty: parseFloat(e.target.value || "0") })} />
         </Field>
-        <Field label="Location">
+        <Field label={T("Location")}>
           <input className="input" value={form.location}
             onChange={(e) => setForm({ ...form, location: e.target.value })}
-            placeholder="e.g. Warehouse A, Rack 12" />
+            placeholder={T("e.g. Warehouse A, Rack 12")} />
         </Field>
-        <Field label="Preferred supplier">
+        <Field label={T("Preferred supplier")}>
           <input className="input" value={form.supplier_hint}
             onChange={(e) => setForm({ ...form, supplier_hint: e.target.value })} />
         </Field>
       </div>
-      <Field label="Notes">
+      <Field label={T("Notes")}>
         <textarea className="input min-h-[60px]" value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </Field>
@@ -107,10 +108,10 @@ export function InventoryItemForm({ initial, onClose }: Props) {
       )}
 
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
         <button type="submit" className="btn-primary" disabled={save.isPending}>
           {save.isPending && <Loader2 size={14} className="animate-spin" />}
-          {editing ? "Save changes" : "Create item"}
+          {editing ? T("Save changes") : T("Create item")}
         </button>
       </div>
     </form>
@@ -120,7 +121,7 @@ export function InventoryItemForm({ initial, onClose }: Props) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );

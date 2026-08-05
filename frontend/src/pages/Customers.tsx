@@ -11,7 +11,7 @@ import { UserLink } from "@/components/UserLink";
 import { PipelineView } from "@/components/PipelineView";
 import { Modal } from "@/components/Modal";
 import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
-import { useT } from "@/store/lang";
+import { useT, T } from "@/store/lang";
 import type { Customer } from "@/types";
 
 type ViewMode = "table" | "pipeline";
@@ -183,7 +183,7 @@ export default function CustomersPage() {
                 <tr>
                   <th className="th">{t("Company", "Perusahaan")}</th>
                   <th className="th">{t("Industry", "Industri")}</th>
-                  <th className="th">PIC</th>
+                  <th className="th">{T("PIC")}</th>
                   <th className="th">{t("Sales", "Sales")}</th>
                   <th className="th">{t("Stage", "Tahap")}</th>
                   <th className="th text-right">{t("Lifetime value", "Nilai seumur hidup")}</th>

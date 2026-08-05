@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import { TrendingUp, TrendingDown, type LucideIcon } from "lucide-react";
+import { T } from "@/store/lang";
 
 interface Props {
   label: string;
@@ -24,7 +25,7 @@ export function KpiCard({ label, value, delta, hint, icon: Icon, accent = "ink" 
     <div className="card card-hover p-5 min-w-0 overflow-hidden">
       <div className="flex items-start justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-500 min-w-0">
-          {label}
+          {T(label)}
         </div>
         {Icon && (
           <div className={clsx("h-8 w-8 rounded-lg flex items-center justify-center shrink-0", ACCENT[accent])}>
@@ -53,7 +54,7 @@ export function KpiCard({ label, value, delta, hint, icon: Icon, accent = "ink" 
             {delta.value}
           </span>
         )}
-        {hint && <span className="muted">{hint}</span>}
+        {hint && <span className="muted">{T(hint)}</span>}
       </div>
     </div>
   );

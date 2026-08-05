@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 interface PStage {
   key: string;
@@ -100,18 +101,15 @@ export default function PurchasingPage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <ShoppingCart size={22} className="text-brand-600" /> Purchasing
-          </h1>
-          <p className="text-sm muted">Track every document along the procurement chain.</p>
+            <ShoppingCart size={22} className="text-brand-600" /> {T("Purchasing")}</h1>
+          <p className="text-sm muted">{T("Track every document along the procurement chain.")}</p>
         </div>
         <div className="flex gap-2">
           <button className="btn-ghost" onClick={() => setOpenNew(true)}>
-            <Plus size={15} /> New supplier
-          </button>
+            <Plus size={15} /> {T("New supplier")}</button>
           {isDirector && (
             <button className="btn-primary" onClick={() => setOpenPO(true)}>
-              <Plus size={15} /> New PO
-            </button>
+              <Plus size={15} /> {T("New PO")}</button>
           )}
         </div>
       </div>
@@ -139,8 +137,7 @@ export default function PurchasingPage() {
             tab === "suppliers" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
           )}
         >
-          <Star size={14} /> Suppliers
-          {suppliers.data && (
+          <Star size={14} /> {T("Suppliers")}{suppliers.data && (
             <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
               {suppliers.data.length}
             </span>
@@ -154,8 +151,7 @@ export default function PurchasingPage() {
               tab === "pos" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
             )}
           >
-            <Truck size={14} /> Purchase Orders
-            {pos.data && (
+            <Truck size={14} /> {T("Purchase Orders")}{pos.data && (
               <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
                 {pos.data.length}
               </span>
@@ -172,15 +168,15 @@ export default function PurchasingPage() {
               <div className="flex-1 rounded-xl border border-ink-200 hover:border-brand-300 transition-colors p-4 bg-white relative">
                 <div className="flex items-center gap-2 text-ink-800">
                   <s.icon size={16} className="text-brand-600" />
-                  <span className="font-semibold">{s.label}</span>
+                  <span className="font-semibold">{T(s.label)}</span>
                 </div>
-                <div className="mt-1 text-xs muted">{s.hint}</div>
+                <div className="mt-1 text-xs muted">{T(s.hint)}</div>
                 <div className="mt-3 text-2xl font-semibold tabular-nums text-ink-900">
                   {count}
                 </div>
-                <div className="text-[11px] muted">open documents</div>
+                <div className="text-[11px] muted">{T("open documents")}</div>
                 <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-700 font-semibold">
-                  Open <ChevronRight size={11} />
+                  {T("Open")}{" "}<ChevronRight size={11} />
                 </div>
               </div>
             );
@@ -202,14 +198,12 @@ export default function PurchasingPage() {
       <div className="card overflow-hidden">
         <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
           <div>
-            <div className="font-semibold text-ink-900">Suppliers</div>
+            <div className="font-semibold text-ink-900">{T("Suppliers")}</div>
             <div className="text-xs muted">
-              Vendors you buy from. Rating averages lead-time, QC pass rate, and price volatility.
-            </div>
+              {T("Vendors you buy from. Rating averages lead-time, QC pass rate, and price volatility.")}</div>
           </div>
           <div className="text-[10px] uppercase tracking-wider muted">
-            {suppliers.data?.length ?? 0} total
-          </div>
+            {suppliers.data?.length ?? 0} {T("total")}</div>
         </header>
 
         {suppliers.error ? (
@@ -217,44 +211,40 @@ export default function PurchasingPage() {
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
             <div className="flex-1">
               <div className="font-medium">
-                Couldn't load suppliers
-                {(suppliers.error as any)?.response?.status
+                {T("Couldn't load suppliers")}{(suppliers.error as any)?.response?.status
                   ? ` (HTTP ${(suppliers.error as any).response.status})` : ""}.
               </div>
               <div className="text-xs mt-0.5 break-all">
                 {(suppliers.error as any)?.response?.data?.errors?.[0]?.message
                   ?? (suppliers.error as any)?.response?.data?.detail
                   ?? (suppliers.error as any)?.message
-                  ?? "Request failed"}
+                  ?? T("Request failed")}
               </div>
               <button
                 onClick={() => suppliers.refetch()}
                 className="mt-2 text-xs underline hover:no-underline"
               >
-                Retry
-              </button>
+                {T("Retry")}</button>
             </div>
           </div>
         ) : suppliers.isLoading ? (
           <div className="px-5 py-10 text-center text-sm muted flex items-center justify-center gap-2">
-            <Loader2 size={14} className="animate-spin" /> Loading…
-          </div>
+            <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
         ) : !suppliers.data?.length ? (
           <div className="px-5 py-12 text-center">
-            <div className="text-sm muted mb-3">No suppliers yet.</div>
+            <div className="text-sm muted mb-3">{T("No suppliers yet.")}</div>
             <button className="btn-primary" onClick={() => setOpenNew(true)}>
-              <Plus size={14} /> Add your first supplier
-            </button>
+              <Plus size={14} /> {T("Add your first supplier")}</button>
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Name</th>
-                <th className="th">Category</th>
-                <th className="th text-right">Rating</th>
-                <th className="th text-right">Avg lead time</th>
-                <th className="th text-right">QC fail rate</th>
+                <th className="th">{T("Name")}</th>
+                <th className="th">{T("Category")}</th>
+                <th className="th text-right">{T("Rating")}</th>
+                <th className="th text-right">{T("Avg lead time")}</th>
+                <th className="th text-right">{T("QC fail rate")}</th>
               </tr>
             </thead>
             <tbody>
@@ -291,39 +281,33 @@ export default function PurchasingPage() {
       <div className="card overflow-hidden">
         <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
           <div>
-            <div className="font-semibold text-ink-900">Supplier purchase orders</div>
+            <div className="font-semibold text-ink-900">{T("Supplier purchase orders")}</div>
             <div className="text-xs muted">
-              Director-only. Every PO must reference a supplier and a project.
-              Suppliers see them in their portal and update dates that flow to
-              the customer.
-            </div>
+              {T("Director-only. Every PO must reference a supplier and a project. Suppliers see them in their portal and update dates that flow to the customer.")}</div>
           </div>
           <div className="text-[10px] uppercase tracking-wider muted">
-            {pos.data?.length ?? 0} total
-          </div>
+            {pos.data?.length ?? 0} {T("total")}</div>
         </header>
 
         {pos.isLoading ? (
           <div className="px-5 py-10 text-center text-sm muted flex items-center justify-center gap-2">
-            <Loader2 size={14} className="animate-spin" /> Loading…
-          </div>
+            <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
         ) : !pos.data?.length ? (
           <div className="px-5 py-12 text-center">
-            <div className="text-sm muted mb-3">No purchase orders yet.</div>
+            <div className="text-sm muted mb-3">{T("No purchase orders yet.")}</div>
             <button className="btn-primary" onClick={() => setOpenPO(true)}>
-              <Plus size={14} /> Issue your first PO
-            </button>
+              <Plus size={14} /> {T("Issue your first PO")}</button>
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th">Number</th>
-                <th className="th">Supplier</th>
-                <th className="th">Project</th>
-                <th className="th">PO date</th>
-                <th className="th">Status</th>
-                <th className="th text-right">Total</th>
+                <th className="th">{T("Number")}</th>
+                <th className="th">{T("Supplier")}</th>
+                <th className="th">{T("Project")}</th>
+                <th className="th">{T("PO date")}</th>
+                <th className="th">{T("Status")}</th>
+                <th className="th text-right">{T("Total")}</th>
               </tr>
             </thead>
             <tbody>
@@ -419,29 +403,29 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
       <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
         <header className="px-5 py-4 border-b border-ink-100">
-          <h2 className="text-lg font-semibold">New supplier</h2>
-          <p className="text-sm muted mt-0.5">Add a vendor so you can issue POs against them.</p>
+          <h2 className="text-lg font-semibold">{T("New supplier")}</h2>
+          <p className="text-sm muted mt-0.5">{T("Add a vendor so you can issue POs against them.")}</p>
         </header>
         <form
           onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
           className="flex-1 overflow-auto p-5 space-y-3"
         >
-          <Field label="Name *">
+          <Field label={T("Name *")}>
             <input
               className="input" required
               value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="PT Sumber Logam Indonesia"
+              placeholder={T("PT Sumber Logam Indonesia")}
             />
           </Field>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Category">
+            <Field label={T("Category")}>
               <input
                 className="input"
                 value={category} onChange={(e) => setCategory(e.target.value)}
-                placeholder="raw_material / fabrication / shipping…"
+                placeholder={T("raw_material / fabrication / shipping…")}
               />
             </Field>
-            <Field label="Initial rating (0–5)">
+            <Field label={T("Initial rating (0–5)")}>
               <input
                 className="input" type="number" min={0} max={5} step="0.1"
                 value={rating} onChange={(e) => setRating(e.target.value)}
@@ -450,21 +434,21 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
             </Field>
           </div>
           <div className="rounded-xl border border-ink-100 p-3 space-y-3">
-            <div className="text-[10px] uppercase tracking-wider muted">Contact (optional)</div>
-            <Field label="PIC name">
+            <div className="text-[10px] uppercase tracking-wider muted">{T("Contact (optional)")}</div>
+            <Field label={T("PIC name")}>
               <input
                 className="input"
                 value={contactName} onChange={(e) => setContactName(e.target.value)}
               />
             </Field>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Phone">
+              <Field label={T("Phone")}>
                 <input
                   className="input"
                   value={contactPhone} onChange={(e) => setContactPhone(e.target.value)}
                 />
               </Field>
-              <Field label="Email">
+              <Field label={T("Email")}>
                 <input
                   className="input" type="email"
                   value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
@@ -473,11 +457,10 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
             <button type="submit" className="btn-primary" disabled={create.isPending}>
               {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Create supplier
-            </button>
+              {T("Create supplier")}</button>
           </div>
         </form>
       </div>
@@ -488,7 +471,7 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );
@@ -581,22 +564,20 @@ function NewPOModal({
       <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
         <header className="px-5 py-4 border-b border-ink-100">
-          <h2 className="text-lg font-semibold">Issue purchase order</h2>
+          <h2 className="text-lg font-semibold">{T("Issue purchase order")}</h2>
           <p className="text-sm muted mt-0.5">
-            The PO must reference a supplier and a project so the supplier can
-            update shipping dates that flow to the customer.
-          </p>
+            {T("The PO must reference a supplier and a project so the supplier can update shipping dates that flow to the customer.")}</p>
         </header>
         <form
           onSubmit={(e) => { e.preventDefault(); attemptSubmit(); }}
           className="flex-1 overflow-auto p-5 space-y-3"
         >
           <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">Supplier *</span>
+            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Supplier *")}</span>
             {suppliers.length === 0 ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>No suppliers yet. Click "+ New supplier" first.</span>
+                <span>{T("No suppliers yet. Click \"+ New supplier\" first.")}</span>
               </div>
             ) : (
               <select
@@ -605,7 +586,7 @@ function NewPOModal({
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
               >
-                <option value="">Choose a supplier…</option>
+                <option value="">{T("Choose a supplier…")}</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -614,15 +595,14 @@ function NewPOModal({
           </label>
 
           <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">Project *</span>
+            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Project *")}</span>
             {projectsLoading ? (
               <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" /> Loading projects…
-              </div>
+                <Loader2 size={14} className="animate-spin" /> {T("Loading projects…")}</div>
             ) : projects.length === 0 ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>No projects yet. Open Operations and create one.</span>
+                <span>{T("No projects yet. Open Operations and create one.")}</span>
               </div>
             ) : (
               <select
@@ -636,7 +616,7 @@ function NewPOModal({
                   setManualPrId("");
                 }}
               >
-                <option value="">Choose a project…</option>
+                <option value="">{T("Choose a project…")}</option>
                 {projects.map((p: any) => (
                   <option key={p.id} value={p.id}>
                     {p.code} {p.status ? `· ${p.status}` : ""}
@@ -649,25 +629,23 @@ function NewPOModal({
           {projectId && (
             prefill.isLoading ? (
               <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" /> Checking the price request…
-              </div>
+                <Loader2 size={14} className="animate-spin" /> {T("Checking the price request…")}</div>
             ) : linkedPR ? (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm">
                 <div className="flex items-center gap-2 text-emerald-800 font-medium">
                   <CheckCircle2 size={14} className="shrink-0" />
-                  Linked to price request {prefill.data?.price_request_number ?? ""}
+                  {T("Linked to price request")}{" "}{prefill.data?.price_request_number ?? ""}
                 </div>
                 <p className="text-[11px] text-emerald-700/90 mt-0.5">
-                  Buying prices below are pulled from purchasing's costing — no need to retype.
-                </p>
+                  {T("Buying prices below are pulled from purchasing's costing — no need to retype.")}</p>
                 {prItems.length > 0 && (
                   <table className="w-full text-xs mt-2">
                     <thead className="text-ink-500">
                       <tr>
-                        <th className="text-left font-medium py-1">Item</th>
-                        <th className="text-right font-medium py-1">Qty</th>
-                        <th className="text-right font-medium py-1">Unit cost</th>
-                        <th className="text-right font-medium py-1">Amount</th>
+                        <th className="text-left font-medium py-1">{T("Item")}</th>
+                        <th className="text-right font-medium py-1">{T("Qty")}</th>
+                        <th className="text-right font-medium py-1">{T("Unit cost")}</th>
+                        <th className="text-right font-medium py-1">{T("Amount")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -684,7 +662,7 @@ function NewPOModal({
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-emerald-200 font-medium">
-                        <td className="py-1" colSpan={3}>Total buying price</td>
+                        <td className="py-1" colSpan={3}>{T("Total buying price")}</td>
                         <td className="py-1 text-right tabular-nums">{idr(prTotal)}</td>
                       </tr>
                     </tfoot>
@@ -694,18 +672,16 @@ function NewPOModal({
             ) : (
               <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2.5 space-y-1.5">
                 <p className="text-[11px] muted">
-                  This project isn't auto-linked to a price request. Pick one to pull in its
-                  buying prices, or enter the total manually below.
-                </p>
+                  {T("This project isn't auto-linked to a price request. Pick one to pull in its buying prices, or enter the total manually below.")}</p>
                 <select
                   className="input text-sm"
                   value={manualPrId}
                   onChange={(e) => { setManualPrId(e.target.value); setTotal(""); setTotalEdited(false); }}
                 >
-                  <option value="">No price request — enter manually</option>
+                  <option value="">{T("No price request — enter manually")}</option>
                   {(prOptions.data ?? []).map((o: any) => (
                     <option key={o.id} value={o.id}>
-                      {o.number} · {o.line_count} line{o.line_count === 1 ? "" : "s"} · {idr(o.total_cost)}
+                      {o.number} · {o.line_count} {T("line")}{o.line_count === 1 ? "" : "s"} · {idr(o.total_cost)}
                     </option>
                   ))}
                 </select>
@@ -716,21 +692,19 @@ function NewPOModal({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">
-                PO number
-              </span>
+                {T("PO number")}</span>
               <input
                 className="input"
                 value={poNumber}
                 onChange={(e) => setPoNumber(e.target.value)}
-                placeholder="Auto-generated if blank (PO-YYMMDD-NNN)"
+                placeholder={T("Auto-generated if blank (PO-YYMMDD-NNN)")}
               />
               <span className="block text-[10px] text-ink-400 mt-1">
-                Leave blank to use the next sequential number.
-              </span>
+                {T("Leave blank to use the next sequential number.")}</span>
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">
-                PO date <span className="text-red-500">*</span>
+                {T("PO date")}{" "}<span className="text-red-500">*</span>
               </span>
               <input
                 type="date"
@@ -740,14 +714,13 @@ function NewPOModal({
                 onChange={(e) => setPoDate(e.target.value)}
               />
               <span className="block text-[10px] text-ink-400 mt-1">
-                The day the PO is issued.
-              </span>
+                {T("The day the PO is issued.")}</span>
             </label>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-xs font-medium text-ink-600 mb-1">Lead time (days)</span>
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Lead time (days)")}</span>
               <input
                 type="number"
                 min={0}
@@ -757,7 +730,7 @@ function NewPOModal({
               />
             </label>
             <label className="block">
-              <span className="block text-xs font-medium text-ink-600 mb-1">Total (Rp)</span>
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Total (Rp)")}</span>
               <input
                 type="number"
                 min={0}
@@ -768,21 +741,20 @@ function NewPOModal({
               />
               {linkedPR && (
                 <span className="block text-[10px] text-ink-400 mt-1">
-                  Pre-filled from the price request — override if you negotiated a different price.
-                </span>
+                  {T("Pre-filled from the price request — override if you negotiated a different price.")}</span>
               )}
             </label>
           </div>
 
           {!(linkedPR && prItems.length > 0) && (
             <label className="block">
-              <span className="block text-xs font-medium text-ink-600 mb-1">Description (optional)</span>
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Description (optional)")}</span>
               <textarea
                 rows={2}
                 className="input"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What's being purchased…"
+                placeholder={T("What's being purchased…")}
               />
             </label>
           )}
@@ -798,22 +770,21 @@ function NewPOModal({
             <div className="text-[11px] muted">
               {(!supplierId || !projectId) && (
                 <>
-                  Need: {!supplierId && <span className="font-semibold">supplier</span>}
+                  {T("Need:")}{" "}{!supplierId && <span className="font-semibold">{T("supplier")}</span>}
                   {!supplierId && !projectId && " · "}
-                  {!projectId && <span className="font-semibold">project</span>}
+                  {!projectId && <span className="font-semibold">{T("project")}</span>}
                 </>
               )}
             </div>
             <div className="flex gap-2">
-              <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
               <button
                 type="submit"
                 className="btn-primary"
                 disabled={create.isPending}
               >
                 {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                Issue PO
-              </button>
+                {T("Issue PO")}</button>
             </div>
           </div>
         </form>

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Wrench, ChevronRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 interface StageMeta {
   key: string;
@@ -50,19 +51,17 @@ export default function OperationPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Wrench size={22} className="text-brand-600" /> Operation board
-        </h1>
+          <Wrench size={22} className="text-brand-600" /> {T("Operation board")}</h1>
         <p className="text-sm muted">
           {isSales
-            ? "Read-only view of where your customers' orders are in production. Click a stage to see the customer list."
-            : "Work orders move left → right. Click a stage to open its full list, where you can mark items done or advance them along the pipeline."}
+            ? T("Read-only view of where your customers' orders are in production. Click a stage to see the customer list.")
+            : T("Work orders move left → right. Click a stage to open its full list, where you can mark items done or advance them along the pipeline.")}
         </p>
       </div>
 
       {q.isLoading && (
         <div className="card p-10 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading work orders…
-        </div>
+          <Loader2 size={14} className="animate-spin" /> {T("Loading work orders…")}</div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
@@ -77,18 +76,17 @@ export default function OperationPage() {
               <div className="flex items-center justify-between px-4 py-3 border-b border-ink-100">
                 <div className="flex items-center gap-2">
                   <span className={`h-2 w-2 rounded-full ${s.accent}`} />
-                  <span className="text-sm font-semibold">{s.label}</span>
+                  <span className="text-sm font-semibold">{T(s.label)}</span>
                 </div>
                 <span className="chip bg-ink-100 text-ink-700 font-semibold">
                   {items.length}
                 </span>
               </div>
-              <div className="text-[11px] muted px-4 pt-1">{s.hint}</div>
+              <div className="text-[11px] muted px-4 pt-1">{T(s.hint)}</div>
               <div className="flex-1 p-3 space-y-2">
                 {items.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-ink-200 p-6 text-center text-xs muted">
-                    No open work orders
-                  </div>
+                    {T("No open work orders")}</div>
                 ) : (
                   items.slice(0, 4).map((w) => (
                     <div
@@ -114,12 +112,11 @@ export default function OperationPage() {
                 )}
                 {items.length > 4 && (
                   <div className="text-[11px] muted text-center">
-                    + {items.length - 4} more
-                  </div>
+                    + {items.length - 4} {T("more")}</div>
                 )}
               </div>
               <div className="m-3 mt-0 inline-flex items-center justify-center gap-1 text-xs text-brand-700 font-semibold group-hover:underline">
-                Open <ChevronRight size={12} />
+                {T("Open")}{" "}<ChevronRight size={12} />
               </div>
             </Link>
           );

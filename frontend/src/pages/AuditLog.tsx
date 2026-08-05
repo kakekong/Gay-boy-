@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Shield, Search, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { T, locale } from "@/store/lang";
 
 interface AuditRow {
   id: string;
@@ -11,7 +12,7 @@ interface AuditRow {
   actor_role: string | null;
   action: string;
   entity: string;
-  entity_id: string;
+  entity_id: string | null;   // null for sweeps that belong to no one record
   before: Record<string, any>;
   after: Record<string, any>;
   occurred_at: string;
@@ -60,7 +61,7 @@ export default function AuditLogPage() {
 
   const visible = (rows.data ?? []).filter((r) => {
     if (!search) return true;
-    const hay = `${r.entity} ${r.action} ${r.actor_name ?? ""} ${r.entity_id}`.toLowerCase();
+    const hay = `${r.entity} ${r.action} ${r.actor_name ?? ""} ${r.entity_id ?? ""}`.toLowerCase();
     return hay.includes(search.toLowerCase());
   });
 
@@ -68,11 +69,9 @@ export default function AuditLogPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Shield size={22} className="text-brand-600" /> Audit log
-        </h1>
+          <Shield size={22} className="text-brand-600" /> {T("Audit log")}</h1>
         <p className="text-sm muted">
-          Every important change is recorded here — who did what, when, with the before/after.
-        </p>
+          {T("Every important change is recorded here — who did what, when, with the before/after.")}</p>
       </div>
 
       <div className="card p-3 flex flex-wrap items-center gap-2">
@@ -81,18 +80,18 @@ export default function AuditLogPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter by actor, entity ID, action…"
+            placeholder={T("Filter by actor, entity ID, action…")}
             className="input pl-9"
           />
         </div>
         <select value={entity} onChange={(e) => setEntity(e.target.value)}
           className="input max-w-[180px]">
-          <option value="">All entities</option>
+          <option value="">{T("All entities")}</option>
           {(entities.data ?? []).map((e) => <option key={e} value={e}>{e}</option>)}
         </select>
         <select value={action} onChange={(e) => setAction(e.target.value)}
           className="input max-w-[180px]">
-          <option value="">All actions</option>
+          <option value="">{T("All actions")}</option>
           {(actions.data ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
         <span className="ml-auto text-xs font-semibold text-ink-500">
@@ -113,7 +112,13 @@ export default function AuditLogPage() {
                         {r.action}
                       </span>
                       <span className="font-medium text-sm capitalize">{r.entity}</span>
-                      <span className="text-xs muted font-mono truncate">{r.entity_id.slice(0, 8)}…</span>
+                      {/* entity_id is nullable — the test-data purge writes one
+                          audit row for the whole sweep, which belongs to no
+                          single record. Calling .slice on that crashed the
+                          page outright rather than showing the other rows. */}
+                      {r.entity_id && (
+                        <span className="text-xs muted font-mono truncate">{r.entity_id.slice(0, 8)}…</span>
+                      )}
                     </div>
                     <div className="text-[11px] muted mt-0.5">
                       {r.actor_name ? (
@@ -125,20 +130,20 @@ export default function AuditLogPage() {
                             </span>
                           )}
                         </>
-                      ) : <span>System</span>}
-                      <span> · {new Date(r.occurred_at).toLocaleString()}</span>
+                      ) : <span>{T("System")}</span>}
+                      <span> · {new Date(r.occurred_at).toLocaleString(locale())}</span>
                     </div>
                   </div>
                 </summary>
                 <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                   <div>
-                    <div className="text-[10px] uppercase muted mb-1">Before</div>
+                    <div className="text-[10px] uppercase muted mb-1">{T("Before")}</div>
                     <pre className="rounded-lg bg-ink-50 border border-ink-100 p-2 overflow-x-auto font-mono text-ink-600">
                       {Object.keys(r.before).length ? JSON.stringify(r.before, null, 2) : "—"}
                     </pre>
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase muted mb-1">After</div>
+                    <div className="text-[10px] uppercase muted mb-1">{T("After")}</div>
                     <pre className="rounded-lg bg-ink-50 border border-ink-100 p-2 overflow-x-auto font-mono text-ink-600">
                       {Object.keys(r.after).length ? JSON.stringify(r.after, null, 2) : "—"}
                     </pre>
@@ -149,7 +154,7 @@ export default function AuditLogPage() {
           ))}
           {!visible.length && (
             <li className="p-10 text-center text-sm muted">
-              {rows.isLoading ? "Loading…" : "No audit entries match your filter."}
+              {rows.isLoading ? T("Loading…") : T("No audit entries match your filter.")}
             </li>
           )}
         </ul>

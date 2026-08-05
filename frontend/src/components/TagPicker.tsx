@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { api } from "@/api/client";
 import { TagChip } from "@/components/TagChip";
 import type { TagRecord } from "@/components/TagManager";
+import { T } from "@/store/lang";
 
 interface Props {
   userId: string;
@@ -43,8 +44,7 @@ export function TagPicker({ userId, attachedTagIds }: Props) {
         onClick={() => setOpen((v) => !v)}
         className="chip bg-ink-100 text-ink-600 hover:bg-ink-200 px-2 py-0.5"
       >
-        <Plus size={11} /> Add tag
-      </button>
+        <Plus size={11} /> {T("Add tag")}</button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
@@ -53,7 +53,7 @@ export function TagPicker({ userId, attachedTagIds }: Props) {
               autoFocus
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tags…"
+              placeholder={T("Search tags…")}
               className="input mb-2"
             />
             <div className="max-h-56 overflow-y-auto space-y-1">
@@ -69,10 +69,10 @@ export function TagPicker({ userId, attachedTagIds }: Props) {
               ))}
               {!available.length && (
                 <div className="px-2 py-3 text-xs muted text-center">
-                  {tags.isLoading ? "Loading…"
+                  {tags.isLoading ? T("Loading…")
                     : (tags.data ?? []).length === 0
-                      ? "No tags exist yet. HR / Director can create some via 'Manage tags' on the Employees page."
-                      : "No more tags to add."}
+                      ? T("No tags exist yet. HR / Director can create some via 'Manage tags' on the Employees page.")
+                      : T("No more tags to add.")}
                 </div>
               )}
             </div>

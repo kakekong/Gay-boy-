@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import type { Customer } from "@/types";
+import { T } from "@/store/lang";
 
 const KINDS = [
   { value: "follow_up",   label: "Follow-up" },
@@ -69,57 +70,57 @@ export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: P
       className="space-y-4"
     >
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Date">
+        <Field label={T("Date")}>
           <input type="date" className="input" value={date}
             onChange={(e) => setDate(e.target.value)} required />
         </Field>
-        <Field label="Time">
+        <Field label={T("Time")}>
           <input type="time" className="input" value={time}
             onChange={(e) => setTime(e.target.value)} required />
         </Field>
-        <Field label="Kind">
+        <Field label={T("Kind")}>
           <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-            {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+            {KINDS.map((k) => <option key={k.value} value={k.value}>{T(k.label)}</option>)}
           </select>
         </Field>
-        <Field label="Channel">
+        <Field label={T("Channel")}>
           <select className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>
-            {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {CHANNELS.map((c) => <option key={c.value} value={c.value}>{T(c.label)}</option>)}
           </select>
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Repeat">
+        <Field label={T("Repeat")}>
           <select className="input" value={recurs} onChange={(e) => setRecurs(e.target.value)}>
-            <option value="none">Never</option>
-            <option value="daily">Every day</option>
-            <option value="weekly">Every week</option>
-            <option value="biweekly">Every 2 weeks</option>
-            <option value="monthly">Every month</option>
+            <option value="none">{T("Never")}</option>
+            <option value="daily">{T("Every day")}</option>
+            <option value="weekly">{T("Every week")}</option>
+            <option value="biweekly">{T("Every 2 weeks")}</option>
+            <option value="monthly">{T("Every month")}</option>
           </select>
         </Field>
         {recurs !== "none" && (
-          <Field label="Repeat until (optional)">
+          <Field label={T("Repeat until (optional)")}>
             <input type="date" className="input" value={recursUntil}
               onChange={(e) => setRecursUntil(e.target.value)} />
           </Field>
         )}
       </div>
 
-      <Field label="Customer (optional)">
+      <Field label={T("Customer (optional)")}>
         <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-          <option value="">— none —</option>
+          <option value="">{T("— none —")}</option>
           {(customers.data ?? []).map((c) => (
             <option key={c.id} value={c.id}>{c.company_name}</option>
           ))}
         </select>
       </Field>
-      <Field label="Message">
+      <Field label={T("Message")}>
         <textarea
           className="input min-h-[80px]"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="What should happen at this time?"
+          placeholder={T("What should happen at this time?")}
         />
       </Field>
 
@@ -130,10 +131,10 @@ export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: P
       )}
 
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
         <button type="submit" className="btn-primary" disabled={create.isPending}>
           {create.isPending && <Loader2 size={14} className="animate-spin" />}
-          {create.isPending ? "Saving…" : "Save reminder"}
+          {create.isPending ? T("Saving…") : T("Save reminder")}
         </button>
       </div>
     </form>
@@ -143,7 +144,7 @@ export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: P
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-ink-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-ink-600 mb-1">{T(label)}</span>
       {children}
     </label>
   );

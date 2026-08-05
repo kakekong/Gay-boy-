@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { useT, t as tt } from "@/store/lang";
+import { useT, t as tt, T, locale } from "@/store/lang";
 
 interface Props {
   quotationId: string;
@@ -165,7 +165,7 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
           </div>
           <div className="text-xs muted">
             {isPosted
-              ? `${t("Balances updated at", "Saldo diperbarui pada")} ${new Date(links.data!.posted_at!).toLocaleString()}. ${t("Click Reverse to roll back.", "Klik Balik untuk membatalkannya.")}`
+              ? `${t("Balances updated at", "Saldo diperbarui pada")} ${new Date(links.data!.posted_at!).toLocaleString(locale())}. ${t("Click Reverse to roll back.", "Klik Balik untuk membatalkannya.")}`
               : t(
                   "When this quotation is marked Won, the linked accounts auto-update. You can also post manually.",
                   "Saat penawaran ini ditandai Menang, akun tertaut diperbarui otomatis. Anda juga bisa memposting secara manual.",
@@ -232,8 +232,8 @@ export function LinkedAccountsPanel({ quotationId }: Props) {
               return (
                 <tr key={l.role} className="border-t border-ink-100">
                   <td className="td">
-                    <span className={clsx("chip uppercase", M.tone)}>{M.label}</span>
-                    <div className="text-[11px] muted mt-1">{M.hint}</div>
+                    <span className={clsx("chip uppercase", M.tone)}>{T(M.label)}</span>
+                    <div className="text-[11px] muted mt-1">{T(M.hint)}</div>
                   </td>
                   <td className="td">
                     {hasCoaAccess ? (

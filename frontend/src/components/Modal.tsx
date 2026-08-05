@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
+import { T } from "@/store/lang";
 
 interface Props {
   open: boolean;
@@ -47,7 +48,7 @@ export function Modal({ open, onClose, title, subtitle, children, size = "md", f
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg text-ink-400 hover:bg-ink-100 hover:text-ink-700"
-            aria-label="Close"
+            aria-label={T("Close")}
           >
             <X size={18} />
           </button>

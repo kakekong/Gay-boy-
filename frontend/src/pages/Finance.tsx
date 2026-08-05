@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
+import { T } from "@/store/lang";
 
 const BUCKETS = [
   { key: "current", label: "Current",    color: "bg-emerald-500" },
@@ -23,17 +24,14 @@ export default function FinancePage() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Banknote size={22} className="text-brand-600" /> Finance · AR Aging
-          </h1>
-          <p className="text-sm muted">Outstanding receivables grouped by days past due.</p>
+            <Banknote size={22} className="text-brand-600" /> {T("Finance · AR Aging")}</h1>
+          <p className="text-sm muted">{T("Outstanding receivables grouped by days past due.")}</p>
         </div>
         <div className="flex gap-2">
           <Link to="/finance/reports" className="btn-ghost">
-            <BarChart3 size={15} /> Financial reports
-          </Link>
+            <BarChart3 size={15} /> {T("Financial reports")}</Link>
           <Link to="/finance/estimated" className="btn-ghost">
-            <LineChart size={15} /> Estimated finance
-          </Link>
+            <LineChart size={15} /> {T("Estimated finance")}</Link>
         </div>
       </div>
 
@@ -75,11 +73,9 @@ function EFakturExport() {
     <div className="card p-4 flex items-center gap-3 flex-wrap">
       <div className="flex-1 min-w-[220px]">
         <div className="font-semibold flex items-center gap-2">
-          <ReceiptText size={15} className="text-brand-600" /> e-Faktur export
-        </div>
+          <ReceiptText size={15} className="text-brand-600" /> {T("e-Faktur export")}</div>
         <div className="text-xs muted">
-          Approved invoices with a faktur pajak number, as an e-Faktur import CSV for the chosen masa pajak.
-        </div>
+          {T("Approved invoices with a faktur pajak number, as an e-Faktur import CSV for the chosen masa pajak.")}</div>
       </div>
       <input
         type="month"
@@ -90,8 +86,7 @@ function EFakturExport() {
       />
       <button className="btn-primary" onClick={download} disabled={busy || !period}>
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-        Export CSV
-      </button>
+        {T("Export CSV")}</button>
       {err && <div className="w-full text-sm text-red-700">{err}</div>}
     </div>
   );
@@ -116,29 +111,22 @@ function PendingPaymentClaims() {
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Banknote size={15} className="text-brand-600" /> Pending payment claims
-          </div>
+            <Banknote size={15} className="text-brand-600" /> {T("Pending payment claims")}</div>
           <div className="text-xs muted">
-            Customers submitted these payments — verify them to advance the
-            project to paid/closed. Approving the invoice above isn't enough
-            on its own; this is the actual money-in step.
-          </div>
+            {T("Customers submitted these payments — verify them to advance the project to paid/closed. Approving the invoice above isn't enough on its own; this is the actual money-in step.")}</div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="chip bg-amber-50 text-amber-700">{rows.length} pending</span>
+          <span className="chip bg-amber-50 text-amber-700">{rows.length} {T("pending")}</span>
           <Link to="/finance/payment-verification" className="btn-ghost text-xs">
-            Open verification queue
-          </Link>
+            {T("Open verification queue")}</Link>
         </div>
       </div>
       {pending.isLoading ? (
         <div className="p-6 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading…
-        </div>
+          <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
       ) : rows.length === 0 ? (
         <div className="p-6 text-center text-sm muted">
-          No customer payments waiting for verification.
-        </div>
+          {T("No customer payments waiting for verification.")}</div>
       ) : (
         <ul className="divide-y divide-ink-100">
           {rows.slice(0, 5).map((c: any) => (
@@ -147,7 +135,7 @@ function PendingPaymentClaims() {
                 <span className="font-mono font-medium">{c.invoice_number ?? "—"}</span>
                 <span className="muted"> · {c.customer_user_name ?? "—"}</span>
                 {c.method && <span className="muted"> · {c.method}</span>}
-                {c.reference && <span className="muted"> · ref {c.reference}</span>}
+                {c.reference && <span className="muted"> {T("· ref")}{" "}{c.reference}</span>}
               </div>
               <div className="flex items-center gap-3">
                 <div className="text-sm font-semibold tabular-nums">{idr(c.amount)}</div>
@@ -155,15 +143,13 @@ function PendingPaymentClaims() {
                   to="/finance/payment-verification"
                   className="btn-primary text-xs"
                 >
-                  <CheckCircle size={12} /> Verify
-                </Link>
+                  <CheckCircle size={12} /> {T("Verify")}</Link>
               </div>
             </li>
           ))}
           {rows.length > 5 && (
             <li className="px-4 py-2 text-xs muted text-center">
-              + {rows.length - 5} more claim(s) in the verification queue.
-            </li>
+              + {rows.length - 5} {T("more claim(s) in the verification queue.")}</li>
           )}
         </ul>
       )}
@@ -241,15 +227,14 @@ function PendingInvoiceApprovals() {
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <FileText size={15} className="text-brand-600" /> Pending invoice approvals
-          </div>
+            <FileText size={15} className="text-brand-600" /> {T("Pending invoice approvals")}</div>
           <div className="text-xs muted">
             {canApprove
-              ? "Enter the faktur pajak number (and optionally upload the FP file), then approve."
-              : "Invoices waiting on finance to enter the faktur pajak and approve."}
+              ? T("Enter the faktur pajak number (and optionally upload the FP file), then approve.")
+              : T("Invoices waiting on finance to enter the faktur pajak and approve.")}
           </div>
         </div>
-        <span className="chip bg-amber-50 text-amber-700">{rows.length} pending</span>
+        <span className="chip bg-amber-50 text-amber-700">{rows.length} {T("pending")}</span>
       </div>
 
       {err && (
@@ -260,10 +245,9 @@ function PendingInvoiceApprovals() {
 
       {pending.isLoading ? (
         <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">
-          <Loader2 size={14} className="animate-spin" /> Loading…
-        </div>
+          <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
       ) : rows.length === 0 ? (
-        <div className="p-8 text-center text-sm muted">No invoices waiting for finance approval.</div>
+        <div className="p-8 text-center text-sm muted">{T("No invoices waiting for finance approval.")}</div>
       ) : (
         <ul className="divide-y divide-ink-100">
           {rows.map((iv: any) => {
@@ -297,12 +281,12 @@ function PendingInvoiceApprovals() {
                   <div className="space-y-2 pt-1">
                     <div className="grid grid-cols-1 sm:grid-cols-[2fr_2fr_auto] gap-2 items-end">
                       <label className="block">
-                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">Faktur pajak no. *</span>
+                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">{T("Faktur pajak no. *")}</span>
                         <input className="input" value={f.no}
                           onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, no: e.target.value } }))} />
                       </label>
                       <label className="block">
-                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">FP file (optional)</span>
+                        <span className="block text-[10px] uppercase tracking-wider muted mb-1">{T("FP file (optional)")}</span>
                         <input type="file"
                           className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
                           onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, file: e.target.files?.[0] ?? null } }))} />
@@ -310,16 +294,14 @@ function PendingInvoiceApprovals() {
                       <button className="btn-primary"
                         disabled={!f.no.trim() || approve.isPending}
                         onClick={() => approve.mutate({ invoiceId: iv.id, fpNo: f.no.trim(), fpFile: f.file })}>
-                        <CheckCircle size={14} /> Approve
-                      </button>
+                        <CheckCircle size={14} /> {T("Approve")}</button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
                       <label className="block">
                         <span className="block text-[10px] uppercase tracking-wider muted mb-1">
-                          Rejection reason (required if rejecting)
-                        </span>
+                          {T("Rejection reason (required if rejecting)")}</span>
                         <input className="input" value={f.reason ?? ""}
-                          placeholder="e.g. wrong amount, invoice PDF unreadable, missing DO…"
+                          placeholder={T("e.g. wrong amount, invoice PDF unreadable, missing DO…")}
                           onChange={(e) => setForms((m) => ({ ...m, [iv.id]: { ...f, reason: e.target.value } }))} />
                       </label>
                       <button className="btn-ghost text-red-600 border border-red-200 hover:bg-red-50"
@@ -330,8 +312,7 @@ function PendingInvoiceApprovals() {
                           )) return;
                           reject.mutate({ invoiceId: iv.id, reason: (f.reason ?? "").trim() });
                         }}>
-                        <XCircle size={14} /> Reject
-                      </button>
+                        <XCircle size={14} /> {T("Reject")}</button>
                     </div>
                   </div>
                 )}
@@ -356,7 +337,7 @@ function ArAging() {
   return (
     <div className="space-y-5">
       <div className="card p-5">
-        <div className="text-xs uppercase tracking-wider muted">Total outstanding</div>
+        <div className="text-xs uppercase tracking-wider muted">{T("Total outstanding")}</div>
         <div className="text-3xl font-semibold tabular-nums mt-1">{fmt(total)}</div>
         <div className="mt-4 flex h-3 rounded-full overflow-hidden border border-ink-100">
           {BUCKETS.map((b) => {
@@ -378,7 +359,7 @@ function ArAging() {
           <div key={b.key} className="card p-4">
             <div className="flex items-center gap-2 text-xs muted">
               <span className={clsx("h-2 w-2 rounded-full", b.color)} />
-              {b.label}
+              {T(b.label)}
             </div>
             <div className="text-xl font-semibold tabular-nums mt-1">
               {fmt(buckets[b.key] || 0)}
