@@ -47,7 +47,9 @@ from app.models.attachment import Attachment
 from app.models.comment import EntityComment
 from app.models.crm import Customer, CustomerContact
 from app.models.customer_po import CustomerPO
+from app.models.account import Account
 from app.models.finance import Invoice, LedgerEntry, Payment
+from app.models.inventory import InventoryItem
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
 from app.models.price_request import PriceRequest
 from app.models.purchasing import PurchaseRequest, RFQ, SupplierPO
@@ -343,6 +345,9 @@ async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
     await wipe(Quotation, Quotation.id, plan["quotes"])             # items cascade
     await wipe(PriceRequest, PriceRequest.id, plan["prs"])
     await wipe(Customer, Customer.id, plan["doomed"])               # contacts/activities/reminders cascade
+    # Flat records, deleted last because nothing else waits on them.
+    await wipe(InventoryItem, InventoryItem.id, plan.get("items") or set())  # movements cascade
+    await wipe(Account, Account.id, plan.get("accounts") or set())
     return paths
 
 
@@ -380,6 +385,11 @@ RECORD_TYPES: dict[str, dict] = {
     "supplier_po":   {"model": SupplierPO,   "label": "Supplier PO",   "num": "number"},
     "purchase_request": {"model": PurchaseRequest, "label": "Purchase request", "num": "number"},
     "customer":      {"model": Customer,     "label": "Customer",      "num": "company_name"},
+    # Flat records with nothing hanging off them. They are here because an
+    # import is the main way they arrive in bulk, and a test batch you cannot
+    # remove is a test you only get to run once.
+    "inventory_item": {"model": InventoryItem, "label": "Part", "num": "sku"},
+    "account":        {"model": Account,       "label": "Account", "num": "account_no"},
 }
 
 
@@ -413,11 +423,14 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     preqs: set[UUID] = set()
     rfqs: set[UUID] = set()
     doomed: set[UUID] = set()          # customers
+    parts: set[UUID] = set()           # inventory parts — nothing hangs off them
+    accounts: set[UUID] = set()        # chart-of-accounts rows, likewise
 
     bucket = {
         "price_request": prs, "quotation": quotes, "customer_po": cpos,
         "project": projects, "invoice": invoices, "supplier_po": spos,
         "purchase_request": preqs, "customer": doomed,
+        "inventory_item": parts, "account": accounts,
     }
     for t in targets:
         if t.type in bucket:
@@ -484,7 +497,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     dos = await _ids(db, select(DeliveryOrder.id).where(DeliveryOrder.project_id.in_(projects)))
     payments = await db.scalar(
         select(func.count(Payment.id)).where(Payment.invoice_id.in_(invoices))) or 0
-    items = await db.scalar(
+    line_count = await db.scalar(
         select(func.count(QuotationItem.id)).where(QuotationItem.quotation_id.in_(quotes))) or 0
 
     doomed_ids = (doomed | projects | quotes | prs | cpos | invoices | spos | preqs
@@ -505,6 +518,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     return {
         "keep_customers": set(), "by_rule": {},
         "doomed": doomed,
+        "items": parts, "accounts": accounts,
         "projects": projects, "quotes": quotes, "prs": prs, "cpos": cpos,
         "invoices": invoices, "spos": spos, "preqs": preqs, "rfqs": rfqs,
         "contacts": contacts, "work_orders": work_orders, "drawings": drawings,
@@ -512,7 +526,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         "approvals": approvals, "ledger": ledger,
         "counts": {
             "customers": len(doomed), "price_requests": len(prs),
-            "quotations": len(quotes), "quotation_items": items,
+            "quotations": len(quotes), "quotation_items": line_count,
             "customer_pos": len(cpos), "projects": len(projects),
             "work_orders": len(work_orders), "drawings": len(drawings),
             "delivery_orders": len(dos), "contacts": len(contacts),
@@ -521,6 +535,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
             "purchase_requests": len(preqs), "rfqs": len(rfqs),
             "attachments": len(attachments), "discussion_messages": len(comments),
             "approval_requests": len(approvals),
+            "inventory_items": len(parts), "accounts": len(accounts),
         },
     }
 
@@ -532,7 +547,9 @@ async def _describe(db: AsyncSession, plan: dict) -> list[dict]:
     for kind, ids in (("price_request", plan["prs"]), ("quotation", plan["quotes"]),
                       ("customer_po", plan["cpos"]), ("project", plan["projects"]),
                       ("invoice", plan["invoices"]), ("supplier_po", plan["spos"]),
-                      ("purchase_request", plan["preqs"]), ("customer", plan["doomed"])):
+                      ("purchase_request", plan["preqs"]), ("customer", plan["doomed"]),
+                      ("inventory_item", plan.get("items", set())),
+                      ("account", plan.get("accounts", set()))):
         if not ids:
             continue
         spec = RECORD_TYPES[kind]
@@ -566,6 +583,19 @@ async def _financial_warnings(db: AsyncSession, plan: dict) -> list[str]:
         warns.append(
             f"{len(plan['ledger'])} ledger entries go with this. Any financial "
             f"report already run for those periods will change.")
+    if plan.get("accounts"):
+        # `LedgerEntry.account_no` is a string, not a foreign key, so deleting
+        # an account that has been posted to leaves those entries naming an
+        # account that is not in the chart — the trial balance still adds up,
+        # but the line has no name. Worth a yes of its own.
+        nos = [n for (n,) in (await db.execute(
+            select(Account.account_no).where(Account.id.in_(plan["accounts"])))).all()]
+        posted = await db.scalar(select(func.count(LedgerEntry.id)).where(
+            LedgerEntry.account_no.in_(nos))) or 0
+        if posted:
+            warns.append(
+                f"{posted} ledger entries have been posted to these accounts. "
+                f"Deleting them leaves those entries without an account name.")
     return warns
 
 

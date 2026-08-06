@@ -660,7 +660,10 @@ async def preview_quotations(
         "unmatched_customers": sorted({
             p["customer_name"] for p in plan if p["action"] == "no_customer"
         }),
-        "value": round(sum(p["subtotal"] for p in plan if p["action"] == "create"), 2),
+        # What the file is worth, not what is left to import — the section this
+        # feeds is headed "what this file contains", and counting only the
+        # not-yet-imported rows made it read "Rp 0" the moment a run finished.
+        "value": round(sum(p["subtotal"] for p in plan), 2),
         "rows": plan,
     }
 

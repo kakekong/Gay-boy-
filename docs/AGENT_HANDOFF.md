@@ -213,7 +213,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
-| `test_record_delete.py` | deleting named documents: everything downstream of the pick goes, nothing outside it is touched, upstream is never taken, money needs its own confirmation — and the numbering regression that made deleting anything break the creation of the next one |
+| `test_record_delete.py` | deleting named documents (including the flat kinds — parts and chart-of-accounts rows, which is how a test import gets undone): everything downstream of the pick goes, nothing outside it is touched, upstream is never taken, money needs its own confirmation — and the numbering regression that made deleting anything break the creation of the next one |
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
@@ -473,6 +473,12 @@ Chat messages and discussion comments both push instantly.
   request broke making the next one. Fixed in `services/numbering.py`
   (`_next_suffix`), and `operation._next_doc_number` (invoices, DOs) and the
   supplier-PO generator now share it. Any new numbering must too.
+- **Sample files for testing the importers** live in the repo at
+  `docs/samples/` — real slices of the user's own Accurate exports, cut so the
+  four run in order (the 8 sample quotations name customers that the 11 sample
+  customers contain, and the sample chart of accounts contains all 15 accounts
+  the seed does *not* have, so it demonstrates an import rather than reporting
+  "already here" 22 times).
 - **Not every link between documents is a foreign key.** `PriceRequest
   .quotation_id`, `Quotation.project_id`, `Quotation.price_request_id`,
   `Project.price_request_id` and `SupplierPO.price_request_id` are bare uuid

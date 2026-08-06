@@ -404,7 +404,7 @@ export default function DataImportPage() {
             {kind === "accounts" && !!preview.renamed?.length && (
               <div className="mx-4 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 <div className="font-semibold">
-                  {t(`${preview.renamed.length} accounts are named differently in Accurate`,
+                  {t(`${preview.renamed.length} account${preview.renamed.length === 1 ? " is" : "s are"} named differently in Accurate`,
                      `${preview.renamed.length} akun punya nama berbeda di Accurate`)}
                 </div>
                 <div className="mt-1 space-y-0.5">

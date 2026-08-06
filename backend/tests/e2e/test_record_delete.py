@@ -311,6 +311,49 @@ async def main():
           J(q3).get("number") != qq[1]["number"],
           f"{J(q3).get('number')} vs {qq[1]['number']}")
 
+    # ── the flat records: parts and accounts ─────────────────────────────────
+    # These hang off nothing, which is the whole reason they are easy to get
+    # wrong: the closure has to carry them through without touching anything
+    # else. (It once did not — the parts set shared a name with the
+    # quotation-line count and got overwritten by an integer, and previewing a
+    # parts delete died with "object of type 'int' has no len()".)
+    part = J(await c.post("/inventory", headers=d, json={
+        "sku": f"SKU-{tag}", "name": f"Voler Chain {tag}", "category": "CHAIN",
+        "uom": "pcs"}))
+    acct = J(await c.post("/accounts", headers=d, json={
+        "account_no": f"99{tag}", "name": f"Akun Uji {tag}",
+        "account_type": "Expense"}))
+    check("a part and an account exist to delete",
+          part.get("id") and acct.get("id"), f"{part} {acct}"[:160])
+
+    p5 = J(await c.post("/maintenance/records/preview", headers=d, json={
+        "targets": [{"type": "inventory_item", "id": part["id"]},
+                    {"type": "account", "id": acct["id"]}]}))
+    check("previewing a parts + accounts delete works at all",
+          "counts" in p5, str(p5)[:180])
+    check("...and counts them under their own names",
+          p5["counts"].get("inventory_items") == 1 and p5["counts"].get("accounts") == 1,
+          str(p5["counts"]))
+    check("...without dragging in anything else",
+          sum(v for k, v in p5["counts"].items()
+              if k not in ("inventory_items", "accounts")) == 0, str(p5["counts"]))
+    check("...and names both documents", len(p5["documents"]) == 2,
+          str([x["type"] for x in p5["documents"]]))
+
+    r5 = J(await c.post("/maintenance/records/delete", headers=d, json={
+        "targets": [{"type": "inventory_item", "id": part["id"]},
+                    {"type": "account", "id": acct["id"]}],
+        "confirm": PHRASE, "allow_financial": True}))
+    check("both are deleted", r5.get("deleted", {}).get("inventory_items") == 1
+          and r5.get("deleted", {}).get("accounts") == 1, str(r5)[:180])
+    inv = J(await c.get("/inventory", headers=d, params={"q": f"SKU-{tag}"}))
+    inv = inv.get("data") if isinstance(inv, dict) else inv
+    check("...the part is really gone", not (inv or []), str(inv)[:120])
+    acc = J(await c.get("/accounts", headers=d, params={"q": f"99{tag}"}))
+    acc = acc.get("data") if isinstance(acc, dict) else acc
+    check("...and so is the account",
+          not [a for a in (acc or []) if a["account_no"] == f"99{tag}"], str(acc)[:120])
+
     # The sweep must still work — both paths share one delete routine now.
     users = J(await c.get("/users", headers=d))
     users = users.get("data") if isinstance(users, dict) else users
