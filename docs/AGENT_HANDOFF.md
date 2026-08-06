@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 29 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 30 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -212,6 +212,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
+| `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
@@ -519,14 +520,16 @@ customer importer for the old Accurate data.
 
 ## 10. Open items
 
-- **Only the customer list has an importer.** The user's Google Drive "Data
-  transmisi" folder (`1CqQpxzFLPRSJkEJMEJIPJgYGgZcM-C7W`) holds four Accurate
-  exports. `daftar-pelanggan.xlsx` (~97 customers) is mapped and importable via
-  *Import data*; `daftar-barang.xlsx` (inventory), `akun-perkiraan.xlsx` (chart
-  of accounts) and `rincian_penawaran_penjualan_*.xlsx` (quotations) are **not**
-  — nobody has looked at their columns yet. Also: create the sales accounts
-  *before* importing customers, or every row lands unassigned and the sales
-  scoping has nothing to work with.
+- **All four Accurate exports import; none has been run against production.**
+  The user's Google Drive "Data transmisi" folder
+  (`1CqQpxzFLPRSJkEJMEJIPJgYGgZcM-C7W`) holds `daftar-pelanggan.xlsx` (97 rows
+  → 87 customers), `daftar-barang.xlsx` (731 parts), `akun-perkiraan.xlsx`
+  (112 accounts, 97 of which the seed already has) and
+  `rincian_penawaran_penjualan_*.xlsx` (137 quotations, 487 lines,
+  Rp 43.2 bn). All four are mapped, tested and reachable from *Import data*.
+  **Order matters**: create the sales accounts first (or every customer lands
+  unassigned), then customers, then quotations (a quotation needs a customer
+  to belong to — 134 of 137 match once the customers are in).
 - **Nothing has actually been purged yet.** The director-only *Clear test data*
   screen is built, tested and deployed, but it is the user who has to run it
   against production. Until they do, the test customers/projects/POs they asked

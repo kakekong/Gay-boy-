@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   NavLink, useLocation, useNavigate, useNavigationType,
 } from "react-router-dom";
@@ -437,15 +437,36 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const dismissibleIdsFor = (n: NavItem): string[] =>
     n.badgeQuery ? [] : (pathItems[n.to] ?? []);
 
-  // ── "mark as read" on right-click ────────────────────────────────────────
+  // ── "mark as read": right-click on a mouse, a plain tap on touch ─────────
   // Right-click is exploratory — people use it to see what's available, not to
   // fire something off — so it opens a one-item menu rather than clearing on
-  // the spot. Touch has no right-click, so a long press opens the same menu.
+  // the spot.
+  //
+  // Touch got a half-second long press for a while and it did not work. Mobile
+  // browsers claim that gesture for their own text-selection and link menus,
+  // so the press either did nothing or produced the browser's menu instead of
+  // ours, and there was no way to tell which you were going to get. On a phone
+  // the badge is now what it used to be — something you tap — except the tap
+  // opens the same named menu rather than clearing on the spot, because the
+  // pill sits at the outer edge of a full-width nav row and a mis-tap that
+  // silently ate a day's alerts is the failure this has to avoid.
   const [badgeMenu, setBadgeMenu] = useState<
     { ids: string[]; count: number; x: number; y: number } | null
   >(null);
-  const longPressTimer = useRef<number | null>(null);
-  const longPressFiredRef = useRef(false);
+
+  // `hover: none` is the honest test for "this device cannot show a hover
+  // affordance and has no right mouse button". Watched rather than read once:
+  // a tablet with a keyboard folio attached and detached flips it mid-session.
+  const [touch, setTouch] = useState(
+    () => typeof window !== "undefined"
+      && window.matchMedia("(hover: none), (pointer: coarse)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(hover: none), (pointer: coarse)");
+    const on = () => setTouch(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
 
   const openBadgeMenu = (ids: string[], count: number, x: number, y: number) => {
     // Clamp so the menu never opens off-screen — on a phone the badge sits
@@ -457,20 +478,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
       y: Math.min(y, Math.max(8, window.innerHeight - H - 8)),
     });
   };
-  const cancelLongPress = () => {
-    if (longPressTimer.current !== null) {
-      window.clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-  const startLongPress = (fire: () => void) => {
-    cancelLongPress();
-    longPressFiredRef.current = false;
-    longPressTimer.current = window.setTimeout(() => {
-      longPressTimer.current = null;
-      longPressFiredRef.current = true;
-      fire();
-    }, 500);
+  /** Open under the badge itself, for the cases with no cursor to open at. */
+  const openBadgeMenuAt = (el: HTMLElement, ids: string[], count: number) => {
+    const r = el.getBoundingClientRect();
+    openBadgeMenu(ids, count, r.left, r.bottom + 6);
   };
 
   // Anything that moves the page out from under the menu closes it — the menu
@@ -615,11 +626,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
                         const ids = dismissibleIdsFor(n);
                         const count = badgeCountFor(n);
                         // A queue badge is a live count of work that still
-                        // exists — it clears by doing the work, so right-click
-                        // leaves it to the browser. An alert badge offers
-                        // "mark as read" on right-click (long-press on touch);
-                        // a left click still just follows the nav link.
+                        // exists — it clears by doing the work, so it stays a
+                        // plain label and right-click is left to the browser.
+                        // An alert badge offers "mark as read": right-click
+                        // with a mouse, a tap on touch. A left click on a
+                        // mouse still just follows the nav link.
                         const clearable = ids.length > 0;
+                        const label = t(
+                          `${count} alert${count === 1 ? "" : "s"} — ${touch ? "tap" : "right-click"} to mark as read`,
+                          `${count} notifikasi — ${touch ? "ketuk" : "klik kanan"} untuk menandai dibaca`,
+                        );
                         return (
                           <span
                             className={clsx(
@@ -628,40 +644,39 @@ export function Shell({ children }: { children: React.ReactNode }) {
                               // without moving the pill — it is ~18px, which
                               // is under the comfortable minimum on a phone.
                               clearable && "-m-1 p-1 select-none",
+                              clearable && touch && "cursor-pointer",
                             )}
                             {...(clearable ? {
                               tabIndex: 0,
+                              role: touch ? ("button" as const) : undefined,
                               "aria-haspopup": "menu" as const,
                               // The context-menu key (or Shift+F10) fires
                               // `contextmenu` on the focused element, so the
-                              // keyboard gets the same action for free.
-                              title: t(
-                                `${count} alert${count === 1 ? "" : "s"} — right-click to mark as read`,
-                                `${count} notifikasi — klik kanan untuk menandai dibaca`,
-                              ),
+                              // keyboard gets the action for free on desktop;
+                              // Enter/Space covers it where tap is the gesture.
+                              title: label,
+                              "aria-label": touch ? label : undefined,
                               style: { WebkitTouchCallout: "none" as const },
                               onContextMenu: (e: React.MouseEvent) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 openBadgeMenu(ids, count, e.clientX, e.clientY);
                               },
-                              onPointerDown: (e: React.PointerEvent) => {
-                                if (e.pointerType === "mouse") return;
-                                const x = e.clientX, y = e.clientY;
-                                startLongPress(() => openBadgeMenu(ids, count, x, y));
-                              },
-                              onPointerUp: cancelLongPress,
-                              onPointerLeave: cancelLongPress,
-                              onPointerCancel: cancelLongPress,
                               onClick: (e: React.MouseEvent) => {
-                                // A long-press fires click too on most touch
-                                // browsers; without this the menu opens and
-                                // the nav link fires underneath it.
-                                if (longPressFiredRef.current) {
-                                  longPressFiredRef.current = false;
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                }
+                                if (!touch) return;      // mouse: follow the link
+                                // The badge lives inside the NavLink, so the
+                                // tap has to be taken off it explicitly or the
+                                // menu opens and the page navigates out from
+                                // under it in the same gesture.
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openBadgeMenuAt(e.currentTarget as HTMLElement, ids, count);
+                              },
+                              onKeyDown: (e: React.KeyboardEvent) => {
+                                if (e.key !== "Enter" && e.key !== " ") return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openBadgeMenuAt(e.currentTarget as HTMLElement, ids, count);
                               },
                             } : {
                               title: t(

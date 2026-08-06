@@ -66,6 +66,26 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+def name_key(s: str) -> str:
+    """Company names, reduced to something two spellings of one company share.
+
+    The same company is written `PT. Mayora Indah`, `PT.MAYORA INDAH` and
+    `PT MAYORA INDAH, TBK` across these exports, so punctuation, case and the
+    legal form all have to come off before comparing. Lives here rather than
+    in the endpoint because the quotation import matches its `Pelanggan`
+    column against customers with exactly the same rule — if the two ever
+    disagreed, quotations would silently fail to find customers that are
+    plainly there.
+    """
+    s = _norm(s)
+    s = re.sub(r"^\s*\[.*?\]\s*", "", s)          # [C.00013] duplicate marker
+    # Accurate appends its own column headings to some exported names.
+    s = re.split(r"\bmata uang\b", s)[0]
+    s = re.sub(r"\b(pt|cv|ud|tbk|persero)\b", " ", s)
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _clean(v: str | None) -> str | None:
     """Trim, drop Accurate's markdown escaping, and treat blanks as absent."""
     if v is None:
