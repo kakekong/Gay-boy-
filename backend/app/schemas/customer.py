@@ -69,5 +69,7 @@ class CustomerOut(CustomerBase):
     stage: str
     lifetime_value: float
     lost_reason: str | None = None
+    # Set only on customers brought in from the old accounting system.
+    external_code: str | None = None
 
     model_config = {"from_attributes": True}

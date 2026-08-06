@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 28 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 29 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -211,6 +211,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
+| `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
@@ -455,6 +456,13 @@ Chat messages and discussion comments both push instantly.
   there is no un-dismiss endpoint — so a second run the same day finds the
   alert already gone. That driver deletes its own `notification_dismissed` rows
   up front; copy that if you write another.
+- **The customer importer matches sales reps by first name only.** The Accurate
+  export records ownership in `Kategori` as free text — "Customer Candra" — so
+  that is all there is to match on. A first name shared by two active accounts
+  is deliberately left **unmatched** rather than guessed at, and the preview
+  names it under `unmatched_reps`. If a driver creates a `Candra` and something
+  else in the same database already has one, the match stops working; tag
+  fixture names per run (`test_customer_import.py` does).
 - **`'text/html' is not a valid JavaScript MIME type`** — a stale-build symptom
   after a Vercel deploy: the browser holds an old index.html referencing a hash
   that no longer exists. Handled by a reload-on-chunk-error path; if it
@@ -506,10 +514,19 @@ Ongoing/Closed project sections, the VOLER re-skin, @mentions, a Back button in
 the app chrome, WhatsApp-style replies and forwarding, the director-only test
 data purge, director-editable price requests with capped negotiation revisions,
 the customer-PO keterangan and order confirmation sheet, cross-department chat
-by request, and document previews in the approval inbox.
+by request, document previews in the approval inbox, and a director-only
+customer importer for the old Accurate data.
 
 ## 10. Open items
 
+- **Only the customer list has an importer.** The user's Google Drive "Data
+  transmisi" folder (`1CqQpxzFLPRSJkEJMEJIPJgYGgZcM-C7W`) holds four Accurate
+  exports. `daftar-pelanggan.xlsx` (~97 customers) is mapped and importable via
+  *Import data*; `daftar-barang.xlsx` (inventory), `akun-perkiraan.xlsx` (chart
+  of accounts) and `rincian_penawaran_penjualan_*.xlsx` (quotations) are **not**
+  — nobody has looked at their columns yet. Also: create the sales accounts
+  *before* importing customers, or every row lands unassigned and the sales
+  scoping has nothing to work with.
 - **Nothing has actually been purged yet.** The director-only *Clear test data*
   screen is built, tested and deployed, but it is the user who has to run it
   against production. Until they do, the test customers/projects/POs they asked

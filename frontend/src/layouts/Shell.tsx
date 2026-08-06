@@ -9,6 +9,7 @@ import {
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
   Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, CheckCheck,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -99,7 +100,10 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/admin/users", label: "Users", label_id: "Pengguna", icon: UserCog,
         roles: ["director"] },
       // One-off housekeeping. Director-only in the sidebar, at the route, and
-      // on the endpoints themselves — it deletes company history.
+      // on the endpoints themselves — one deletes company history, the other
+      // writes records in bulk.
+      { to: "/admin/import", label: "Import data", label_id: "Impor data", icon: Upload,
+        roles: ["director"] },
       { to: "/admin/cleanup", label: "Clear test data", label_id: "Hapus data uji", icon: Trash2,
         roles: ["director"] },
     ],

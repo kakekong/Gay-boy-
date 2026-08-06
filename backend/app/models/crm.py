@@ -40,6 +40,16 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     lost_reason: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
+    @property
+    def external_code(self) -> str | None:
+        """This customer's code in the old accounting system, if imported.
+
+        Kept so the two systems can still be reconciled against each other
+        while both are in use — and so a second import run recognises the row
+        instead of creating it again.
+        """
+        return (self.meta or {}).get("external_code")
+
 
 class CustomerContact(Base, UUIDPK, TimestampMixin):
     """Additional PICs at a customer company. The Customer row itself still
