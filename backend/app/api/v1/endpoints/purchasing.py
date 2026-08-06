@@ -410,13 +410,12 @@ async def create_po(
 
     number = payload.number
     if not number:
-        prefix = "PO"
-        ts = date_t.today().strftime("%y%m%d")
-        # Count today's POs for a short suffix
-        existing = await db.scalar(
-            select(func.count(SupplierPO.id)).where(SupplierPO.number.like(f"{prefix}-{ts}-%"))
-        ) or 0
-        number = f"{prefix}-{ts}-{existing + 1:03d}"
+        prefix = f"PO-{date_t.today().strftime('%y%m%d')}-"
+        # One past the highest issued today, not a count of today's rows: a
+        # count walks backwards the moment one is deleted and hands the next
+        # PO a number that is still in use.
+        from app.services.numbering import _next_suffix
+        number = f"{prefix}{await _next_suffix(db, SupplierPO.number, prefix):03d}"
 
     po_date_parsed = None
     if payload.po_date:

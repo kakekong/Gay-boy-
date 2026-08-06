@@ -1,9 +1,20 @@
 """Director-only data maintenance.
 
-One job today: clear out the records left behind while the system was being
-built, keeping the real ones. The system ran alongside its own development for
-months, so the database holds a mix of genuine deals and throwaway test rows,
-and there is no flag on a row saying which is which.
+Two ways to delete, for two different problems.
+
+**By owner** — the original. The system ran alongside its own development for
+months, so the database holds a mix of genuine deals and throwaway test rows
+with no flag saying which is which. Naming the people whose data is real sorts
+thousands of rows in one pass.
+
+**By record** — pick this price request, that customer PO, and delete exactly
+those. The sweep is the wrong tool once the bulk is gone and what is left is
+three quotations someone entered twice. It is also the only tool for a test row
+belonging to a real person, which the sweep deliberately protects.
+
+Both end in the same place: `_execute_plan` deletes from one set of ids in one
+transaction, so there is exactly one piece of code that knows the order the
+foreign keys demand.
 
 **What counts as real is decided per customer, not per row.** That is not a
 shortcut — it is the only rule that works here. A project is created by
@@ -25,7 +36,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import and_, delete as sqldelete, func, or_, select
+from sqlalchemy import delete as sqldelete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import record
@@ -269,9 +280,28 @@ async def purge_execute(payload: PurgeIn, db: AsyncSession = Depends(get_db),
         return {"deleted": plan["counts"], "files_removed": 0,
                 "message": "Nothing to delete — every customer belongs to the people you kept."}
 
-    # Grab the stored file paths before the rows go; the objects themselves are
-    # removed after the transaction commits, so a rollback can't strand a row
-    # whose file is already gone.
+    files = await _execute_plan(db, plan)
+    await record(
+        db, actor=me, action="purge_test_data", entity="database", entity_id=None,
+        after={"kept_user_ids": [str(u) for u in keep_ids], "counts": plan["counts"]},
+    )
+    await db.commit()
+    await _drop_files(files)
+    return {"deleted": plan["counts"], "files_cleared": len(files)}
+
+
+async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
+    """Delete everything the plan names, in the order the keys allow.
+
+    Returns the storage paths of the attachments that went, for the caller to
+    clean up **after** it commits — the objects outlive a rollback, so a row
+    must never be left pointing at a file that is already gone.
+
+    Every delete path goes through here. Both callers build the same shaped
+    plan precisely so that the ordering below is written once: the order is not
+    obvious, it is enforced by `ON DELETE RESTRICT` on every `customer_id`, and
+    a second copy of it would rot.
+    """
     paths = [p for (p,) in (await db.execute(
         select(Attachment.storage_path).where(Attachment.id.in_(plan["attachments"]))
     )).all() if p]
@@ -280,8 +310,26 @@ async def purge_execute(payload: PurgeIn, db: AsyncSession = Depends(get_db),
         if ids:
             await db.execute(sqldelete(model).where(column.in_(ids)))
 
-    # Order matters: every customer_id is ON DELETE RESTRICT, so the customer
-    # cannot go until its whole history has.
+    async def detach(model, column, ids):
+        """Clear a soft reference on rows that are *staying*.
+
+        Several links between documents are plain uuid columns with no foreign
+        key, so the database will not clean them up and will not complain. A
+        price request keeps `quotation_id` after its quotation is deleted, and
+        then refuses to produce a new one — "this price request already has a
+        quotation", for a quotation that no longer exists. Left alone that
+        makes a deleted document quietly unrepeatable.
+        """
+        if ids:
+            await db.execute(
+                model.__table__.update().where(column.in_(ids)).values(**{column.key: None}))
+
+    await detach(PriceRequest, PriceRequest.quotation_id, plan["quotes"])
+    await detach(Quotation, Quotation.price_request_id, plan["prs"])
+    await detach(Quotation, Quotation.project_id, plan["projects"])
+    await detach(Project, Project.price_request_id, plan["prs"])
+    await detach(SupplierPO, SupplierPO.price_request_id, plan["prs"])
+
     await wipe(LedgerEntry, LedgerEntry.id, plan["ledger"])
     await wipe(Attachment, Attachment.id, plan["attachments"])
     await wipe(EntityComment, EntityComment.id, plan["comments"])   # mentions cascade
@@ -295,21 +343,326 @@ async def purge_execute(payload: PurgeIn, db: AsyncSession = Depends(get_db),
     await wipe(Quotation, Quotation.id, plan["quotes"])             # items cascade
     await wipe(PriceRequest, PriceRequest.id, plan["prs"])
     await wipe(Customer, Customer.id, plan["doomed"])               # contacts/activities/reminders cascade
+    return paths
 
-    await record(
-        db, actor=me, action="purge_test_data", entity="database", entity_id=None,
-        after={"kept_user_ids": [str(u) for u in keep_ids], "counts": plan["counts"]},
-    )
-    await db.commit()
 
-    # Best effort, and only now: the rows are gone for good, so a failure here
-    # costs bucket space, not data. `storage.delete` swallows its own errors, so
-    # this counts files handed to it, not files provably gone.
+async def _drop_files(paths: list[str]) -> None:
+    """Best effort, and only after the commit: the rows are gone for good, so a
+    failure here costs bucket space, not data."""
     from app.services import storage
     for p in paths:
         try:
             await storage.delete(p)
-        except Exception:  # noqa: BLE001 — never fail the purge over a stray file
+        except Exception:  # noqa: BLE001 — never fail a delete over a stray file
             pass
 
-    return {"deleted": plan["counts"], "files_cleared": len(paths)}
+
+# ═══ Deleting named records ══════════════════════════════════════════════════
+#
+# Deleting one document is never really one document. A price request becomes a
+# quotation becomes a customer PO becomes a project becomes invoices, and the
+# database will not let the parent go while the children point at it — or worse,
+# for the columns that are `SET NULL`, it *will*, and leaves an invoice attached
+# to a project that no longer exists.
+#
+# So a selection is expanded to its descendants before anything is counted, and
+# the preview shows the whole tree. What the director picks is the root; what
+# they are shown, and what goes, is everything downstream of it. Upstream is
+# never touched: deleting a quotation must not take the price request it came
+# from, because that request is a real thing that really happened.
+
+RECORD_TYPES: dict[str, dict] = {
+    "price_request": {"model": PriceRequest, "label": "Price request", "num": "number"},
+    "quotation":     {"model": Quotation,    "label": "Quotation",     "num": "number"},
+    "customer_po":   {"model": CustomerPO,   "label": "Customer PO",   "num": "number"},
+    "project":       {"model": Project,      "label": "Project",       "num": "code"},
+    "invoice":       {"model": Invoice,      "label": "Invoice",       "num": "number"},
+    "supplier_po":   {"model": SupplierPO,   "label": "Supplier PO",   "num": "number"},
+    "purchase_request": {"model": PurchaseRequest, "label": "Purchase request", "num": "number"},
+    "customer":      {"model": Customer,     "label": "Customer",      "num": "company_name"},
+}
+
+
+class Target(BaseModel):
+    type: str
+    id: UUID
+
+
+class RecordsIn(BaseModel):
+    targets: list[Target] = []
+    confirm: str | None = None
+    # Deleting an invoice that has been paid, or one already posted to the
+    # ledger, is a different act from deleting a draft — it removes money that
+    # the books say arrived. It needs its own yes.
+    allow_financial: bool = False
+
+
+async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
+    """Everything that must go if these records go. Nothing is deleted here.
+
+    Walked to a fixed point rather than in one pass, because the graph is not
+    a tree: a customer PO reaches invoices directly *and* through its project,
+    and a purchase request reaches supplier POs through its RFQs.
+    """
+    prs: set[UUID] = set()
+    quotes: set[UUID] = set()
+    cpos: set[UUID] = set()
+    projects: set[UUID] = set()
+    invoices: set[UUID] = set()
+    spos: set[UUID] = set()
+    preqs: set[UUID] = set()
+    rfqs: set[UUID] = set()
+    doomed: set[UUID] = set()          # customers
+
+    bucket = {
+        "price_request": prs, "quotation": quotes, "customer_po": cpos,
+        "project": projects, "invoice": invoices, "supplier_po": spos,
+        "purchase_request": preqs, "customer": doomed,
+    }
+    for t in targets:
+        if t.type in bucket:
+            bucket[t.type].add(t.id)
+
+    # A named customer is the sweep's job, and it already knows how: pull its
+    # whole lineage in rather than reimplementing it here.
+    for cid in list(doomed):
+        prs |= await _ids(db, select(PriceRequest.id).where(PriceRequest.customer_id == cid))
+        quotes |= await _ids(db, select(Quotation.id).where(Quotation.customer_id == cid))
+        cpos |= await _ids(db, select(CustomerPO.id).where(CustomerPO.customer_id == cid))
+        projects |= await _ids(db, select(Project.id).where(Project.customer_id == cid))
+        invoices |= await _ids(db, select(Invoice.id).where(Invoice.customer_id == cid))
+
+    for _ in range(6):                 # deeper than the chain actually is
+        before = (len(prs), len(quotes), len(cpos), len(projects),
+                  len(invoices), len(spos), len(preqs), len(rfqs))
+
+        if prs:
+            quotes |= await _ids(db, select(Quotation.id).where(
+                Quotation.price_request_id.in_(prs)))
+            quotes |= await _ids(db, select(PriceRequest.quotation_id).where(
+                PriceRequest.id.in_(prs)))
+            spos |= await _ids(db, select(SupplierPO.id).where(
+                SupplierPO.price_request_id.in_(prs)))
+        if quotes:
+            # A revision points at the quotation it replaced; deleting the
+            # original without its revisions leaves them orphaned mid-chain.
+            quotes |= await _ids(db, select(Quotation.id).where(
+                Quotation.parent_id.in_(quotes)))
+            cpos |= await _ids(db, select(CustomerPO.id).where(
+                CustomerPO.quotation_id.in_(quotes)))
+            projects |= await _ids(db, select(Project.id).where(
+                Project.quotation_id.in_(quotes)))
+        if cpos:
+            projects |= await _ids(db, select(CustomerPO.project_id).where(
+                CustomerPO.id.in_(cpos)))
+            invoices |= await _ids(db, select(Invoice.id).where(
+                Invoice.customer_po_id.in_(cpos)))
+        if projects:
+            invoices |= await _ids(db, select(Invoice.id).where(
+                Invoice.project_id.in_(projects)))
+            spos |= await _ids(db, select(SupplierPO.id).where(
+                SupplierPO.project_id.in_(projects)))
+            preqs |= await _ids(db, select(PurchaseRequest.id).where(
+                PurchaseRequest.project_id.in_(projects)))
+        if preqs:
+            rfqs |= await _ids(db, select(RFQ.id).where(RFQ.pr_id.in_(preqs)))
+        if rfqs:
+            spos |= await _ids(db, select(SupplierPO.id).where(
+                SupplierPO.rfq_id.in_(rfqs)))
+
+        after = (len(prs), len(quotes), len(cpos), len(projects),
+                 len(invoices), len(spos), len(preqs), len(rfqs))
+        if before == after:
+            break
+
+    # Cascade children — the database removes them, but the preview should say
+    # how many, because "12 delivery orders" is what a director recognises.
+    contacts = await _ids(db, select(CustomerContact.id).where(
+        CustomerContact.customer_id.in_(doomed)))
+    work_orders = await _ids(db, select(WorkOrder.id).where(WorkOrder.project_id.in_(projects)))
+    drawings = await _ids(db, select(Drawing.id).where(Drawing.project_id.in_(projects)))
+    dos = await _ids(db, select(DeliveryOrder.id).where(DeliveryOrder.project_id.in_(projects)))
+    payments = await db.scalar(
+        select(func.count(Payment.id)).where(Payment.invoice_id.in_(invoices))) or 0
+    items = await db.scalar(
+        select(func.count(QuotationItem.id)).where(QuotationItem.quotation_id.in_(quotes))) or 0
+
+    doomed_ids = (doomed | projects | quotes | prs | cpos | invoices | spos | preqs
+                  | rfqs | contacts | work_orders | drawings | dos)
+    attachments = await _ids(db, select(Attachment.id).where(
+        Attachment.owner_id.in_(doomed_ids)))
+    comments = await _ids(db, select(EntityComment.id).where(
+        EntityComment.owner_id.in_(doomed_ids)))
+    approvals = await _ids(db, select(ApprovalRequest.id).where(
+        ApprovalRequest.target_id.in_(doomed_ids)))
+    ledger = await _ids(db, select(LedgerEntry.id).where(or_(
+        LedgerEntry.source_id.in_(doomed_ids),
+        # A ledger entry names its customer in its own column as well as its
+        # source document; a customer deleted here must not stay named in the
+        # books by a row nothing else points at.
+        LedgerEntry.customer_id.in_(doomed))))
+
+    return {
+        "keep_customers": set(), "by_rule": {},
+        "doomed": doomed,
+        "projects": projects, "quotes": quotes, "prs": prs, "cpos": cpos,
+        "invoices": invoices, "spos": spos, "preqs": preqs, "rfqs": rfqs,
+        "contacts": contacts, "work_orders": work_orders, "drawings": drawings,
+        "dos": dos, "attachments": attachments, "comments": comments,
+        "approvals": approvals, "ledger": ledger,
+        "counts": {
+            "customers": len(doomed), "price_requests": len(prs),
+            "quotations": len(quotes), "quotation_items": items,
+            "customer_pos": len(cpos), "projects": len(projects),
+            "work_orders": len(work_orders), "drawings": len(drawings),
+            "delivery_orders": len(dos), "contacts": len(contacts),
+            "invoices": len(invoices), "payments": payments,
+            "ledger_entries": len(ledger), "supplier_pos": len(spos),
+            "purchase_requests": len(preqs), "rfqs": len(rfqs),
+            "attachments": len(attachments), "discussion_messages": len(comments),
+            "approval_requests": len(approvals),
+        },
+    }
+
+
+async def _describe(db: AsyncSession, plan: dict) -> list[dict]:
+    """Name every document in the plan, so the preview is a list of documents
+    rather than a column of numbers."""
+    out: list[dict] = []
+    for kind, ids in (("price_request", plan["prs"]), ("quotation", plan["quotes"]),
+                      ("customer_po", plan["cpos"]), ("project", plan["projects"]),
+                      ("invoice", plan["invoices"]), ("supplier_po", plan["spos"]),
+                      ("purchase_request", plan["preqs"]), ("customer", plan["doomed"])):
+        if not ids:
+            continue
+        spec = RECORD_TYPES[kind]
+        model, num = spec["model"], spec["num"]
+        rows = (await db.scalars(
+            select(model).where(model.id.in_(list(ids)[:300]))
+        )).all()
+        for r in rows:
+            out.append({
+                "type": kind,
+                "type_label": spec["label"],
+                "id": str(r.id),
+                "number": getattr(r, num, None),
+                "status": getattr(r, "status", None),
+                "total": float(getattr(r, "total", 0) or 0),
+            })
+    return out
+
+
+async def _financial_warnings(db: AsyncSession, plan: dict) -> list[str]:
+    """The things that make a delete different in kind, not just in size."""
+    warns: list[str] = []
+    if plan["invoices"]:
+        paid = await db.scalar(select(func.count(Payment.id)).where(
+            Payment.invoice_id.in_(plan["invoices"]))) or 0
+        if paid:
+            warns.append(
+                f"{paid} payment(s) have been received against these invoices. "
+                f"Deleting them removes money the books say arrived.")
+    if plan["ledger"]:
+        warns.append(
+            f"{len(plan['ledger'])} ledger entries go with this. Any financial "
+            f"report already run for those periods will change.")
+    return warns
+
+
+@router.get("/records")
+async def list_records(
+    type: str,
+    q: str | None = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """Find documents of one kind, to pick from. Read-only."""
+    spec = RECORD_TYPES.get(type)
+    if not spec:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown record type. Try one of: {', '.join(RECORD_TYPES)}")
+    model, num = spec["model"], spec["num"]
+    stmt = select(model).order_by(model.created_at.desc()).limit(min(limit, 200))
+    if q:
+        stmt = stmt.where(getattr(model, num).ilike(f"%{q}%"))
+    if hasattr(model, "is_deleted"):
+        stmt = stmt.where(model.is_deleted.is_(False))
+    rows = (await db.scalars(stmt)).all()
+
+    # Name the customer alongside the number — "QUO-2026-0007" identifies
+    # nothing on its own when you are deciding whether to delete it.
+    cust_ids = {getattr(r, "customer_id", None) for r in rows}
+    names = {
+        cid: nm for cid, nm in (await db.execute(
+            select(Customer.id, Customer.company_name)
+            .where(Customer.id.in_([c for c in cust_ids if c]))
+        )).all()
+    }
+    return [{
+        "type": type,
+        "id": str(r.id),
+        "number": getattr(r, num, None),
+        "status": getattr(r, "status", None),
+        "total": float(getattr(r, "total", 0) or 0),
+        "customer": names.get(getattr(r, "customer_id", None)),
+        "created_at": getattr(r, "created_at", None),
+    } for r in rows]
+
+
+@router.post("/records/preview")
+async def records_preview(payload: RecordsIn, db: AsyncSession = Depends(get_db)):
+    """Everything that would go if these records went. Writes nothing."""
+    if not payload.targets:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing selected.")
+    bad = {t.type for t in payload.targets} - set(RECORD_TYPES)
+    if bad:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown record type(s): {', '.join(sorted(bad))}")
+
+    plan = await _closure(db, payload.targets)
+    picked = {(t.type, str(t.id)) for t in payload.targets}
+    documents = await _describe(db, plan)
+    return {
+        "confirm_phrase": CONFIRM_PHRASE,
+        "counts": plan["counts"],
+        "documents": documents,
+        # What the director did not pick but would lose anyway. This is the
+        # number that changes minds, so it is reported on its own.
+        "pulled_in": sum(1 for d in documents if (d["type"], d["id"]) not in picked),
+        "warnings": await _financial_warnings(db, plan),
+    }
+
+
+@router.post("/records/delete")
+async def records_delete(payload: RecordsIn, db: AsyncSession = Depends(get_db),
+                         me: User = Depends(require(Role.DIRECTOR))):
+    """Delete the named records and everything created from them."""
+    await _require_real_director(db, me)
+    if (payload.confirm or "").strip() != CONFIRM_PHRASE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f'Type "{CONFIRM_PHRASE}" to confirm.')
+    if not payload.targets:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing selected.")
+    bad = {t.type for t in payload.targets} - set(RECORD_TYPES)
+    if bad:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown record type(s): {', '.join(sorted(bad))}")
+
+    plan = await _closure(db, payload.targets)
+    warnings = await _financial_warnings(db, plan)
+    if warnings and not payload.allow_financial:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This touches money that has already been recorded: "
+            + " ".join(warnings)
+            + " Tick the financial-records box to go ahead.")
+
+    files = await _execute_plan(db, plan)
+    await record(
+        db, actor=me, action="delete_records", entity="database", entity_id=None,
+        after={"targets": [{"type": t.type, "id": str(t.id)} for t in payload.targets],
+               "counts": plan["counts"]},
+    )
+    await db.commit()
+    await _drop_files(files)
+    return {"deleted": plan["counts"], "files_cleared": len(files)}

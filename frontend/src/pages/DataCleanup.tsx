@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Trash2, Loader2, AlertTriangle, ShieldAlert, Check, Users, Eye, CheckCircle2,
+  ListChecks,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT } from "@/store/lang";
+import RecordDelete from "@/components/RecordDelete";
 
 interface Owner {
   id: string; full_name: string; email: string; role: string; is_active: boolean;
@@ -62,6 +64,11 @@ const LABEL: Record<string, [string, string]> = {
  */
 export default function DataCleanupPage() {
   const t = useT();
+  // Two tools, and which one is right depends entirely on how much is left.
+  // The sweep is for the first pass — thousands of rows from months of
+  // development. Picking records is for everything after that, and for the
+  // test row that belongs to a real person, which the sweep protects.
+  const [mode, setMode] = useState<"owner" | "records">("owner");
   const [keep, setKeep] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<Preview | null>(null);
   const [phrase, setPhrase] = useState("");
@@ -118,9 +125,35 @@ export default function DataCleanupPage() {
           {t("Clear test data", "Hapus data uji coba")}
         </h1>
         <p className="text-sm muted mt-1">
-          {t("Deletes the customers, price requests, quotations, POs and projects that belong to nobody you keep — along with everything filed under them.",
-             "Menghapus pelanggan, permintaan harga, penawaran, PO dan proyek yang bukan milik orang yang Anda pertahankan — beserta semua isinya.")}
+          {mode === "owner"
+            ? t("Deletes the customers, price requests, quotations, POs and projects that belong to nobody you keep — along with everything filed under them.",
+                "Menghapus pelanggan, permintaan harga, penawaran, PO dan proyek yang bukan milik orang yang Anda pertahankan — beserta semua isinya.")
+            : t("Deletes exactly the documents you pick, and everything created from them.",
+                "Menghapus dokumen yang Anda pilih saja, beserta semua yang dibuat darinya.")}
         </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setMode("owner")}
+          className={clsx("flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+            mode === "owner"
+              ? "border-brand-600 bg-brand-50 text-brand-700 font-semibold dark:bg-brand-500/15"
+              : "border-ink-200 hover:bg-ink-50")}
+        >
+          <Users size={15} />
+          {t("Sweep by owner", "Sapu per pemilik")}
+        </button>
+        <button
+          onClick={() => setMode("records")}
+          className={clsx("flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+            mode === "records"
+              ? "border-brand-600 bg-brand-50 text-brand-700 font-semibold dark:bg-brand-500/15"
+              : "border-ink-200 hover:bg-ink-50")}
+        >
+          <ListChecks size={15} />
+          {t("Pick specific records", "Pilih data tertentu")}
+        </button>
       </div>
 
       <div className="card p-4 border-l-2 border-l-accent-500">
@@ -139,13 +172,15 @@ export default function DataCleanupPage() {
         </div>
       </div>
 
-      {err && (
+      {mode === "records" && <RecordDelete />}
+
+      {mode === "owner" && err && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
           {err}
         </div>
       )}
 
-      {done && (
+      {mode === "owner" && done && (
         <div className="card p-4 border-l-2 border-l-emerald-500">
           <div className="flex items-center gap-2 font-semibold text-emerald-700">
             <CheckCircle2 size={16} /> {t("Done", "Selesai")}
@@ -165,6 +200,7 @@ export default function DataCleanupPage() {
       )}
 
       {/* ── Step 1 ─────────────────────────────────────────────────────────── */}
+      {mode === "owner" && (
       <div className="card overflow-hidden">
         <header className="px-4 py-3 border-b border-ink-100 flex items-center gap-2">
           <Users size={15} className="text-brand-600" />
@@ -242,9 +278,10 @@ export default function DataCleanupPage() {
           </button>
         </footer>
       </div>
+      )}
 
       {/* ── Step 2 ─────────────────────────────────────────────────────────── */}
-      {preview && (
+      {mode === "owner" && preview && (
         <>
           <div className="card overflow-hidden">
             <header className="px-4 py-3 border-b border-ink-100 font-semibold">

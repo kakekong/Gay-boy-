@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 30 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 31 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -213,6 +213,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
+| `test_record_delete.py` | deleting named documents: everything downstream of the pick goes, nothing outside it is touched, upstream is never taken, money needs its own confirmation — and the numbering regression that made deleting anything break the creation of the next one |
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
@@ -464,6 +465,21 @@ Chat messages and discussion comments both push instantly.
   names it under `unmatched_reps`. If a driver creates a `Candra` and something
   else in the same database already has one, the match stops working; tag
   fixture names per run (`test_customer_import.py` does).
+- **Document numbers come from the highest suffix issued, never a row count.**
+  `PR-2026-0007` used to be `count(*) + 1`, which is correct right up until
+  something is deleted — then the counter walks backwards and hands the next
+  document a number that is still in use, the insert dies on the unique index,
+  and the user is told only that it could not be created. Deleting one price
+  request broke making the next one. Fixed in `services/numbering.py`
+  (`_next_suffix`), and `operation._next_doc_number` (invoices, DOs) and the
+  supplier-PO generator now share it. Any new numbering must too.
+- **Not every link between documents is a foreign key.** `PriceRequest
+  .quotation_id`, `Quotation.project_id`, `Quotation.price_request_id`,
+  `Project.price_request_id` and `SupplierPO.price_request_id` are bare uuid
+  columns, so the database will not clear them and will not complain. A price
+  request left pointing at a deleted quotation refuses to make a new one
+  ("this price request already has a quotation"). `_execute_plan` clears them
+  explicitly — add to that list when you add a soft reference.
 - **`'text/html' is not a valid JavaScript MIME type`** — a stale-build symptom
   after a Vercel deploy: the browser holds an old index.html referencing a hash
   that no longer exists. Handled by a reload-on-chunk-error path; if it

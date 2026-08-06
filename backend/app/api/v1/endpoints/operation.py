@@ -1101,13 +1101,16 @@ _ADMIN_ROLES = {Role.ADMIN, Role.DIRECTOR}
 
 
 async def _next_doc_number(db: AsyncSession, model, prefix: str) -> str:
+    """One past the highest number issued this year, never a row count.
+
+    A count walks backwards the moment a document is deleted and hands the
+    next one a number that is still in use — the insert then fails on the
+    unique index. See `app/services/numbering.py`.
+    """
     from datetime import datetime as _dt
-    year = _dt.utcnow().year
-    pre = f"{prefix}-{year}-"
-    n = await db.scalar(
-        select(func.count(model.id)).where(model.number.like(f"{pre}%"))
-    ) or 0
-    return f"{pre}{n + 1:04d}"
+    from app.services.numbering import _next_suffix
+    pre = f"{prefix}-{_dt.utcnow().year}-"
+    return f"{pre}{await _next_suffix(db, model.number, pre):04d}"
 
 
 async def _save_attachment(

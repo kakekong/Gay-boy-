@@ -1,13 +1,44 @@
-"""Document numbering. Keeps a per-year counter via row-level lock."""
+"""Document numbering.
+
+Numbers come from the **highest suffix already issued**, not from a row count.
+That distinction is the whole of this module's history: counting works right up
+until a document is deleted, and then the counter walks backwards and the next
+document is handed a number that is still in use. The insert fails on the
+unique index, and the user sees "could not create price request" with nothing
+to tell them why.
+
+That is not a hypothetical. The director can delete a price request or a
+quotation from *Clear test data*, and until this was fixed, doing so broke the
+creation of the next one.
+"""
 
 import re
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.quotation import Quotation
+
+
+async def _next_suffix(db: AsyncSession, column, prefix: str) -> int:
+    """One past the largest number already issued under `prefix`.
+
+    Compares on the numeric tail rather than the whole string so that 0009 and
+    0010 sort the way a person expects, and ignores any suffix that isn't
+    digits — a hand-entered number should never stop the next one being issued.
+    """
+    rows = (await db.scalars(
+        select(column).where(column.like(f"{prefix}%"))
+    )).all()
+    best = 0
+    for value in rows:
+        tail = (value or "")[len(prefix):]
+        m = re.match(r"^(\d+)", tail)
+        if m:
+            best = max(best, int(m.group(1)))
+    return best + 1
 
 
 def _clean_token(token: str) -> str:
@@ -36,10 +67,7 @@ async def next_quotation_number(
     year = datetime.utcnow().year
     tok = _clean_token(token) if token else settings.QUOTATION_COMPANY_TOKEN
     prefix = f"QT-{tok}-{year}-"
-    existing = await db.scalar(
-        select(func.count(Quotation.id)).where(Quotation.number.like(f"{prefix}%"))
-    ) or 0
-    return f"{prefix}{existing + 1:04d}"
+    return f"{prefix}{await _next_suffix(db, Quotation.number, prefix):04d}"
 
 
 async def next_price_request_number(db: AsyncSession) -> str:
@@ -47,7 +75,4 @@ async def next_price_request_number(db: AsyncSession) -> str:
     from app.models.price_request import PriceRequest
     year = datetime.utcnow().year
     prefix = f"PR-{year}-"
-    existing = await db.scalar(
-        select(func.count(PriceRequest.id)).where(PriceRequest.number.like(f"{prefix}%"))
-    ) or 0
-    return f"{prefix}{existing + 1:04d}"
+    return f"{prefix}{await _next_suffix(db, PriceRequest.number, prefix):04d}"
