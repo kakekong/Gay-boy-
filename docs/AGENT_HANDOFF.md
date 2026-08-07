@@ -536,6 +536,20 @@ Chat messages and discussion comments both push instantly.
   request" on a draft, and silently became a director approval request on an
   approved one. Any new guard that branches on a field's presence needs the
   same treatment.
+- **`GET /customers` is the only paged list, and its sort must stay a total
+  order.** It was `ORDER BY created_at DESC` alone; an import writes dozens of
+  customers in one transaction, so they share a timestamp to the microsecond
+  and Postgres ordered those ties differently per query. OFFSET paging then
+  served some rows twice and never showed others — 87 customers paged out as
+  71 distinct ones. It now sorts `created_at DESC, company_name ASC, id DESC`:
+  name before id deliberately, because a whole imported batch lands on one
+  timestamp and whoever is checking it against the spreadsheet wants those
+  rows alphabetical. Any new paged endpoint needs the same treatment.
+- **"Is my import complete?" is answered by re-uploading the file**, not by
+  counting. The preview checks every row against what is in the CRM, and the
+  verdict banner in `DataImport.tsx` states it outright: "Nothing is missing"
+  or "N of M rows are not in yet", naming them. `test_customer_paging.py`
+  pins both that and the paging.
 - **Not every link between documents is a foreign key.** `PriceRequest
   .quotation_id`, `Quotation.project_id`, `Quotation.price_request_id`,
   `Project.price_request_id` and `SupplierPO.price_request_id` are bare uuid

@@ -222,6 +222,12 @@ export default function DataImportPage() {
   const toCreate = preview?.counts?.create ?? 0;
   const armed = !!preview && toCreate > 0 && confirm.trim().toUpperCase() === "IMPORT";
   const rowCount = preview?.rows_in_file ?? preview?.sheets_in_file ?? 0;
+  // Rows the file itself cannot contribute: a company repeated further down,
+  // a quotation with no customer or no lines. Named so the "nothing is
+  // missing" verdict can account for every row in the file, not most of them.
+  const skipped = (preview?.counts?.duplicate_in_file ?? 0)
+                + (preview?.counts?.no_customer ?? 0)
+                + (preview?.counts?.no_lines ?? 0);
 
   return (
     <div className="space-y-5 max-w-6xl">
@@ -349,6 +355,56 @@ export default function DataImportPage() {
                 <AlertTriangle size={14} className="shrink-0 mt-0.5" />{p}
               </div>
             ))}
+
+            {/* Did the whole file arrive?
+                Re-uploading a file that has already been imported answers it
+                exactly: every row is checked against what is in the CRM, so
+                anything still reading "will import" never made it. Counting
+                87 rows by eye is not a reasonable thing to ask of anyone. */}
+            {(preview.counts.existing ?? 0) > 0 && (
+              toCreate === 0 ? (
+                <div className="mx-4 mt-3 rounded-lg border border-emerald-200 bg-emerald-50
+                                px-3 py-2 text-sm text-emerald-900 flex items-start gap-2">
+                  <CheckCircle2 size={15} className="shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-semibold">
+                      {t("Nothing is missing — this whole file is already in.",
+                         "Tidak ada yang kurang — seluruh berkas ini sudah masuk.")}
+                    </div>
+                    <div className="mt-0.5">
+                      {t(`All ${rowCount} rows are accounted for: ${preview.counts.existing} already here`,
+                         `Semua ${rowCount} baris sudah terhitung: ${preview.counts.existing} sudah ada`)}
+                      {skipped > 0 && t(
+                        `, and ${skipped} that this file itself repeats or leaves incomplete`,
+                        `, dan ${skipped} yang di berkas ini terduplikasi atau tidak lengkap`)}
+                      {"."}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mx-4 mt-3 rounded-lg border border-amber-200 bg-amber-50
+                                px-3 py-2 text-sm text-amber-900 flex items-start gap-2">
+                  <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="font-semibold">
+                      {t(`${toCreate} of ${rowCount} rows are not in yet.`,
+                         `${toCreate} dari ${rowCount} baris belum masuk.`)}
+                    </div>
+                    <div className="mt-0.5">
+                      {t("Import below and they will be added — the ones already here are left alone.",
+                         "Impor di bawah dan semuanya akan ditambahkan — yang sudah ada tidak disentuh.")}
+                    </div>
+                    <div className="mt-1 text-[12px]">
+                      {preview.rows.filter((r) => r.action === "create")
+                        .slice(0, 10)
+                        .map((r) => String(cfg.cells(r)[0] ?? "")).join(" · ")}
+                      {toCreate > 10 && t(` …and ${toCreate - 10} more`,
+                                          ` …dan ${toCreate - 10} lagi`)}
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
 
             <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="rounded-lg border border-ink-200 px-3 py-2">

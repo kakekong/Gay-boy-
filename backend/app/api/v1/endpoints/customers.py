@@ -78,7 +78,19 @@ async def list_customers(
         select(func.count()).select_from(base.subquery())
     ) or 0
     rows = (await db.scalars(
-        base.order_by(Customer.created_at.desc())
+        # `created_at` alone is not a total order: an import writes dozens of
+        # customers inside one transaction, so they share a timestamp to the
+        # microsecond. Postgres is then free to order those ties differently
+        # per query, and OFFSET paging served some rows twice while never
+        # showing others — 87 customers paged out as 71 distinct ones.
+        #
+        # The tie is broken by name rather than by id because of who reads
+        # this: a whole imported batch lands on one timestamp, and somebody
+        # checking it against the spreadsheet wants those rows alphabetical,
+        # not in uuid order. The id is a last resort for two customers that
+        # share both a name and an instant.
+        base.order_by(Customer.created_at.desc(),
+                      Customer.company_name.asc(), Customer.id.desc())
         .offset((page - 1) * page_size).limit(page_size)
     )).all()
     # Batch-load sales rep names so the list view can show "Sales rep"

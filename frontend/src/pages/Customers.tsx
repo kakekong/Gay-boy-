@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   Plus, Search, Filter, Download, Table2, Columns3, AlertCircle, UserCog,
+  ChevronLeft, ChevronRight, Loader2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -55,6 +56,18 @@ export default function CustomersPage() {
   const [rep, setRep] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [assignOpen, setAssignOpen] = useState(false);
+  // The list used to ask for 50 rows and offer no way to reach row 51, so an
+  // import of 87 customers looked like an import of 50. The count in the
+  // header said 87 the whole time, which made it worse rather than better.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() =>
+    Number(localStorage.getItem("customers-page-size")) || 50);
+  useEffect(() => {
+    localStorage.setItem("customers-page-size", String(pageSize));
+  }, [pageSize]);
+  // Any change to what is being looked at invalidates the page number.
+  useEffect(() => { setPage(1); setPicked(new Set()); },
+            [search, stage, rep, pageSize, view]);
 
   const reps = useQuery({
     queryKey: ["assignable-reps"],
@@ -66,7 +79,8 @@ export default function CustomersPage() {
   // whether or not a Diani account existed at the time.
   const hint = rep.startsWith("hint:") ? rep.slice(5) : "";
   const q = useQuery({
-    queryKey: ["customers", view === "pipeline" ? "" : search, view === "pipeline" ? "" : stage, rep],
+    queryKey: ["customers", view === "pipeline" ? "" : search,
+               view === "pipeline" ? "" : stage, rep, page, pageSize, view],
     queryFn: () =>
       api
         .get("/customers", {
@@ -77,12 +91,17 @@ export default function CustomersPage() {
             sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
             unassigned: rep === "none" ? true : undefined,
             rep_hint: hint || undefined,
-            page_size: view === "pipeline" ? 500 : 50,
+            page: view === "pipeline" ? 1 : page,
+            page_size: view === "pipeline" ? 500 : pageSize,
           },
         })
         .then((r) => r.data),
   });
   const rows: Customer[] = q.data?.data ?? [];
+  const total: number = q.data?.total ?? rows.length;
+  const first = rows.length ? (page - 1) * pageSize + 1 : 0;
+  const last = (page - 1) * pageSize + rows.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
   const pickedRows = rows.filter((r) => picked.has(r.id));
   const toggle = (id: string) => setPicked((prev) => {
     const next = new Set(prev);
@@ -91,18 +110,50 @@ export default function CustomersPage() {
   });
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
 
-  function exportCsv() {
-    const header = "company_name,industry,pic_name,sales_pic_name,stage,lifetime_value\n";
-    const body = rows.map((r) =>
-      [r.company_name, r.industry, r.pic_name ?? "", r.sales_pic_name ?? "", r.stage, r.lifetime_value ?? 0]
-        .map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")
-    ).join("\n");
-    const blob = new Blob([header + body], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "customers.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const [exporting, setExporting] = useState(false);
+
+  /** Export every customer the current filter matches, not just this page.
+   *
+   * It used to write out whatever the table happened to be showing, which
+   * with paging would quietly mean "the first 50" — the same trap that made
+   * an import of 87 look like an import of 50. Pages are fetched until the
+   * count is met, and the row number is the first column so the file can be
+   * counted against the source without re-sorting anything. */
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const all: Customer[] = [];
+      const size = 500;
+      for (let p = 1; ; p++) {
+        const r = await api.get("/customers", {
+          params: {
+            q: search || undefined,
+            stage: stage || undefined,
+            sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
+            unassigned: rep === "none" ? true : undefined,
+            rep_hint: hint || undefined,
+            page: p, page_size: size,
+          },
+        });
+        all.push(...(r.data?.data ?? []));
+        if (all.length >= (r.data?.total ?? 0) || !(r.data?.data ?? []).length) break;
+      }
+      const header = "no,company_name,industry,pic_name,sales_pic_name,"
+                   + "sales_rep_from_import,stage,lifetime_value\n";
+      const body = all.map((r, i) =>
+        [i + 1, r.company_name, r.industry, r.pic_name ?? "", r.sales_pic_name ?? "",
+         r.sales_rep_hint ?? "", r.stage, r.lifetime_value ?? 0]
+          .map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")
+      ).join("\n");
+      const blob = new Blob([header + body], { type: "text/csv" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `customers-${all.length}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally {
+      setExporting(false);
+    }
   }
 
   // Client-side filter for pipeline search
@@ -116,9 +167,9 @@ export default function CustomersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t("Customers", "Pelanggan")}</h1>
           <p className="text-sm muted">
-            {q.data?.total ?? rows.length} {t(
-              (q.data?.total ?? rows.length) === 1 ? "record" : "records",
-              "data"
+            {total} {t(total === 1 ? "customer" : "customers", "pelanggan")}
+            {view === "table" && total > rows.length && (
+              <span> · {t(`showing ${first}–${last}`, `menampilkan ${first}–${last}`)}</span>
             )}
           </p>
         </div>
@@ -148,7 +199,12 @@ export default function CustomersPage() {
               <Columns3 size={14} /> {t("Pipeline", "Pipeline")}
             </button>
           </div>
-          <button className="btn-ghost" onClick={exportCsv}><Download size={15} /> {t("Export", "Ekspor")}</button>
+          <button className="btn-ghost" onClick={exportCsv} disabled={exporting}
+                  title={t("Downloads every customer the filter matches, numbered — not just this page.",
+                           "Mengunduh semua pelanggan yang cocok dengan filter, bernomor — bukan hanya halaman ini.")}>
+            {exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+            {t("Export all", "Ekspor semua")}
+          </button>
           <button className="btn-primary" onClick={() => setOpenNew(true)}>
             <Plus size={15} /> {t("New customer", "Pelanggan baru")}
           </button>
@@ -271,6 +327,9 @@ export default function CustomersPage() {
                       />
                     </th>
                   )}
+                  {/* Counting by eye is what made a short list look like a
+                      complete one. The number is continuous across pages. */}
+                  <th className="th text-right w-10">#</th>
                   <th className="th">{t("Company", "Perusahaan")}</th>
                   <th className="th">{t("Industry", "Industri")}</th>
                   <th className="th">{T("PIC")}</th>
@@ -280,7 +339,7 @@ export default function CustomersPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((c) => (
+                {rows.map((c, i) => (
                   <tr key={c.id} className="tr-hover border-t border-ink-100">
                     {isDirector && (
                       <td className="td">
@@ -292,6 +351,9 @@ export default function CustomersPage() {
                         />
                       </td>
                     )}
+                    <td className="td text-right tabular-nums text-xs muted">
+                      {(page - 1) * pageSize + i + 1}
+                    </td>
                     <td className="td">
                       <Link
                         to={`/customers/${c.id}`}
@@ -320,7 +382,7 @@ export default function CustomersPage() {
                 ))}
                 {!rows.length && (
                   <tr>
-                    <td colSpan={isDirector ? 7 : 6} className="td text-center muted py-12">
+                    <td colSpan={isDirector ? 8 : 7} className="td text-center muted py-12">
                       {t("No customers match your filter.", "Tidak ada pelanggan yang cocok dengan filter Anda.")}
                     </td>
                   </tr>
@@ -331,6 +393,36 @@ export default function CustomersPage() {
         </div>
       ) : (
         <PipelineView customers={pipelineRows} />
+      )}
+
+      {view === "table" && total > 0 && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="muted">
+            {t(`Showing ${first}–${last} of ${total}`,
+               `Menampilkan ${first}–${last} dari ${total}`)}
+          </span>
+          <select className="input max-w-[9rem] py-1 text-xs" value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}>
+            {[50, 100, 200, 500].map((n) => (
+              <option key={n} value={n}>
+                {t(`${n} per page`, `${n} per halaman`)}
+              </option>
+            ))}
+          </select>
+          <div className="ml-auto flex items-center gap-2">
+            <button className="btn-ghost border-ink-200 text-xs" disabled={page <= 1}
+                    onClick={() => setPage((n) => Math.max(1, n - 1))}>
+              <ChevronLeft size={14} /> {t("Previous", "Sebelumnya")}
+            </button>
+            <span className="muted text-xs">
+              {t(`Page ${page} of ${pages}`, `Halaman ${page} dari ${pages}`)}
+            </span>
+            <button className="btn-ghost border-ink-200 text-xs" disabled={page >= pages}
+                    onClick={() => setPage((n) => Math.min(pages, n + 1))}>
+              {t("Next", "Berikutnya")} <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
       )}
 
       <Modal
