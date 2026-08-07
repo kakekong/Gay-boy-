@@ -5,7 +5,7 @@ import {
   Building2, Mail, Phone, MessageCircle, MapPin, Sparkles, Activity, Loader2,
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
   Clock, ListChecks, CheckCircle2, Circle, RotateCcw, ChevronRight, Truck,
-  ShoppingCart, Banknote, Building, CalendarDays, Tag, Pencil,
+  ShoppingCart, Banknote, Building, CalendarDays, Tag, Pencil, UserCog,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -18,6 +18,7 @@ import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { ContactsSection } from "@/components/ContactsSection";
+import { AssignSalesDialog } from "@/components/AssignSalesDialog";
 import { useT, t as tt, T, locale } from "@/store/lang";
 
 // Indonesian display labels for backend stage/status keys. Display only —
@@ -48,6 +49,7 @@ const LABEL_ID: Record<string, string> = {
   // activity types & directions
   call: "telepon", meeting: "rapat", note: "catatan", email: "email",
   visit: "kunjungan", inbound: "masuk", outbound: "keluar",
+  assignment: "penugasan",
 };
 // Humanised display label for a backend key: English fallback is the key
 // with underscores replaced; Indonesian comes from the map above.
@@ -173,6 +175,7 @@ export default function CustomerDetailPage() {
   // it moved through — the reasons from stage-move requests + direct moves.
   const [historyStage, setHistoryStage] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   const stageHistory = useQuery({
     queryKey: ["customer-stage-history", id],
     queryFn: () => api.get(`/customers/${id}/stage-history`).then((r) => r.data as any[]),
@@ -276,6 +279,25 @@ export default function CustomerDetailPage() {
                 <Building2 size={14} /> {c.industry}
                 <span className="muted">·</span>
                 <StageBadge stage={c.stage} />
+              </div>
+              {/* Who is in charge. It decides who can see this account at
+                  all, so it belongs in the header rather than buried in a
+                  form — and the director can change it from right here. */}
+              <div className="text-sm muted flex items-center gap-1.5 mt-1">
+                <UserCog size={14} />
+                <span>
+                  {c.sales_pic_name
+                    ? c.sales_pic_name
+                    : t("No sales rep assigned", "Belum ada sales penanggung jawab")}
+                </span>
+                {me?.role === "director" && (
+                  <button
+                    className="text-xs text-brand-700 hover:underline"
+                    onClick={() => setAssignOpen(true)}
+                  >
+                    {t("Change", "Ubah")}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -668,6 +690,21 @@ export default function CustomerDetailPage() {
           <NewCustomerForm customer={c} onClose={() => setEditOpen(false)} />
         </Modal>
       )}
+
+      <AssignSalesDialog
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        customers={[{
+          id: id!, company_name: c.company_name,
+          sales_pic_name: c.sales_pic_name,
+        }]}
+        onDone={() => {
+          qc.invalidateQueries({ queryKey: ["customer", id] });
+          qc.invalidateQueries({ queryKey: ["activities", id] });
+          qc.invalidateQueries({ queryKey: ["customer-quotations", id] });
+          qc.invalidateQueries({ queryKey: ["customer-price-requests", id] });
+        }}
+      />
 
       {historyStage && (
         <Modal

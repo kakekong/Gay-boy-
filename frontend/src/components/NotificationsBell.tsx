@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell, BellRing, CheckSquare, AlertTriangle, AlertCircle, Truck, MessageCircle,
-  ChevronRight, Loader2, ListChecks, X,
+  ChevronRight, Loader2, ListChecks, X, UserCog,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -12,7 +12,7 @@ import { isPushSupported, subscribePush, unsubscribePush } from "@/lib/push";
 
 interface NotificationItem {
   id: string;
-  kind: "approval" | "approval_decided" | "at_risk_deal" | "payment_due" | "drawing_pending" | "chat" | "stage_task";
+  kind: "approval" | "approval_decided" | "at_risk_deal" | "payment_due" | "drawing_pending" | "chat" | "stage_task" | "handover";
   severity: "low" | "medium" | "high";
   title: string;
   body: string;
@@ -28,6 +28,7 @@ const ICON: Record<string, any> = {
   drawing_pending:  Truck,
   chat:             MessageCircle,
   stage_task:       ListChecks,
+  handover:         UserCog,
 };
 
 const SEVERITY_RING: Record<string, string> = {

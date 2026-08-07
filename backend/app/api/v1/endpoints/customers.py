@@ -11,7 +11,13 @@ from app.core.approval import evaluate_data_change, request_approval
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, can_view_customer, filter_to_role_scope, require_min
+from app.core.permissions import (
+    Role,
+    can_view_customer,
+    filter_to_role_scope,
+    require,
+    require_min,
+)
 from app.core.stage_playbook import is_forward_skip
 from app.core.stage_tasks import (
     ensure_stage_tasks,
@@ -44,9 +50,17 @@ async def list_customers(
     q: str | None = None,
     stage: str | None = None,
     industry: str | None = None,
+    sales_pic_id: UUID | None = None,
+    unassigned: bool = False,
 ):
     base = select(Customer).where(Customer.is_deleted.is_(False))
     base = filter_to_role_scope(user, base, Customer.sales_pic_id)
+    # Book-of-business filters, for the director deciding who covers what.
+    # "Nobody is on this account" is the one that matters after an import.
+    if unassigned:
+        base = base.where(Customer.sales_pic_id.is_(None))
+    elif sales_pic_id:
+        base = base.where(Customer.sales_pic_id == sales_pic_id)
     if q:
         base = base.where(Customer.company_name.ilike(f"%{q}%"))
     if stage:
@@ -115,6 +129,217 @@ async def create_customer(
     return obj
 
 
+# ─── Who is in charge of which customer ──────────────────────────────────────
+#
+# Accounts move between reps for ordinary reasons: somebody leaves, somebody
+# is hired, a territory is split, an import lands 87 customers with nobody on
+# them. That is the director's call — it decides who can see the account at
+# all (sales scope is `Customer.sales_pic_id`), so it is not something a rep
+# may quietly do to their own book, and it is not an ordinary field edit.
+#
+# Routes here must stay ABOVE /{customer_id} — FastAPI matches in declaration
+# order and "assignable-reps" would otherwise be read as a customer id.
+
+# Roles that can be put in charge of an account. Portal accounts (tier 0) are
+# excluded by construction; the rest of the office has no book of customers.
+_REP_ROLES = (Role.SALES, Role.MANAGER, Role.DIRECTOR)
+
+# What "open work" means when the account is handed over. Anything decided —
+# won, lost, rejected — stays with the rep who decided it: that is their
+# record, and rewriting it would falsify who closed the deal.
+_LIVE_QUOTE_STATUSES = ("draft", "pending_approval", "approved", "sent")
+_DEAD_PR_STATUSES = ("rejected", "cancelled")
+
+
+class ReassignIn(BaseModel):
+    customer_ids: list[UUID]
+    # None hands the account back to nobody — useful for a rep who has left
+    # before the director has decided where their book goes.
+    sales_pic_id: UUID | None = None
+    # Carry the customer's live price requests and quotations across too.
+    # Off would leave the new rep owning a customer whose open quote they
+    # cannot open, so it defaults on.
+    move_open_work: bool = True
+    note: str | None = None
+
+
+@router.get("/assignable-reps")
+async def assignable_reps(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_min(Role.MANAGER)),
+):
+    """Who can be put in charge of an account, and how much each already holds.
+
+    The count is the point: handing somebody their fourteenth account is a
+    decision the director should be able to see themselves making.
+    """
+    rows = (await db.scalars(
+        select(User).where(
+            User.is_active.is_(True),
+            User.role.in_([r.value for r in _REP_ROLES]),
+        ).order_by(User.full_name.asc())
+    )).all()
+    counts = dict((await db.execute(
+        select(Customer.sales_pic_id, func.count(Customer.id))
+        .where(Customer.is_deleted.is_(False))
+        .group_by(Customer.sales_pic_id)
+    )).all())
+    unassigned = counts.get(None, 0)
+    return {
+        "reps": [
+            {
+                "id": str(u.id),
+                "full_name": u.full_name,
+                "email": u.email,
+                "role": u.role,
+                "customers": counts.get(u.id, 0),
+            }
+            for u in rows
+        ],
+        "unassigned": unassigned,
+    }
+
+
+@router.post("/reassign")
+async def reassign_customers(
+    payload: ReassignIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.DIRECTOR)),
+):
+    """Put a different sales rep in charge of one or more customers.
+
+    Three things happen per customer, and all three matter:
+
+      • ownership moves, which is what decides who can see the account;
+      • the live price requests and quotations move with it (unless the
+        director says otherwise), so the new rep inherits a working desk
+        rather than a customer with invisible open documents;
+      • the handover is written to the customer's timeline with both names,
+        so in six months it is still clear who handed what to whom, and why.
+
+    Decided work — won or lost quotations, rejected price requests — is
+    deliberately left where it is. It is the record of who closed it.
+    """
+    from app.models.price_request import PriceRequest
+
+    if not payload.customer_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at least one customer")
+    if len(payload.customer_ids) > 500:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Too many customers in one go (max 500)")
+
+    new_rep: User | None = None
+    if payload.sales_pic_id:
+        new_rep = await db.get(User, payload.sales_pic_id)
+        if not new_rep:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "That user doesn't exist")
+        if not new_rep.is_active:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"{new_rep.full_name}'s account is disabled — reactivate it first",
+            )
+        if Role(new_rep.role) not in _REP_ROLES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"{new_rep.full_name} is {new_rep.role} — only sales, a manager "
+                "or a director can be put in charge of a customer",
+            )
+
+    note = (payload.note or "").strip() or None
+    now = datetime.now(UTC)
+    moved: list[dict] = []
+    unchanged: list[dict] = []
+    prs_moved = 0
+    quotes_moved = 0
+
+    for cid in payload.customer_ids:
+        c = await db.get(Customer, cid)
+        if not c or c.is_deleted:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Customer {cid} not found")
+        old_id = c.sales_pic_id
+        if old_id == payload.sales_pic_id:
+            unchanged.append({"id": str(c.id), "company_name": c.company_name})
+            continue
+
+        old_rep = await db.get(User, old_id) if old_id else None
+        c.sales_pic_id = payload.sales_pic_id
+        c.updated_by = user.id
+
+        carried = {"price_requests": 0, "quotations": 0}
+        if payload.move_open_work:
+            live_prs = (await db.scalars(
+                select(PriceRequest).where(
+                    PriceRequest.customer_id == c.id,
+                    PriceRequest.is_deleted.is_(False),
+                    PriceRequest.status.not_in(_DEAD_PR_STATUSES),
+                )
+            )).all()
+            for pr in live_prs:
+                if pr.sales_pic_id != payload.sales_pic_id:
+                    pr.sales_pic_id = payload.sales_pic_id
+                    carried["price_requests"] += 1
+            live_quotes = (await db.scalars(
+                select(Quotation).where(
+                    Quotation.customer_id == c.id,
+                    Quotation.status.in_(_LIVE_QUOTE_STATUSES),
+                )
+            )).all()
+            for q in live_quotes:
+                if q.sales_pic_id != payload.sales_pic_id:
+                    q.sales_pic_id = payload.sales_pic_id
+                    carried["quotations"] += 1
+            prs_moved += carried["price_requests"]
+            quotes_moved += carried["quotations"]
+
+        from_name = old_rep.full_name if old_rep else "nobody"
+        to_name = new_rep.full_name if new_rep else "nobody"
+        db.add(Activity(
+            customer_id=c.id,
+            user_id=user.id,
+            type="assignment",
+            direction="internal",
+            occurred_at=now,
+            notes=(f"Sales in charge: {from_name} → {to_name}"
+                   + (f" · {note}" if note else "")),
+            meta={
+                "from_id": str(old_id) if old_id else None,
+                "from_name": from_name,
+                "to_id": str(payload.sales_pic_id) if payload.sales_pic_id else None,
+                "to_name": to_name,
+                "note": note,
+                "carried": carried,
+                "by_name": user.full_name,
+            },
+        ))
+        await audit_record(
+            db, actor=user, action="update", entity="customer", entity_id=c.id,
+            before={"sales_pic_id": str(old_id) if old_id else None},
+            after={
+                "sales_pic_id": str(payload.sales_pic_id) if payload.sales_pic_id else None,
+                "reason": note,
+                "carried": carried,
+            },
+        )
+        moved.append({
+            "id": str(c.id),
+            "company_name": c.company_name,
+            "from_name": from_name,
+            "to_name": to_name,
+            "carried": carried,
+        })
+
+    await db.flush()
+    return {
+        "moved": len(moved),
+        "unchanged": len(unchanged),
+        "price_requests_moved": prs_moved,
+        "quotations_moved": quotes_moved,
+        "to": {"id": str(new_rep.id), "full_name": new_rep.full_name} if new_rep else None,
+        "customers": moved,
+        "already_theirs": unchanged,
+    }
+
+
 @router.get("/{customer_id}", response_model=CustomerOut)
 async def get_customer(customer_id: UUID,
                        db: AsyncSession = Depends(get_db),
@@ -142,7 +367,13 @@ async def get_customer(customer_id: UUID,
         # the bell, calendar and AI queue.
         await ensure_stage_tasks(db, obj, obj.stage)
         await db.flush()
-    return obj
+    out = CustomerOut.model_validate(obj)
+    # The detail page names whoever is in charge, so the id alone isn't
+    # enough — the list view already resolves it the same way.
+    if obj.sales_pic_id:
+        rep = await db.get(User, obj.sales_pic_id)
+        out.sales_pic_name = rep.full_name if rep else None
+    return out
 
 
 @router.patch("/{customer_id}", response_model=CustomerOut)
@@ -160,6 +391,23 @@ async def update_customer(
 
     rule = evaluate_data_change(Role(user.role))
     changes = payload.model_dump(exclude_unset=True)
+
+    # Who is in charge of an account is not an ordinary field edit — it
+    # decides who can see the customer at all. It goes through
+    # POST /customers/reassign, which is the director's, and which also
+    # carries the open work across and writes the handover down.
+    if "sales_pic_id" in changes and changes["sales_pic_id"] != obj.sales_pic_id:
+        if Role(user.role) != Role.DIRECTOR:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Only a director can change which sales rep is in charge of a customer.",
+            )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Use the Reassign action (POST /customers/reassign) to change who is "
+            "in charge — it moves the open price requests and quotations too.",
+        )
+    changes.pop("sales_pic_id", None)
 
     # Stage transitions are sensitive — every move along the pipeline needs
     # a manager or director to sign off. Managers and directors can move

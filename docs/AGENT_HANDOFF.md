@@ -363,6 +363,28 @@ no customer↔supplier map can be reconstructed. Preserve this on any new screen
 **Sales sees only their own customers** (`can_view_customer`). Everyone above
 sees all.
 
+**Changing who is in charge of a customer is the director's alone, and it is
+not a field edit.** `PATCH /customers/{id}` refuses `sales_pic_id` outright
+(403 for anyone below director, 400 for the director, pointing at the right
+door); the door is `POST /customers/reassign` in `customers.py`. It exists as
+its own action because ownership is what the whole CRM scopes on, so moving it
+has to move three other things at once:
+- the customer's **live** price requests and quotations (`move_open_work`,
+  default on) — without them the new rep inherits an account whose open quote
+  they cannot open, and the departed rep keeps it;
+- **decided** work — won/lost quotations, rejected PRs — stays put. It is the
+  record of who closed the deal;
+- an `Activity(type="assignment")` on the customer's timeline plus an audit
+  row, and the `handover` section in `notifications.py` reads that activity to
+  tell both reps.
+
+Only `sales`/`manager`/`director` may be put in charge; the endpoint refuses
+disabled accounts and everyone else by role. `GET /customers/assignable-reps`
+(manager+) returns the roster with each rep's current load, and
+`GET /customers?unassigned=true` finds the accounts nobody owns — which is the
+state a fresh import leaves behind. `test_customer_handover.py` covers all of
+it.
+
 **Invoice lifecycle** — the app writes only:
 `pending_finance → approved → partial → paid` (or `→ rejected`).
 `issued` and `overdue` are legacy values nothing sets any more but old rows
@@ -521,6 +543,10 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Let the director change which sales rep is in charge of a customer
+Make an import undoable in one action, and refuse the parts that aren't
+Ask which address to print on before exporting
+Let sales add a note to a quotation without being told the price is fixed
 Show the document behind an approval request
 Open cross-department chats by request instead of refusing them
 Let sales negotiate a price request, capped at three revisions
@@ -560,8 +586,9 @@ Ongoing/Closed project sections, the VOLER re-skin, @mentions, a Back button in
 the app chrome, WhatsApp-style replies and forwarding, the director-only test
 data purge, director-editable price requests with capped negotiation revisions,
 the customer-PO keterangan and order confirmation sheet, cross-department chat
-by request, document previews in the approval inbox, and a director-only
-customer importer for the old Accurate data.
+by request, document previews in the approval inbox, a director-only
+customer importer for the old Accurate data, an address picker on every
+export, and director-controlled customer ownership.
 
 ## 10. Open items
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Plus, Search, Filter, Download, Table2, Columns3, AlertCircle,
+  Plus, Search, Filter, Download, Table2, Columns3, AlertCircle, UserCog,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -11,6 +11,8 @@ import { UserLink } from "@/components/UserLink";
 import { PipelineView } from "@/components/PipelineView";
 import { Modal } from "@/components/Modal";
 import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
+import { AssignSalesDialog } from "@/components/AssignSalesDialog";
+import { useAuthStore } from "@/store/auth";
 import { useT, T } from "@/store/lang";
 import type { Customer } from "@/types";
 
@@ -45,9 +47,23 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
   const [openNew, setOpenNew] = useState(false);
+  // Who covers what is the director's call, so the filter and the bulk
+  // hand-over only exist for them. "" = everyone, "none" = nobody is on it —
+  // the state an import leaves behind, and the one worth finding.
+  const me = useAuthStore((s) => s.user);
+  const isDirector = me?.role === "director";
+  const [rep, setRep] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [assignOpen, setAssignOpen] = useState(false);
+
+  const reps = useQuery({
+    queryKey: ["assignable-reps"],
+    queryFn: () => api.get("/customers/assignable-reps").then((r) => r.data),
+    enabled: isDirector,
+  });
 
   const q = useQuery({
-    queryKey: ["customers", view === "pipeline" ? "" : search, view === "pipeline" ? "" : stage],
+    queryKey: ["customers", view === "pipeline" ? "" : search, view === "pipeline" ? "" : stage, rep],
     queryFn: () =>
       api
         .get("/customers", {
@@ -55,12 +71,20 @@ export default function CustomersPage() {
             // In pipeline mode we fetch all stages, search is applied client-side
             q: view === "table" ? (search || undefined) : (search || undefined),
             stage: view === "table" ? (stage || undefined) : undefined,
+            sales_pic_id: rep && rep !== "none" ? rep : undefined,
+            unassigned: rep === "none" ? true : undefined,
             page_size: view === "pipeline" ? 500 : 50,
           },
         })
         .then((r) => r.data),
   });
   const rows: Customer[] = q.data?.data ?? [];
+  const pickedRows = rows.filter((r) => picked.has(r.id));
+  const toggle = (id: string) => setPicked((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(n || 0);
 
   function exportCsv() {
@@ -149,10 +173,46 @@ export default function CustomersPage() {
             ))}
           </select>
         )}
+        {isDirector && (
+          <select value={rep} onChange={(e) => { setRep(e.target.value); setPicked(new Set()); }}
+                  className="input max-w-[240px]"
+                  title={t("Filter by who is in charge", "Saring berdasarkan penanggung jawab")}>
+            <option value="">{t("All sales reps", "Semua sales")}</option>
+            <option value="none">
+              {t(`No sales rep (${reps.data?.unassigned ?? 0})`,
+                 `Tanpa sales (${reps.data?.unassigned ?? 0})`)}
+            </option>
+            {(reps.data?.reps ?? []).map((r: any) => (
+              <option key={r.id} value={r.id}>{r.full_name} ({r.customers})</option>
+            ))}
+          </select>
+        )}
         {view === "table" && (
           <button className="btn-ghost"><Filter size={15} /> {t("More filters", "Filter lainnya")}</button>
         )}
       </div>
+
+      {/* Bulk hand-over bar — only once something is ticked. */}
+      {isDirector && view === "table" && picked.size > 0 && (
+        <div className="card p-3 flex flex-wrap items-center gap-3 border-brand-200 bg-brand-50/50">
+          <UserCog size={16} className="text-brand-600" />
+          <span className="text-sm font-medium">
+            {t(`${picked.size} customer${picked.size === 1 ? "" : "s"} selected`,
+               `${picked.size} pelanggan dipilih`)}
+          </span>
+          <button className="text-xs text-brand-700 hover:underline"
+                  onClick={() => setPicked(new Set(rows.map((r) => r.id)))}>
+            {t(`Select all ${rows.length} shown`, `Pilih semua ${rows.length} yang tampil`)}
+          </button>
+          <button className="text-xs muted hover:underline"
+                  onClick={() => setPicked(new Set())}>
+            {t("Clear", "Kosongkan")}
+          </button>
+          <button className="btn-primary ml-auto" onClick={() => setAssignOpen(true)}>
+            <UserCog size={14} /> {t("Assign sales rep", "Tetapkan sales")}
+          </button>
+        </div>
+      )}
 
       {q.error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-start gap-2">
@@ -181,6 +241,18 @@ export default function CustomersPage() {
             <table className="w-full">
               <thead className="bg-ink-50/60">
                 <tr>
+                  {isDirector && (
+                    <th className="th w-8">
+                      <input
+                        type="checkbox"
+                        aria-label={t("Select all", "Pilih semua")}
+                        checked={!!rows.length && picked.size === rows.length}
+                        onChange={(e) => setPicked(
+                          e.target.checked ? new Set(rows.map((r) => r.id)) : new Set(),
+                        )}
+                      />
+                    </th>
+                  )}
                   <th className="th">{t("Company", "Perusahaan")}</th>
                   <th className="th">{t("Industry", "Industri")}</th>
                   <th className="th">{T("PIC")}</th>
@@ -192,6 +264,16 @@ export default function CustomersPage() {
               <tbody>
                 {rows.map((c) => (
                   <tr key={c.id} className="tr-hover border-t border-ink-100">
+                    {isDirector && (
+                      <td className="td">
+                        <input
+                          type="checkbox"
+                          aria-label={c.company_name}
+                          checked={picked.has(c.id)}
+                          onChange={() => toggle(c.id)}
+                        />
+                      </td>
+                    )}
                     <td className="td">
                       <Link
                         to={`/customers/${c.id}`}
@@ -209,7 +291,7 @@ export default function CustomersPage() {
                 ))}
                 {!rows.length && (
                   <tr>
-                    <td colSpan={6} className="td text-center muted py-12">
+                    <td colSpan={isDirector ? 7 : 6} className="td text-center muted py-12">
                       {t("No customers match your filter.", "Tidak ada pelanggan yang cocok dengan filter Anda.")}
                     </td>
                   </tr>
@@ -234,6 +316,16 @@ export default function CustomersPage() {
       >
         <NewCustomerForm onClose={() => setOpenNew(false)} />
       </Modal>
+
+      <AssignSalesDialog
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        customers={pickedRows.map((c) => ({
+          id: c.id, company_name: c.company_name,
+          sales_pic_name: c.sales_pic_name,
+        }))}
+        onDone={() => { setPicked(new Set()); q.refetch(); }}
+      />
     </div>
   );
 }

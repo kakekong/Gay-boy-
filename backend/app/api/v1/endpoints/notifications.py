@@ -169,6 +169,50 @@ async def list_notifications(
             "at": a.decided_at,
         })
 
+    # 1b2. An account was handed to you (or taken off you). The director
+    # makes this change from their own screen, so without a row here the
+    # first a rep knows of it is a customer appearing in — or vanishing
+    # from — their list.
+    handovers = (await db.execute(
+        select(Activity, Customer)
+        .join(Customer, Activity.customer_id == Customer.id)
+        .where(
+            Activity.type == "assignment",
+            Activity.occurred_at >= now - timedelta(days=14),
+            Customer.is_deleted.is_(False),
+        )
+        .order_by(Activity.occurred_at.desc())
+        .limit(40)
+    )).all()
+    for a, c in handovers:
+        meta = a.meta or {}
+        took_it = meta.get("to_id") == str(me.id)
+        lost_it = meta.get("from_id") == str(me.id)
+        if not (took_it or lost_it):
+            continue
+        carried = meta.get("carried") or {}
+        moved_bits = [
+            f"{carried.get('price_requests') or 0} price request"
+            + ("" if carried.get("price_requests") == 1 else "s"),
+            f"{carried.get('quotations') or 0} quotation"
+            + ("" if carried.get("quotations") == 1 else "s"),
+        ]
+        note = (meta.get("note") or "").strip()
+        items.append({
+            "id": f"handover:{a.id}",
+            "kind": "handover",
+            "severity": "medium" if took_it else "low",
+            "title": (f"You're now in charge of {c.company_name}" if took_it
+                      else f"{c.company_name} moved to {meta.get('to_name') or 'nobody'}"),
+            "body": ((f"Handed over by {meta.get('by_name') or 'a director'}"
+                      + (f" · {note}" if note else "")
+                      + " · came with " + " and ".join(moved_bits)) if took_it
+                     else (f"Reassigned by {meta.get('by_name') or 'a director'}"
+                           + (f" · {note}" if note else ""))),
+            "link": f"/customers/{c.id}" if took_it else "/customers",
+            "at": a.occurred_at,
+        })
+
     # 1c. Price requests. They run their own pipeline (pending_purchasing →
     # pending_director → approved/rejected) OUTSIDE the approvals queue, so
     # without this section every handoff was silent. Routed to whoever

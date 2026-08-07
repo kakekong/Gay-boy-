@@ -183,16 +183,11 @@ async def main():
     await c.post(f"/quotations/{q4['id']}/submit", headers=d)
     await c.post(f"/quotations/{q4['id']}/approve", headers=d, json={})
     # The director owns it, so hand it to sales1 — the path under test is the
-    # non-director one. Quotation ownership has no API, hence the direct write.
+    # non-director one. Reassigning the customer carries the live quotation
+    # with it, which is how the quotation changes hands.
     me = J(await c.get("/auth/me", headers=s1))
-    await c.patch(f"/customers/{cust}", headers=d, json={"sales_pic_id": me["id"]})
-    from sqlalchemy import update as sqlupdate
-    from app.core.db import SessionLocal
-    from app.models.quotation import Quotation as _Q
-    async with SessionLocal() as sess:            # ownership isn't editable via the API
-        await sess.execute(sqlupdate(_Q).where(_Q.id == uuid.UUID(q4["id"]))
-                           .values(sales_pic_id=uuid.UUID(me["id"])))
-        await sess.commit()
+    await c.post("/customers/reassign", headers=d, json={
+        "customer_ids": [cust], "sales_pic_id": me["id"], "move_open_work": True})
 
     cur4 = J(await c.get(f"/quotations/{q4['id']}", headers=s1))
     before = await pending_edits(q4["id"])
