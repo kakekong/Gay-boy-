@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 32 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 33 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -213,6 +213,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
+| `test_export_address.py` | which of a customer's three addresses gets printed is asked at download time, honoured (checked by reading the address back out of the generated PDF/xlsx), falls back to the office when the chosen one is blank, and refuses another customer's contact |
 | `test_quotation_meta_edit.py` | a note is not a price change: the edit form posts the whole document back, so every guard that asked "are items in this payload?" had to be taught to ask "did the items change?" — while a real price edit is still refused, or still queued for the director |
 | `test_record_delete.py` | deleting named documents (including the flat kinds — parts and chart-of-accounts rows, which is how a test import gets undone): everything downstream of the pick goes, nothing outside it is touched, upstream is never taken, money needs its own confirmation — and the numbering regression that made deleting anything break the creation of the next one |
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
@@ -480,6 +481,18 @@ Chat messages and discussion comments both push instantly.
   customers contain, and the sample chart of accounts contains all 15 accounts
   the seed does *not* have, so it demonstrates an import rather than reporting
   "already here" 22 times).
+- **A customer has three addresses and they are different places.** Office,
+  delivery and tax — which one a document prints is a decision about *that
+  document*, made at download time, not a property of the customer.
+  `services/print_address.py` is the only place that knows the list; the
+  quotation and customer-PO exports both read it, which is what stops them
+  drifting apart again (they already had, with two different ideas of
+  "delivery" and only one of them offering the tax address).
+- **Reading a generated PDF back needs a real parser.** `pypdf` is in
+  requirements as a test-only dependency. A substring search over the raw
+  bytes finds nothing even when the words are plainly on the page — the
+  streams are compressed and the text is split across drawing operators — and
+  a driver built that way fails on behaviour that is entirely correct.
 - **The edit forms post the whole document back, every time.** So "field is
   present in the payload" never means "field was changed" — a sales rep typing
   a note sends every line item along with it. `quotations.PATCH` prunes

@@ -14,6 +14,7 @@ import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
 import { LinkedAccountsPanel } from "@/components/quotation/LinkedAccountsPanel";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { ExportAddressDialog } from "@/components/ExportAddressDialog";
 import { CommentThread } from "@/components/CommentThread";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
@@ -47,25 +48,6 @@ const STATUS_CHIP: Record<string, string> = {
 };
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
-
-function downloadExport(quoteId: string, quoteNumber: string, kind: "pdf" | "xlsx") {
-  api.get(`/quotations/${quoteId}/export.${kind}`, { responseType: "blob" })
-    .then((r) => {
-      const url = URL.createObjectURL(r.data);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `quotation-${quoteNumber}.${kind}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    })
-    .catch((e) => alert(
-      e?.response?.data?.errors?.[0]?.message
-      ?? e?.response?.data?.detail
-      ?? tt("Download failed", "Unduhan gagal")
-    ));
-}
 
 export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -108,6 +90,7 @@ export default function QuotationDetailPage() {
 
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [lostOpen, setLostOpen] = useState(false);
+  const [exportKind, setExportKind] = useState<"pdf" | "xlsx" | null>(null);
   const [lostReason, setLostReason] = useState("");
   const [editOpen, setEditOpen] = useState(false);
 
@@ -419,15 +402,17 @@ export default function QuotationDetailPage() {
                 </button>
               </>
             )}
+            {/* Both exports ask which address to print on first — see
+                ExportAddressDialog. */}
             <button
               className="btn-ghost"
-              onClick={() => downloadExport(Q.id, Q.number, "pdf")}
+              onClick={() => setExportKind("pdf")}
               title={t("Download as PDF", "Unduh sebagai PDF")}
             >
               <FileText size={15} /> {T("PDF")}</button>
             <button
               className="btn-ghost"
-              onClick={() => downloadExport(Q.id, Q.number, "xlsx")}
+              onClick={() => setExportKind("xlsx")}
               title={t("Download as Excel", "Unduh sebagai Excel")}
             >
               <FileText size={15} /> {T("Excel")}</button>
@@ -525,6 +510,17 @@ export default function QuotationDetailPage() {
           customerId={Q.customer_id}
         />
       )}
+
+      <ExportAddressDialog
+        open={!!exportKind}
+        onClose={() => setExportKind(null)}
+        title={exportKind === "xlsx"
+          ? t("Download quotation as Excel", "Unduh penawaran sebagai Excel")
+          : t("Download quotation as PDF", "Unduh penawaran sebagai PDF")}
+        optionsUrl={`/quotations/${Q.id}/pdf-options`}
+        downloadUrl={`/quotations/${Q.id}/export.${exportKind ?? "pdf"}`}
+        filename={`quotation-${Q.number}.${exportKind ?? "pdf"}`}
+      />
 
       {/* Notes — directly under the figures, not below the discussion and the
           follow-up log. It is the one part of this page a sales rep types

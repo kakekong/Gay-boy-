@@ -1043,19 +1043,71 @@ def _pic_fields(cust: Customer | None, contact: CustomerContact | None) -> dict:
     return {"name": "—", "position": "—", "email": "—", "phone": "—"}
 
 
-@router.get("/{q_id}/export.pdf")
-async def export_quotation_pdf(
+async def _chosen_contact(db: AsyncSession, cust, contact_id, fallback):
+    """The contact the caller asked for, or the quotation's own.
+
+    A contact id that belongs to some other customer is refused rather than
+    ignored — printing a stranger's name and phone number on a quotation is
+    the kind of mistake that reaches the customer before it reaches us.
+    """
+    if contact_id is None:
+        return fallback
+    ct = await db.get(CustomerContact, contact_id)
+    if not ct or not cust or ct.customer_id != cust.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "That contact doesn't belong to this customer")
+    return ct
+
+
+@router.get("/{q_id}/pdf-options")
+async def quotation_pdf_options(
     q_id: UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """The addresses and contacts this quotation could be printed against.
+
+    Asked at download time rather than stored on the document: the same
+    customer takes correspondence at a head office and delivery at a plant,
+    and which one belongs on the sheet depends on what the quotation is for.
+    """
+    from app.services.print_address import address_options, contact_options
+
+    q, _items, cust, _contact, _sales = await _quotation_bundle(db, q_id)
+    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    contacts = []
+    if cust:
+        contacts = (await db.scalars(
+            select(CustomerContact).where(CustomerContact.customer_id == cust.id)
+            .order_by(CustomerContact.is_primary.desc(), CustomerContact.name)
+        )).all()
+    return {
+        "customer_name": cust.company_name if cust else "—",
+        "addresses": address_options(cust),
+        "pics": contact_options(cust, contacts),
+        "default_address": "office",
+    }
+
+
+@router.get("/{q_id}/export.pdf")
+async def export_quotation_pdf(
+    q_id: UUID,
+    address: str = "office",
+    contact_id: UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from app.services.print_address import resolve_address
     from app.services.quotation_pdf import build_quotation_pdf
 
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    contact = await _chosen_contact(db, cust, contact_id, contact)
     await _log_export_activity(db, q, user, "PDF")
     pic = _pic_fields(cust, contact)
+    addr = resolve_address(cust, address)
 
     # KODE BARANG comes from the linked product where there is one; a
     # free-text line falls back to its position on the sheet.
@@ -1086,7 +1138,7 @@ async def export_quotation_pdf(
         number=q.number or "—",
         issued=q.created_at.strftime("%d %b %Y") if q.created_at else "—",
         customer_name=(cust.company_name if cust else "—"),
-        customer_address=(cust.company_address if cust and cust.company_address else "—"),
+        customer_address=addr.address,
         cp_name=pic["name"],
         cp_position=pic["position"],
         cp_email=pic["email"],
@@ -1114,9 +1166,12 @@ async def export_quotation_pdf(
 @router.get("/{q_id}/export.xlsx")
 async def export_quotation_excel(
     q_id: UUID,
+    address: str = "office",
+    contact_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.services.print_address import resolve_address
     from io import BytesIO
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -1124,8 +1179,10 @@ async def export_quotation_excel(
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
     if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    contact = await _chosen_contact(db, cust, contact_id, contact)
     await _log_export_activity(db, q, user, "Excel")
     pic = _pic_fields(cust, contact)
+    addr = resolve_address(cust, address)
 
     wb = Workbook()
     ws = wb.active
@@ -1149,7 +1206,7 @@ async def export_quotation_excel(
     row += 1
     for label, value in [
         ("Customer",      cust.company_name if cust else "—"),
-        ("Address",       (cust.company_address if cust and cust.company_address else "—")),
+        (addr.label,      addr.address),
         ("PIC",           pic["name"]),
         ("Department",    pic["position"]),
         ("Email",         pic["email"]),

@@ -4,12 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Receipt, Building2, FileText, Briefcase, Calendar,
   Loader2, AlertCircle, Check, X, TrendingUp, Wallet, AlertTriangle,
-  Download, Pencil, MapPin, User as UserIcon,
+  Download, Pencil,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
-import { downloadFile } from "@/lib/download";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { ExportAddressDialog } from "@/components/ExportAddressDialog";
 import { CommentThread } from "@/components/CommentThread";
 import { useAuthStore } from "@/store/auth";
 import { useT, t as tt, T, locale } from "@/store/lang";
@@ -943,13 +943,6 @@ function CustomerRecap({
   );
 }
 
-interface PdfOptions {
-  ship_to: { key: string; label: string; address: string }[];
-  pics: { id: string | null; name: string; position: string; phone: string;
-          email: string; primary: boolean }[];
-  keterangan: string;
-}
-
 /**
  * The keterangan, and the order-confirmation sheet it prints on.
  *
@@ -963,9 +956,6 @@ function KeteranganCard({ po }: { po: any }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(po.notes ?? "");
   const [open, setOpen] = useState(false);
-  const [shipTo, setShipTo] = useState("delivery");
-  const [contactIdx, setContactIdx] = useState(0);
-  const [busy, setBusy] = useState(false);
 
   const save = useMutation({
     mutationFn: () => api.patch(`/customer-pos/${po.id}`, { notes: draft }),
@@ -975,16 +965,6 @@ function KeteranganCard({ po }: { po: any }) {
       qc.invalidateQueries({ queryKey: ["customer-pos"] });
     },
   });
-
-  const opts = useQuery({
-    queryKey: ["po-pdf-options", po.id],
-    queryFn: () => api.get(`/customer-pos/${po.id}/pdf-options`)
-      .then((r) => r.data as PdfOptions),
-    enabled: open,
-  });
-
-  const pics = opts.data?.pics ?? [];
-  const chosen = pics[contactIdx];
 
   return (
     <div className="card p-5 space-y-3">
@@ -1028,104 +1008,15 @@ function KeteranganCard({ po }: { po: any }) {
         </div>
       )}
 
-      {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center p-4">
-          <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[85vh] overflow-y-auto">
-            <header className="p-4 border-b border-ink-100 flex items-center gap-2">
-              <FileText size={16} className="text-brand-600" />
-              <span className="text-lg font-semibold">
-                {t("Order confirmation sheet", "Lembar konfirmasi pesanan")}
-              </span>
-              <button className="ml-auto text-ink-400 hover:text-ink-800"
-                      onClick={() => setOpen(false)} aria-label={T("Close")}><X size={16} /></button>
-            </header>
-
-            {opts.isLoading ? (
-              <div className="p-8 text-center muted">
-                <Loader2 size={16} className="animate-spin inline" /> {t("Loading…", "Memuat…")}
-              </div>
-            ) : (
-              <div className="p-4 space-y-4">
-                <div>
-                  <div className="overline mb-2 flex items-center gap-1">
-                    <MapPin size={12} /> {t("Ship to", "Kirim ke")}
-                  </div>
-                  <div className="space-y-2">
-                    {(opts.data?.ship_to ?? []).map((s) => (
-                      <label key={s.key} className={clsx(
-                        "block rounded-lg border px-3 py-2 cursor-pointer",
-                        shipTo === s.key ? "border-brand-400 bg-brand-50/60" : "border-ink-200",
-                        !s.address && "opacity-60",
-                      )}>
-                        <div className="flex items-center gap-2">
-                          <input type="radio" name="shipto" checked={shipTo === s.key}
-                                 onChange={() => setShipTo(s.key)} />
-                          <span className="text-sm font-medium">{T(s.label)}</span>
-                        </div>
-                        <div className="text-xs muted whitespace-pre-wrap mt-1 pl-6">
-                          {s.address || t("Not set on the customer — the office address is used instead.",
-                                          "Belum diisi pada pelanggan — alamat kantor yang dipakai.")}
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="overline mb-2 flex items-center gap-1">
-                    <UserIcon size={12} /> {t("PIC for this order", "PIC pesanan ini")}
-                  </div>
-                  {pics.length ? (
-                    <select className="input" value={contactIdx}
-                            onChange={(e) => setContactIdx(Number(e.target.value))}>
-                      {pics.map((p2, i) => (
-                        <option key={i} value={i}>
-                          {p2.name}{p2.position ? ` — ${p2.position}` : ""}
-                          {p2.primary ? t(" (primary)", " (utama)") : ""}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <p className="text-sm muted">
-                      {t("This customer has no contacts yet — add one on the customer page.",
-                         "Pelanggan ini belum punya kontak — tambahkan di halaman pelanggan.")}
-                    </p>
-                  )}
-                  {chosen && (
-                    <div className="text-xs muted mt-1">
-                      {[chosen.phone, chosen.email].filter(Boolean).join(" · ") || "—"}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end gap-2 pt-1">
-                  <button className="btn-ghost" onClick={() => setOpen(false)}>
-                    {t("Cancel", "Batal")}
-                  </button>
-                  <button
-                    className="btn-primary"
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      await downloadFile(
-                        `/customer-pos/${po.id}/export.pdf`,
-                        `KonfirmasiPesanan-${po.number}.pdf`,
-                        { ship_to: shipTo, contact_id: chosen?.id ?? undefined },
-                      );
-                      setBusy(false);
-                      setOpen(false);
-                    }}
-                  >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                    {t("Download", "Unduh")}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <ExportAddressDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={t("Order confirmation sheet", "Lembar konfirmasi pesanan")}
+        optionsUrl={`/customer-pos/${po.id}/pdf-options`}
+        downloadUrl={`/customer-pos/${po.id}/export.pdf`}
+        filename={`KonfirmasiPesanan-${po.number}.pdf`}
+        addressParam="ship_to"
+      />
     </div>
   );
 }

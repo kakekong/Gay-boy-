@@ -830,26 +830,24 @@ async def customer_po_pdf_options(
         if not c or c.sales_pic_id != user.id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
 
+    from app.services.print_address import address_options, contact_options
+
     cust = await db.get(Customer, po.customer_id)
-    ship_to = [
-        {"key": "office", "label": "Kantor / Office",
-         "address": (cust.company_address if cust else None) or ""},
-        {"key": "delivery", "label": "Alamat Pengiriman / Delivery",
-         "address": (cust.delivery_address if cust else None) or ""},
-    ]
-    pics = []
-    if cust and cust.pic_name:
-        pics.append({"id": None, "name": cust.pic_name,
-                     "position": cust.pic_position or "", "phone": cust.phone or "",
-                     "email": cust.email or "", "primary": True})
-    for ct in (await db.scalars(
+    contacts = (await db.scalars(
         select(CustomerContact).where(CustomerContact.customer_id == po.customer_id)
         .order_by(CustomerContact.is_primary.desc(), CustomerContact.name)
-    )).all():
-        pics.append({"id": str(ct.id), "name": ct.name, "position": ct.position or "",
-                     "phone": ct.phone or "", "email": ct.email or "",
-                     "primary": ct.is_primary})
-    return {"ship_to": ship_to, "pics": pics, "keterangan": po.notes or ""}
+    )).all()
+    # `ship_to` is kept as the field name here because that is what the PO
+    # sheet calls the block it prints; the list itself now comes from the same
+    # place the quotation's does, so the two cannot drift apart.
+    return {
+        "customer_name": cust.company_name if cust else "—",
+        "ship_to": address_options(cust),
+        "addresses": address_options(cust),
+        "pics": contact_options(cust, contacts),
+        "default_address": "delivery",
+        "keterangan": po.notes or "",
+    }
 
 
 @router.get("/{po_id}/export.pdf")
@@ -866,19 +864,15 @@ async def export_customer_po_pdf(
     cust = await db.get(Customer, po.customer_id)
     if Role(user.role) == Role.SALES and (not cust or cust.sales_pic_id != user.id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
-    if ship_to not in ("office", "delivery"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "ship_to must be 'office' or 'delivery'")
-
-    if ship_to == "office":
-        label, address = "Kantor", (cust.company_address if cust else "") or ""
-    else:
-        # Fall back to the office address rather than printing a blank block —
-        # a sheet with no destination on it is worse than the wrong heading.
-        label = "Alamat Pengiriman"
-        address = (cust.delivery_address if cust else "") or ""
-        if not address:
-            label, address = "Kantor", (cust.company_address if cust else "") or ""
+    from app.services.print_address import VALID_KEYS, resolve_address
+    if ship_to not in VALID_KEYS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"ship_to must be one of {', '.join(sorted(VALID_KEYS))}")
+    # Falls back to the office address rather than printing a blank block —
+    # a sheet with no destination on it is worse than the wrong heading.
+    resolved = resolve_address(cust, ship_to)
+    label, address = resolved.label, resolved.address
 
     if contact_id:
         ct = await db.get(CustomerContact, contact_id)

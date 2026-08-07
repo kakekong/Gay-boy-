@@ -30,6 +30,8 @@ pillow==10.4.0
 pytesseract==0.3.13
 reportlab==4.2.5
 openpyxl==3.1.5
+# Test-only: reads the generated PDFs back to check what is printed on them.
+pypdf==6.15.0
 pytest==8.3.3
 pytest-asyncio==0.24.0
 pywebpush==2.0.1
