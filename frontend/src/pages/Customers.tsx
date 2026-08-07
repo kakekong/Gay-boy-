@@ -11,7 +11,7 @@ import { UserLink } from "@/components/UserLink";
 import { PipelineView } from "@/components/PipelineView";
 import { Modal } from "@/components/Modal";
 import { NewCustomerForm } from "@/components/forms/NewCustomerForm";
-import { AssignSalesDialog } from "@/components/AssignSalesDialog";
+import { AssignSalesDialog, repHintLabel } from "@/components/AssignSalesDialog";
 import { useAuthStore } from "@/store/auth";
 import { useT, T } from "@/store/lang";
 import type { Customer } from "@/types";
@@ -62,6 +62,9 @@ export default function CustomersPage() {
     enabled: isDirector,
   });
 
+  // "hint:Diani" selects everything the import file said was Diani's,
+  // whether or not a Diani account existed at the time.
+  const hint = rep.startsWith("hint:") ? rep.slice(5) : "";
   const q = useQuery({
     queryKey: ["customers", view === "pipeline" ? "" : search, view === "pipeline" ? "" : stage, rep],
     queryFn: () =>
@@ -71,8 +74,9 @@ export default function CustomersPage() {
             // In pipeline mode we fetch all stages, search is applied client-side
             q: view === "table" ? (search || undefined) : (search || undefined),
             stage: view === "table" ? (stage || undefined) : undefined,
-            sales_pic_id: rep && rep !== "none" ? rep : undefined,
+            sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
             unassigned: rep === "none" ? true : undefined,
+            rep_hint: hint || undefined,
             page_size: view === "pipeline" ? 500 : 50,
           },
         })
@@ -185,6 +189,20 @@ export default function CustomersPage() {
             {(reps.data?.reps ?? []).map((r: any) => (
               <option key={r.id} value={r.id}>{r.full_name} ({r.customers})</option>
             ))}
+            {/* Names the import file carried. A rep with no account here at
+                import time left their customers unassigned under a name —
+                this is how to find them and hand them over. */}
+            {!!(reps.data?.from_import ?? []).length && (
+              <optgroup label={t("Named in the imported file", "Nama dari berkas impor")}>
+                {(reps.data?.from_import ?? []).map((h: any) => (
+                  <option key={h.hint} value={`hint:${h.hint}`}>
+                    {repHintLabel(h.hint)} ({h.unassigned
+                      ? t(`${h.unassigned} unassigned`, `${h.unassigned} tanpa sales`)
+                      : t(`${h.customers} customers`, `${h.customers} pelanggan`)})
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         )}
         {view === "table" && (
@@ -284,7 +302,18 @@ export default function CustomersPage() {
                     </td>
                     <td className="td capitalize muted">{c.industry}</td>
                     <td className="td">{c.pic_name ?? "—"}</td>
-                    <td className="td muted"><UserLink id={c.sales_pic_id} name={c.sales_pic_name} /></td>
+                    <td className="td muted">
+                      {c.sales_pic_id
+                        ? <UserLink id={c.sales_pic_id} name={c.sales_pic_name} />
+                        : c.sales_rep_hint
+                          // Nobody here owns it, but the file said whose it
+                          // was — the director needs that name to hand it over.
+                          ? <span className="text-xs">
+                              {t(`${repHintLabel(c.sales_rep_hint)} (from the import)`,
+                                 `${repHintLabel(c.sales_rep_hint)} (dari impor)`)}
+                            </span>
+                          : "—"}
+                    </td>
                     <td className="td"><StageBadge stage={c.stage} /></td>
                     <td className="td text-right tabular-nums">{idr(c.lifetime_value ?? 0)}</td>
                   </tr>
@@ -323,6 +352,7 @@ export default function CustomersPage() {
         customers={pickedRows.map((c) => ({
           id: c.id, company_name: c.company_name,
           sales_pic_name: c.sales_pic_name,
+          sales_rep_hint: c.sales_rep_hint,
         }))}
         onDone={() => { setPicked(new Set()); q.refetch(); }}
       />

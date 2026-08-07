@@ -52,6 +52,7 @@ async def list_customers(
     industry: str | None = None,
     sales_pic_id: UUID | None = None,
     unassigned: bool = False,
+    rep_hint: str | None = None,
 ):
     base = select(Customer).where(Customer.is_deleted.is_(False))
     base = filter_to_role_scope(user, base, Customer.sales_pic_id)
@@ -61,6 +62,11 @@ async def list_customers(
         base = base.where(Customer.sales_pic_id.is_(None))
     elif sales_pic_id:
         base = base.where(Customer.sales_pic_id == sales_pic_id)
+    # ...and "everything the file said was Diani's", which is the other half:
+    # a rep named in the export with no account here imports unassigned, and
+    # this is how those customers are found again afterwards.
+    if rep_hint:
+        base = base.where(Customer.meta["sales_rep_hint"].astext == rep_hint)
     if q:
         base = base.where(Customer.company_name.ilike(f"%{q}%"))
     if stage:
@@ -185,6 +191,25 @@ async def assignable_reps(
         .group_by(Customer.sales_pic_id)
     )).all())
     unassigned = counts.get(None, 0)
+
+    # Names the import file carried. A rep who had no account here when the
+    # file was read imported unassigned, so their customers are sitting in
+    # the CRM under a name and nothing else — these groups are how the
+    # director finds them and hands them to the account once it exists.
+    hint_rows = (await db.execute(
+        select(
+            Customer.meta["sales_rep_hint"].astext.label("hint"),
+            func.count(Customer.id),
+            func.count(Customer.id).filter(Customer.sales_pic_id.is_(None)),
+        )
+        .where(
+            Customer.is_deleted.is_(False),
+            Customer.meta["sales_rep_hint"].astext.is_not(None),
+        )
+        .group_by("hint")
+        .order_by(func.count(Customer.id).desc())
+    )).all()
+
     return {
         "reps": [
             {
@@ -197,6 +222,10 @@ async def assignable_reps(
             for u in rows
         ],
         "unassigned": unassigned,
+        "from_import": [
+            {"hint": h, "customers": total, "unassigned": free}
+            for h, total, free in hint_rows if h
+        ],
     }
 
 

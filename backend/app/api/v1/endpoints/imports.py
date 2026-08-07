@@ -261,6 +261,13 @@ async def commit_customers(
                 "external_code": src.external_code,
                 "imported_from": file.filename,
                 "import_notes": src.notes,
+                # The rep the old system had on this account, kept whether or
+                # not it matched an account here. When it didn't — a rep who
+                # has no login yet — this name is the only record of who the
+                # customer belongs to, and losing it would mean going back to
+                # the spreadsheet to find out. The director assigns by it
+                # later from the customer list.
+                "sales_rep_hint": src.sales_rep_hint,
             },
         )
         db.add(cust)

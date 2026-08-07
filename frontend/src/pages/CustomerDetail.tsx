@@ -18,7 +18,7 @@ import { NewQuotationForm } from "@/components/forms/NewQuotationForm";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { SubmitCustomerPOModal } from "@/components/SubmitCustomerPOModal";
 import { ContactsSection } from "@/components/ContactsSection";
-import { AssignSalesDialog } from "@/components/AssignSalesDialog";
+import { AssignSalesDialog, repHintLabel } from "@/components/AssignSalesDialog";
 import { useT, t as tt, T, locale } from "@/store/lang";
 
 // Indonesian display labels for backend stage/status keys. Display only —
@@ -288,7 +288,11 @@ export default function CustomerDetailPage() {
                 <span>
                   {c.sales_pic_name
                     ? c.sales_pic_name
-                    : t("No sales rep assigned", "Belum ada sales penanggung jawab")}
+                    : c.sales_rep_hint
+                      // Imported with a rep name that had no account here yet.
+                      ? t(`No sales rep assigned — the import file said ${repHintLabel(c.sales_rep_hint)}`,
+                           `Belum ada sales — berkas impor menyebut ${repHintLabel(c.sales_rep_hint)}`)
+                      : t("No sales rep assigned", "Belum ada sales penanggung jawab")}
                 </span>
                 {me?.role === "director" && (
                   <button
@@ -697,6 +701,7 @@ export default function CustomerDetailPage() {
         customers={[{
           id: id!, company_name: c.company_name,
           sales_pic_name: c.sales_pic_name,
+          sales_rep_hint: c.sales_rep_hint,
         }]}
         onDone={() => {
           qc.invalidateQueries({ queryKey: ["customer", id] });

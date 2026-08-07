@@ -269,6 +269,82 @@ async def main():
     check("...and the rep who had it can no longer see it",
           (await c.get(f"/customers/{batch[0]}", headers=s2)).status_code == 403)
 
+    # ══ the rep the import file named ════════════════════════════════════════
+    #
+    # The export's Kategori column carries a rep name. When no account here
+    # matches it — a rep who has not been given a login yet — the customer
+    # imports unassigned, and that name used to be thrown away, leaving a pile
+    # of unowned companies with no record of whose they were. It is kept now,
+    # and it is what the director sorts them out by afterwards.
+    print("\n── customers imported under a name with no account ──")
+    import io, csv as _csv
+    from openpyxl import Workbook
+    wb = Workbook(); ws = wb.active
+    ws.append(["ID Pelanggan", "Nama", "Kategori", "Alamat Penagihan"])
+    for i in range(3):
+        ws.append([f"C.9{tag}{i}", f"PT Diani Punya {tag}-{i}", f"Customer Diani {tag}",
+                   "Jl. Industri 5, Gresik"])
+    ws.append([f"C.8{tag}", f"PT Bukan Diani {tag}", "Umum", "Jl. Lain 2, Sidoarjo"])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    files = {"file": (f"pelanggan-{tag}.xlsx", buf.getvalue(),
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+
+    prev = J(await c.post("/imports/customers/preview", headers=d, files=files))
+    check("the preview says the rep has no account here",
+          any(f"diani {tag}" in u.lower() for u in prev.get("unmatched_reps", [])),
+          str(prev.get("unmatched_reps"))[:140])
+
+    buf.seek(0)
+    files = {"file": (f"pelanggan-{tag}.xlsx", buf.getvalue(),
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    res = J(await c.post("/imports/customers/commit", headers=d, files=files,
+                         data={"limit": 10, "confirm": "IMPORT"}))
+    check("the four import", res.get("created") == 4, str(res)[:160])
+
+    got = J(await c.get("/customers", headers=d,
+                        params={"q": f"PT Diani Punya {tag}", "page_size": 50}))["data"]
+    check("...unassigned, because nobody here is that person",
+          len(got) == 3 and all(x["sales_pic_id"] is None for x in got), str(len(got)))
+    check("...but the file's name is kept on them",
+          all(x.get("sales_rep_hint", "").startswith("diani") for x in got),
+          str([x.get("sales_rep_hint") for x in got])[:140])
+
+    reps = J(await c.get("/customers/assignable-reps", headers=d))
+    group = next((g for g in reps.get("from_import", [])
+                  if g["hint"].startswith(f"diani {tag}")), None)
+    check("the roster offers them as a group to hand over", group is not None,
+          str(reps.get("from_import"))[:200])
+    check("...counting how many still have nobody on them",
+          group and group["unassigned"] == 3, str(group))
+
+    by_hint = J(await c.get("/customers", headers=d,
+                            params={"rep_hint": group["hint"], "page_size": 50}))
+    check("filtering by that name finds exactly those three",
+          by_hint["total"] == 3, str(by_hint["total"]))
+    check("...and not the customer the file left blank",
+          all(f"Bukan Diani" not in x["company_name"] for x in by_hint["data"]))
+
+    # Now Diani gets an account, and the director hands the three over.
+    diani = J(await c.post("/users", headers=d, json={
+        "email": f"diani-{tag}@demo.local", "full_name": f"Diani Putri {tag}",
+        "role": "sales", "password": "test-pass-123"}))
+    out = J(await c.post("/customers/reassign", headers=d, json={
+        "customer_ids": [x["id"] for x in by_hint["data"]],
+        "sales_pic_id": diani["id"], "note": "account created after the import"}))
+    check("all three go to the new account at once", out.get("moved") == 3, str(out)[:140])
+    dh = await login(f"diani-{tag}@demo.local")
+    theirs = [x["company_name"] for x in J(await c.get("/customers", headers=dh))["data"]]
+    check("...and Diani can now see them",
+          sum(1 for n in theirs if f"PT Diani Punya {tag}" in n) == 3, str(theirs)[:160])
+
+    reps = J(await c.get("/customers/assignable-reps", headers=d))
+    group = next((g for g in reps.get("from_import", [])
+                  if g["hint"].startswith(f"diani {tag}")), None)
+    check("the group stops asking to be dealt with",
+          group and group["unassigned"] == 0, str(group))
+    check("...but still records where they came from",
+          group and group["customers"] == 3, str(group))
+
     r = await c.post("/customers/reassign", headers=d, json={
         "customer_ids": [], "sales_pic_id": me2["id"]})
     check("an empty selection is refused rather than silently doing nothing",

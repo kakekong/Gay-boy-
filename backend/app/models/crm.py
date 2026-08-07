@@ -50,6 +50,17 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
         """
         return (self.meta or {}).get("external_code")
 
+    @property
+    def sales_rep_hint(self) -> str | None:
+        """The rep the old accounting system had on this account.
+
+        Set by the importer, and kept even when the name matched an account
+        here — it is where the assignment came from. It matters most when it
+        did *not* match: a rep with no login yet imports as unassigned, and
+        this name is then the only record of whose customer it is.
+        """
+        return (self.meta or {}).get("sales_rep_hint")
+
 
 class CustomerContact(Base, UUIDPK, TimestampMixin):
     """Additional PICs at a customer company. The Customer row itself still

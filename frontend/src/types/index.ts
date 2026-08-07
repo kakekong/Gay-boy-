@@ -12,6 +12,8 @@ export interface Customer {
   stage: Stage;
   sales_pic_id?: string;
   sales_pic_name?: string | null;
+  /** The rep name the import file carried, if this customer came from one. */
+  sales_rep_hint?: string | null;
   lifetime_value: number;
 }
 

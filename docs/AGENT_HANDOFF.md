@@ -385,6 +385,18 @@ disabled accounts and everyone else by role. `GET /customers/assignable-reps`
 state a fresh import leaves behind. `test_customer_handover.py` covers all of
 it.
 
+**The importer keeps the rep name even when it matches nobody.** The Accurate
+export's Kategori column says whose customer it is ("Customer Diani"). If that
+name has no active account here, the customer imports unassigned — and the
+name is written to `Customer.meta["sales_rep_hint"]` (exposed as the
+`sales_rep_hint` property and on `CustomerOut`) rather than dropped. It is the
+only record of who the account belongs to, and without it the only way back is
+the spreadsheet. `assignable-reps` returns those names as `from_import` groups
+with an unassigned count, `GET /customers?rep_hint=diani` selects them, and the
+assign dialog suggests the account whose name shares a part with the hint. The
+hint is stored lower-cased because that's the form it matches user names on —
+`repHintLabel()` in `AssignSalesDialog.tsx` capitalises it for display.
+
 **Invoice lifecycle** — the app writes only:
 `pending_finance → approved → partial → paid` (or `→ rejected`).
 `issued` and `overdue` are legacy values nothing sets any more but old rows

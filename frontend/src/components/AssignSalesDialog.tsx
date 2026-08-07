@@ -11,6 +11,26 @@ export interface AssignTarget {
   id: string;
   company_name: string;
   sales_pic_name?: string | null;
+  /** The rep name the import file carried, when it matched no account here. */
+  sales_rep_hint?: string | null;
+}
+
+/** The import stores the rep name lower-cased, because that is the form it
+ *  matches user accounts on. Nobody wants to read "diani" in a dialog. */
+export function repHintLabel(hint: string): string {
+  return hint.replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
+}
+
+/** Does this rep look like the name the import file used?
+ *
+ * The file writes people the way the old accounting system did — a first
+ * name, an initial, sometimes a nickname — so an exact match would almost
+ * never fire. Matching on any shared name part is loose on purpose: it only
+ * ever *suggests* a rep, and the director still has to pick one. */
+function looksLike(fullName: string, hint: string): boolean {
+  const parts = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/i).filter((x) => x.length > 2);
+  const a = parts(fullName), b = parts(hint);
+  return a.some((x) => b.includes(x));
 }
 
 interface Rep {
@@ -41,7 +61,10 @@ export function AssignSalesDialog({
 }) {
   const t = useT();
   const qc = useQueryClient();
-  const [repId, setRepId] = useState<string | "">("");
+  // Nothing is selected until the director picks. An empty string would have
+  // meant "nobody", i.e. the dialog would open armed to strip the account
+  // off whoever holds it — one stray click from a destructive default.
+  const [repId, setRepId] = useState<string | null>(null);
   const [moveWork, setMoveWork] = useState(true);
   const [note, setNote] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -57,7 +80,7 @@ export function AssignSalesDialog({
     mutationFn: () =>
       api.post("/customers/reassign", {
         customer_ids: customers.map((c) => c.id),
-        sales_pic_id: repId || null,
+        sales_pic_id: repId === "none" ? null : repId,
         move_open_work: moveWork,
         note: note.trim() || null,
       }).then((r) => r.data),
@@ -82,9 +105,15 @@ export function AssignSalesDialog({
   const list: Rep[] = reps.data?.reps ?? [];
   const chosen = list.find((r) => r.id === repId);
   const many = customers.length > 1;
+  // When every selected customer came from the import under the same rep
+  // name, say so and point at the account that looks like them. The pick is
+  // still the director's — a name in a spreadsheet is not an identity.
+  const hints = [...new Set(customers.map((c) => c.sales_rep_hint).filter(Boolean))];
+  const hint = hints.length === 1 ? (hints[0] as string) : null;
+  const suggested = hint ? list.find((r) => looksLike(r.full_name, hint)) : undefined;
 
   const close = () => {
-    setDone(null); setErr(null); setNote(""); setRepId("");
+    setDone(null); setErr(null); setNote(""); setRepId(null);
     onClose();
   };
 
@@ -157,6 +186,19 @@ export function AssignSalesDialog({
               </div>
             )}
 
+            {hint && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2
+                              text-sm text-amber-900">
+                {t(`The imported file listed ${many ? "these" : "this one"} under "${repHintLabel(hint)}".`,
+                   `Berkas impor mencantumkan ini atas nama "${repHintLabel(hint)}".`)}
+                {suggested
+                  ? " " + t(`${suggested.full_name} looks like the same person.`,
+                            `${suggested.full_name} sepertinya orang yang sama.`)
+                  : " " + t("No account here matches that name yet.",
+                            "Belum ada akun di sini yang cocok dengan nama itu.")}
+              </div>
+            )}
+
             <div>
               <div className="overline mb-2 flex items-center gap-1">
                 <Users size={12} /> {t("Sales in charge", "Sales penanggung jawab")}
@@ -178,6 +220,11 @@ export function AssignSalesDialog({
                              onChange={() => setRepId(r.id)} />
                       <span className="text-sm font-medium">{r.full_name}</span>
                       <span className="text-[11px] muted capitalize">{r.role}</span>
+                      {suggested?.id === r.id && (
+                        <span className="chip bg-amber-50 text-amber-700 text-[10px]">
+                          {t("matches the file", "cocok dengan berkas")}
+                        </span>
+                      )}
                       <span className="ml-auto text-[11px] muted">
                         {t(`${r.customers} customer${r.customers === 1 ? "" : "s"}`,
                            `${r.customers} pelanggan`)}
@@ -186,12 +233,12 @@ export function AssignSalesDialog({
                   ))}
                   <label className={clsx(
                     "flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer",
-                    repId === ""
+                    repId === "none"
                       ? "border-brand-400 bg-brand-50/60 dark:bg-brand-500/15"
                       : "border-ink-200 dark:border-white/10",
                   )}>
-                    <input type="radio" name="assign-rep" checked={repId === ""}
-                           onChange={() => setRepId("")} />
+                    <input type="radio" name="assign-rep" checked={repId === "none"}
+                           onChange={() => setRepId("none")} />
                     <span className="text-sm">{t("Nobody — leave unassigned",
                                                   "Tidak ada — biarkan kosong")}</span>
                     <span className="ml-auto text-[11px] muted">
@@ -230,7 +277,8 @@ export function AssignSalesDialog({
 
             <div className="flex justify-end gap-2 pt-1">
               <button className="btn-ghost" onClick={close}>{t("Cancel", "Batal")}</button>
-              <button className="btn-primary" disabled={assign.isPending}
+              <button className="btn-primary"
+                      disabled={assign.isPending || repId === null}
                       onClick={() => assign.mutate()}>
                 {assign.isPending
                   ? <Loader2 size={14} className="animate-spin" />

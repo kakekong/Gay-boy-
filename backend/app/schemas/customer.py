@@ -71,5 +71,9 @@ class CustomerOut(CustomerBase):
     lost_reason: str | None = None
     # Set only on customers brought in from the old accounting system.
     external_code: str | None = None
+    # The rep name the import file carried. Survives whether or not it
+    # matched a user account here, so an unassigned import can still be
+    # sorted out afterwards by who used to own it.
+    sales_rep_hint: str | None = None
 
     model_config = {"from_attributes": True}
