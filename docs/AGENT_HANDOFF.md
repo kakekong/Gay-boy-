@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 31 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 32 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -213,6 +213,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
+| `test_quotation_meta_edit.py` | a note is not a price change: the edit form posts the whole document back, so every guard that asked "are items in this payload?" had to be taught to ask "did the items change?" — while a real price edit is still refused, or still queued for the director |
 | `test_record_delete.py` | deleting named documents (including the flat kinds — parts and chart-of-accounts rows, which is how a test import gets undone): everything downstream of the pick goes, nothing outside it is touched, upstream is never taken, money needs its own confirmation — and the numbering regression that made deleting anything break the creation of the next one |
 | `test_purge.py` | the test-data purge: right lineage deleted, no orphans left anywhere, director-only, confirmation phrase, empty keep-list refused |
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
@@ -479,6 +480,14 @@ Chat messages and discussion comments both push instantly.
   customers contain, and the sample chart of accounts contains all 15 accounts
   the seed does *not* have, so it demonstrates an import rather than reporting
   "already here" 22 times).
+- **The edit forms post the whole document back, every time.** So "field is
+  present in the payload" never means "field was changed" — a sales rep typing
+  a note sends every line item along with it. `quotations.PATCH` prunes
+  unchanged fields (`_changed`) before any rule looks at them; without that,
+  a note was refused with "line prices are fixed by the approved price
+  request" on a draft, and silently became a director approval request on an
+  approved one. Any new guard that branches on a field's presence needs the
+  same treatment.
 - **Not every link between documents is a foreign key.** `PriceRequest
   .quotation_id`, `Quotation.project_id`, `Quotation.price_request_id`,
   `Project.price_request_id` and `SupplierPO.price_request_id` are bare uuid

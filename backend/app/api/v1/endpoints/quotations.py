@@ -43,6 +43,48 @@ router = APIRouter(
 _ledger_viewer = require(Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
 
 
+def _line_shape(it) -> tuple:
+    """One line, reduced to the things a change to it would mean something.
+
+    Compared as text for the numbers because the stored side is `Decimal` and
+    the posted side is `float`, and `Decimal("40.0000") != 40.0`.
+    """
+    get = (lambda k: getattr(it, k, None)) if not isinstance(it, dict) else it.get
+    return (
+        (get("description") or "").strip(),
+        f"{float(get('qty') or 0):.4f}",
+        (get("uom") or "").strip().lower(),
+        f"{float(get('unit_price') or 0):.2f}",
+        str(get("product_id") or ""),
+    )
+
+
+def _changed(q: Quotation, field: str, value) -> bool:
+    """Is this submitted field actually different from what is stored?
+
+    Anything unrecognised counts as changed — a new field should behave the
+    way it always did until someone teaches this function about it, rather
+    than being silently dropped.
+    """
+    if field == "items":
+        if value is None:
+            return False
+        current = [_line_shape(i) for i in sorted(q.items, key=lambda x: x.line_no)]
+        incoming = [_line_shape(dict(i) if not isinstance(i, dict) else i)
+                    for i in value]
+        return current != incoming
+    if field == "number":
+        return (value or "").strip() != (q.number or "")
+    if field in ("discount_pct", "tax_pct"):
+        return abs(float(value or 0) - float(getattr(q, field) or 0)) > 1e-9
+    if field == "contact_id":
+        cur = q.contact_id
+        return (str(value) if value else None) != (str(cur) if cur else None)
+    if field in ("variant", "notes", "valid_until"):
+        return value != getattr(q, field)
+    return True
+
+
 async def _apply_quotation_changes(db: AsyncSession, q: Quotation, changes: dict) -> None:
     """Apply a queued edit payload (JSON-shaped) to a quotation + recalc.
 
@@ -263,6 +305,25 @@ async def update_quotation(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
 
     data = payload.model_dump(exclude_unset=True)
+    # Drop the fields the caller sent that are already what they say.
+    #
+    # The edit form posts the whole quotation every time, so a sales rep who
+    # only typed a note still sends the line items back untouched. Every rule
+    # below asks "are the items in this payload?" when it means "did the items
+    # change", and the two answers stopped agreeing the moment the form got a
+    # notes box. Adding a note to a price-request-backed quotation was refused
+    # with "line prices are fixed and can't be edited" — about prices nobody
+    # touched — and on an approved one it quietly became an approval request in
+    # the director's queue instead.
+    #
+    # Deciding this once, here, fixes both, and keeps them fixed for any other
+    # caller that posts a full document back.
+    data = {k: v for k, v in data.items() if _changed(q, k, v)}
+    if not data:
+        # Save pressed with nothing altered. Not an error, and not worth an
+        # audit line or an approval request either.
+        return await _load(q.id, db)
+
     # Fields that don't change pricing/approval — allowed even after submit.
     _META_FIELDS = {"valid_until", "notes"}
     _CLOSED_STATES = {"won", "lost", "cancelled"}
@@ -287,7 +348,11 @@ async def update_quotation(
         # approved once. Non-directors file the change; it applies when
         # the director approves in /approvals. Directors apply directly.
         if Role(user.role) != Role.DIRECTOR:
-            queued = payload.model_dump(mode="json", exclude_unset=True)
+            # Only the fields that really differ, so the director is asked to
+            # approve the change rather than a re-post of the whole document.
+            queued = {k: v for k, v in
+                      payload.model_dump(mode="json", exclude_unset=True).items()
+                      if k in data}
             queued.pop("number", None)  # number stays a direct meta edit
             existing = await db.scalar(
                 select(ApprovalRequest).where(

@@ -526,6 +526,17 @@ export default function QuotationDetailPage() {
         />
       )}
 
+      {/* Notes — directly under the figures, not below the discussion and the
+          follow-up log. It is the one part of this page a sales rep types
+          themselves, and three cards further down it reads as not having
+          saved. */}
+      {Q.notes && (
+        <div className="card p-5">
+          <div className="font-semibold mb-2">{t("Notes", "Catatan")}</div>
+          <pre className="whitespace-pre-wrap text-sm text-ink-700 font-sans">{Q.notes}</pre>
+        </div>
+      )}
+
       {/* Attachments */}
       <AttachmentsSection ownerType="quotation" ownerId={Q.id} />
 
@@ -662,14 +673,6 @@ export default function QuotationDetailPage() {
           </ul>
         )}
       </div>
-
-      {/* Notes */}
-      {Q.notes && (
-        <div className="card p-5">
-          <div className="font-semibold mb-2">{t("Notes", "Catatan")}</div>
-          <pre className="whitespace-pre-wrap text-sm text-ink-700 font-sans">{Q.notes}</pre>
-        </div>
-      )}
 
       <Modal
         open={openFollowup}
