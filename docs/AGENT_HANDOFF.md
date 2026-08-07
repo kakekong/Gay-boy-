@@ -180,7 +180,7 @@ bash backend/tests/e2e/run_all.sh --fresh   # recreate DB, seed, run everything
 bash backend/tests/e2e/run_all.sh           # re-run on the existing DB
 ```
 
-`backend/tests/e2e/` holds 33 drivers that exercise the **real ASGI app
+`backend/tests/e2e/` holds 34 drivers that exercise the **real ASGI app
 in-process** via `httpx.ASGITransport`, with real logins per role — no mocks,
 no fixtures pretending to be permissions. This is the pattern to copy when
 writing a new check:
@@ -213,6 +213,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
+| `test_import_undo.py` | undoing an import: it removes exactly what that run created, refuses records somebody has since filed work against (naming both), takes them only on a second explicit yes, and never touches a hand-typed record or a different run |
 | `test_export_address.py` | which of a customer's three addresses gets printed is asked at download time, honoured (checked by reading the address back out of the generated PDF/xlsx), falls back to the office when the chosen one is blank, and refuses another customer's contact |
 | `test_quotation_meta_edit.py` | a note is not a price change: the edit form posts the whole document back, so every guard that asked "are items in this payload?" had to be taught to ask "did the items change?" — while a real price edit is still refused, or still queued for the director |
 | `test_record_delete.py` | deleting named documents (including the flat kinds — parts and chart-of-accounts rows, which is how a test import gets undone): everything downstream of the pick goes, nothing outside it is touched, upstream is never taken, money needs its own confirmation — and the numbering regression that made deleting anything break the creation of the next one |
@@ -564,6 +565,12 @@ customer importer for the old Accurate data.
 
 ## 10. Open items
 
+- **An import is undoable as one action.** Every commit writes an `ImportRun`
+  plus an `ImportedRecord` per row created; *Import data* lists recent runs
+  with an Undo. Undo removes only the records nothing has been built on —
+  anything with a price request, PO or invoice filed against it since is kept
+  and named, and taking those needs a separate tick. That split is what makes
+  it safe to try an import on production, so keep it if you touch the code.
 - **All four Accurate exports import; none has been run against production.**
   The user's Google Drive "Data transmisi" folder
   (`1CqQpxzFLPRSJkEJMEJIPJgYGgZcM-C7W`) holds `daftar-pelanggan.xlsx` (97 rows

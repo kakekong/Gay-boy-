@@ -7,6 +7,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT } from "@/store/lang";
+import ImportRuns from "@/components/ImportRuns";
 
 type Kind = "customers" | "accounts" | "items" | "quotations";
 
@@ -573,6 +574,11 @@ export default function DataImportPage() {
           </div>
         </>
       )}
+
+      {/* Every import, and the way back out of one. Deliberately on this page
+          rather than in Clear test data: the moment you want an undo is the
+          moment you have just pressed Import. */}
+      <ImportRuns />
     </div>
   );
 }

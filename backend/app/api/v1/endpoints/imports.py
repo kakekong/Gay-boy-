@@ -30,6 +30,7 @@ from app.core.db import get_db
 from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.crm import Customer
+from app.models.import_run import ImportedRecord, ImportRun
 from app.models.inventory import InventoryItem, InventoryMovement
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
@@ -154,6 +155,26 @@ def _require_confirm(confirm: str, limit: int) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "limit must be at least 1")
 
 
+async def _log_run(db: AsyncSession, *, kind: str, filename: str | None,
+                   actor: User, created: list[tuple[str, object]],
+                   meta: dict | None = None) -> str:
+    """Write down what this import made, so it can be taken back out.
+
+    `created` is (record_type, id) pairs, using the same type names the record
+    picker uses — undo hands them straight to the same delete routine, which
+    is what keeps "remove this import" and "remove this document" from being
+    two different ideas of what deleting means.
+    """
+    run = ImportRun(kind=kind, filename=filename, actor_id=actor.id,
+                    created_count=len(created), meta=meta or {})
+    db.add(run)
+    await db.flush()
+    for rtype, rid in created:
+        db.add(ImportedRecord(run_id=run.id, record_type=rtype, record_id=rid))
+    await db.flush()
+    return str(run.id)
+
+
 def _tally(plan: list[dict]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for p in plan:
@@ -248,13 +269,18 @@ async def commit_customers(
                         "external_code": src.external_code,
                         "sales_pic_id": p["sales_pic_id"]})
 
+    run_id = await _log_run(
+        db, kind="customers", filename=file.filename, actor=me,
+        created=[("customer", UUID(x["id"])) for x in created],
+        meta={"limit": limit})
     await record(db, actor=me, action="import", entity="customer", entity_id=None,
                  after={"source": file.filename, "created": len(created),
-                        "limit": limit})
+                        "limit": limit, "run_id": run_id})
     await db.commit()
 
     remaining = sum(1 for p in plan if p["action"] == "create") - len(created)
     return {
+        "run_id": run_id,
         "created": len(created),
         "remaining_to_import": max(0, remaining),
         "skipped_existing": sum(1 for p in plan if p["action"] == "existing"),
@@ -366,7 +392,7 @@ async def commit_accounts(
         if p["action"] != "create":
             continue
         src = by_row[p["row_no"]]
-        db.add(Account(
+        acct = Account(
             account_no=src.account_no,
             name=src.name,
             account_type=src.account_type,
@@ -376,17 +402,23 @@ async def commit_accounts(
             balance=src.balance,
             is_tax=src.is_tax,
             description=src.description,
-        ))
+        )
+        db.add(acct)
         await db.flush()
-        created.append({"account_no": src.account_no, "name": src.name,
-                        "account_type": src.account_type})
+        created.append({"id": acct.id, "account_no": src.account_no,
+                        "name": src.name, "account_type": src.account_type})
 
+    run_id = await _log_run(
+        db, kind="accounts", filename=file.filename, actor=me,
+        created=[("account", x["id"]) for x in created], meta={"limit": limit})
     await record(db, actor=me, action="import", entity="account", entity_id=None,
-                 after={"source": file.filename, "created": len(created), "limit": limit})
+                 after={"source": file.filename, "created": len(created),
+                        "limit": limit, "run_id": run_id})
     await db.commit()
 
     remaining = sum(1 for p in plan if p["action"] == "create") - len(created)
     return {
+        "run_id": run_id,
         "created": len(created),
         "remaining_to_import": max(0, remaining),
         "skipped_existing": sum(1 for p in plan if p["action"] == "existing"),
@@ -515,13 +547,19 @@ async def commit_items(
         created.append({"id": str(item.id), "sku": item.sku, "name": item.name,
                         "category": item.category})
 
+    run_id = await _log_run(
+        db, kind="items", filename=file.filename, actor=me,
+        created=[("inventory_item", UUID(x["id"])) for x in created],
+        meta={"limit": limit})
     await record(db, actor=me, action="import", entity="inventory_item",
                  entity_id=None,
-                 after={"source": file.filename, "created": len(created), "limit": limit})
+                 after={"source": file.filename, "created": len(created),
+                        "limit": limit, "run_id": run_id})
     await db.commit()
 
     remaining = sum(1 for p in plan if p["action"] == "create") - len(created)
     return {
+        "run_id": run_id,
         "created": len(created),
         "remaining_to_import": max(0, remaining),
         "skipped_existing": sum(1 for p in plan if p["action"] == "existing"),
@@ -741,17 +779,210 @@ async def commit_quotations(
                         "customer": p["matched_customer"],
                         "lines": len(src.lines), "total": src.computed_subtotal})
 
+    run_id = await _log_run(
+        db, kind="quotations", filename=file.filename, actor=me,
+        created=[("quotation", UUID(x["id"])) for x in created],
+        meta={"limit": limit, "status": quote_status})
     await record(db, actor=me, action="import", entity="quotation", entity_id=None,
                  after={"source": file.filename, "created": len(created),
-                        "limit": limit, "status": quote_status})
+                        "limit": limit, "status": quote_status, "run_id": run_id})
     await db.commit()
 
     remaining = sum(1 for p in plan if p["action"] == "create") - len(created)
     return {
+        "run_id": run_id,
         "created": len(created),
         "remaining_to_import": max(0, remaining),
         "skipped_existing": sum(1 for p in plan if p["action"] == "existing"),
         "skipped_no_customer": sum(1 for p in plan if p["action"] == "no_customer"),
         "duplicates_in_file": sum(1 for p in plan if p["action"] == "duplicate_in_file"),
         "quotations": created,
+    }
+
+
+# ═══ Undoing a run ═══════════════════════════════════════════════════════════
+#
+# Importing into a live system is only reasonable if getting it back out is one
+# action. But "one action" must not mean "one careless action": by the time
+# somebody reaches for undo, staff may have started working on the imported
+# records — a price request against an imported customer, a customer PO against
+# an imported quotation. Deleting the parent takes that work with it.
+#
+# So undo splits the run in two. Records nothing has been built on are removed.
+# Records that have grown dependents are **kept and named**, and taking them
+# needs a second, explicit yes. That is the difference between reversing a
+# mistake and causing a new one.
+
+async def _run_or_404(db: AsyncSession, run_id: UUID) -> ImportRun:
+    run = await db.get(ImportRun, run_id)
+    if not run:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Import run not found")
+    return run
+
+
+async def _still_there(db: AsyncSession, run: ImportRun) -> list[tuple[str, UUID]]:
+    """The rows this run made that are still in the database.
+
+    Anything already deleted by hand is simply not in the list — undo has
+    nothing to say about it and should not fail because of it.
+    """
+    from app.api.v1.endpoints.maintenance import RECORD_TYPES
+
+    alive: list[tuple[str, UUID]] = []
+    by_type: dict[str, list[UUID]] = {}
+    for rec in run.records:
+        by_type.setdefault(rec.record_type, []).append(rec.record_id)
+    for rtype, ids in by_type.items():
+        spec = RECORD_TYPES.get(rtype)
+        if not spec:
+            continue
+        found = set((await db.scalars(
+            select(spec["model"].id).where(spec["model"].id.in_(ids))
+        )).all())
+        alive += [(rtype, i) for i in ids if i in found]
+    return alive
+
+
+async def _undo_split(db: AsyncSession, run: ImportRun) -> dict:
+    """Which of this run's records are safe to remove, and which are not."""
+    from app.api.v1.endpoints.maintenance import Target, _closure, _describe
+
+    alive = await _still_there(db, run)
+    if not alive:
+        return {"alive": [], "clean": [], "entangled": [], "plan": None,
+                "dependents": []}
+
+    own = {str(i) for _t, i in alive}
+    targets = [Target(type=t, id=i) for t, i in alive]
+    plan = await _closure(db, targets)
+    documents = await _describe(db, plan)
+    # Anything the closure reaches that this run did not create is somebody
+    # else's work, arrived since.
+    dependents = [d for d in documents if d["id"] not in own]
+
+    entangled: list[dict] = []
+    if dependents:
+        # Work out which of the run's own records each stray document hangs
+        # off, so the report can say "these 3 customers, because of these 5
+        # documents" instead of a number.
+        for t, i in alive:
+            sub = await _closure(db, [Target(type=t, id=i)])
+            reach = {d["id"] for d in await _describe(db, sub)}
+            if reach - own - {str(i)}:
+                entangled.append({"type": t, "id": str(i)})
+    ent_ids = {e["id"] for e in entangled}
+    clean = [(t, i) for t, i in alive if str(i) not in ent_ids]
+    return {"alive": alive, "clean": clean, "entangled": entangled,
+            "plan": plan, "dependents": dependents}
+
+
+@router.get("/runs")
+async def list_import_runs(
+    limit: int = 25,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_director_only),
+):
+    """Recent imports, newest first — the list you undo from."""
+    runs = (await db.scalars(
+        select(ImportRun).order_by(ImportRun.created_at.desc()).limit(min(limit, 100))
+    )).all()
+    actors = {
+        u.id: u.full_name for u in (await db.scalars(
+            select(User).where(User.id.in_([r.actor_id for r in runs if r.actor_id]))
+        )).all()
+    }
+    out = []
+    for r in runs:
+        remaining = len(await _still_there(db, r))
+        out.append({
+            "id": str(r.id), "kind": r.kind, "filename": r.filename,
+            "created_count": r.created_count,
+            "still_present": remaining,
+            "created_at": r.created_at,
+            "by": actors.get(r.actor_id) or "—",
+            "undone_at": r.undone_at,
+        })
+    return out
+
+
+@router.get("/runs/{run_id}/undo-preview")
+async def preview_undo(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_director_only),
+):
+    """What undoing this import would remove, and what it would refuse to."""
+    run = await _run_or_404(db, run_id)
+    split = await _undo_split(db, run)
+    counts = split["plan"]["counts"] if split["plan"] else {}
+    return {
+        "id": str(run.id), "kind": run.kind, "filename": run.filename,
+        "created_count": run.created_count,
+        "undone_at": run.undone_at,
+        "still_present": len(split["alive"]),
+        "removable": len(split["clean"]),
+        "blocked": len(split["entangled"]),
+        # Documents that were not part of this import but hang off it. These
+        # are the reason a plain undo is not always the whole story.
+        "dependents": split["dependents"][:100],
+        "counts": counts,
+        "confirm_phrase": "UNDO IMPORT",
+    }
+
+
+@router.post("/runs/{run_id}/undo")
+async def undo_import(
+    run_id: UUID,
+    confirm: str = Form(""),
+    include_dependents: bool = Form(False),
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(_director_only),
+):
+    """Remove what this import created.
+
+    By default only the records nothing has been built on. `include_dependents`
+    takes the rest, and everything hanging off them — which is a bigger act
+    than undoing an import, so it is asked for separately.
+    """
+    from app.api.v1.endpoints.maintenance import (
+        Target, _closure, _drop_files, _execute_plan,
+    )
+    from datetime import UTC, datetime
+
+    if confirm.strip().upper() != "UNDO IMPORT":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            'Type "UNDO IMPORT" to confirm')
+    run = await _run_or_404(db, run_id)
+    split = await _undo_split(db, run)
+    if not split["alive"]:
+        return {"deleted": {}, "removed": 0, "left_alone": 0,
+                "message": "Nothing left to undo — these records are already gone."}
+
+    take = split["alive"] if include_dependents else split["clean"]
+    left = len(split["alive"]) - len(take)
+    if not take:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"All {len(split['alive'])} records from this import have work "
+            f"filed against them since. Tick the box to remove those too, or "
+            f"delete them individually in Clear test data.")
+
+    plan = await _closure(db, [Target(type=t, id=i) for t, i in take])
+    files = await _execute_plan(db, plan)
+
+    run.undone_at = datetime.now(UTC)
+    run.undone_by = me.id
+    await record(db, actor=me, action="undo_import", entity="database",
+                 entity_id=None,
+                 after={"run_id": str(run.id), "kind": run.kind,
+                        "removed": len(take), "left_alone": left,
+                        "counts": plan["counts"]})
+    await db.commit()
+    await _drop_files(files)
+
+    return {
+        "deleted": plan["counts"],
+        "removed": len(take),
+        "left_alone": left,
+        "files_cleared": len(files),
     }
