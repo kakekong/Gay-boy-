@@ -363,6 +363,21 @@ no customer↔supplier map can be reconstructed. Preserve this on any new screen
 **Sales sees only their own customers** (`can_view_customer`). Everyone above
 sees all.
 
+**A document is a rep's if it names them OR if the customer is theirs.** That
+union lives in `sales_scope()` / `sales_may_see()` in `permissions.py` and is
+the rule for price requests, quotations, their discussion threads, their
+attachments and their bell rows. It used to be only the first half for those,
+while customer POs, projects and invoices already used the second — so a price
+request the *director* raised on a rep's account was invisible to that rep,
+who therefore could not turn it into a quotation. Any new sales-facing
+document needs both halves; scoping on the document's own `sales_pic_id` alone
+is the bug.
+
+A useful consequence: a rep who inherits an account can read its closed
+history (a won quotation stays with whoever closed it, but the account's new
+owner can still open it), which is what makes the handover in
+`POST /customers/reassign` honest.
+
 **Changing who is in charge of a customer is the director's alone, and it is
 not a field edit.** `PATCH /customers/{id}` refuses `sales_pic_id` outright
 (403 for anyone below director, 400 for the director, pointing at the right
@@ -460,6 +475,14 @@ move and never a selling price, sales the reverse. Covered by
 **Approvals** are one `ApprovalRequest` table with `decide()` + `apply_to_target()`.
 When a target moves on by another route, its pending request must be cleared,
 or the inbox fills with undecidable ghosts.
+
+**Every bell item's `link` decides which sidebar section badges.** `Shell.tsx`
+matches each alert's link against the nav paths (longest prefix wins), so the
+link is not just where the row navigates — it is what lights up. An alert
+pointing at `/` badges nothing and dumps the reader on the dashboard, which is
+what "your quotation request was approved" used to do for everyone below
+manager. `_TARGET_LINK` in `notifications.py` maps an approval's `target_type`
+to its document; extend it when you add a new approval type.
 
 **Push notifications** — `app/services/webpush.py`. VAPID keys live in the DB,
 created under `pg_advisory_xact_lock(429173001)` with `ORDER BY created_at` so

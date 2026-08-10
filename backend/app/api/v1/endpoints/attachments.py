@@ -119,7 +119,14 @@ async def _sales_owns_attachment(db: AsyncSession, me: User,
     if owner_type == "quotation":
         from app.models.quotation import Quotation
         q = await db.get(Quotation, owner_id)
-        return bool(q and q.sales_pic_id == me.id)
+        if not q:
+            return False
+        # Named on it, or the customer is theirs — the same two ways the
+        # quotation itself is reachable.
+        if q.sales_pic_id == me.id:
+            return True
+        cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+        return bool(cust and cust.sales_pic_id == me.id)
     if owner_type == "customer_po":
         from app.models.customer_po import CustomerPO
         po = await db.get(CustomerPO, owner_id)

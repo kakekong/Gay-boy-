@@ -38,6 +38,32 @@ _LATE_CUTOFF = time(9, 15)
 # alerts stay silent until the office is actually expected to be working.
 _ATTENDANCE_ALERT_FROM = time(8, 30)
 
+# Where an approval's *subject* lives. An alert about a quotation belongs in
+# Quotations, not on the dashboard — the sidebar badges are derived from these
+# links (longest matching nav path wins), so the link is what decides which
+# section lights up. `inventory_item` carries a synthetic target id, and
+# `cross_dept_chat` a channel, so both point at their list rather than a row.
+_TARGET_LINK = {
+    "quotation":              "/quotations/{id}",
+    "quotation_edit":         "/quotations/{id}",
+    "quotation_won":          "/quotations/{id}",
+    "price_request_revision": "/price-requests?open={id}",
+    "customer_po":            "/customer-pos/{id}",
+    "supplier_po":            "/purchase-orders",
+    "purchase_request":       "/purchasing",
+    "project":                "/projects/{id}",
+    "customer":               "/customers/{id}",
+    "followup":               "/customers/{id}",
+    "inventory_item":         "/inventory",
+    "cross_dept_chat":        "/chat",
+}
+
+
+def _target_link(target_type: str, target_id) -> str | None:
+    tpl = _TARGET_LINK.get(target_type or "")
+    return tpl.format(id=target_id) if tpl else None
+
+
 _DISCUSSION_LINK = {
     "price_request": "/price-requests?open={id}",
     "quotation": "/quotations/{id}",
@@ -165,7 +191,12 @@ async def list_notifications(
             "body": (f"Reason: {reason}" if reason
                      else ("Approved." if approved
                            else "Rejected (no reason given).")),
-            "link": "/approvals" if role in (Role.MANAGER, Role.DIRECTOR) else "/",
+            # Straight to the document it was about. This used to send
+            # everyone below manager to the dashboard, so "your quotation edit
+            # was approved" arrived with nothing to click and nothing lit up
+            # in the sidebar.
+            "link": (_target_link(a.target_type, a.target_id)
+                     or ("/approvals" if role in (Role.MANAGER, Role.DIRECTOR) else "/")),
             "at": a.decided_at,
         })
 
@@ -273,7 +304,8 @@ async def list_notifications(
             PriceRequest.status.in_(["approved", "rejected"]),
             PriceRequest.updated_at >= now - timedelta(days=7),
             (PriceRequest.sales_pic_id == me.id)
-            | (PriceRequest.created_by == me.id),
+            | (PriceRequest.created_by == me.id)
+            | (Customer.sales_pic_id == me.id),
             # ...but not to the person who made the decision
             (PriceRequest.approved_by.is_(None))
             | (PriceRequest.approved_by != me.id),
@@ -310,7 +342,9 @@ async def list_notifications(
             .limit(50)
         )
         if role == Role.SALES:
-            q_stmt = q_stmt.where(Quotation.sales_pic_id == me.id)
+            q_stmt = q_stmt.where(
+                (Quotation.sales_pic_id == me.id)
+                | (Customer.sales_pic_id == me.id))
         for q, c in (await db.execute(q_stmt)).all():
             last_act = await db.scalar(
                 select(func.max(Activity.occurred_at))

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require_min
+from app.core.permissions import Role, require_min, sales_may_see, sales_scope
 from app.models.crm import Customer
 from app.models.price_request import PriceRequest
 from app.models.user import User
@@ -304,7 +304,11 @@ async def _scoped(pr_id: UUID, db: AsyncSession, user: User) -> PriceRequest:
     pr = await db.get(PriceRequest, pr_id)
     if not pr or pr.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
-    if Role(user.role) == Role.SALES and pr.sales_pic_id != user.id:
+    # Theirs if they raised it, or if the customer is theirs — the director
+    # filing a request against a rep's account is the ordinary case, and the
+    # rep has to be able to work it.
+    cust = await db.get(Customer, pr.customer_id) if pr.customer_id else None
+    if not sales_may_see(user, pr.sales_pic_id, cust.sales_pic_id if cust else None):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     return pr
 
@@ -321,7 +325,8 @@ async def list_price_requests(
         PriceRequest.created_at.desc()
     )
     if role == Role.SALES:
-        stmt = stmt.where(PriceRequest.sales_pic_id == user.id)
+        stmt = sales_scope(user, stmt, PriceRequest.sales_pic_id,
+                           PriceRequest.customer_id)
     elif role == Role.PURCHASING:
         # Purchasing works the costing queue — never sees sales' raw drafts.
         stmt = stmt.where(PriceRequest.status != "draft")

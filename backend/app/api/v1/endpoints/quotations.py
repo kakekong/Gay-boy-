@@ -16,7 +16,10 @@ from app.core.approval import (
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, can_approve_quotation, require, require_min
+from app.core.permissions import (
+    Role, can_approve_quotation, require, require_min, sales_may_see,
+    sales_scope,
+)
 from app.models.account import Account
 from app.models.approval import ApprovalRequest, ApprovalStatus
 from app.models.crm import Activity, Customer, CustomerContact, Reminder
@@ -213,7 +216,12 @@ async def create_from_price_request(
     pr = await db.get(PriceRequest, pr_id)
     if not pr or pr.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
-    if Role(user.role) == Role.SALES and pr.sales_pic_id != user.id:
+    # This is the step that was actually broken: a price request the director
+    # raised names the director, so the rep who owns the customer could not
+    # turn it into a quotation — the whole point of raising it.
+    _cust = await db.get(Customer, pr.customer_id) if pr.customer_id else None
+    if not sales_may_see(user, pr.sales_pic_id,
+                         _cust.sales_pic_id if _cust else None):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     if pr.status != "approved":
         raise HTTPException(status.HTTP_409_CONFLICT,
@@ -301,7 +309,7 @@ async def update_quotation(
     q = await _load(q_id, db)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
 
     data = payload.model_dump(exclude_unset=True)
@@ -448,7 +456,7 @@ async def submit_quotation(
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     if q.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only draft can be submitted")
@@ -503,7 +511,7 @@ async def unsubmit_quotation(
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.DIRECTOR, Role.ADMIN):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
@@ -554,7 +562,7 @@ async def revise_quotation(
     q = await _load(q_id, db)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.DIRECTOR, Role.ADMIN):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
@@ -753,7 +761,7 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     # Won and Lost are mutually exclusive terminal outcomes — once one is
     # set (or superseded by a revision), the other can't be clicked.
@@ -860,7 +868,7 @@ async def mark_lost(q_id: UUID, reason: str,
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     # Won and Lost are mutually exclusive: a won/closed quote can't flip
     # to lost, and while a Mark-won request sits in the director's queue
@@ -905,6 +913,22 @@ async def _log_export_activity(db: AsyncSession, q: Quotation, user: User,
         meta={"quotation_id": str(q.id), "format": fmt.lower()},
     ))
     await db.flush()
+
+
+async def _may_see(db: AsyncSession, user: User, q: Quotation) -> bool:
+    """Can this user open this quotation?
+
+    Sales sees a quotation two ways: they are named on it, or the customer is
+    theirs. The second matters because anyone may raise the paperwork — a
+    director filing the price request behind it, an admin entering it — and
+    the rep in charge of the account still has to be able to work the deal.
+    """
+    if Role(user.role) != Role.SALES:
+        return True
+    if q.sales_pic_id == user.id:
+        return True
+    cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+    return bool(cust and cust.sales_pic_id == user.id)
 
 
 async def _load(q_id: UUID, db: AsyncSession) -> Quotation:
@@ -979,8 +1003,7 @@ async def list_quotations(
         .order_by(Quotation.created_at.desc())
         .limit(limit)
     )
-    if Role(user.role) == Role.SALES:
-        stmt = stmt.where(Quotation.sales_pic_id == user.id)
+    stmt = sales_scope(user, stmt, Quotation.sales_pic_id, Quotation.customer_id)
     if status_eq:
         stmt = stmt.where(Quotation.status == status_eq)
     if customer_id:
@@ -993,9 +1016,9 @@ async def list_quotations(
 async def stats(db: AsyncSession = Depends(get_db),
                 user: User = Depends(get_current_user)):
     stmt = select(func.count(Quotation.id))
-    # Sales only count their own quotations, in line with the scoped list.
-    if Role(user.role) == Role.SALES:
-        stmt = stmt.where(Quotation.sales_pic_id == user.id)
+    # Counted the same way the list is scoped, or the number disagrees with
+    # the rows underneath it.
+    stmt = sales_scope(user, stmt, Quotation.sales_pic_id, Quotation.customer_id)
     total = await db.scalar(stmt)
     return {"total": total or 0}
 
@@ -1074,7 +1097,7 @@ async def quotation_pdf_options(
     from app.services.print_address import address_options, contact_options
 
     q, _items, cust, _contact, _sales = await _quotation_bundle(db, q_id)
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not sales_may_see(user, q.sales_pic_id, cust.sales_pic_id if cust else None):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
     contacts = []
     if cust:
@@ -1102,7 +1125,7 @@ async def export_quotation_pdf(
     from app.services.quotation_pdf import build_quotation_pdf
 
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not sales_may_see(user, q.sales_pic_id, cust.sales_pic_id if cust else None):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
     contact = await _chosen_contact(db, cust, contact_id, contact)
     await _log_export_activity(db, q, user, "PDF")
@@ -1177,7 +1200,7 @@ async def export_quotation_excel(
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not sales_may_see(user, q.sales_pic_id, cust.sales_pic_id if cust else None):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
     contact = await _chosen_contact(db, cust, contact_id, contact)
     await _log_export_activity(db, q, user, "Excel")
@@ -1316,7 +1339,7 @@ async def get_quotation(
     q = await _load(q_id, db)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     # Surface the sales rep's name so the detail page can show who owns the deal.
     if q.sales_pic_id:
@@ -1338,7 +1361,7 @@ async def _scoped_quote(q_id: UUID, db: AsyncSession, user: User) -> Quotation:
     q = await db.get(Quotation, q_id)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if Role(user.role) == Role.SALES and q.sales_pic_id != user.id:
+    if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     return q
 

@@ -65,14 +65,30 @@ async def _sales_owns(db: AsyncSession, user: User, owner_type: str, owner_id: U
     Mirrors the check each entity's own detail endpoint already performs, so a
     thread is never reachable when the document behind it is not.
     """
+    # Price requests and quotations name whoever raised them, which is not
+    # always the rep who owns the account — a director files a price request
+    # against somebody's customer all the time. Both count, exactly as they
+    # do on the documents themselves.
     if owner_type == "price_request":
+        from app.models.crm import Customer
         from app.models.price_request import PriceRequest
         pr = await db.get(PriceRequest, owner_id)
-        return bool(pr and not pr.is_deleted and pr.sales_pic_id == user.id)
+        if not pr or pr.is_deleted:
+            return False
+        if pr.sales_pic_id == user.id:
+            return True
+        cust = await db.get(Customer, pr.customer_id) if pr.customer_id else None
+        return bool(cust and cust.sales_pic_id == user.id)
     if owner_type == "quotation":
+        from app.models.crm import Customer
         from app.models.quotation import Quotation
         q = await db.get(Quotation, owner_id)
-        return bool(q and q.sales_pic_id == user.id)
+        if not q:
+            return False
+        if q.sales_pic_id == user.id:
+            return True
+        cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+        return bool(cust and cust.sales_pic_id == user.id)
     if owner_type == "customer_po":
         from app.models.crm import Customer
         from app.models.customer_po import CustomerPO
