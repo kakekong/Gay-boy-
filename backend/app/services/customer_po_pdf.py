@@ -41,6 +41,7 @@ def build_customer_po_pdf(
     ship_to_address: str, pic_name: str, pic_position: str, pic_phone: str,
     pic_email: str, quotation_number: str | None, rows: list[dict],
     total: float, keterangan: str | None, sales_pic: str,
+    signer_signature: bytes | None = None,
 ) -> bytes:
     buf = BytesIO()
     doc = _Doc(
@@ -190,9 +191,16 @@ def build_customer_po_pdf(
         ))
         flow.append(Spacer(1, 6 * mm))
 
+    # Same scan, this block's proportions: narrower and taller than the
+    # quotation's, so the fit is computed against these numbers rather than
+    # a size baked into the image.
+    from app.services.signature import fitted_flowable
+    _ink = (fitted_flowable(signer_signature, max_w_mm=(content_w * 0.40) / mm,
+                            max_h_mm=16)
+            if signer_signature else None)
     flow.append(Table(
         [[Paragraph("Hormat kami,", small)],
-         [Spacer(1, 16 * mm)],
+         [_ink if _ink is not None else Spacer(1, 16 * mm)],
          [Paragraph(f"<b>{sales_pic or '—'}</b>", body)],
          [Paragraph("PT. Transmisi Enjinering", small)]],
         colWidths=[content_w * 0.42], hAlign="LEFT",

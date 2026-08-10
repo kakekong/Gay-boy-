@@ -486,6 +486,31 @@ the director simply handed back. The reason is deliberately kept through a
 resubmission: the director is about to look again and wants to see what they
 asked for. `test_resubmit.py` covers all three.
 
+**A user has two addresses and a signature.** `User.email` is the login and
+nothing else — unique, and the only thing `/auth/login` matches on.
+`User.contact_email` is where that person corresponds from, is **not** unique
+(a shared mailbox is fine), and is never accepted as a credential. Documents
+prefer it: the quotation PDF and Excel print `contact_email or email`, so a
+customer replying to a quote no longer replies to `sales1@demo.local`.
+
+`User.signature_path` holds a scanned signature, uploaded via
+`POST /users/{id}/signature` (own, or anybody's if you are the director) and
+drawn into the signature block of the quotation PDF and the customer-PO order
+confirmation. `app/services/signature.py` owns both halves: `validate()`
+refuses anything unusable at upload time, and `fitted_flowable(max_w_mm,
+max_h_mm)` scales the scan to the **calling document's** block, preserving
+aspect ratio and never enlarging past the source. The two blocks are
+different shapes, which is the whole reason the size is not baked into the
+image. No signature = the blank space to sign by hand, exactly as before.
+A PNG with transparency is what keeps the scan from painting a white
+rectangle over the rule. `test_signature_email.py` covers it.
+
+*Frontend gotcha this surfaced:* the API authenticates with a bearer token,
+so a protected image can never be shown with a plain `<img src="/api/…">` —
+that request carries no token, 401s, and the preview silently shows nothing.
+Fetch it through `api.get(..., { responseType: "blob" })` and
+`URL.createObjectURL`, as `AdminUsers.tsx` and the attachment components do.
+
 **Approvals** are one `ApprovalRequest` table with `decide()` + `apply_to_target()`.
 When a target moves on by another route, its pending request must be cleared,
 or the inbox fills with undecidable ghosts.

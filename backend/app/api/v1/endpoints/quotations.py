@@ -953,6 +953,12 @@ async def _log_export_activity(db: AsyncSession, q: Quotation, user: User,
     await db.flush()
 
 
+async def _signature_of(rep) -> bytes | None:
+    """The signing rep's scanned signature, or None to leave a blank space."""
+    from app.services.signature import load_for
+    return await load_for(rep)
+
+
 async def _may_see(db: AsyncSession, user: User, q: Quotation) -> bool:
     """Can this user open this quotation?
 
@@ -1213,7 +1219,11 @@ async def export_quotation_pdf(
         signer_name=(sales.full_name if sales else "—"),
         signer_phone=((sales.phone if sales else None)
                       or (sales.whatsapp_id if sales else None) or "—"),
-        signer_email=(sales.email if sales else "—"),
+        # The address this rep corresponds from, when they have one. Their
+        # login is an internal credential and has no business on a document
+        # a customer replies to.
+        signer_email=((sales.contact_email or sales.email) if sales else "—"),
+        signer_signature=await _signature_of(sales),
     )
     return Response(
         content=pdf,
@@ -1350,7 +1360,7 @@ async def export_quotation_excel(
     row += 1
     for label, value in [
         ("Sales rep", sales.full_name if sales else "—"),
-        ("Email",     sales.email if sales else "—"),
+        ("Email",     (sales.contact_email or sales.email) if sales else "—"),
         ("Phone",     ((sales.phone if sales else None) or (sales.whatsapp_id if sales else None) or "—")),
     ]:
         ws.cell(row=row, column=1, value=label).font = bold

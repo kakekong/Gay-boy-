@@ -12,8 +12,20 @@ from app.models.base import TimestampMixin, UUIDPK
 class User(Base, UUIDPK, TimestampMixin):
     __tablename__ = "users"
 
+    # The login. Unique, and the only thing `POST /auth/login` matches on.
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    # The address this person actually corresponds from — the one that goes
+    # on a quotation the customer reads. Deliberately separate from the login
+    # and deliberately NOT unique or indexed: it is a contact detail, not an
+    # identity, two people can share a shared mailbox, and nothing may ever
+    # authenticate against it.
+    contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # Storage path of this person's scanned signature, drawn into the
+    # signature block of every document they sign. Same dispatch rule as
+    # every other stored file: `s3://…` reads from the bucket, anything else
+    # from disk (see services/storage.py).
+    signature_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # sales|admin|hr|manager|director|customer|supplier
     phone: Mapped[str | None] = mapped_column(String(40), nullable=True)

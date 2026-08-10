@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,11 +9,12 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { startViewAs } from "@/lib/viewAs";
-import { T } from "@/store/lang";
+import { T, t } from "@/store/lang";
 
 interface User {
   id: string;
   email: string;
+  contact_email?: string | null;
   full_name: string;
   role: string;
   custom_role_id?: string | null;
@@ -57,7 +58,7 @@ export default function AdminUsersPage() {
 
   // Form state
   const [form, setForm] = useState({
-    email: "", full_name: "", role: "sales", password: "",
+    email: "", contact_email: "", full_name: "", role: "sales", password: "",
     phone: "", linked_customer_id: "", linked_supplier_id: "",
     custom_role_id: "",
   });
@@ -113,10 +114,11 @@ export default function AdminUsersPage() {
       linked_supplier_id: form.linked_supplier_id || null,
       custom_role_id: form.custom_role_id || null,
       phone: form.phone || null,
+      contact_email: form.contact_email || null,
     }),
     onSuccess: () => {
       setOpenNew(false);
-      setForm({ email: "", full_name: "", role: "sales", password: "",
+      setForm({ email: "", contact_email: "", full_name: "", role: "sales", password: "",
                 phone: "", linked_customer_id: "", linked_supplier_id: "",
                 custom_role_id: "" });
       setFlash({ kind: "ok", text: "User created." });
@@ -214,7 +216,15 @@ export default function AdminUsersPage() {
                 !u.is_active && "opacity-50",
               )}>
                 <td className="td font-medium">{u.full_name}</td>
-                <td className="td muted">{u.email}</td>
+                <td className="td muted">
+                  {u.email}
+                  {u.contact_email && u.contact_email !== u.email && (
+                    <div className="text-[11px] text-brand-700">
+                      {t(`writes as ${u.contact_email}`,
+                         `menulis sebagai ${u.contact_email}`)}
+                    </div>
+                  )}
+                </td>
                 <td className="td">
                   {u.custom_role_name ? (
                     <span className="chip bg-indigo-50 text-indigo-700" title={`Base role: ${u.role}`}>
@@ -527,9 +537,22 @@ function UserForm({
           <input className="input" required value={form.full_name}
             onChange={(e: any) => setForm({ ...form, full_name: e.target.value })} />
         </Field>
-        <Field label={T("Email *")}>
+        <Field label={T("Login email *")}>
           <input className="input" type="email" required value={form.email}
             onChange={(e: any) => setForm({ ...form, email: e.target.value })} />
+          <p className="text-[11px] muted mt-1">
+            {t("What they sign in with. Never printed on a document.",
+               "Yang dipakai untuk masuk. Tidak pernah dicetak di dokumen.")}
+          </p>
+        </Field>
+        <Field label={T("Contact email")}>
+          <input className="input" type="email" value={form.contact_email}
+            onChange={(e: any) => setForm({ ...form, contact_email: e.target.value })}
+            placeholder={T("optional — e.g. name@transmisisuplindo.com")} />
+          <p className="text-[11px] muted mt-1">
+            {t("Printed on the quotations they sign, so customers reply to a real mailbox. Blank uses the login email.",
+               "Dicetak di penawaran yang mereka tanda tangani, agar pelanggan membalas ke kotak surat yang benar. Kosong berarti memakai email login.")}
+          </p>
         </Field>
         <Field label={T("Role *")}>
           <select className="input" value={form.role}
@@ -756,10 +779,106 @@ function SearchablePicker<T>({
   );
 }
 
+/**
+ * The scanned signature that goes on this person's documents.
+ *
+ * Uploading it here rather than making eleven people each log in and do it
+ * is deliberate: in practice one person collects the scans. The preview is
+ * the point of the control — a signature nobody checked before it went on a
+ * quotation is how you find out it was upside down from the customer.
+ */
+function SignatureField({ userId }: { userId: string }) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [gone, setGone] = useState(true);
+  // Fetched through the API client and turned into an object URL rather than
+  // pointed at with a plain <img src>. The API authenticates with a bearer
+  // token the browser knows nothing about, so a direct src is an
+  // unauthenticated request — it 401s and the preview silently shows nothing.
+  const [src, setSrc] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const r = await api.get(`/users/${userId}/signature`, { responseType: "blob" });
+      const url = URL.createObjectURL(r.data as Blob);
+      setSrc((old) => { if (old) URL.revokeObjectURL(old); return url; });
+      setGone(false);
+    } catch {
+      setSrc((old) => { if (old) URL.revokeObjectURL(old); return null; });
+      setGone(true);
+    }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [userId]);
+
+  async function upload(f: File | null) {
+    if (!f) return;
+    setBusy(true); setErr(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      await api.post(`/users/${userId}/signature`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      await load();
+    } catch (e: any) {
+      setErr(e?.response?.data?.errors?.[0]?.message
+             ?? e?.response?.data?.detail
+             ?? t("Upload failed", "Gagal mengunggah"));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Field label={T("Signature")}>
+      <div className="space-y-2">
+        {!gone && src && (
+          <img
+            src={src}
+            alt={t("Current signature", "Tanda tangan saat ini")}
+            className="max-h-16 max-w-[16rem] object-contain rounded border
+                       border-ink-200 bg-white p-1"
+          />
+        )}
+        {gone && (
+          <p className="text-[11px] muted">
+            {t("None yet — documents leave a blank space to sign by hand.",
+               "Belum ada — dokumen menyisakan ruang kosong untuk ditandatangani manual.")}
+          </p>
+        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="file" accept="image/png,image/jpeg,image/webp"
+            className="text-xs" disabled={busy}
+            onChange={(e) => upload(e.target.files?.[0] ?? null)} />
+          {!gone && (
+            <button type="button" className="btn-ghost text-xs border-ink-200"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await api.delete(`/users/${userId}/signature`);
+                  setSrc((old) => { if (old) URL.revokeObjectURL(old); return null; });
+                  setGone(true);
+                } finally { setBusy(false); }
+              }}>
+              {t("Remove", "Hapus")}
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] muted">
+          {t("A PNG with a transparent background prints best — it sits over the line instead of covering it. It is scaled to fit each document's signature block.",
+             "PNG dengan latar transparan paling bagus — menimpa garis, bukan menutupinya. Ukurannya disesuaikan dengan blok tanda tangan tiap dokumen.")}
+        </p>
+        {err && <p className="text-[11px] text-red-700">{err}</p>}
+      </div>
+    </Field>
+  );
+}
+
+
 function EditForm({ user, onClose, patch }: any) {
   const [name, setName] = useState(user.full_name);
   const [role, setRole] = useState(user.role);
   const [phone, setPhone] = useState(user.phone ?? "");
+  const [contactEmail, setContactEmail] = useState(user.contact_email ?? "");
   const [pwd, setPwd] = useState("");
   const [customRoleId, setCustomRoleId] = useState<string>(user.custom_role_id ?? "");
   // Per-user page override: when overrideOn is true the user sees exactly
@@ -787,6 +906,7 @@ function EditForm({ user, onClose, patch }: any) {
   function save() {
     const body: any = {
       full_name: name, role, phone: phone || null,
+      contact_email: contactEmail.trim() || null,
       custom_role_id: customRoleId || null,
       // Empty list clears the override on the backend; otherwise send what
       // was ticked. If override is OFF, send an empty list to clear.
@@ -822,6 +942,16 @@ function EditForm({ user, onClose, patch }: any) {
       <Field label={T("Phone")}>
         <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
+      <Field label={T("Contact email")}>
+        <input className="input" type="email" value={contactEmail}
+          onChange={(e) => setContactEmail(e.target.value)}
+          placeholder={user.email} />
+        <p className="text-[11px] muted mt-1">
+          {t("Goes on the documents they sign. Blank uses the login email.",
+             "Dicetak di dokumen yang mereka tanda tangani. Kosong memakai email login.")}
+        </p>
+      </Field>
+      <SignatureField userId={user.id} />
       <Field label={T("Reset password (leave blank to keep)")}>
         <input className="input" type="text" value={pwd} onChange={(e) => setPwd(e.target.value)}
           placeholder={T("new password (optional)")} />

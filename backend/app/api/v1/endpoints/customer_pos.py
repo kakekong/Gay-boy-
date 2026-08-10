@@ -964,9 +964,14 @@ async def export_customer_po_pdf(
         quote_no = q.number if q else None
 
     sales_name = ""
+    rep = None
     if cust and cust.sales_pic_id:
         rep = await db.get(User, cust.sales_pic_id)
         sales_name = rep.full_name if rep else ""
+    # Whoever's name is printed is whose signature goes on it — falling back
+    # to the person generating the document, exactly as the name does.
+    from app.services.signature import load_for as _load_signature
+    signer = rep if sales_name else user
 
     from app.services.customer_po_pdf import build_customer_po_pdf
     pdf = build_customer_po_pdf(
@@ -980,6 +985,7 @@ async def export_customer_po_pdf(
         total=float(po.total or 0),
         keterangan=po.notes,
         sales_pic=sales_name or (user.full_name or ""),
+        signer_signature=await _load_signature(signer),
     )
     from fastapi.responses import Response
     return Response(

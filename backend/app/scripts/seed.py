@@ -373,6 +373,10 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE price_requests ADD COLUMN IF NOT EXISTS price_history JSONB NOT NULL DEFAULT '[]'::jsonb",
     # Why a quotation was rejected, on the quotation itself
     "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS decision_notes TEXT",
+    # A correspondence address separate from the login email
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
+    # Scanned signature, drawn onto the documents this person signs
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS signature_path VARCHAR(500)",
 ]
 
 

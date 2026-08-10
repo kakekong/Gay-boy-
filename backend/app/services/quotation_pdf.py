@@ -262,7 +262,8 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
                         discount: float, tax_pct: float, tax: float,
                         total: float, notes: str | None,
                         signer_name: str, signer_phone: str,
-                        signer_email: str) -> bytes:
+                        signer_email: str,
+                        signer_signature: bytes | None = None) -> bytes:
     buf = BytesIO()
     doc = _Doc(
         buf, pagesize=A4,
@@ -422,9 +423,15 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
     flow.append(Spacer(1, 4 * mm))
 
     # ── Signature ───────────────────────────────────────────────────────
+    # The scan goes in the gap that was always left for a wet signature, and
+    # is scaled to this block's shape — 62mm wide, and no taller than the gap
+    # it replaces, so the name below never gets pushed off the page.
+    from app.services.signature import fitted_flowable
+    ink = (fitted_flowable(signer_signature, max_w_mm=58, max_h_mm=11)
+           if signer_signature else None)
     sign = [
         [Paragraph("Hormat kami,", body)],
-        [Spacer(1, 11 * mm)],
+        [ink if ink is not None else Spacer(1, 11 * mm)],
         [Paragraph(signer_name.upper(), body_b)],
         [Paragraph(f"Hp&nbsp;&nbsp;&nbsp;: {signer_phone}", small)],
         [Paragraph(f"Email : {signer_email}", small)],

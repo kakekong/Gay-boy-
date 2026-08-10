@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from datetime import date as date_t
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,9 @@ _director = require(Role.DIRECTOR)
 
 class UserCreate(BaseModel):
     email: str
+    # Optional. Where this person corresponds from, when that is not the
+    # address they sign in with.
+    contact_email: str | None = None
     full_name: str
     role: str   # sales | admin | hr | manager | director | customer | supplier
     password: str
@@ -38,6 +41,7 @@ class UserCreate(BaseModel):
 
 class UserPatch(BaseModel):
     full_name: str | None = None
+    contact_email: str | None = None
     role: str | None = None
     phone: str | None = None
     whatsapp_id: str | None = None
@@ -50,6 +54,29 @@ class UserPatch(BaseModel):
 
 
 VALID_ROLES = {"sales", "admin", "hr", "finance", "manager", "director", "customer", "supplier", "purchasing"}
+
+
+def _clean_contact_email(value: str | None) -> str | None:
+    """Normalise the correspondence address, or refuse it.
+
+    Empty clears it. Anything kept has to look like an address, because it is
+    printed on quotations customers read — a typo there is a lost reply, not a
+    failed login, so nothing downstream would ever surface it.
+
+    Note what is deliberately absent: a uniqueness check. This is a contact
+    detail, not an identity. Two people may share a shared mailbox, and
+    nothing authenticates against it.
+    """
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if not v:
+        return None
+    if len(v) > 255 or v.count("@") != 1 or v.startswith("@") or v.endswith("@") \
+            or "." not in v.split("@")[1] or " " in v:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"'{value}' does not look like an email address")
+    return v
 
 
 def _validate_pages(pages: list[str] | None) -> None:
@@ -146,6 +173,7 @@ async def list_employees(
         {
             "id": str(r.id),
             "email": "(hidden)" if hide_contact else r.email,
+            "contact_email": None if hide_contact else r.contact_email,
             "full_name": r.full_name,
             "role": r.role,
             "custom_role_id": str(r.custom_role_id) if r.custom_role_id else None,
@@ -448,6 +476,7 @@ async def create_user(
     _validate_pages(payload.pages)
     u = User(
         email=payload.email.lower(),
+        contact_email=_clean_contact_email(payload.contact_email),
         password_hash=hash_password(payload.password),
         full_name=payload.full_name,
         role=role,
@@ -481,6 +510,8 @@ async def update_user(
         _validate_pages(data["pages"])
         # An empty list clears the override (stored as NULL).
         data["pages"] = data["pages"] or None
+    if "contact_email" in data:
+        data["contact_email"] = _clean_contact_email(data["contact_email"])
     if "password" in data:
         if len(data["password"]) < 6:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "password too short")
@@ -496,6 +527,108 @@ async def update_user(
     for k, v in data.items():
         setattr(u, k, v)
     return {"id": str(u.id), "ok": True}
+
+
+@router.post("/{user_id}/signature")
+async def upload_signature(
+    user_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Store a scanned signature for this person.
+
+    Anyone may set their own; the director may set anybody's, because in
+    practice one person collects the scans and uploads them rather than
+    chasing eleven people to each log in and do it.
+
+    A PNG with a transparent background prints best — it sits over the rule
+    in the signature block instead of covering it with a white rectangle —
+    but a phone photo of a signature on white paper works too.
+    """
+    from app.services import signature as sig
+    from app.services import storage
+
+    if me.id != user_id and Role(me.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "You can only change your own signature")
+    u = await db.get(User, user_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    data = await file.read()
+    try:
+        width, height = sig.validate(data, file.content_type)
+    except sig.SignatureError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+    old = u.signature_path
+    u.signature_path = await storage.save(
+        data, filename=file.filename or "signature.png", label="signature",
+        owner_type="user", owner_id=u.id,
+    )
+    # Replacing one should not leave the old file behind; failing to delete
+    # it must not fail the upload, which has already succeeded.
+    if old and old != u.signature_path:
+        try:
+            await storage.delete(old)
+        except Exception:
+            pass
+    await db.flush()
+    return {"ok": True, "width": width, "height": height,
+            "transparent_background": (file.content_type or "").endswith("png")}
+
+
+@router.get("/{user_id}/signature")
+async def get_signature(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """The stored signature image, for previewing it before it goes on a
+    document. Readable by the person themselves and by management — it
+    appears on documents they all handle anyway."""
+    from fastapi.responses import Response as _Response
+
+    from app.services import signature as sig
+
+    if me.id != user_id and Role(me.role) not in (
+            Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.HR):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    u = await db.get(User, user_id)
+    if not u or not u.signature_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No signature on file")
+    data = await sig.load_for(u)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Signature file is missing")
+    kind = "image/png" if u.signature_path.lower().endswith(".png") else "image/jpeg"
+    return _Response(content=data, media_type=kind,
+                     headers={"Cache-Control": "private, max-age=60"})
+
+
+@router.delete("/{user_id}/signature", status_code=204)
+async def delete_signature(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Remove it. Documents go back to leaving a blank space to sign by hand."""
+    from app.services import storage
+
+    if me.id != user_id and Role(me.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "You can only change your own signature")
+    u = await db.get(User, user_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if u.signature_path:
+        try:
+            await storage.delete(u.signature_path)
+        except Exception:
+            pass
+        u.signature_path = None
+        await db.flush()
+    return None
 
 
 @router.delete("/{user_id}", status_code=204)

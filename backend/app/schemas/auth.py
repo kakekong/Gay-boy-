@@ -17,6 +17,8 @@ class TokenPair(BaseModel):
 class UserOut(BaseModel):
     id: UUID
     email: str
+    # Where this person is reachable, when it differs from the login.
+    contact_email: str | None = None
     full_name: str
     role: str
     phone: str | None = None
