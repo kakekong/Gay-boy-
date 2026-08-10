@@ -2,11 +2,10 @@ import clsx from "clsx";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Users, FileText, Banknote, Wallet, ArrowUpRight, Sparkles, Target,
+  ArrowUpRight, Sparkles, Target,
   ListTodo, Send, Clock, BellRing, Trophy,
 } from "lucide-react";
 import { api } from "@/api/client";
-import { KpiCard } from "@/components/KpiCard";
 import { StageBadge } from "@/components/StageBadge";
 import { useAuthStore } from "@/store/auth";
 import { useT, T } from "@/store/lang";
@@ -14,14 +13,6 @@ import { useT, T } from "@/store/lang";
 export default function DashboardPage() {
   const t = useT();
   const user = useAuthStore((s) => s.user);
-  const sales = useQuery({
-    queryKey: ["kpi-sales"],
-    queryFn: () => api.get("/kpi/sales").then((r) => r.data),
-  });
-  const fin = useQuery({
-    queryKey: ["kpi-finance"],
-    queryFn: () => api.get("/kpi/finance").then((r) => r.data),
-  });
   const customers = useQuery({
     queryKey: ["customers"],
     queryFn: () => api.get("/customers").then((r) => r.data),
@@ -34,7 +25,6 @@ export default function DashboardPage() {
 
   const idr = (n: number) =>
     "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
-  const pct = (n: number) => `${Math.round((n ?? 0) * 100)}%`;
 
   return (
     <div className="space-y-6">
@@ -48,37 +38,6 @@ export default function DashboardPage() {
             <Sparkles size={15} /> {t("AI Command Center", "Pusat Komando AI")}
           </Link>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <KpiCard
-          label={t("New leads (30d)", "Prospek baru (30 hari)")}
-          value={sales.data?.new_leads ?? "—"}
-          icon={Users}
-          accent="brand"
-          delta={{ value: "+12%", trend: "up" }}
-        />
-        <KpiCard
-          label={t("Quote → Win", "Penawaran → Menang")}
-          value={sales.data ? pct(sales.data.quote_to_win_rate) : "—"}
-          icon={FileText}
-          accent="violet"
-          hint={t("last 30 days", "30 hari terakhir")}
-        />
-        <KpiCard
-          label={t("Outstanding AR", "Piutang belum lunas")}
-          value={fin.data ? idr(fin.data.outstanding) : "—"}
-          icon={Wallet}
-          accent="amber"
-          hint={t("open invoices", "faktur terbuka")}
-        />
-        <KpiCard
-          label={t("Collected", "Terkumpul")}
-          value={fin.data ? idr(fin.data.collected) : "—"}
-          icon={Banknote}
-          accent="emerald"
-          delta={{ value: "+4%", trend: "up" }}
-        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
