@@ -348,6 +348,15 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string }>
   >({});
   const [notes, setNotes] = useState("");
+  // Repricing keeps its own working copy. On a request sitting at
+  // pending_director the ordinary cost/approve editors are live at the same
+  // time, and sharing one draft between them would let a half-finished
+  // correction leak into an approval.
+  const [reprice, setReprice] = useState<
+    Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string }> | null
+  >(null);
+  const [repriceWhy, setRepriceWhy] = useState("");
+  const [repriceDone, setRepriceDone] = useState<any | null>(null);
   const [editingNumber, setEditingNumber] = useState(false);
   const [numberDraft, setNumberDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
@@ -426,18 +435,39 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   })));
   const reject = useMutation(mut(() => api.post(`/price-requests/${id}/reject`, { notes: notes || undefined })));
 
+  // Only the lines actually typed into are sent: an untouched line has no
+  // entry in the draft, so it is never quietly re-stated at its own value.
+  const saveReprice = useMutation({
+    mutationFn: () => api.post(`/price-requests/${id}/reprice`, {
+      items: Object.entries(reprice ?? {}).map(([ln, v]) => ({
+        line_no: Number(ln),
+        cost_price: v.cost, cost_basis: v.costBasis ?? "unit",
+        sell_price: v.sell, sell_basis: v.sellBasis ?? "unit",
+      })),
+      reason: repriceWhy.trim(),
+    }).then((r) => r.data),
+    onSuccess: (d) => {
+      setReprice(null); setRepriceWhy(""); setRepriceDone(d);
+      qc.invalidateQueries({ queryKey: ["quotations"] });
+      refresh();
+    },
+    onError: onErr,
+  });
+
   // Editable price cell with a per-line "/unit" vs "total" basis selector.
   // Storage is always per-unit; "total" just means the entered figure covers
   // the whole line, and we show the implied unit price (or vice-versa) live.
-  const editCell = (it: any, kind: "cost" | "sell") => {
-    const v = draft[it.line_no] ?? {};
+  const editCell = (it: any, kind: "cost" | "sell", which: "flow" | "reprice" = "flow") => {
+    const book = which === "reprice" ? (reprice ?? {}) : draft;
+    const write = which === "reprice" ? setReprice : setDraft;
+    const v = book[it.line_no] ?? {};
     const amount = kind === "cost" ? v.cost : v.sell;
     const basis = (kind === "cost" ? v.costBasis : v.sellBasis) ?? "unit";
     const qty = Number(it.qty) || 0;
     const unit = basis === "total" ? (qty ? Number(amount || 0) / qty : 0) : Number(amount || 0);
     const total = basis === "total" ? Number(amount || 0) : Number(amount || 0) * qty;
     const setVal = (patch: any) =>
-      setDraft((d) => ({ ...d, [it.line_no]: { ...d[it.line_no], ...patch } }));
+      write((d: any) => ({ ...(d ?? {}), [it.line_no]: { ...(d ?? {})[it.line_no], ...patch } }));
     return (
       <div className="flex flex-col items-end gap-1">
         <div className="flex items-center gap-1">
@@ -487,6 +517,10 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const stillDraft = pr.status === "draft" || pr.status === "rejected";
   const canEditItems = isDirector
     || (stillDraft && (role === "sales" || role === "manager" || role === "admin"));
+  // A draft has no prices yet, so there is nothing to correct there. From
+  // the moment it is submitted onwards the director can change either figure.
+  const canReprice = isDirector && pr.status !== "draft";
+  const repricing = reprice !== null;
   const revLeft = revisions.data?.left ?? 0;
   const revPending = (revisions.data?.revisions ?? []).some((r: any) => r.status === "pending");
   // Negotiation path: propose a change on a request that has already gone out.
@@ -738,16 +772,18 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 <td className="td muted text-xs">{it.spec || "—"}</td>
                 {"cost_price" in it && (
                   <td className="td text-right">
-                    {canCost && (isPurchasing || isDirector)
-                      ? editCell(it, "cost")
-                      : readCell(it.cost_price, it.cost_total, it.qty)}
+                    {repricing ? editCell(it, "cost", "reprice")
+                      : canCost && (isPurchasing || isDirector)
+                        ? editCell(it, "cost")
+                        : readCell(it.cost_price, it.cost_total, it.qty)}
                   </td>
                 )}
                 {"sell_price" in it && (
                   <td className="td text-right">
-                    {canApprove
-                      ? editCell(it, "sell")
-                      : readCell(it.sell_price, it.line_total, it.qty)}
+                    {repricing ? editCell(it, "sell", "reprice")
+                      : canApprove
+                        ? editCell(it, "sell")
+                        : readCell(it.sell_price, it.line_total, it.qty)}
                   </td>
                 )}
               </tr>
@@ -756,7 +792,52 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         </table>
         )}
 
-        {(canCost || canApprove || canSubmit) && (
+        {/* ── the director correcting a settled figure ──────────────────── */}
+        {repricing && (
+          <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+            <div className="text-sm font-semibold text-violet-900 flex items-center gap-2">
+              <Pencil size={14} />
+              {t("Changing the agreed figures", "Mengubah angka yang sudah disepakati")}
+            </div>
+            <p className="text-xs text-violet-900">
+              {t("Type over any cost or price above — leave the rest alone and they stay as they are. A quotation still in draft is updated to match; one already sent or approved is left as it went out.",
+                 "Ketik ulang biaya atau harga di atas — yang tidak diubah tetap sama. Penawaran yang masih draf akan disesuaikan; yang sudah terkirim atau disetujui dibiarkan apa adanya.")}
+            </p>
+            <input className="input" value={repriceWhy} maxLength={200}
+              onChange={(e) => setRepriceWhy(e.target.value)}
+              placeholder={t("Why is it changing? e.g. supplier revised the quote",
+                             "Mengapa berubah? mis. supplier merevisi penawarannya")} />
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost"
+                onClick={() => { setReprice(null); setRepriceWhy(""); }}>
+                {t("Cancel", "Batal")}
+              </button>
+              <button className="btn-primary ml-auto"
+                disabled={saveReprice.isPending || !repriceWhy.trim()
+                          || !Object.keys(reprice ?? {}).length}
+                onClick={() => saveReprice.mutate()}>
+                <Check size={14} /> {t("Save new figures", "Simpan angka baru")}
+              </button>
+            </div>
+          </div>
+        )}
+        {repriceDone && (
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2
+                          text-sm text-emerald-900">
+            {repriceDone.changed_lines === 0
+              ? t("Those are the same figures — nothing changed.",
+                  "Angkanya sama — tidak ada yang berubah.")
+              : t(`${repriceDone.changed_lines} line${repriceDone.changed_lines === 1 ? "" : "s"} updated.`,
+                  `${repriceDone.changed_lines} baris diperbarui.`)}
+            {repriceDone.quotation && (repriceDone.quotation.action === "updated"
+              ? " " + t(`Quotation ${repriceDone.quotation.number} was still a draft and now matches.`,
+                        `Penawaran ${repriceDone.quotation.number} masih draf dan kini sudah sesuai.`)
+              : " " + t(`Quotation ${repriceDone.quotation.number} has already gone out (${repriceDone.quotation.status}) and was left as it is — issue a revision if the customer needs the new price.`,
+                        `Penawaran ${repriceDone.quotation.number} sudah keluar (${repriceDone.quotation.status}) dan dibiarkan — terbitkan revisi bila pelanggan perlu harga baru.`))}
+          </div>
+        )}
+
+        {(canCost || canApprove || canSubmit || canReprice) && (
           <div className="mt-4 flex items-center gap-2 flex-wrap">
             {(canCost || canApprove) && (
               <input className="input flex-1 min-w-[200px]" placeholder={t("Notes (optional)", "Catatan (opsional)")}
@@ -777,6 +858,14 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 <Check size={14} /> {t("Set prices & approve", "Tetapkan harga & setujui")}
               </button>
             )}
+            {canReprice && !repricing && (
+              <button className="btn-ghost border-ink-200"
+                onClick={() => { setReprice({}); setRepriceDone(null); }}
+                title={t("Change a cost or a selling price that has already been set",
+                         "Ubah biaya atau harga jual yang sudah ditetapkan")}>
+                <Pencil size={14} /> {t("Change prices", "Ubah harga")}
+              </button>
+            )}
             {(isDirector || isPurchasing || role === "manager") && pr.status !== "approved" && pr.status !== "draft" && (
               <button className="btn-ghost text-red-600" disabled={reject.isPending} onClick={() => reject.mutate()}>
                 <X size={14} /> {t("Send back", "Kembalikan")}
@@ -786,6 +875,67 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         )}
         {pr.decision_notes && <div className="mt-3 text-xs muted">{t("Note:", "Catatan:")} {pr.decision_notes}</div>}
       </div>
+
+      {/* What the director changed after the fact. Distinct from the
+          negotiation log above: that is sales asking, this is the decision
+          already applied. Shown to everybody who can see the figure that
+          moved — the server has already stripped the one they cannot. */}
+      {(pr.price_history ?? []).length > 0 && (
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="overline">{t("Price changes", "Perubahan harga")}</span>
+            <span className="text-xs muted ml-auto">
+              {t("Made after the figures were first agreed",
+                 "Dilakukan setelah angka pertama disepakati")}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {[...(pr.price_history ?? [])].reverse().map((h: any, i: number) => (
+              <div key={i} className="rounded-lg border border-ink-200 p-3">
+                <div className="flex items-center gap-2 flex-wrap text-xs muted">
+                  <b className="text-ink-900">{h.by}</b>
+                  <span>{h.at ? new Date(h.at).toLocaleString(locale()) : ""}</span>
+                  {h.status_then && (
+                    <span className="chip bg-ink-100 text-ink-700">{sl(h.status_then)}</span>
+                  )}
+                </div>
+                {h.reason && <div className="text-sm mt-1">{h.reason}</div>}
+                <div className="mt-2 space-y-0.5">
+                  {(h.lines ?? []).map((ln: any) => (
+                    <div key={ln.line_no} className="text-xs flex flex-wrap gap-x-3">
+                      <span className="muted">#{ln.line_no}</span>
+                      <span className="font-medium">{ln.description}</span>
+                      {"cost_to" in ln && (
+                        <span className="tabular-nums">
+                          {t("cost", "biaya")}{" "}
+                          <span className="line-through muted">{idr(ln.cost_from ?? 0)}</span>
+                          {" → "}<b>{idr(ln.cost_to)}</b>
+                        </span>
+                      )}
+                      {"sell_to" in ln && (
+                        <span className="tabular-nums">
+                          {t("price", "harga")}{" "}
+                          <span className="line-through muted">{idr(ln.sell_from ?? 0)}</span>
+                          {" → "}<b>{idr(ln.sell_to)}</b>
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {h.quotation && (
+                  <div className="text-[11px] muted mt-2">
+                    {h.quotation.action === "updated"
+                      ? t(`Quotation ${h.quotation.number} was updated to match.`,
+                          `Penawaran ${h.quotation.number} ikut disesuaikan.`)
+                      : t(`Quotation ${h.quotation.number} had already gone out and was left as it was.`,
+                          `Penawaran ${h.quotation.number} sudah keluar dan dibiarkan.`)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {(revisions.data?.revisions ?? []).length > 0 && (
         <div className="card p-5">

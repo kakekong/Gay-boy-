@@ -116,6 +116,25 @@ class DecisionIn(BaseModel):
     notes: str | None = None
 
 
+class RepriceLine(BaseModel):
+    """One line of a director's correction. Omit a price to leave it alone —
+    changing a cost must not require re-typing the selling price, and the
+    other way round."""
+    line_no: int
+    cost_price: float | None = None
+    cost_basis: str = "unit"
+    sell_price: float | None = None
+    sell_basis: str = "unit"
+
+
+class RepriceIn(BaseModel):
+    items: list[RepriceLine] = Field(default_factory=list)
+    # Required. This changes a number somebody has already agreed to, and in
+    # six months "why is this line 12% dearer than the quote we sent" needs
+    # an answer that is written down.
+    reason: str
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 def _to_unit(amount: float | None, basis: str | None, qty: float) -> float:
     """Normalise an entered price to a per-unit value.
@@ -194,6 +213,28 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             float(i.get("sell_price") or 0) * float(i.get("qty") or 0)
             for i in (pr.items or [])
         )
+    # Corrections the director made after the fact. Filtered the same way the
+    # lines are: purchasing sees costs move but never a selling price, sales
+    # the reverse. An entry with nothing left to show is dropped rather than
+    # rendered as a mysterious empty row.
+    history = []
+    for h in (pr.price_history or []):
+        lines = []
+        for ln in h.get("lines") or []:
+            kept = {"line_no": ln.get("line_no"), "description": ln.get("description")}
+            if see_cost and "cost_to" in ln:
+                kept["cost_from"], kept["cost_to"] = ln.get("cost_from"), ln["cost_to"]
+            if see_sell and "sell_to" in ln:
+                kept["sell_from"], kept["sell_to"] = ln.get("sell_from"), ln["sell_to"]
+            if len(kept) > 2:
+                lines.append(kept)
+        if lines:
+            history.append({
+                "at": h.get("at"), "by": h.get("by"),
+                "reason": h.get("reason"), "status_then": h.get("status_then"),
+                "quotation": h.get("quotation"), "lines": lines,
+            })
+    out["price_history"] = history
     return out
 
 
@@ -459,6 +500,141 @@ async def approve_price_request(
                        entity_id=pr.id, after={"status": "approved"})
     await db.flush()
     return await _serialize(db, pr, Role(user.role))
+
+
+@router.post("/{pr_id}/reprice")
+async def reprice_price_request(
+    pr_id: UUID,
+    payload: RepriceIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Change a cost or a selling price on a request that is already settled.
+
+    Until now both numbers could only be set on the way through the pipeline:
+    purchasing entered the cost before the request reached the director, the
+    director set the sell price at the moment of approval, and after that the
+    figures were frozen. Real life does not respect that. A supplier revises a
+    quote, a rate moves, the director agrees a different price on the phone —
+    and the request that everything downstream reads from still says the old
+    number.
+
+    So this is the director's alone, works at any stage, and takes each price
+    independently: send a cost without a sell price and only the cost moves.
+
+    What it deliberately does NOT do is rewrite documents that have left the
+    building. A draft quotation is still ours, and its prices are locked to
+    this request by design, so it is brought back into line. One that has been
+    sent, approved or won is a statement already made to the customer — that
+    is corrected by issuing a revision, not by editing history underneath it.
+    The response says which happened.
+    """
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can change a price or a cost")
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Say why the price is changing")
+    if not payload.items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No lines to change")
+
+    by_line = {r.line_no: r for r in payload.items}
+    unknown = sorted(set(by_line) - {it.get("line_no") for it in (pr.items or [])})
+    if unknown:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"This request has no line {unknown[0]}")
+
+    before_items = [dict(it) for it in (pr.items or [])]
+    items = [dict(it) for it in (pr.items or [])]
+    changes: list[dict] = []
+    for it in items:
+        r = by_line.get(it.get("line_no"))
+        if r is None:
+            continue
+        qty = float(it.get("qty") or 0)
+        entry: dict = {"line_no": it["line_no"], "description": it.get("description")}
+        if r.cost_price is not None:
+            new_cost = _to_unit(r.cost_price, r.cost_basis, qty)
+            if new_cost != (it.get("cost_price") or None):
+                entry["cost_from"] = it.get("cost_price")
+                entry["cost_to"] = new_cost
+                it["cost_price"] = new_cost
+                it["cost_basis"] = "unit"
+        if r.sell_price is not None:
+            new_sell = _to_unit(r.sell_price, r.sell_basis, qty)
+            if new_sell != (it.get("sell_price") or None):
+                entry["sell_from"] = it.get("sell_price")
+                entry["sell_to"] = new_sell
+                it["sell_price"] = new_sell
+                it["sell_basis"] = "unit"
+        if len(entry) > 2:                      # something actually moved
+            changes.append(entry)
+
+    if not changes:
+        # Re-submitting the same numbers is not an event. Saying so beats
+        # writing an empty entry into the history nobody can interpret later.
+        return {**await _serialize(db, pr, Role(user.role)),
+                "changed_lines": 0, "quotation": None}
+
+    pr.items = items
+    pr.updated_by = user.id
+
+    # ── bring a still-draft quotation back into line ─────────────────────
+    quote_result: dict | None = None
+    if pr.quotation_id:
+        from app.models.quotation import Quotation, QuotationItem
+        q = await db.get(Quotation, pr.quotation_id)
+        if q:
+            if q.status == "draft":
+                q_items = (await db.scalars(
+                    select(QuotationItem).where(QuotationItem.quotation_id == q.id)
+                )).all()
+                moved = 0
+                for qi in q_items:
+                    src = next((x for x in items
+                                if x.get("line_no") == qi.line_no), None)
+                    if not src:
+                        continue
+                    if src.get("sell_price") is not None:
+                        if float(qi.unit_price or 0) != float(src["sell_price"]):
+                            moved += 1
+                        qi.unit_price = float(src["sell_price"])
+                    if src.get("cost_price") is not None:
+                        qi.cost_estimate = float(src["cost_price"])
+                from app.api.v1.endpoints.quotations import _recalc
+                _recalc(q, list(q_items))
+                q.updated_by = user.id
+                quote_result = {"id": str(q.id), "number": q.number,
+                                "status": q.status, "action": "updated",
+                                "lines_changed": moved}
+            else:
+                quote_result = {"id": str(q.id), "number": q.number,
+                                "status": q.status, "action": "left_alone"}
+
+    stamp = {
+        "at": datetime.now(UTC).isoformat(),
+        "by": user.full_name,
+        "by_id": str(user.id),
+        "status_then": pr.status,
+        "reason": reason,
+        "lines": changes,
+        "quotation": quote_result,
+    }
+    pr.price_history = [*(pr.price_history or []), stamp]
+
+    await audit_record(
+        db, actor=user, action="reprice", entity="price_request",
+        entity_id=pr.id,
+        before={"items": before_items},
+        after={"items": items, "reason": reason},
+    )
+    await db.flush()
+    return {**await _serialize(db, pr, Role(user.role)),
+            "changed_lines": len(changes), "quotation": quote_result}
 
 
 @router.post("/{pr_id}/reject")

@@ -49,6 +49,14 @@ class PriceRequest(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixi
     # ever read with the request itself, and it is capped at a handful.
     revisions: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
 
+    # Every time the director changed a cost or a selling price after the
+    # fact: which line, from what, to what, why, and who. Separate from
+    # `revisions`, which is sales proposing a change and waiting for a
+    # decision — this is the decision itself, already applied. Kept on the
+    # row rather than left to the audit log because the people who need to
+    # see it are looking at the request, not at an admin screen.
+    price_history: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+
     # Purchasing fills costs
     priced_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     priced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

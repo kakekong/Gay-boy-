@@ -443,6 +443,20 @@ someone gets pulled into a conversation on a document they cannot open. Keep
 (which also honours the mention), or the composer's warning and the "open the
 document" link both start lying to the people they exist for.
 
+**A price request's two figures can be corrected after it settles.**
+`POST /price-requests/{id}/reprice` is director-only and works at any status:
+cost and sell move independently (send one, the other stays), a reason is
+required, and each change is stamped into `PriceRequest.price_history` as well
+as the audit log. The rule that matters is what it does downstream: a
+quotation still in **draft** is rewritten to match (its prices are locked to
+the request by design, so leaving it stale would make the lock a lie), and one
+already **sent/approved/won** is left exactly as it went out — that is a
+statement made to the customer, corrected by a revision, not by editing the
+number underneath it. The response says which happened. `_serialize` filters
+`price_history` the same way it filters line prices: purchasing sees costs
+move and never a selling price, sales the reverse. Covered by
+`test_pr_reprice.py`.
+
 **Approvals** are one `ApprovalRequest` table with `decide()` + `apply_to_target()`.
 When a target moves on by another route, its pending request must be cleared,
 or the inbox fills with undecidable ghosts.
