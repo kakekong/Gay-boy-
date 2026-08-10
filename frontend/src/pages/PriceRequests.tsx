@@ -357,6 +357,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   >(null);
   const [repriceWhy, setRepriceWhy] = useState("");
   const [repriceDone, setRepriceDone] = useState<any | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
   const [editingNumber, setEditingNumber] = useState(false);
   const [numberDraft, setNumberDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
@@ -434,6 +435,14 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     notes: notes || undefined,
   })));
   const reject = useMutation(mut(() => api.post(`/price-requests/${id}/reject`, { notes: notes || undefined })));
+
+  // Anyone who can open the request can add to its notes, at any stage.
+  const addNote = useMutation({
+    mutationFn: () => api.post(`/price-requests/${id}/note`,
+                               { text: noteDraft.trim() }).then((r) => r.data),
+    onSuccess: () => { setNoteDraft(""); refresh(); },
+    onError: onErr,
+  });
 
   // Only the lines actually typed into are sent: an untouched line has no
   // entry in the draft, so it is never quietly re-stated at its own value.
@@ -519,6 +528,16 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     || (stillDraft && (role === "sales" || role === "manager" || role === "admin"));
   // A draft has no prices yet, so there is nothing to correct there. From
   // the moment it is submitted onwards the director can change either figure.
+  // The notes blob is one tagged line per entry; the untagged first line is
+  // whatever was typed on the create form.
+  const noteLines = String(pr.notes || "")
+    .split("\n")
+    .map((raw: string) => raw.trim())
+    .filter(Boolean)
+    .map((raw: string) => {
+      const m = raw.match(/^\[(purchasing|director|manager|admin|finance|sales)\]\s*(.*)$/i);
+      return m ? { tag: m[1].toLowerCase(), text: m[2] } : { tag: "", text: raw };
+    });
   const canReprice = isDirector && pr.status !== "draft";
   const repricing = reprice !== null;
   const revLeft = revisions.data?.left ?? 0;
@@ -874,6 +893,51 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
           </div>
         )}
         {pr.decision_notes && <div className="mt-3 text-xs muted">{t("Note:", "Catatan:")} {pr.decision_notes}</div>}
+      </div>
+
+      {/* Notes on the request.
+          The blob is a running log of role-tagged lines, and the server has
+          already removed the ones this reader is not entitled to — sales sees
+          its own and the untagged original, never purchasing's costings. */}
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="overline">{t("Notes", "Catatan")}</span>
+          <span className="text-xs muted ml-auto">
+            {t("Anyone working this request can add one",
+               "Siapa pun yang menangani permintaan ini bisa menambahkan")}
+          </span>
+        </div>
+        {noteLines.length === 0 ? (
+          <p className="text-sm muted">
+            {t("No notes yet.", "Belum ada catatan.")}
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {noteLines.map((ln, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                {ln.tag && (
+                  <span className="chip bg-ink-100 text-ink-700 capitalize shrink-0">
+                    {sl(ln.tag)}
+                  </span>
+                )}
+                <span className="whitespace-pre-wrap">{ln.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex items-center gap-2">
+          <input className="input flex-1" value={noteDraft} maxLength={1000}
+            placeholder={t("Add a note…", "Tambah catatan…")}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && noteDraft.trim()) addNote.mutate();
+            }} />
+          <button className="btn-primary"
+            disabled={addNote.isPending || !noteDraft.trim()}
+            onClick={() => addNote.mutate()}>
+            <Send size={14} /> {t("Add", "Tambah")}
+          </button>
+        </div>
       </div>
 
       {/* What the director changed after the fact. Distinct from the

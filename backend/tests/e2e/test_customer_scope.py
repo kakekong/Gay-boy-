@@ -82,8 +82,8 @@ async def main():
     print("\n── a price request the director raised on the rep's customer ──")
     pr = await director_pr(mine)
     got = J(await c.get(f"/price-requests/{pr}", headers=d))
-    check("it is the director's on paper", got["sales_pic_id"] != me1["id"],
-          str(got["sales_pic_id"]))
+    check("the director raised it", str(got["created_by"] or "") != me1["id"]
+          if "created_by" in got else True, str(got.get("created_by")))
 
     r = await c.get(f"/price-requests/{pr}", headers=s1)
     check("the rep in charge of the customer can open it", r.status_code == 200,
@@ -96,6 +96,20 @@ async def main():
     check("...and they can build the quotation from it — the point of it",
           q.status_code in (200, 201), f"{q.status_code} {J(q)}"[:160])
     qid = J(q)["id"]
+
+    print("\n── and it belongs to them, not only visible to them ──")
+    check("the request is in the account rep's name, not the director's",
+          got["sales_pic_id"] == me1["id"], str(got["sales_pic_id"]))
+    made = J(q)
+    check("...and so is the quotation built from it",
+          made["sales_pic_id"] == me1["id"], str(made.get("sales_pic_id")))
+    r = await c.patch(f"/quotations/{made['id']}", headers=s1, json={
+        "notes": f"agreed delivery in 3 weeks {tag}"})
+    check("...which the rep can therefore edit", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+    check("...and the edit landed",
+          J(await c.get(f"/quotations/{made['id']}", headers=s1)).get("notes")
+          == f"agreed delivery in 3 weeks {tag}")
 
     print("\n── and the boundary still holds ──")
     other = await director_pr(theirs)
@@ -114,10 +128,18 @@ async def main():
         "customer_id": mine, "variant": "detailed",
         "items": [{"line_no": 1, "description": f"Sprocket {tag}", "qty": 2,
                    "uom": "pcs", "unit_price": 900_000}]}))
-    check("a quotation the director wrote is the director's",
-          dq["sales_pic_id"] != me1["id"], str(dq.get("sales_pic_id")))
+    check("a quotation the director wrote lands in the account rep's name",
+          dq["sales_pic_id"] == me1["id"], str(dq.get("sales_pic_id")))
     r = await c.get(f"/quotations/{dq['id']}", headers=s1)
     check("the rep can open it", r.status_code == 200, str(r.status_code))
+    r = await c.patch(f"/quotations/{dq['id']}", headers=s1, json={
+        "items": [{"line_no": 1, "description": f"Sprocket {tag}", "qty": 3,
+                   "uom": "pcs", "unit_price": 950_000}]})
+    check("...and edit it — it is their deal", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+    edited = J(await c.get(f"/quotations/{dq['id']}", headers=s1))
+    check("...the change stuck", float(edited["items"][0]["qty"]) == 3,
+          str(edited["items"][0]["qty"]))
     qs = J(await c.get("/quotations", headers=s1))
     qrows = qs if isinstance(qs, list) else qs.get("data", [])
     check("...it is in their quotation list", any(x["id"] == dq["id"] for x in qrows))
@@ -172,14 +194,13 @@ async def main():
         "customer_ids": [mine], "sales_pic_id": me2["id"],
         "move_open_work": True, "note": "handover"})
     still = J(await c.get(f"/quotations/{hist['id']}", headers=d))
-    check("the won quotation stayed with the rep who closed it",
-          still["sales_pic_id"] == me1["id"], str(still["sales_pic_id"]))
+    check("the closed deal moved to the new rep with the account",
+          still["sales_pic_id"] == me2["id"], str(still["sales_pic_id"]))
     r = await c.get(f"/quotations/{hist['id']}", headers=s2)
-    check("...and the rep who now owns the account can still read it",
-          r.status_code == 200, str(r.status_code))
+    check("...who can open it", r.status_code == 200, str(r.status_code))
     r = await c.get(f"/quotations/{hist['id']}", headers=s1)
-    check("...while the rep who lost the account cannot, even though it names them",
-          r.status_code == 200, "own document stays readable")
+    check("...and the rep who lost the account can no longer",
+          r.status_code == 403, str(r.status_code))
     r = await c.get(f"/customers/{mine}", headers=s1)
     check("...the customer itself is gone from them", r.status_code == 403,
           str(r.status_code))

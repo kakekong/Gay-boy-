@@ -162,9 +162,18 @@ async def create_customer(
 # excluded by construction; the rest of the office has no book of customers.
 _REP_ROLES = (Role.SALES, Role.MANAGER, Role.DIRECTOR)
 
-# What "open work" means when the account is handed over. Anything decided —
-# won, lost, rejected — stays with the rep who decided it: that is their
-# record, and rewriting it would falsify who closed the deal.
+# A handover moves the account's whole file, closed deals included.
+#
+# It moved only the live documents at first, on the reasoning that a won
+# quotation is the record of who closed it and should keep their name. In
+# practice that left the new rep holding an account they could not fully work:
+# ownership is what grants the right to *edit*, so the inherited history was
+# read-only and a repeat order off an old quotation meant asking the director.
+# The audit log and the customer's timeline still say who closed what, so
+# nothing is actually lost by moving the row.
+#
+# These two are now only used to count how much of what moved was already
+# decided, so the handover can say "…including 4 closed".
 _LIVE_QUOTE_STATUSES = ("draft", "pending_approval", "approved", "sent")
 _DEAD_PR_STATUSES = ("rejected", "cancelled")
 
@@ -174,9 +183,10 @@ class ReassignIn(BaseModel):
     # None hands the account back to nobody — useful for a rep who has left
     # before the director has decided where their book goes.
     sales_pic_id: UUID | None = None
-    # Carry the customer's live price requests and quotations across too.
-    # Off would leave the new rep owning a customer whose open quote they
-    # cannot open, so it defaults on.
+    # Carry the customer's price requests and quotations across too — all of
+    # them, open and closed. Off leaves the documents named after the previous
+    # rep; the new one can still read them (scope follows the customer) but
+    # cannot edit them, which is rarely what anybody wants.
     move_open_work: bool = True
     note: str | None = None
 
@@ -252,14 +262,15 @@ async def reassign_customers(
     Three things happen per customer, and all three matter:
 
       • ownership moves, which is what decides who can see the account;
-      • the live price requests and quotations move with it (unless the
-        director says otherwise), so the new rep inherits a working desk
-        rather than a customer with invisible open documents;
+      • every price request and quotation on that account moves with it
+        (unless the director says otherwise) — closed ones too, because
+        ownership is what grants the right to edit, and a rep who inherits an
+        account has to be able to work its repeat business, not just read it;
       • the handover is written to the customer's timeline with both names,
         so in six months it is still clear who handed what to whom, and why.
 
-    Decided work — won or lost quotations, rejected price requests — is
-    deliberately left where it is. It is the record of who closed it.
+    Who closed what is not lost by moving the row: the audit log and the
+    customer's timeline both keep the original name.
     """
     from app.models.price_request import PriceRequest
 
@@ -306,29 +317,29 @@ async def reassign_customers(
         c.sales_pic_id = payload.sales_pic_id
         c.updated_by = user.id
 
-        carried = {"price_requests": 0, "quotations": 0}
+        carried = {"price_requests": 0, "quotations": 0, "closed": 0}
         if payload.move_open_work:
-            live_prs = (await db.scalars(
+            prs = (await db.scalars(
                 select(PriceRequest).where(
                     PriceRequest.customer_id == c.id,
                     PriceRequest.is_deleted.is_(False),
-                    PriceRequest.status.not_in(_DEAD_PR_STATUSES),
                 )
             )).all()
-            for pr in live_prs:
+            for pr in prs:
                 if pr.sales_pic_id != payload.sales_pic_id:
                     pr.sales_pic_id = payload.sales_pic_id
                     carried["price_requests"] += 1
-            live_quotes = (await db.scalars(
-                select(Quotation).where(
-                    Quotation.customer_id == c.id,
-                    Quotation.status.in_(_LIVE_QUOTE_STATUSES),
-                )
+                    if pr.status in _DEAD_PR_STATUSES:
+                        carried["closed"] += 1
+            quotes = (await db.scalars(
+                select(Quotation).where(Quotation.customer_id == c.id)
             )).all()
-            for q in live_quotes:
+            for q in quotes:
                 if q.sales_pic_id != payload.sales_pic_id:
                     q.sales_pic_id = payload.sales_pic_id
                     carried["quotations"] += 1
+                    if q.status not in _LIVE_QUOTE_STATUSES:
+                        carried["closed"] += 1
             prs_moved += carried["price_requests"]
             quotes_moved += carried["quotations"]
 

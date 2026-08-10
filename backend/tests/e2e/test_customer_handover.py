@@ -12,9 +12,12 @@ cannot open, while the departed rep keeps it. So this driver watches all four
 things at once:
 
   the account moves        the new rep can open it, the old one cannot
-  the live work moves      open price requests and quotations follow
-  the decided work stays   won/lost/rejected keep the rep who closed them
-  it is written down       the customer's timeline and the new rep's bell
+  the whole file moves     every price request and quotation on the account,
+                           closed ones included — ownership is what grants
+                           the right to edit, and an inherited account whose
+                           history is read-only is half an account
+  it is written down       the customer's timeline and the new rep's bell,
+                           and the audit log still names who closed what
 
 And the door it closes: reassignment used to be an ordinary field on the
 customer PATCH, which meant any sales rep could quietly hand their own account
@@ -150,6 +153,7 @@ async def main():
     await c.post(f"/quotations/{won_q}/approve", headers=d, json={})
     await c.post(f"/quotations/{won_q}/won", headers=d)
     won_state = J(await c.get(f"/quotations/{won_q}", headers=d))["status"]
+    closer = J(await c.get(f"/quotations/{won_q}", headers=d))["sales_pic_id"]
 
     r = await c.post("/customers/reassign", headers=d, json={
         "customer_ids": [cust], "sales_pic_id": me2["id"],
@@ -158,7 +162,7 @@ async def main():
     check("the director hands it over", r.status_code == 200, f"{r.status_code} {out}"[:160])
     check("...one customer moved", out.get("moved") == 1, str(out.get("moved")))
     check("...and it says what came with it",
-          out.get("price_requests_moved", 0) >= 2 and out.get("quotations_moved", 0) >= 1,
+          out.get("price_requests_moved", 0) >= 2 and out.get("quotations_moved", 0) >= 2,
           f"prs={out.get('price_requests_moved')} quotes={out.get('quotations_moved')}")
 
     got = J(await c.get(f"/customers/{cust}", headers=d))
@@ -186,8 +190,12 @@ async def main():
     check("...and the old rep cannot",
           (await c.get(f"/quotations/{live_q}", headers=s1)).status_code == 403)
     won_now = J(await c.get(f"/quotations/{won_q}", headers=d))
-    check(f"the {won_state} quotation stayed with the rep who closed it",
-          won_now["sales_pic_id"] == me1["id"], str(won_now["sales_pic_id"]))
+    check(f"the {won_state} quotation came across as well",
+          won_now["sales_pic_id"] == me2["id"], str(won_now["sales_pic_id"]))
+    check("...so the new rep can work the repeat business on it",
+          (await c.get(f"/quotations/{won_q}", headers=s2)).status_code == 200)
+    check("...and it was the other rep's a moment ago",
+          closer == me1["id"], str(closer))
     prs2 = J(await c.get("/price-requests", headers=s2))
     pr_ids2 = {x["id"] for x in (prs2 if isinstance(prs2, list) else prs2.get("data", []))}
     check("the price requests moved too", live_pr in pr_ids2)

@@ -175,12 +175,17 @@ async def create_quotation(
         number = custom
     else:
         number = await next_quotation_number(db, token=payload.number_token)
+    # Owned by the account's rep, not by whoever filled the form in. The
+    # director writing a one-off quote for somebody's customer is doing it on
+    # that rep's behalf; leaving it in the director's name meant the rep could
+    # not edit their own deal.
+    _cust = await db.get(Customer, payload.customer_id)
     q = Quotation(
         number=number,
         customer_id=payload.customer_id,
         contact_id=payload.contact_id,
         variant=payload.variant,
-        sales_pic_id=user.id,
+        sales_pic_id=(_cust.sales_pic_id if _cust else None) or user.id,
         discount_pct=payload.discount_pct,
         tax_pct=payload.tax_pct,
         valid_until=payload.valid_until,
@@ -238,7 +243,10 @@ async def create_from_price_request(
     q = Quotation(
         number=await next_quotation_number(db),
         customer_id=pr.customer_id,
-        sales_pic_id=pr.sales_pic_id or user.id,
+        # Same rule as everywhere else: the account's rep owns it. The price
+        # request's own rep is the fallback, then whoever pressed the button.
+        sales_pic_id=((_cust.sales_pic_id if _cust else None)
+                      or pr.sales_pic_id or user.id),
         price_request_id=pr.id,
         discount_pct=0, tax_pct=11,
         notes=strip_internal_notes(pr.notes),
@@ -428,13 +436,27 @@ async def update_quotation(
 
     if new_items is not None:
         # Replace the line items wholesale.
+        #
+        # `data` came from model_dump, so these are plain dicts — calling
+        # .model_dump() on them raised AttributeError and returned a 500.
+        # It survived unnoticed because every other route to this line was
+        # blocked first: an unchanged payload is pruned before it gets here,
+        # a price-request-backed quotation is refused outright, and an
+        # approved one is queued for the director instead. What was left was
+        # a real line change on a plain draft, which only its owner can make
+        # — and until the scope fix, a rep rarely owned one.
         for it in list(q.items):
             await db.delete(it)
         await db.flush()
-        items = [
-            QuotationItem(quotation_id=q.id, **i.model_dump())
-            for i in new_items
-        ]
+        items = []
+        for i in new_items:
+            row = dict(i)
+            pid = row.get("product_id")
+            if isinstance(pid, str):
+                row["product_id"] = UUID(pid)
+            row.pop("line_total", None)
+            row.pop("id", None)
+            items.append(QuotationItem(quotation_id=q.id, **row))
         db.add_all(items)
     else:
         items = list(q.items)

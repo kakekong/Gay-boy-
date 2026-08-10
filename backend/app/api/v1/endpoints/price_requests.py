@@ -40,12 +40,14 @@ import re as _re
 # we actually write today so a user's own note like "[urgent]" doesn't
 # get accidentally scrubbed.
 _INTERNAL_TAG_LINE = _re.compile(
-    r"^\s*\[(?:purchasing|director|manager|admin|finance|sales)\](?:\s.*)?$",
+    # The tag is captured so a caller can ask to keep one — sales has to be
+    # able to read the note it just wrote.
+    r"^\s*\[(purchasing|director|manager|admin|finance|sales)\](?:\s.*)?$",
     _re.IGNORECASE,
 )
 
 
-def strip_internal_notes(text: str | None) -> str | None:
+def strip_internal_notes(text: str | None, keep: set[str] | None = None) -> str | None:
     """Drop internal role-tagged lines from a shared notes blob.
 
     Purchasing/director/etc. append `[purchasing] …`, `[director] …` (and
@@ -57,10 +59,21 @@ def strip_internal_notes(text: str | None) -> str | None:
     Only strips lines that match a concrete known-internal tag so a
     user-authored line that happens to start with a bracket (e.g. an
     inline reference like "[ref 001] follow up") is preserved.
+
+    `keep` names tags to leave in. It exists for one case: showing sales the
+    notes on their own request. Their own `[sales]` lines have to survive, or
+    they write a note and watch it disappear. The copy that reaches the
+    customer's quotation always uses the default — every tag stripped.
     """
     if not text:
         return text
-    kept = [ln for ln in text.splitlines() if not _INTERNAL_TAG_LINE.match(ln)]
+    keep = {k.lower() for k in (keep or set())}
+    kept = []
+    for ln in text.splitlines():
+        m = _INTERNAL_TAG_LINE.match(ln)
+        if m and m.group(1).lower() not in keep:
+            continue
+        kept.append(ln)
     result = "\n".join(kept).strip()
     return result or None
 
@@ -114,6 +127,10 @@ class ApproveIn(BaseModel):
 
 class DecisionIn(BaseModel):
     notes: str | None = None
+
+
+class NoteIn(BaseModel):
+    text: str
 
 
 class RepriceLine(BaseModel):
@@ -187,7 +204,8 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
     # the full blob so their conversation with the director isn't hidden
     # from them.
     notes_for_role = (
-        strip_internal_notes(pr.notes) if role == Role.SALES else pr.notes
+        strip_internal_notes(pr.notes, keep={"sales"})
+        if role == Role.SALES else pr.notes
     )
     out = {
         "id": str(pr.id),
@@ -286,10 +304,14 @@ async def create_price_request(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Customer not found")
     if Role(user.role) == Role.SALES and cust.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
+    # The request belongs to whoever runs the account, not to whoever typed
+    # it. A director raising one on a rep's customer is doing it *for* that
+    # rep — making it the director's left the rep unable to act on their own
+    # work. Falls back to the author when the account has nobody on it.
     pr = PriceRequest(
         number=await next_price_request_number(db),
         customer_id=payload.customer_id,
-        sales_pic_id=user.id,
+        sales_pic_id=cust.sales_pic_id or user.id,
         status="draft",
         items=_norm_items(payload.items),
         notes=payload.notes,
@@ -503,6 +525,44 @@ async def approve_price_request(
     pr.status = "approved"
     await audit_record(db, actor=user, action="approve", entity="price_request",
                        entity_id=pr.id, after={"status": "approved"})
+    await db.flush()
+    return await _serialize(db, pr, Role(user.role))
+
+
+@router.post("/{pr_id}/note")
+async def add_note(
+    pr_id: UUID,
+    payload: NoteIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Add a note to a price request, at any stage.
+
+    Sales could not do this at all. Notes were only ever written in two
+    places — the box on the create form, and the one purchasing and the
+    director get while costing or approving — and the moment a request left
+    draft the whole document locked, so a rep with something to say about
+    their own request had nowhere to put it. (The page did not even show the
+    notes back, so the ones typed at creation were write-only.)
+
+    Appended rather than replaced, and tagged with the writer's role. Both
+    matter. Replacing would let one person overwrite the running record, and
+    for sales it would silently delete the [purchasing] lines they cannot see
+    in the first place. The tag is what keeps the internal conversation out
+    of the customer's quotation, which copies these notes onto its PDF.
+    """
+    pr = await _scoped(pr_id, db, user)
+    text = " ".join((payload.text or "").split())
+    if not text:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Write something first")
+    if len(text) > 1000:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "That note is too long (max 1000 characters)")
+    line = f"[{Role(user.role).value}] {text}"
+    pr.notes = f"{(pr.notes or '').rstrip()}\n{line}".strip()
+    pr.updated_by = user.id
+    await audit_record(db, actor=user, action="note", entity="price_request",
+                       entity_id=pr.id, after={"note": line})
     await db.flush()
     return await _serialize(db, pr, Role(user.role))
 
