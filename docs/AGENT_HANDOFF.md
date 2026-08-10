@@ -472,6 +472,20 @@ number underneath it. The response says which happened. `_serialize` filters
 move and never a selling price, sales the reverse. Covered by
 `test_pr_reprice.py`.
 
+**Rejection is never a dead end, and always says why.** All three sales
+documents now behave the same way: the reason lives on the row
+(`decision_notes` on quotations, customer POs and price requests — the
+quotation gained the column, the other two already had it), it is shown on
+the document's own page, and a rejected document can be fixed and sent
+straight back up under the same number. Quotations resubmit through
+`POST /{id}/submit` (which now accepts `rejected`, not only `draft`);
+customer POs through `POST /{id}/resubmit`; price requests always could.
+Revising a quotation into a new `-R2` is still there and still the right
+tool for a quote the *customer* has already seen — resubmission is for one
+the director simply handed back. The reason is deliberately kept through a
+resubmission: the director is about to look again and wants to see what they
+asked for. `test_resubmit.py` covers all three.
+
 **Approvals** are one `ApprovalRequest` table with `decide()` + `apply_to_target()`.
 When a target moves on by another route, its pending request must be cleared,
 or the inbox fills with undecidable ghosts.

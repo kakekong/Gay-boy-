@@ -5,7 +5,7 @@ import {
   FileText, Send, CheckCircle2, XCircle, Trophy, Frown,
   ArrowLeft, Building2, Calendar, Receipt, ShieldCheck, ShieldAlert, Crown, Loader2,
   MessageCircle, Plus, Bell, CheckCircle, Link2, BookOpen, Undo2, Save, Pencil,
-  User as UserIcon,
+  User as UserIcon, AlertCircle,
 } from "lucide-react";
 import clsx from "clsx";
 import { UserLink } from "@/components/UserLink";
@@ -200,7 +200,9 @@ export default function QuotationDetailPage() {
 
   const canApprove = user && (user.role === "manager" || user.role === "director");
   const isOwner    = user && user.id === Q.sales_pic_id;
-  const canSubmit  = isOwner && Q.status === "draft";
+  // A rejected quotation goes straight back up once it has been fixed —
+  // revising it into a new -R2 is for a quote the customer has already seen.
+  const canSubmit  = isOwner && (Q.status === "draft" || Q.status === "rejected");
   // Withdraw an accidental submit while the director hasn't decided yet.
   const canUnsubmit = (isOwner || user?.role === "director")
     && Q.status === "pending_approval";
@@ -229,6 +231,30 @@ export default function QuotationDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Why it was sent back. It used to live only in the audit log and the
+          approvals queue, so the person who has to fix it could not read it
+          on the page they were fixing. Kept visible after a resubmission so
+          the director can see what they asked for last time. */}
+      {Q.decision_notes && ["rejected", "pending_approval"].includes(Q.status) && (
+        <div className={clsx(
+          "rounded-xl border px-4 py-3 text-sm flex items-start gap-2",
+          Q.status === "rejected"
+            ? "border-red-200 bg-red-50 text-red-800"
+            : "border-amber-200 bg-amber-50 text-amber-900",
+        )}>
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">
+              {Q.status === "rejected"
+                ? t("Sent back — fix this and resubmit",
+                    "Dikembalikan — perbaiki lalu kirim ulang")
+                : t("What was asked for last time it was sent back",
+                    "Yang diminta saat terakhir dikembalikan")}
+            </div>
+            <div className="mt-0.5 whitespace-pre-wrap">{Q.decision_notes}</div>
+          </div>
+        </div>
+      )}
       {flash && (
         <div
           className={clsx(
@@ -358,7 +384,10 @@ export default function QuotationDetailPage() {
             )}
             {canSubmit && (
               <button className="btn-primary" onClick={() => submit.mutate()} disabled={submit.isPending}>
-                <Send size={15} /> {t("Submit", "Kirim")}
+                <Send size={15} />
+                {Q.status === "rejected"
+                  ? t("Resubmit", "Kirim ulang")
+                  : t("Submit", "Kirim")}
               </button>
             )}
             {canUnsubmit && (

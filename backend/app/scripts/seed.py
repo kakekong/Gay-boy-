@@ -371,6 +371,8 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE price_requests ADD COLUMN IF NOT EXISTS revisions JSONB NOT NULL DEFAULT '[]'::jsonb",
     # Director repricing after approval — what changed, and why
     "ALTER TABLE price_requests ADD COLUMN IF NOT EXISTS price_history JSONB NOT NULL DEFAULT '[]'::jsonb",
+    # Why a quotation was rejected, on the quotation itself
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS decision_notes TEXT",
 ]
 
 

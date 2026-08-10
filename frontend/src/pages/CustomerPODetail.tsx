@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Receipt, Building2, FileText, Briefcase, Calendar,
   Loader2, AlertCircle, Check, X, TrendingUp, Wallet, AlertTriangle,
-  Download, Pencil,
+  Download, Pencil, Send,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -134,6 +134,25 @@ export default function CustomerPODetailPage() {
     queryFn: () => api.get(`/customers/${custId}/summary`).then((r) => r.data as any),
     enabled: !!custId,
     retry: false,
+  });
+
+  // A rejected PO is fixed and sent back up under the same number, rather
+  // than filed again under a new one and leaving two records of one order.
+  const resubmit = useMutation({
+    mutationFn: () => api.post(`/customer-pos/${id}/resubmit`).then((r) => r.data),
+    onSuccess: () => {
+      setFlash({ kind: "ok", text: tt("Resubmitted for approval.",
+                                      "Dikirim ulang untuk persetujuan.") });
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      qc.invalidateQueries({ queryKey: ["customer-pos"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? tt("Could not resubmit", "Gagal mengirim ulang"),
+    }),
   });
 
   const decide = useMutation({
@@ -354,6 +373,24 @@ export default function CustomerPODetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Rejected: whoever owns the customer fixes it and sends it back. */}
+        {p.status === "rejected" && (
+          <div className="rounded-xl border border-red-200 bg-red-50/60 px-4 py-3
+                          flex flex-wrap items-center gap-3">
+            <span className="text-xs text-red-900">
+              {t("Edit the PO above to fix what was asked, then send it back for a decision.",
+                 "Perbaiki PO di atas sesuai permintaan, lalu kirim ulang untuk diputuskan.")}
+            </span>
+            <button className="btn-primary ml-auto" disabled={resubmit.isPending}
+                    onClick={() => resubmit.mutate()}>
+              {resubmit.isPending
+                ? <Loader2 size={15} className="animate-spin" />
+                : <Send size={15} />}
+              {t("Resubmit for approval", "Kirim ulang untuk persetujuan")}
+            </button>
+          </div>
+        )}
 
         {/* Regular PO: manager/director approve/reject while pending. */}
         {canDecide && p.status === "pending_approval" && (
@@ -643,9 +680,22 @@ export default function CustomerPODetailPage() {
           </Meta>
         </div>
 
-        {p.decision_notes && p.status !== "pending_approval" && (
-          <div className="rounded-lg border border-ink-100 bg-ink-50/60 px-3 py-2 text-xs">
-            <div className="font-semibold mb-0.5">{t("Director decision", "Keputusan direktur")}</div>
+        {p.decision_notes && (
+          <div className={clsx(
+            "rounded-lg border px-3 py-2 text-xs",
+            p.status === "rejected"
+              ? "border-red-200 bg-red-50 text-red-800"
+              : "border-ink-100 bg-ink-50/60",
+          )}>
+            <div className="font-semibold mb-0.5">
+              {p.status === "rejected"
+                ? t("Sent back — fix this and resubmit",
+                    "Dikembalikan — perbaiki lalu kirim ulang")
+                : p.status === "pending_approval"
+                  ? t("What was asked for last time it was sent back",
+                      "Yang diminta saat terakhir dikembalikan")
+                  : t("Director decision", "Keputusan direktur")}
+            </div>
             <div className="text-ink-700">{p.decision_notes}</div>
             {p.decided_at && (
               <div className="text-ink-500 mt-0.5">

@@ -348,7 +348,9 @@ async def update_customer_po(
         cust = await db.get(Customer, po.customer_id)
         if not cust or cust.sales_pic_id != user.id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
-    if po.status != "pending_approval" and Role(user.role) != Role.DIRECTOR:
+    # A rejected PO has to be editable, or "send it back with a reason" is a
+    # dead end: the reason says what to fix and nothing can be fixed.
+    if po.status not in ("pending_approval", "rejected") and Role(user.role) != Role.DIRECTOR:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Customer PO is no longer pending — edit the project it spawned instead.",
@@ -600,6 +602,75 @@ async def dp_finance_reject(
     await _close_dp_approval_request(
         db, po_id, approve=False, decider_id=user.id, notes=payload.notes,
     )
+    await db.flush()
+    return await _enrich(db, po)
+
+
+@router.post("/{po_id}/resubmit", response_model=CustomerPOOut)
+async def resubmit_customer_po(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_any_internal),
+):
+    """Send a rejected customer PO back for a decision.
+
+    Rejecting one already demands a reason, and that reason is shown on the
+    PO — but until now there was nothing to do about it. The PO sat rejected
+    with no way forward except filing a second one under a new number, which
+    left two records of the same order.
+
+    The reason the director gave is kept, not cleared: they are about to look
+    at this again and what they asked for last time is the most useful thing
+    on the page.
+    """
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    from app.core.audit import record as audit_record
+
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+    customer = await db.get(Customer, po.customer_id)
+    if Role(user.role) == Role.SALES:
+        if not customer or customer.sales_pic_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
+    if po.status != "rejected":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Only a rejected PO can be resubmitted — this one is '{po.status}'.")
+
+    is_director = Role(user.role) == Role.DIRECTOR
+    if po.is_downpayment:
+        po.status = "pending_finance"
+        await request_approval(
+            db, target_type="customer_po", target_id=po.id,
+            requested_by=user.id, required_role=Role.FINANCE,
+            reason=(f"Down-payment PO {po.number} from "
+                    f"{customer.company_name if customer else 'a customer'} "
+                    "— resubmitted after being sent back."),
+            payload={"action": "dp_finance_approve"},
+        )
+    elif is_director:
+        # The director resubmitting their own is the decision.
+        po.status = "approved"
+        po.decided_by = user.id
+        po.decided_at = _dt.now(UTC)
+        project = await _spawn_project(db, po, user)
+        po.project_id = project.id
+    else:
+        po.status = "pending_approval"
+        await request_approval(
+            db, target_type="customer_po", target_id=po.id,
+            requested_by=user.id, required_role=Role.DIRECTOR,
+            reason=(f"Customer PO {po.number} from "
+                    f"{customer.company_name if customer else 'a customer'} "
+                    "— resubmitted after being sent back."),
+            payload={"action": "create"},
+        )
+    po.updated_by = user.id
+    await audit_record(db, actor=user, action="resubmit", entity="customer_po",
+                       entity_id=po.id, after={"status": po.status})
     await db.flush()
     return await _enrich(db, po)
 

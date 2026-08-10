@@ -68,6 +68,9 @@ class QuotationOut(BaseModel):
     total: float
     valid_until: date | None
     notes: str | None
+    # Why it was sent back, when it was. Survives a resubmission so the
+    # director can see what they asked for last time.
+    decision_notes: str | None = None
     items: list[QuotationItemOut] = []
     # CoA linkage
     account_revenue_no:    str | None = None

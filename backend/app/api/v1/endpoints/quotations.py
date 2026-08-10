@@ -480,8 +480,19 @@ async def submit_quotation(
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    if q.status != "draft":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Only draft can be submitted")
+    if q.status not in ("draft", "rejected"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation can't be submitted — only a draft or a "
+            "rejected one.")
+    # A rejected quotation goes straight back up once it has been fixed.
+    # Revising it into a new -R2 draft is still there for a quote the
+    # customer has already seen, but for one the director simply sent back
+    # that minted a second document for no reason, and the reason it was
+    # sent back lived nowhere the sales rep could read it. The note stays
+    # on the row through the resubmission so the director sees what they
+    # asked for the first time.
+    was_rejected = q.status == "rejected"
 
     from app.core.config import settings
 
@@ -508,7 +519,8 @@ async def submit_quotation(
             reason=reason,
             payload={"discount_pct": float(q.discount_pct), "total": float(q.total)},
         )
-    await audit_record(db, actor=user, action="submit", entity="quotation",
+    await audit_record(db, actor=user, action="resubmit" if was_rejected else "submit",
+                       entity="quotation",
                        entity_id=q.id, before={"status": "draft"},
                        after={"status": q.status})
     await db.flush()
@@ -771,6 +783,10 @@ async def reject_quotation(q_id: UUID, payload: QuotationDecide,
         except PermissionError as e:
             raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
     q.status = "rejected"
+    # On the quotation itself, not only in the audit log and the approval
+    # request. The person who has to fix it is looking at this document.
+    q.decision_notes = (payload.notes or "").strip() or None
+    q.updated_by = user.id
     await audit_record(db, actor=user, action="reject", entity="quotation",
                        entity_id=q.id, after={"status": "rejected",
                                               "notes": payload.notes})

@@ -59,6 +59,12 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     valid_until: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
+    # Why it was sent back. The reason used to go only to the audit log and
+    # to the approval request, so the quotation itself could not say why it
+    # was rejected — the one place the person who has to fix it is looking.
+    # Kept after a resubmission on purpose: the director deciding it a second
+    # time wants to see what they asked for the first time.
+    decision_notes: Mapped[str | None] = mapped_column(Text)
     pdf_url: Mapped[str | None] = mapped_column(String(500))
 
     # ── Chart-of-Accounts linkage ─────────────────────────────────────────
