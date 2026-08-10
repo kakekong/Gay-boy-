@@ -53,6 +53,7 @@ export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const [reassignOpen, setReassignOpen] = useState(false);
   const user = useAuthStore((s) => s.user);
   const t = useT();
   // Display label for a backend status key: humanised English key, or the
@@ -199,7 +200,13 @@ export default function QuotationDetailPage() {
   }[tier];
 
   const canApprove = user && (user.role === "manager" || user.role === "director");
-  const isOwner    = user && user.id === Q.sales_pic_id;
+  const isDirector = user?.role === "director";
+  // "Mine" is the same union the server enforces: named on the quotation, or
+  // in charge of the customer it belongs to. Without the second half, a
+  // quotation the director wrote for this rep's account was readable but
+  // every button on it was greyed out — visible and useless.
+  const isOwner    = !!user && (user.id === Q.sales_pic_id
+                                || user.id === customer.data?.sales_pic_id);
   // A rejected quotation goes straight back up once it has been fixed —
   // revising it into a new -R2 is for a quote the customer has already seen.
   const canSubmit  = isOwner && (Q.status === "draft" || Q.status === "rejected");
@@ -231,6 +238,19 @@ export default function QuotationDetailPage() {
 
   return (
     <div className="space-y-6">
+      {reassignOpen && (
+        <QuotationReassign
+          quotationId={id!}
+          current={Q.sales_pic_id}
+          onClose={() => setReassignOpen(false)}
+          onDone={() => {
+            setReassignOpen(false);
+            qc.invalidateQueries({ queryKey: ["quotation", id] });
+            qc.invalidateQueries({ queryKey: ["quotations"] });
+          }}
+        />
+      )}
+
       {/* Why it was sent back. It used to live only in the audit log and the
           approvals queue, so the person who has to fix it could not read it
           on the page they were fixing. Kept visible after a resubmission so
@@ -340,11 +360,19 @@ export default function QuotationDetailPage() {
                   <Building2 size={14} /> {customer.data.company_name}
                 </Link>
               )}
-              {Q.sales_pic_name && (
-                <div className="mt-1 inline-flex items-center gap-1.5 text-sm text-ink-600">
-                  <UserIcon size={14} /> <UserLink id={Q.sales_pic_id} name={Q.sales_pic_name} />
-                </div>
-              )}
+              <div className="mt-1 inline-flex items-center gap-1.5 text-sm text-ink-600">
+                <UserIcon size={14} />
+                {Q.sales_pic_name
+                  ? <UserLink id={Q.sales_pic_id} name={Q.sales_pic_name} />
+                  : <span className="muted">{t("No sales rep", "Tanpa sales")}</span>}
+                {isDirector && !["won", "lost", "cancelled", "superseded"]
+                    .includes(Q.status) && (
+                  <button className="text-xs text-brand-700 hover:underline"
+                          onClick={() => setReassignOpen(true)}>
+                    {t("Change", "Ubah")}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -775,6 +803,98 @@ export default function QuotationDetailPage() {
     </div>
   );
 }
+
+/**
+ * Move one quotation to a different rep.
+ *
+ * Separate from handing over a whole customer: that moves every document on
+ * the account, this is the single deal covered by somebody else. It changes
+ * who is *answerable* — who may submit it, mark it won, edit it — not who can
+ * read it, since the rep who runs the account always can.
+ */
+function QuotationReassign({ quotationId, current, onClose, onDone }: {
+  quotationId: string;
+  current?: string | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [repId, setRepId] = useState<string>("");
+  const [note, setNote] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+
+  const reps = useQuery({
+    queryKey: ["assignable-reps"],
+    queryFn: () => api.get("/customers/assignable-reps").then((r) => r.data),
+  });
+  const save = useMutation({
+    mutationFn: () => api.post(`/quotations/${quotationId}/reassign`, {
+      sales_pic_id: repId, note: note.trim() || null,
+    }).then((r) => r.data),
+    onSuccess: onDone,
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? tt("Could not reassign", "Gagal memindahkan")),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white dark:bg-ink-800 rounded-2xl
+                      shadow-card max-h-[85vh] overflow-y-auto">
+        <header className="p-4 border-b border-ink-100 flex items-center gap-2">
+          <UserIcon size={16} className="text-brand-600" />
+          <span className="text-lg font-semibold">
+            {tt("Who is this quotation's rep", "Sales penanggung jawab penawaran ini")}
+          </span>
+        </header>
+        <div className="p-4 space-y-3">
+          {err && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2
+                            text-sm text-red-800">{err}</div>
+          )}
+          <p className="text-xs muted">
+            {tt("Moves this one document only — the customer, and everything else on it, stays where it is.",
+                "Memindahkan dokumen ini saja — pelanggan dan dokumen lainnya tetap.")}
+          </p>
+          <div className="space-y-1.5 max-h-[15rem] overflow-y-auto pr-1">
+            {(reps.data?.reps ?? []).map((r: any) => (
+              <label key={r.id} className={clsx(
+                "flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer",
+                repId === r.id ? "border-brand-400 bg-brand-50/60"
+                               : "border-ink-200",
+              )}>
+                <input type="radio" name="q-rep" checked={repId === r.id}
+                       onChange={() => setRepId(r.id)} />
+                <span className="text-sm font-medium">{r.full_name}</span>
+                <span className="text-[11px] muted capitalize">{r.role}</span>
+                {r.id === current && (
+                  <span className="ml-auto text-[11px] muted">
+                    {tt("current", "saat ini")}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+          <input className="input" value={note} maxLength={200}
+                 onChange={(e) => setNote(e.target.value)}
+                 placeholder={tt("Why (optional) — saved on the customer's timeline",
+                                 "Alasan (opsional) — disimpan di linimasa pelanggan")} />
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost" onClick={onClose}>{tt("Cancel", "Batal")}</button>
+            <button className="btn-primary"
+                    disabled={!repId || repId === current || save.isPending}
+                    onClick={() => save.mutate()}>
+              {save.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
+              {tt("Move it", "Pindahkan")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function ValidUntilCell({
   value, canEdit, onSave,

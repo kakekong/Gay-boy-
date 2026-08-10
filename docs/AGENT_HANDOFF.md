@@ -486,6 +486,21 @@ the director simply handed back. The reason is deliberately kept through a
 resubmission: the director is about to look again and wants to see what they
 asked for. `test_resubmit.py` covers all three.
 
+**Ownership of one quotation can be moved on its own.**
+`POST /quotations/{id}/reassign` is director-only and changes who is
+*answerable* for a single deal — who may submit it, withdraw it, edit it,
+mark it won — without touching the customer. Handing over the customer moves
+everything; this is the finer instrument (one deal covered while its rep is
+away). A closed quotation (won/lost/cancelled/superseded) refuses to move:
+its owner is the record of who closed it. The move is written to the
+customer's timeline as an `assignment` activity naming the quotation.
+
+**The frontend's "is this mine" must match the server's.** `QuotationDetail`
+computes `isOwner` as *named on it OR in charge of the customer* — the same
+union `sales_scope`/`_may_see` use. Gating the buttons on the raw
+`sales_pic_id` alone is the bug that made a director-written quotation
+readable but completely inert for the rep whose customer it was.
+
 **A user has two addresses and a signature.** `User.email` is the login and
 nothing else — unique, and the only thing `/auth/login` matches on.
 `User.contact_email` is where that person corresponds from, is **not** unique

@@ -469,6 +469,84 @@ async def update_quotation(
     return await _load(q.id, db)
 
 
+class QuotationReassign(BaseModel):
+    sales_pic_id: UUID
+    note: str | None = None
+
+
+@router.post("/{q_id}/reassign", response_model=QuotationOut)
+async def reassign_quotation(
+    q_id: UUID,
+    payload: QuotationReassign,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.DIRECTOR)),
+):
+    """Put a different sales rep's name on one quotation.
+
+    Handing over a whole customer already moves every document with it. This
+    is the finer instrument: one deal covered by somebody else while its rep
+    is away, or a quotation raised under the wrong name.
+
+    It changes who *owns* the document — which is what grants the right to
+    submit it, mark it won, and edit it — without touching the customer.
+    Visibility is wider than ownership (the rep who runs the account can
+    always read it), so this is about who is answerable for the deal.
+    """
+    from app.api.v1.endpoints.customers import _REP_ROLES
+
+    q = await _load(q_id, db)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
+    if q.status in ("won", "lost", "cancelled", "superseded"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{q.status}' quotation is closed — its owner is the record of "
+            "who closed it.")
+
+    rep = await db.get(User, payload.sales_pic_id)
+    if not rep:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That user doesn't exist")
+    if not rep.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"{rep.full_name}'s account is disabled")
+    if Role(rep.role) not in _REP_ROLES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{rep.full_name} is {rep.role} — only sales, a manager or a "
+            "director can be put on a quotation")
+    if q.sales_pic_id == payload.sales_pic_id:
+        return await _load(q.id, db)
+
+    old = await db.get(User, q.sales_pic_id) if q.sales_pic_id else None
+    q.sales_pic_id = payload.sales_pic_id
+    q.updated_by = user.id
+    note = (payload.note or "").strip() or None
+
+    # On the customer's timeline, where somebody looking at the account later
+    # will find it, rather than only in an admin log.
+    if q.customer_id:
+        db.add(Activity(
+            customer_id=q.customer_id,
+            user_id=user.id,
+            type="assignment",
+            direction="internal",
+            occurred_at=datetime.now(UTC),
+            notes=(f"Quotation {q.number}: {old.full_name if old else 'nobody'}"
+                   f" → {rep.full_name}" + (f" · {note}" if note else "")),
+            meta={"quotation_id": str(q.id), "quotation_number": q.number,
+                  "from_id": str(old.id) if old else None,
+                  "from_name": old.full_name if old else "nobody",
+                  "to_id": str(rep.id), "to_name": rep.full_name,
+                  "note": note, "by_name": user.full_name},
+        ))
+    await audit_record(db, actor=user, action="reassign", entity="quotation",
+                       entity_id=q.id,
+                       before={"sales_pic_id": str(old.id) if old else None},
+                       after={"sales_pic_id": str(rep.id), "note": note})
+    await db.flush()
+    return await _load(q.id, db)
+
+
 @router.post("/{q_id}/submit", response_model=QuotationOut)
 async def submit_quotation(
     q_id: UUID,
