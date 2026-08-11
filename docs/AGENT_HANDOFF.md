@@ -227,6 +227,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_attendance_alert_window.py` | attendance alerts stay silent before 08:30 **WIB** — includes a threshold that only passes if the comparison isn't done in server/UTC time |
 | `test_mark_read.py` | marking a section's alerts read from its sidebar badge: batched, per-user, tolerant of ids that resolved on their own |
 | `test_efaktur.py` | e-Faktur CSV export |
+| `test_quotation_layout.py` | where the printed quotation puts things: the totals block sits on the item grid's own rule (measured out of the PDF, not eyeballed), the KETERANGAN panel gets the width that frees up, and a note the sender numbered themselves prints numbered once |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`
 and `python tests/e2e_dp_flow.py` (down-payment flow, 26/26), both invoked by
@@ -618,7 +619,20 @@ Chat messages and discussion comments both push instantly.
   requirements as a test-only dependency. A substring search over the raw
   bytes finds nothing even when the words are plainly on the page — the
   streams are compressed and the text is split across drawing operators — and
-  a driver built that way fails on behaviour that is entirely correct.
+  a driver built that way fails on behaviour that is entirely correct. For
+  *where* something landed rather than whether it is there, PyMuPDF (`fitz`)
+  is also installed: `page.search_for(text)` gives the box in points and
+  `page.get_drawings()` gives the filled panels, which is how a layout ask
+  ("put the price behind this line") becomes an assertion instead of a
+  screenshot. `pdftoppm` is **not** installed; render with `fitz` too.
+- **Print blocks are sized off each other, not off the page.** The quotation's
+  totals block used to be page fractions (48/8/24/20), which left it 9mm
+  inside the SATUAN column: prices under the wrong heading, and the notes
+  panel squeezed for nothing. It is now `content_w - 69mm - 4mm | 4mm | 30mm |
+  39mm`, where 69mm is exactly the item grid's last three columns — change an
+  item column width and the totals follow it. Senders also type their own
+  "1." on each note, so the builder strips a leading number before adding
+  one; without that every line printed as "1. 1. …".
 - **The edit forms post the whole document back, every time.** So "field is
   present in the payload" never means "field was changed" — a sales rep typing
   a note sends every line item along with it. `quotations.PATCH` prunes

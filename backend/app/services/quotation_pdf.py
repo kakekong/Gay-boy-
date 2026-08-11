@@ -14,6 +14,7 @@ repeat on every page; the rest flows.
 
 from __future__ import annotations
 
+import re as _re
 from io import BytesIO
 from pathlib import Path
 
@@ -368,12 +369,18 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
         ("LINEBELOW", (0, 1), (-1, -1), 0.5, RULE),
     ]))
     flow.append(items)
-    flow.append(Spacer(1, 5 * mm))
+    flow.append(Spacer(1, 2.5 * mm))
 
     # ── KETERANGAN  |  totals ───────────────────────────────────────────
     # One flat table again: the notes cell spans every totals row rather than
     # holding a nested table.
-    note_lines = [n.strip() for n in (notes or "").splitlines() if n.strip()]
+    # Strip a leading "1." / "2)" the writer typed themselves before adding
+    # our own number, or the printed line reads "1. 1. Drawing akan…".
+    note_lines = []
+    for raw in (notes or "").splitlines():
+        line = _re.sub(r"^\s*\d+\s*[.)]\s*", "", raw.strip())
+        if line:
+            note_lines.append(line)
     notes_html = "<br/>".join(f"{i}. &nbsp;{t}" for i, t in enumerate(note_lines, 1)) or "—"
     note_para = Paragraph(notes_html, small)
 
@@ -412,8 +419,12 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
     ]
     keterangan_block = Table(
         [[Paragraph("KETERANGAN", lbl), "", "", ""]] + grid,
-        colWidths=[content_w * 0.48, content_w * 0.08,
-                   content_w * 0.24, content_w * 0.20],
+        # Aligned to the item table above rather than to fractions of the
+        # page: the totals occupy exactly the last three columns
+        # (UNIT + @HARGA + TOTAL HARGA = 69mm), so their left edge lands on
+        # the same rule the item grid draws. Everything left of that gutter
+        # is the notes panel, which is why it is now much wider.
+        colWidths=[content_w - 69 * mm - 4 * mm, 4 * mm, 30 * mm, 39 * mm],
         style=TableStyle([
             ("LEFTPADDING", (0, 0), (-1, 0), 0),
             ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
