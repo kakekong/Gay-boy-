@@ -34,6 +34,7 @@ from app.api.v1.endpoints import (
     salaries,
     sales_targets,
     search,
+    supplier_price_requests,
     tags,
     users,
     webhooks,
@@ -48,6 +49,12 @@ api_router.include_router(customer_pos.router, prefix="/customer-pos", tags=["cu
 api_router.include_router(quotations.router, prefix="/quotations", tags=["quotation"])
 api_router.include_router(approvals.router, prefix="/approvals", tags=["approval"])
 api_router.include_router(purchasing.router, prefix="/purchasing", tags=["purchasing"])
+# Buy-side price requests. Nested under /purchasing because that is the page
+# they live on, but a router of their own: the audience is narrower than
+# /purchasing (no sales at all) and the file is its own workflow.
+api_router.include_router(supplier_price_requests.router,
+                          prefix="/purchasing/price-requests",
+                          tags=["supplier-price-requests"])
 api_router.include_router(push.router, prefix="/push", tags=["push"])
 api_router.include_router(operation.router, prefix="/operation", tags=["operation"])
 api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])

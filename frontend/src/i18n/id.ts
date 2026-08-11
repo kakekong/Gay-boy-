@@ -174,6 +174,36 @@ export const ID_STATIC: Record<string, string> = {
   "Conditional": "Bersyarat",
   "Confirm what arrived against a supplier PO.": "Konfirmasi barang yang tiba terhadap PO pemasok.",
   "Contact": "Kontak",
+  // Price requests to suppliers — the buy side of the pricing workflow.
+  "Price requests": "Permintaan harga",
+  "Price requests to suppliers": "Permintaan harga ke pemasok",
+  "Ask suppliers for a price": "Minta harga ke pemasok",
+  "What you asked each vendor to charge, and what they answered. Apply the one you take as the cost on the price request it is costing.":
+    "Harga yang Anda tanyakan ke tiap pemasok, dan jawabannya. Terapkan yang Anda ambil sebagai biaya pada permintaan harga yang dibiayai.",
+  "One request per supplier, so you can put their answers side by side.":
+    "Satu permintaan per pemasok, agar jawabannya bisa dibandingkan berdampingan.",
+  "Costing which price request?": "Membiayai permintaan harga yang mana?",
+  "— nothing, this is a standalone enquiry —":
+    "— tidak ada, ini permintaan mandiri —",
+  "Lines copied from": "Baris disalin dari",
+  "What are you asking about?": "Apa yang Anda tanyakan?",
+  "Who are you asking?": "Siapa yang Anda tanya?",
+  "Search suppliers…": "Cari pemasok…",
+  "No suppliers match.": "Tidak ada pemasok yang cocok.",
+  "Quote valid until": "Penawaran berlaku sampai",
+  "Note to yourself": "Catatan untuk diri sendiri",
+  "e.g. need the price before Friday": "cth. butuh harga sebelum Jumat",
+  "Create requests": "Buat permintaan",
+  "Nothing asked yet.": "Belum ada yang ditanyakan.",
+  "Costing": "Membiayai",
+  "Lines answered": "Baris dijawab",
+  "Quoted total": "Total penawaran",
+  "used as cost": "dipakai sebagai biaya",
+  "standalone": "mandiri",
+  "selected": "dipilih",
+  "lines": "baris",
+  "Qty": "Jml",
+
   // The supplier form: the company's own details, then the people at it.
   "Company address & contact": "Alamat & kontak perusahaan",
   "Company address": "Alamat perusahaan",

@@ -194,6 +194,10 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             row["cost_price"] = it.get("cost_price")
             row["cost_basis"] = it.get("cost_basis") or "unit"
             row["cost_total"] = float(it.get("cost_price") or 0) * float(it.get("qty") or 0)
+            # Which supplier quote this cost came from, when it came from one
+            # (SPR-…). Rides with the cost and is hidden from whoever cannot
+            # see the cost — the number is only meaningful next to it.
+            row["cost_source"] = it.get("cost_source")
         if see_sell:
             row["sell_price"] = it.get("sell_price")
             row["sell_basis"] = it.get("sell_basis") or "unit"

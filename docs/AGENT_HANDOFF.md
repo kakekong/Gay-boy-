@@ -227,6 +227,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_attendance_alert_window.py` | attendance alerts stay silent before 08:30 **WIB** — includes a threshold that only passes if the comparison isn't done in server/UTC time |
 | `test_mark_read.py` | marking a section's alerts read from its sidebar badge: batched, per-user, tolerant of ids that resolved on their own |
 | `test_efaktur.py` | e-Faktur CSV export |
+| `test_supplier_price_request.py` | asking vendors what they charge: one request per supplier, quotes recorded per line (per-unit or per-line, normalised), the chosen one applied as the cost with its number stamped on the line, a later cheaper quote superseding it, losing quotes kept, and sales locked out of every endpoint |
 | `test_supplier_record.py` | the supplier as a real company record: address + pickup address, the company's line kept separate from each PIC's own, PICs added/edited/removed after the fact, the header editable in place (it used to be write-once), vendor paperwork readable by purchasing but not sales, and rows created before the columns existed still showing their legacy `contact` blob |
 | `test_quotation_layout.py` | where the printed quotation puts things: the totals block sits on the item grid's own rule (measured out of the PDF, not eyeballed), the KETERANGAN panel gets the width that frees up, and a note the sender numbered themselves prints numbered once |
 
@@ -469,6 +470,32 @@ someone gets pulled into a conversation on a document they cannot open. Keep
 `_has_document_access` (role/scope only) separate from `_can_view_thread`
 (which also honours the mention), or the composer's warning and the "open the
 document" link both start lying to the people they exist for.
+
+**A price request has a buy side now, and it is a separate document.**
+`PriceRequest` (PR-…) is the sell side: what a customer wants, what it costs
+us, what we charge. `SupplierPriceRequest` (SPR-…, `supplier_price_requests`,
+`app/api/v1/endpoints/supplier_price_requests.py`, mounted at
+`/purchasing/price-requests`) is the buy side: what a vendor charges *us*.
+**One row per supplier asked**, so three vendors on one job are three rows to
+compare; `price_request_id` is nullable, because purchasing also asks with no
+deal behind it. `POST /{id}/apply` writes the quoted prices onto the linked
+price request as `cost_price`, stamps `cost_source` (the SPR number) on each
+line it touched, and moves the request to the director — which is the point of
+the whole record: the cost the director sees now has a document behind it
+instead of a memory of a WhatsApp call. Applying a second quote supersedes the
+first and moves `applied_at` with it; the losing quotes are never deleted.
+Numbering is its own series (`next_supplier_price_request_number`) so the two
+documents never look like one sequence.
+
+Two constraints on it that are not negotiable. **The router excludes sales
+entirely** — its whole content is procurement cost, and `price_requests`
+already hides that from them line by line, so there is no version of this
+document a rep may open. **It never names the customer**: it is drafted to be
+sent to an outside company, so `apply`/create copy the goods across and
+nothing else — no customer, no selling price. Covered by
+`test_supplier_price_request.py`, and by the orphan sweep in `test_purge.py`
+(the FK is SET NULL, so a purged price request would otherwise strand its
+supplier quotes).
 
 **A price request's two figures can be corrected after it settles.**
 `POST /price-requests/{id}/reprice` is director-only and works at any status:

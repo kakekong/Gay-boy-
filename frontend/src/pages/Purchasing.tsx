@@ -40,6 +40,36 @@ interface Supplier {
   qc_fail_rate: number;
 }
 
+/** A price request addressed to one supplier — the buy side. */
+interface SPR {
+  id: string;
+  number: string;
+  status: string;
+  supplier_id: string;
+  supplier_name: string | null;
+  price_request_id: string | null;
+  price_request_number: string | null;
+  items: any[];
+  notes: string | null;
+  currency: string;
+  valid_until: string | null;
+  quoted_lead_days: number | null;
+  sent_at: string | null;
+  quoted_at: string | null;
+  applied_at: string | null;
+  quoted_total: number | null;
+  lines_quoted: number;
+  lines_total: number;
+}
+
+const SPR_CHIP: Record<string, string> = {
+  draft:     "bg-ink-100 text-ink-700",
+  sent:      "bg-amber-50 text-amber-700",
+  quoted:    "bg-blue-50 text-blue-700",
+  closed:    "bg-emerald-50 text-emerald-700",
+  cancelled: "bg-red-50 text-red-700",
+};
+
 export default function PurchasingPage() {
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -48,14 +78,15 @@ export default function PurchasingPage() {
 
   const [openNew, setOpenNew] = useState(false);
   const [openPO, setOpenPO] = useState(false);
+  const [openSPR, setOpenSPR] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Tab persisted across sessions so the user lands back where they left off.
-  const [tab, setTab] = useState<"suppliers" | "pos">(() => {
+  const [tab, setTab] = useState<"suppliers" | "prices" | "pos">(() => {
     const stored = localStorage.getItem("purchasing-tab");
-    if (stored === "pos") return stored;
+    if (stored === "pos" || stored === "prices") return stored;
     return "suppliers";
   });
-  function pickTab(t: "suppliers" | "pos") {
+  function pickTab(t: "suppliers" | "prices" | "pos") {
     setTab(t);
     localStorage.setItem("purchasing-tab", t);
   }
@@ -63,6 +94,14 @@ export default function PurchasingPage() {
   const suppliers = useQuery({
     queryKey: ["suppliers"],
     queryFn: () => api.get("/purchasing/suppliers").then((r) => r.data as Supplier[]),
+    retry: false,
+  });
+
+  // The buy side of a price request: what we asked vendors to charge. Same
+  // audience as this page, so no extra gate — sales never reaches it at all.
+  const priceReqs = useQuery({
+    queryKey: ["supplier-price-requests"],
+    queryFn: () => api.get("/purchasing/price-requests").then((r) => r.data as SPR[]),
     retry: false,
   });
 
@@ -107,6 +146,8 @@ export default function PurchasingPage() {
         <div className="flex gap-2">
           <button className="btn-ghost" onClick={() => setOpenNew(true)}>
             <Plus size={15} /> {T("New supplier")}</button>
+          <button className="btn-ghost" onClick={() => setOpenSPR(true)}>
+            <Plus size={15} /> {T("Ask suppliers for a price")}</button>
           {isDirector && (
             <button className="btn-primary" onClick={() => setOpenPO(true)}>
               <Plus size={15} /> {T("New PO")}</button>
@@ -140,6 +181,19 @@ export default function PurchasingPage() {
           <Star size={14} /> {T("Suppliers")}{suppliers.data && (
             <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
               {suppliers.data.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => pickTab("prices")}
+          className={clsx(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+            tab === "prices" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
+          )}
+        >
+          <ClipboardList size={14} /> {T("Price requests")}{priceReqs.data && (
+            <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
+              {priceReqs.data.length}
             </span>
           )}
         </button>
@@ -276,6 +330,76 @@ export default function PurchasingPage() {
       </div>
       )}
 
+      {/* Price requests to suppliers — the buy side of the sell-side PR.
+          Purchasing used to ask two or three vendors on WhatsApp and type the
+          winning number into the cost field; the losing quotes, the lead times
+          and how long each price held went nowhere. */}
+      {tab === "prices" && (
+      <div className="card overflow-hidden">
+        <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
+          <div>
+            <div className="font-semibold text-ink-900">{T("Price requests to suppliers")}</div>
+            <div className="text-xs muted">
+              {T("What you asked each vendor to charge, and what they answered. Apply the one you take as the cost on the price request it is costing.")}</div>
+          </div>
+          <div className="text-[10px] uppercase tracking-wider muted">
+            {priceReqs.data?.length ?? 0} {T("total")}</div>
+        </header>
+
+        {priceReqs.isLoading ? (
+          <div className="px-5 py-10 text-center text-sm muted flex items-center justify-center gap-2">
+            <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
+        ) : !priceReqs.data?.length ? (
+          <div className="px-5 py-12 text-center">
+            <div className="text-sm muted mb-3">{T("Nothing asked yet.")}</div>
+            <button className="btn-primary" onClick={() => setOpenSPR(true)}>
+              <Plus size={14} /> {T("Ask suppliers for a price")}</button>
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">{T("Number")}</th>
+                <th className="th">{T("Supplier")}</th>
+                <th className="th">{T("Costing")}</th>
+                <th className="th">{T("Status")}</th>
+                <th className="th text-right">{T("Lines answered")}</th>
+                <th className="th text-right">{T("Quoted total")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {priceReqs.data.map((r) => (
+                <tr key={r.id} className="tr-hover border-t border-ink-100 cursor-pointer"
+                  onClick={() => nav(`/purchasing/price-requests/${r.id}`)}>
+                  <td className="td font-mono text-xs">{r.number}</td>
+                  <td className="td">{r.supplier_name ?? "—"}</td>
+                  <td className="td font-mono text-xs muted">
+                    {r.price_request_number ?? T("standalone")}
+                  </td>
+                  <td className="td">
+                    <span className={clsx("chip uppercase", SPR_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
+                      {r.status}
+                    </span>
+                    {r.applied_at && (
+                      <span className="chip bg-emerald-50 text-emerald-700 ml-1">
+                        {T("used as cost")}
+                      </span>
+                    )}
+                  </td>
+                  <td className="td text-right tabular-nums">
+                    {r.lines_quoted}/{r.lines_total}
+                  </td>
+                  <td className="td text-right tabular-nums">
+                    {r.quoted_total == null ? "—" : idr(r.quoted_total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      )}
+
       {/* Supplier POs — director-only to limit who sees the supplier⇄customer mapping */}
       {tab === "pos" && isDirector && (
       <div className="card overflow-hidden">
@@ -334,6 +458,19 @@ export default function PurchasingPage() {
       </div>
       )}
 
+      {openSPR && (
+        <AskSuppliersModal
+          suppliers={suppliers.data ?? []}
+          onClose={() => setOpenSPR(false)}
+          onCreated={(n) => {
+            qc.invalidateQueries({ queryKey: ["supplier-price-requests"] });
+            setOpenSPR(false);
+            pickTab("prices");
+            setFlash({ kind: "ok", text: `Asked ${n} supplier(s) for a price.` });
+          }}
+          onError={(msg) => setFlash({ kind: "err", text: msg })}
+        />
+      )}
       {openNew && (
         <NewSupplierModal
           onClose={() => setOpenNew(false)}
@@ -615,6 +752,212 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
             <button type="submit" className="btn-primary" disabled={busy}>
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               {uploading ? T("Uploading files…") : T("Create supplier")}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Ask several suppliers what they charge, in one action.
+ *
+ * Two ways in, and the difference matters. Picking a price request copies its
+ * lines, so every vendor is answering the same question and the answers can be
+ * applied to it line for line — that is the path that ends in a cost the
+ * director can trace. Typing lines by hand is for the rest of purchasing's
+ * life: refreshing a price list, checking a rate before a tender.
+ *
+ * The customer is never named here, and the picker shows only the request's
+ * own number. Purchasing does not see who the deal is with, and a form that
+ * leaked it on the way to a supplier would be the worst place to start.
+ */
+function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
+  suppliers: Supplier[];
+  onClose: () => void;
+  onCreated: (count: number) => void;
+  onError: (msg: string) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [prId, setPrId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [validUntil, setValidUntil] = useState("");
+  const [lines, setLines] = useState([{ description: "", qty: 1, uom: "pcs" }]);
+  const [search, setSearch] = useState("");
+
+  // Only requests that are still waiting on a cost — asking a vendor about a
+  // job the director already priced is answering a question nobody asked.
+  const openPrs = useQuery({
+    queryKey: ["price-requests-costable"],
+    queryFn: () => api.get("/price-requests").then((r) => {
+      const rows = Array.isArray(r.data) ? r.data : (r.data?.data ?? []);
+      return rows.filter((x: any) =>
+        ["pending_purchasing", "pending_director"].includes(x.status));
+    }),
+    retry: false,
+  });
+
+  const chosenPr = (openPrs.data ?? []).find((p: any) => p.id === prId);
+  const shown = suppliers.filter((s) =>
+    !search.trim() || s.name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  const create = useMutation({
+    mutationFn: () => api.post("/purchasing/price-requests", {
+      supplier_ids: picked,
+      price_request_id: prId || null,
+      items: prId ? [] : lines
+        .filter((l) => l.description.trim())
+        .map((l, i) => ({
+          line_no: i + 1, description: l.description.trim(),
+          qty: Number(l.qty) || 0, uom: l.uom || null,
+        })),
+      notes: notes.trim() || null,
+      valid_until: validUntil || null,
+    }),
+    onSuccess: () => onCreated(picked.length),
+    onError: (e: any) => onError(
+      e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? e?.message
+        ?? "Failed to send the request"),
+  });
+
+  const ready = picked.length > 0
+    && (!!prId || lines.some((l) => l.description.trim()));
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+        <header className="px-5 py-4 border-b border-ink-100">
+          <h2 className="text-lg font-semibold">{T("Ask suppliers for a price")}</h2>
+          <p className="text-sm muted mt-0.5">
+            {T("One request per supplier, so you can put their answers side by side.")}</p>
+        </header>
+        <form
+          onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
+          className="flex-1 overflow-auto p-5 space-y-4"
+        >
+          {/* What it is costing */}
+          <Field label={T("Costing which price request?")}>
+            <select className="input" value={prId} onChange={(e) => setPrId(e.target.value)}>
+              <option value="">{T("— nothing, this is a standalone enquiry —")}</option>
+              {(openPrs.data ?? []).map((p: any) => (
+                <option key={p.id} value={p.id}>
+                  {p.number} · {(p.items ?? []).length} {T("lines")}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {chosenPr && (
+            <div className="rounded-xl border border-ink-100 bg-ink-50/50 p-3 text-xs space-y-1">
+              <div className="uppercase tracking-wider muted">
+                {T("Lines copied from")} {chosenPr.number}
+              </div>
+              {(chosenPr.items ?? []).map((it: any) => (
+                <div key={it.line_no} className="flex gap-2">
+                  <span className="tabular-nums muted">{it.line_no}.</span>
+                  <span className="flex-1">{it.description}</span>
+                  <span className="tabular-nums muted">{it.qty} {it.uom}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ...or a list typed by hand */}
+          {!prId && (
+            <div className="rounded-xl border border-ink-100 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider muted">
+                  {T("What are you asking about?")}
+                </span>
+                <button type="button" className="btn-ghost text-xs"
+                  onClick={() => setLines((l) => [...l, { description: "", qty: 1, uom: "pcs" }])}>
+                  <Plus size={13} /> {T("Add line")}
+                </button>
+              </div>
+              {lines.map((l, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-7">
+                    <Field label={T("Description")}>
+                      <input className="input" value={l.description}
+                        onChange={(e) => setLines((cur) => cur.map((x, idx) =>
+                          idx === i ? { ...x, description: e.target.value } : x))} />
+                    </Field>
+                  </div>
+                  <div className="col-span-2">
+                    <Field label={T("Qty")}>
+                      <input className="input" type="number" min={0} value={l.qty}
+                        onChange={(e) => setLines((cur) => cur.map((x, idx) =>
+                          idx === i ? { ...x, qty: Number(e.target.value) } : x))} />
+                    </Field>
+                  </div>
+                  <div className="col-span-2">
+                    <Field label={T("UoM")}>
+                      <input className="input" value={l.uom}
+                        onChange={(e) => setLines((cur) => cur.map((x, idx) =>
+                          idx === i ? { ...x, uom: e.target.value } : x))} />
+                    </Field>
+                  </div>
+                  <div className="col-span-1 pb-2">
+                    {lines.length > 1 && (
+                      <button type="button" className="text-red-600 hover:opacity-80"
+                        onClick={() => setLines((cur) => cur.filter((_, idx) => idx !== i))}>
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Who to ask */}
+          <div className="rounded-xl border border-ink-100 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[10px] uppercase tracking-wider muted">
+                {T("Who are you asking?")}
+              </span>
+              <span className="text-[11px] muted">
+                {picked.length} {T("selected")}
+              </span>
+            </div>
+            <input className="input" placeholder={T("Search suppliers…")}
+              value={search} onChange={(e) => setSearch(e.target.value)} />
+            <div className="max-h-52 overflow-auto divide-y divide-ink-100">
+              {shown.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 py-2 text-sm cursor-pointer">
+                  <input type="checkbox" className="h-4 w-4 rounded border-ink-300 text-brand-600"
+                    checked={picked.includes(s.id)}
+                    onChange={(e) => setPicked((cur) => e.target.checked
+                      ? [...cur, s.id] : cur.filter((x) => x !== s.id))} />
+                  <span className="flex-1">{s.name}</span>
+                  <span className="text-[11px] muted">{s.category ?? ""}</span>
+                </label>
+              ))}
+              {!shown.length && (
+                <div className="py-4 text-center text-sm muted">{T("No suppliers match.")}</div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label={T("Quote valid until")}>
+              <input className="input" type="date" value={validUntil}
+                onChange={(e) => setValidUntil(e.target.value)} />
+            </Field>
+            <Field label={T("Note to yourself")}>
+              <input className="input" value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder={T("e.g. need the price before Friday")} />
+            </Field>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
+            <button type="submit" className="btn-primary" disabled={!ready || create.isPending}>
+              {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              {T("Create requests")}</button>
           </div>
         </form>
       </div>

@@ -76,3 +76,17 @@ async def next_price_request_number(db: AsyncSession) -> str:
     year = datetime.utcnow().year
     prefix = f"PR-{year}-"
     return f"{prefix}{await _next_suffix(db, PriceRequest.number, prefix):04d}"
+
+
+async def next_supplier_price_request_number(db: AsyncSession) -> str:
+    """Issue the next supplier price-request number:  SPR-<YYYY>-<NNNN>.
+
+    A separate series from PR- on purpose. The two documents travel in
+    opposite directions — one asks what a customer will pay, the other asks
+    what a supplier charges — and sharing a counter would make two unrelated
+    things look like the same sequence on a desk.
+    """
+    from app.models.purchasing import SupplierPriceRequest
+    year = datetime.utcnow().year
+    prefix = f"SPR-{year}-"
+    return f"{prefix}{await _next_suffix(db, SupplierPriceRequest.number, prefix):04d}"

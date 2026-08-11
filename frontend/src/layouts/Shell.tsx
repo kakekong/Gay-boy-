@@ -160,6 +160,8 @@ function navTitleForPath(path: string, lang: string): string | null {
 const ORPHAN_PARENT: Record<string, string> = {
   // Supplier detail pages are reached from the purchasing directory.
   "/suppliers": "/purchasing",
+  // ...and so is a price request raised to a supplier.
+  "/purchasing/price-requests": "/purchasing",
 };
 
 /**

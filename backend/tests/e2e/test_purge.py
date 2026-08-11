@@ -52,6 +52,14 @@ async def full_deal(c, sales, d, pu, name, tag):
     pr = J(await c.post("/price-requests", headers=sales, json={
         "customer_id": cust, "items": [{"description": "Gearbox", "qty": 1, "uom": "pcs"}]}))["id"]
     await c.post(f"/price-requests/{pr}/submit", headers=sales)
+    # The buy-side quote that justified the cost. It points at the price
+    # request with a SET NULL foreign key, so a purge that forgot it would
+    # leave a supplier quote hanging off nothing.
+    sup = J(await c.post("/purchasing/suppliers", headers=d, json={
+        "name": f"PT Pemasok {tag}", "category": "fabrication"})).get("id")
+    if sup:
+        await c.post("/purchasing/price-requests", headers=pu, json={
+            "supplier_ids": [sup], "price_request_id": pr})
     await c.post(f"/price-requests/{pr}/price", headers=pu,
                  json={"items": [{"line_no": 1, "cost_price": 5_000_000, "basis": "unit"}]})
     await c.post(f"/price-requests/{pr}/approve", headers=d,
@@ -214,7 +222,7 @@ async def main():
     from app.models.finance import Invoice, LedgerEntry, Payment
     from app.models.operation import Project, WorkOrder, Drawing, DeliveryOrder
     from app.models.price_request import PriceRequest
-    from app.models.purchasing import SupplierPO
+    from app.models.purchasing import SupplierPO, SupplierPriceRequest
     from app.models.quotation import Quotation, QuotationItem
 
     async with SessionLocal() as db:
@@ -263,6 +271,10 @@ async def main():
                 ~SupplierPO.project_id.in_(select(Project.id)))),
             "mentions → comment": await n(select(func.count(CommentMention.id)).where(
                 ~CommentMention.comment_id.in_(select(EntityComment.id)))),
+            "supplier_price_requests → price_request": await n(
+                select(func.count(SupplierPriceRequest.id)).where(
+                    SupplierPriceRequest.price_request_id.is_not(None),
+                    ~SupplierPriceRequest.price_request_id.in_(select(PriceRequest.id)))),
         }
         bad = {k: v for k, v in orphans.items() if v}
         check("the database has no orphaned rows anywhere afterwards", not bad, str(bad))

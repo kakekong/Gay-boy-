@@ -44,6 +44,7 @@ const PORecapPage             = lazy(() => import("@/pages/PORecap"));
 const OperationStagePage      = lazy(() => import("@/pages/OperationStage"));
 const PurchasingStagePage     = lazy(() => import("@/pages/PurchasingStage"));
 const SupplierDetailPage      = lazy(() => import("@/pages/SupplierDetail"));
+const SupplierPriceRequestPage = lazy(() => import("@/pages/SupplierPriceRequestDetail"));
 const OperationPage        = lazy(() => import("@/pages/Operation"));
 const FinancePage          = lazy(() => import("@/pages/Finance"));
 const EstimatedFinancePage = lazy(() => import("@/pages/EstimatedFinance"));
@@ -213,6 +214,7 @@ function MainApp() {
           <Route path="/purchasing" element={<PurchasingPage />} />
           <Route path="/purchasing/stage/:stage" element={<PurchasingStagePage />} />
           <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+          <Route path="/purchasing/price-requests/:id" element={<SupplierPriceRequestPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
           <Route path="/customer-pos" element={<CustomerPOsPage />} />

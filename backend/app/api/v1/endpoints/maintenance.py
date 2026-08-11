@@ -52,7 +52,9 @@ from app.models.finance import Invoice, LedgerEntry, Payment
 from app.models.inventory import InventoryItem
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
 from app.models.price_request import PriceRequest
-from app.models.purchasing import PurchaseRequest, RFQ, SupplierPO
+from app.models.purchasing import (
+    PurchaseRequest, RFQ, SupplierPO, SupplierPriceRequest,
+)
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
 
@@ -133,6 +135,11 @@ async def _build_plan(db: AsyncSession, keep_ids: set[UUID]) -> dict:
     preqs = await _ids(db, select(PurchaseRequest.id).where(
         PurchaseRequest.project_id.in_(projects)))
     rfqs = await _ids(db, select(RFQ.id).where(RFQ.pr_id.in_(preqs)))
+    # The buy-side quotes raised to cost a doomed price request. Their FK is
+    # SET NULL, so leaving them would strand a quote pointing at nothing —
+    # and one whose whole meaning was "this is what that job cost us".
+    sprs = await _ids(db, select(SupplierPriceRequest.id).where(
+        SupplierPriceRequest.price_request_id.in_(prs)))
 
     # Cascade children — deleted by the database, but the preview should still
     # say how many, because "12 delivery orders" is what the director recognises.
@@ -152,7 +159,7 @@ async def _build_plan(db: AsyncSession, keep_ids: set[UUID]) -> dict:
     # on the id alone is deliberate — uuids don't collide across tables, and it
     # catches owner types nobody remembered to list here.
     doomed_ids = (doomed | projects | quotes | prs | cpos | invoices | spos | preqs
-                  | rfqs | contacts | work_orders | drawings | dos)
+                  | rfqs | sprs | contacts | work_orders | drawings | dos)
 
     attachments = await _ids(db, select(Attachment.id).where(
         Attachment.owner_id.in_(doomed_ids)))
@@ -169,6 +176,7 @@ async def _build_plan(db: AsyncSession, keep_ids: set[UUID]) -> dict:
         "doomed": doomed,
         "projects": projects, "quotes": quotes, "prs": prs, "cpos": cpos,
         "invoices": invoices, "spos": spos, "preqs": preqs, "rfqs": rfqs,
+        "sprs": sprs,
         "contacts": contacts, "work_orders": work_orders, "drawings": drawings,
         "dos": dos, "attachments": attachments, "comments": comments,
         "approvals": approvals, "ledger": ledger,
@@ -181,6 +189,7 @@ async def _build_plan(db: AsyncSession, keep_ids: set[UUID]) -> dict:
             "invoices": len(invoices), "payments": payments,
             "ledger_entries": len(ledger), "supplier_pos": len(spos),
             "purchase_requests": len(preqs), "rfqs": len(rfqs),
+            "supplier_price_requests": len(sprs),
             "attachments": len(attachments), "discussion_messages": len(comments),
             "approval_requests": len(approvals),
         },
@@ -338,6 +347,7 @@ async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
     await wipe(ApprovalRequest, ApprovalRequest.id, plan["approvals"])
     await wipe(Invoice, Invoice.id, plan["invoices"])               # payments + claims cascade
     await wipe(SupplierPO, SupplierPO.id, plan["spos"])             # receipts + QC cascade
+    await wipe(SupplierPriceRequest, SupplierPriceRequest.id, plan.get("sprs") or set())
     await wipe(RFQ, RFQ.id, plan["rfqs"])
     await wipe(PurchaseRequest, PurchaseRequest.id, plan["preqs"])
     await wipe(CustomerPO, CustomerPO.id, plan["cpos"])
@@ -384,6 +394,8 @@ RECORD_TYPES: dict[str, dict] = {
     "invoice":       {"model": Invoice,      "label": "Invoice",       "num": "number"},
     "supplier_po":   {"model": SupplierPO,   "label": "Supplier PO",   "num": "number"},
     "purchase_request": {"model": PurchaseRequest, "label": "Purchase request", "num": "number"},
+    "supplier_price_request": {"model": SupplierPriceRequest,
+                               "label": "Supplier price request", "num": "number"},
     "customer":      {"model": Customer,     "label": "Customer",      "num": "company_name"},
     # Flat records with nothing hanging off them. They are here because an
     # import is the main way they arrive in bulk, and a test batch you cannot
@@ -422,6 +434,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     spos: set[UUID] = set()
     preqs: set[UUID] = set()
     rfqs: set[UUID] = set()
+    picked_sprs: set[UUID] = set()     # buy-side quotes named directly
     doomed: set[UUID] = set()          # customers
     parts: set[UUID] = set()           # inventory parts — nothing hangs off them
     accounts: set[UUID] = set()        # chart-of-accounts rows, likewise
@@ -430,6 +443,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         "price_request": prs, "quotation": quotes, "customer_po": cpos,
         "project": projects, "invoice": invoices, "supplier_po": spos,
         "purchase_request": preqs, "customer": doomed,
+        "supplier_price_request": picked_sprs,
         "inventory_item": parts, "account": accounts,
     }
     for t in targets:
@@ -488,6 +502,12 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         if before == after:
             break
 
+    # Buy-side quotes raised against a doomed price request. Their FK is SET
+    # NULL, so they survive the delete pointing at nothing — a supplier quote
+    # whose only meaning was the job it was costing.
+    sprs = picked_sprs | (await _ids(db, select(SupplierPriceRequest.id).where(
+        SupplierPriceRequest.price_request_id.in_(prs))) if prs else set())
+
     # Cascade children — the database removes them, but the preview should say
     # how many, because "12 delivery orders" is what a director recognises.
     contacts = await _ids(db, select(CustomerContact.id).where(
@@ -501,7 +521,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         select(func.count(QuotationItem.id)).where(QuotationItem.quotation_id.in_(quotes))) or 0
 
     doomed_ids = (doomed | projects | quotes | prs | cpos | invoices | spos | preqs
-                  | rfqs | contacts | work_orders | drawings | dos)
+                  | rfqs | sprs | contacts | work_orders | drawings | dos)
     attachments = await _ids(db, select(Attachment.id).where(
         Attachment.owner_id.in_(doomed_ids)))
     comments = await _ids(db, select(EntityComment.id).where(
@@ -521,6 +541,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         "items": parts, "accounts": accounts,
         "projects": projects, "quotes": quotes, "prs": prs, "cpos": cpos,
         "invoices": invoices, "spos": spos, "preqs": preqs, "rfqs": rfqs,
+        "sprs": sprs,
         "contacts": contacts, "work_orders": work_orders, "drawings": drawings,
         "dos": dos, "attachments": attachments, "comments": comments,
         "approvals": approvals, "ledger": ledger,
@@ -533,6 +554,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
             "invoices": len(invoices), "payments": payments,
             "ledger_entries": len(ledger), "supplier_pos": len(spos),
             "purchase_requests": len(preqs), "rfqs": len(rfqs),
+            "supplier_price_requests": len(sprs),
             "attachments": len(attachments), "discussion_messages": len(comments),
             "approval_requests": len(approvals),
             "inventory_items": len(parts), "accounts": len(accounts),
@@ -548,6 +570,7 @@ async def _describe(db: AsyncSession, plan: dict) -> list[dict]:
                       ("customer_po", plan["cpos"]), ("project", plan["projects"]),
                       ("invoice", plan["invoices"]), ("supplier_po", plan["spos"]),
                       ("purchase_request", plan["preqs"]), ("customer", plan["doomed"]),
+                      ("supplier_price_request", plan.get("sprs", set())),
                       ("inventory_item", plan.get("items", set())),
                       ("account", plan.get("accounts", set()))):
         if not ids:
