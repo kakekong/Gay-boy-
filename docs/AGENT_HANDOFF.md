@@ -392,10 +392,13 @@ role, because an input that 403s reads as a broken page rather than a rule.
 
 **The supplier record has three different audiences, on purpose.** The row
 itself (name, category, rating, address, PICs) is readable by any internal
-role — it is a directory. Editing it is `_supplier_editors` = admin,
-director, manager, **purchasing**: onboarding a vendor stays a management
-decision (`_admin_or_director` on POST), but maintaining the record belongs to
-the department that talks to them daily. The vendor's *paperwork* —
+role — it is a directory. Writing it — creating a supplier, editing the
+header, managing its PICs — is `_supplier_editors` = admin, director, manager,
+**purchasing**, one rule for the whole record. Onboarding was management-only
+for a while and that was wrong: purchasing is the one talking to the vendor at
+the moment the vendor first needs to exist, and making them ask somebody else
+to type a name in just meant the row got created late. The vendor's
+*paperwork* —
 `owner_type` `supplier` and `supplier_contact`, i.e. company deed, NPWP, bank
 details, a PIC's ID card — is narrower again and excludes sales. Supplier
 pricing (`supplier_po` files) stays narrowest: director + purchasing only.

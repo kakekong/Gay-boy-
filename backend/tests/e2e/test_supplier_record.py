@@ -224,6 +224,20 @@ async def main():
     check("...and so is a duplicate name", r.status_code == 409, str(r.status_code))
     r = await c.post("/purchasing/suppliers", headers=s1, json={"name": f"PT Nope {tag}"})
     check("sales cannot onboard a vendor", r.status_code == 403, str(r.status_code))
+    # ...but the department that actually deals with suppliers can. Onboarding
+    # was management-only for a while; purchasing is the one talking to the
+    # vendor when the vendor first needs to exist.
+    r = await c.post("/purchasing/suppliers", headers=pur, json={
+        "name": f"PT Pemasok Purchasing {tag}", "category": "fabrication",
+        "company_address": "Jl. Purchasing 1",
+        "contacts": [{"name": f"Rudi {tag}", "phone": "0812-5555-6666"}]})
+    check("purchasing can onboard one", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:150])
+    own = J(r)["id"]
+    got = J(await c.get(f"/purchasing/suppliers/{own}", headers=pur))
+    check("...complete, with its address and PIC",
+          got.get("company_address") == "Jl. Purchasing 1"
+          and len(got.get("contacts") or []) == 1, str(got)[:200])
     r = await c.post(f"/purchasing/suppliers/{sup}/contacts", headers=s1,
                      json={"name": "Nope"})
     check("...nor add a PIC to one", r.status_code == 403, str(r.status_code))

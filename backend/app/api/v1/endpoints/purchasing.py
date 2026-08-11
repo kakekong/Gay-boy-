@@ -24,10 +24,11 @@ router = APIRouter(
     dependencies=[Depends(require_min(Role.SALES))]
 )
 
-_admin_or_director = require(Role.ADMIN, Role.DIRECTOR, Role.MANAGER)
-# Onboarding a vendor stays a management decision, but *maintaining* the
-# record — the address they moved to, the PIC who replaced the last one —
-# belongs to the department that talks to them every day.
+# The supplier directory belongs to the department that deals with suppliers.
+# Onboarding one was management-only for a while; it is not a decision anybody
+# else is in a position to make — purchasing is the one talking to the vendor
+# when the vendor first needs to exist, and making them ask somebody else to
+# type a name in just meant the row got created late or not at all.
 _supplier_editors = require(Role.ADMIN, Role.DIRECTOR, Role.MANAGER, Role.PURCHASING)
 
 
@@ -243,7 +244,7 @@ async def get_supplier(
 async def create_supplier(
     payload: SupplierIn,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_admin_or_director),
+    _u: User = Depends(_supplier_editors),
 ):
     if not payload.name.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name required")
