@@ -1,17 +1,34 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft, Building2, Star, Truck, Loader2, AlertCircle, Mail, Phone,
   Briefcase, PackageCheck, CheckCircle2, Paperclip, Eye, Download,
+  MapPin, MessageCircle, Pencil, Save,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
-import { T, locale } from "@/store/lang";
+import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { ContactsSection } from "@/components/ContactsSection";
+import { useAuthStore } from "@/store/auth";
+import { useT, T, locale } from "@/store/lang";
 
 interface Contact { name?: string; phone?: string; email?: string }
+
+/** A named person at the supplier, with their own line — same row shape the
+ *  customer's PICs use, because it is the same card rendering them. */
+interface SupplierPIC {
+  id: string;
+  name: string;
+  position: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  is_primary: boolean;
+  notes: string | null;
+}
 
 interface PO {
   id: string;
@@ -39,6 +56,12 @@ interface SupplierDetail {
   lead_time_days_avg: number;
   qc_fail_rate: number;
   price_volatility: number;
+  company_address: string | null;
+  warehouse_address: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  contacts: SupplierPIC[];
   contact: Contact;
   po_count: number;
   open_po_count: number;
@@ -65,6 +88,11 @@ export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const [preview, setPreview] = useState<SupplierFile | null>(null);
+  const me = useAuthStore((st) => st.user);
+  // Who maintains the directory: the same set the API accepts a PATCH from.
+  // Sales can read a supplier (names, ratings) but does not keep its record.
+  const canEdit = ["director", "manager", "admin", "purchasing"]
+    .includes(me?.role ?? "");
 
   const q = useQuery({
     queryKey: ["supplier", id],
@@ -136,40 +164,15 @@ export default function SupplierDetailPage() {
           </div>
         </div>
 
-        {/* Contact */}
-        {(c.name || c.phone || c.email) && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm border-t border-ink-100 pt-4">
-            {c.name && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider muted">{T("Contact")}</div>
-                <div className="mt-0.5">{c.name}</div>
-              </div>
-            )}
-            {c.phone && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider muted">{T("Phone")}</div>
-                <a
-                  href={`tel:${c.phone}`}
-                  className="mt-0.5 inline-flex items-center gap-1 text-brand-700 hover:underline"
-                >
-                  <Phone size={12} /> {c.phone}
-                </a>
-              </div>
-            )}
-            {c.email && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider muted">{T("Email")}</div>
-                <a
-                  href={`mailto:${c.email}`}
-                  className="mt-0.5 inline-flex items-center gap-1 text-brand-700 hover:underline"
-                >
-                  <Mail size={12} /> {c.email}
-                </a>
-              </div>
-            )}
-          </div>
-        )}
+        <CompanyCard supplier={s} legacy={c} canEdit={canEdit} onSaved={() => q.refetch()} />
       </div>
+
+      {/* The people, and the vendor's own paperwork — the same two cards the
+          customer page carries, for the same reasons. A supplier is not one
+          phone number, and the company deed / NPWP / bank details have to
+          live somewhere other than an inbox. */}
+      <ContactsSection supplierId={s.id} />
+      {canEdit && <AttachmentsSection ownerType="supplier" ownerId={s.id} />}
 
       {/* PO history */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
@@ -360,6 +363,201 @@ export default function SupplierDetailPage() {
           contentType={preview.content_type}
           onClose={() => setPreview(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Where the supplier is and how the company itself is reached.
+ *
+ * Company-level, deliberately: the switchboard and the sales@ mailbox outlive
+ * whoever is answering them this year, and a named person's own number
+ * belongs on their row in the Contacts card below. The record used to be
+ * write-once — a typo in an address could only be fixed by creating a second
+ * supplier, which splits the PO history — so this edits in place.
+ *
+ * The legacy `contact` blob is read as a fallback for rows created before the
+ * columns existed, and never written back to.
+ */
+function CompanyCard({ supplier, legacy, canEdit, onSaved }: {
+  supplier: SupplierDetail;
+  legacy: Contact;
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    company_address: supplier.company_address ?? "",
+    warehouse_address: supplier.warehouse_address ?? "",
+    phone: supplier.phone ?? "",
+    whatsapp: supplier.whatsapp ?? "",
+    email: supplier.email ?? "",
+  });
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/purchasing/suppliers/${supplier.id}`, {
+      company_address: form.company_address.trim() || null,
+      warehouse_address: form.warehouse_address.trim() || null,
+      phone: form.phone.trim() || null,
+      whatsapp: form.whatsapp.trim() || null,
+      email: form.email.trim() || null,
+    }),
+    onSuccess: () => { setEditing(false); setErr(null); onSaved(); },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail
+      ?? t("Save failed", "Gagal menyimpan")),
+  });
+
+  const phone = supplier.phone ?? legacy.phone ?? null;
+  const email = supplier.email ?? legacy.email ?? null;
+  const anything = supplier.company_address || supplier.warehouse_address
+    || phone || supplier.whatsapp || email || legacy.name;
+
+  return (
+    <div className="border-t border-ink-100 pt-4 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wider muted">
+          {t("Company address & contact", "Alamat & kontak perusahaan")}
+        </span>
+        {canEdit && !editing && (
+          <button className="btn-ghost text-xs ml-auto" onClick={() => {
+            setForm({
+              company_address: supplier.company_address ?? "",
+              warehouse_address: supplier.warehouse_address ?? "",
+              phone: supplier.phone ?? "",
+              whatsapp: supplier.whatsapp ?? "",
+              email: supplier.email ?? "",
+            });
+            setErr(null); setEditing(true);
+          }}>
+            <Pencil size={13} /> {anything ? t("Edit", "Ubah") : t("Add details", "Tambah detail")}
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {t("Company address", "Alamat perusahaan")}
+              </span>
+              <textarea className="input min-h-[60px]" value={form.company_address}
+                onChange={(e) => setForm({ ...form, company_address: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {t("Warehouse / pickup address", "Alamat gudang / pengambilan")}
+              </span>
+              <textarea className="input min-h-[60px]" value={form.warehouse_address}
+                onChange={(e) => setForm({ ...form, warehouse_address: e.target.value })}
+                placeholder={t("Leave blank if goods are collected from the office address",
+                               "Kosongkan jika barang diambil di alamat kantor")} />
+            </label>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {t("Company phone", "Telepon perusahaan")}
+              </span>
+              <input className="input" value={form.phone} placeholder="+62…"
+                onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {t("Company WhatsApp", "WhatsApp perusahaan")}
+              </span>
+              <input className="input" value={form.whatsapp} placeholder="+62…"
+                onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {t("Company email", "Email perusahaan")}
+              </span>
+              <input className="input" type="email" value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </label>
+          </div>
+          <p className="text-[11px] muted">
+            {t("A named person's own phone and email go on their row in Contacts below.",
+               "Telepon dan email milik orang tertentu ditulis pada barisnya di Kontak di bawah.")}
+          </p>
+          {err && (
+            <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
+              {err}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button className="btn-primary" disabled={save.isPending}
+              onClick={() => save.mutate()}>
+              {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {t("Save", "Simpan")}
+            </button>
+            <button className="btn-ghost" onClick={() => { setEditing(false); setErr(null); }}>
+              {t("Cancel", "Batal")}
+            </button>
+          </div>
+        </div>
+      ) : !anything ? (
+        <div className="text-sm muted">
+          {canEdit
+            ? t("No address or company contact yet.",
+                "Belum ada alamat atau kontak perusahaan.")
+            : t("No address on file.", "Alamat belum dicatat.")}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          {supplier.company_address && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider muted">
+                {t("Company address", "Alamat perusahaan")}
+              </div>
+              <div className="mt-0.5 flex gap-1.5">
+                <MapPin size={12} className="mt-1 shrink-0 text-ink-400" />
+                <span className="whitespace-pre-wrap">{supplier.company_address}</span>
+              </div>
+            </div>
+          )}
+          {supplier.warehouse_address && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider muted">
+                {t("Warehouse / pickup", "Gudang / pengambilan")}
+              </div>
+              <div className="mt-0.5 flex gap-1.5">
+                <MapPin size={12} className="mt-1 shrink-0 text-ink-400" />
+                <span className="whitespace-pre-wrap">{supplier.warehouse_address}</span>
+              </div>
+            </div>
+          )}
+          <div className="sm:col-span-2 flex flex-wrap gap-x-5 gap-y-1">
+            {phone && (
+              <a href={`tel:${phone}`}
+                className="inline-flex items-center gap-1 text-brand-700 hover:underline">
+                <Phone size={12} /> {phone}
+              </a>
+            )}
+            {supplier.whatsapp && (
+              <a href={`https://wa.me/${supplier.whatsapp.replace(/[^\d]/g, "")}`}
+                target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-1 text-brand-700 hover:underline">
+                <MessageCircle size={12} /> {supplier.whatsapp}
+              </a>
+            )}
+            {email && (
+              <a href={`mailto:${email}`}
+                className="inline-flex items-center gap-1 text-brand-700 hover:underline">
+                <Mail size={12} /> {email}
+              </a>
+            )}
+            {legacy.name && !supplier.contacts?.length && (
+              <span className="muted">{t("Contact", "Kontak")}: {legacy.name}</span>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

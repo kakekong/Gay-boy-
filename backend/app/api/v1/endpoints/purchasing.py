@@ -25,15 +25,73 @@ router = APIRouter(
 )
 
 _admin_or_director = require(Role.ADMIN, Role.DIRECTOR, Role.MANAGER)
+# Onboarding a vendor stays a management decision, but *maintaining* the
+# record — the address they moved to, the PIC who replaced the last one —
+# belongs to the department that talks to them every day.
+_supplier_editors = require(Role.ADMIN, Role.DIRECTOR, Role.MANAGER, Role.PURCHASING)
 
 
 # ─── Suppliers ───────────────────────────────────────────────────────────────
+
+class SupplierContactIn(BaseModel):
+    name: str
+    position: str | None = None
+    phone: str | None = None
+    whatsapp: str | None = None
+    email: str | None = None
+    is_primary: bool = False
+    notes: str | None = None
+
 
 class SupplierIn(BaseModel):
     name: str
     category: str | None = None
     rating: float = 0
-    contact: dict = {}
+    # Where they are. `warehouse_address` is where the goods are actually
+    # collected from, which is regularly not the office on the letterhead.
+    company_address: str | None = None
+    warehouse_address: str | None = None
+    # The company's own line and mailbox, not a person's.
+    phone: str | None = None
+    whatsapp: str | None = None
+    email: str | None = None
+    # The people. Submitted with the form so a supplier arrives complete
+    # rather than needing a second visit to the page to be usable.
+    contacts: list[SupplierContactIn] = []
+    contact: dict = {}          # legacy blob; still accepted
+
+
+class SupplierPatch(BaseModel):
+    """Everything on the header that can be corrected after the fact.
+
+    Deliberately not `SupplierIn`: contacts are their own rows with their own
+    endpoints, and a PATCH that carried them would have to decide what an
+    omitted list means. The scores (lead time, QC failure, volatility) are
+    computed from delivery history and are not editable by hand.
+    """
+    name: str | None = None
+    category: str | None = None
+    rating: float | None = None
+    company_address: str | None = None
+    warehouse_address: str | None = None
+    phone: str | None = None
+    whatsapp: str | None = None
+    email: str | None = None
+
+
+def _supplier_contact_out(c) -> dict:
+    return {
+        "id": str(c.id),
+        "supplier_id": str(c.supplier_id),
+        "name": c.name,
+        "position": c.position,
+        "phone": c.phone,
+        "whatsapp": c.whatsapp,
+        "email": c.email,
+        "is_primary": c.is_primary,
+        "notes": c.notes,
+        "created_at": c.created_at,
+    }
 
 
 @router.get("/suppliers")
@@ -52,6 +110,10 @@ async def list_suppliers(
             "rating": float(s.rating or 0),
             "lead_time_days_avg": float(s.lead_time_days_avg or 0),
             "qc_fail_rate": float(s.qc_fail_rate or 0),
+            # Enough to ring them from the directory without opening the row.
+            "phone": s.phone or (s.contact or {}).get("phone"),
+            "email": s.email or (s.contact or {}).get("email"),
+            "company_address": s.company_address,
         }
         for s in rows
     ]
@@ -68,7 +130,9 @@ async def get_supplier(
     Used by the supplier detail screen."""
     from app.models.attachment import Attachment
     from app.models.operation import Project
-    from app.models.purchasing import GoodsReceipt, QCReport, Supplier, SupplierPO
+    from app.models.purchasing import (
+        GoodsReceipt, QCReport, Supplier, SupplierContact, SupplierPO,
+    )
 
     s = await db.get(Supplier, supplier_id)
     if not s:
@@ -130,6 +194,13 @@ async def get_supplier(
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
 
+    contacts = (await db.scalars(
+        select(SupplierContact)
+        .where(SupplierContact.supplier_id == supplier_id)
+        .order_by(SupplierContact.is_primary.desc(),
+                  SupplierContact.created_at.asc())
+    )).all()
+
     return {
         "id": str(s.id),
         "name": s.name,
@@ -138,6 +209,14 @@ async def get_supplier(
         "lead_time_days_avg": float(s.lead_time_days_avg or 0),
         "qc_fail_rate": float(s.qc_fail_rate or 0),
         "price_volatility": float(s.price_volatility or 0),
+        "company_address": s.company_address,
+        "warehouse_address": s.warehouse_address,
+        # Fall back to the legacy blob so suppliers created before the columns
+        # existed still show the number somebody typed into it.
+        "phone": s.phone or (s.contact or {}).get("phone"),
+        "whatsapp": s.whatsapp or (s.contact or {}).get("whatsapp"),
+        "email": s.email or (s.contact or {}).get("email"),
+        "contacts": [_supplier_contact_out(x) for x in contacts],
         "contact": s.contact or {},
         "po_count": len(po_rows),
         "open_po_count": len(open_pos),
@@ -171,15 +250,173 @@ async def create_supplier(
     existing = await db.scalar(select(Supplier).where(Supplier.name == payload.name.strip()))
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "Supplier with this name already exists")
+    from app.models.purchasing import SupplierContact
+
     s = Supplier(
         name=payload.name.strip(),
         category=payload.category,
         rating=payload.rating,
+        company_address=payload.company_address,
+        warehouse_address=payload.warehouse_address,
+        phone=payload.phone,
+        whatsapp=payload.whatsapp,
+        email=payload.email,
         contact=payload.contact or {},
     )
     db.add(s)
     await db.flush()
+
+    # The PICs typed into the same form. A supplier with nobody to ring is a
+    # row you have to come back and finish, so the form carries them.
+    for c in payload.contacts:
+        if not (c.name or "").strip():
+            continue
+        db.add(SupplierContact(
+            supplier_id=s.id,
+            name=c.name.strip(),
+            position=c.position,
+            phone=c.phone,
+            whatsapp=c.whatsapp,
+            email=c.email,
+            is_primary=c.is_primary,
+            notes=c.notes,
+        ))
+    await db.flush()
     return {"id": str(s.id), "name": s.name}
+
+
+@router.patch("/suppliers/{supplier_id}")
+async def update_supplier(
+    supplier_id: UUID,
+    payload: SupplierPatch,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_supplier_editors),
+):
+    """Correct the header: address, company line, category, rating.
+
+    Suppliers move warehouses and change switchboards, and until now the row
+    was write-once — the only way to fix a typo in an address was to create a
+    second supplier, which splits the PO history in two.
+    """
+    s = await db.get(Supplier, supplier_id)
+    if not s:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Supplier not found")
+    data = payload.model_dump(exclude_unset=True)
+
+    if "name" in data:
+        new_name = (data.pop("name") or "").strip()
+        if not new_name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name required")
+        if new_name != s.name:
+            clash = await db.scalar(
+                select(Supplier).where(Supplier.name == new_name,
+                                       Supplier.id != s.id)
+            )
+            if clash:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    "Supplier with this name already exists")
+            s.name = new_name
+
+    for k, v in data.items():
+        setattr(s, k, v)
+    await db.flush()
+    return {"id": str(s.id), "name": s.name}
+
+
+# ─── Supplier PICs (multiple contacts per supplier) ──────────────────────────
+#
+# Same shape as the customer's contacts, deliberately: the two directories are
+# the same job seen from opposite ends, and a purchasing officer who has used
+# one should not have to learn the other.
+
+
+async def _supplier_or_404(supplier_id: UUID, db: AsyncSession) -> Supplier:
+    s = await db.get(Supplier, supplier_id)
+    if not s:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Supplier not found")
+    return s
+
+
+@router.get("/suppliers/{supplier_id}/contacts")
+async def list_supplier_contacts(
+    supplier_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    from app.models.purchasing import SupplierContact
+
+    await _supplier_or_404(supplier_id, db)
+    rows = (await db.scalars(
+        select(SupplierContact)
+        .where(SupplierContact.supplier_id == supplier_id)
+        .order_by(SupplierContact.is_primary.desc(),
+                  SupplierContact.created_at.asc())
+    )).all()
+    return [_supplier_contact_out(c) for c in rows]
+
+
+@router.post("/suppliers/{supplier_id}/contacts", status_code=201)
+async def create_supplier_contact(
+    supplier_id: UUID,
+    payload: SupplierContactIn,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_supplier_editors),
+):
+    from app.models.purchasing import SupplierContact
+
+    await _supplier_or_404(supplier_id, db)
+    if not payload.name.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name required")
+    c = SupplierContact(
+        supplier_id=supplier_id,
+        name=payload.name.strip(),
+        position=payload.position,
+        phone=payload.phone,
+        whatsapp=payload.whatsapp,
+        email=payload.email,
+        is_primary=payload.is_primary,
+        notes=payload.notes,
+    )
+    db.add(c)
+    await db.flush()
+    return _supplier_contact_out(c)
+
+
+@router.patch("/suppliers/{supplier_id}/contacts/{contact_id}")
+async def update_supplier_contact(
+    supplier_id: UUID,
+    contact_id: UUID,
+    payload: SupplierContactIn,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_supplier_editors),
+):
+    from app.models.purchasing import SupplierContact
+
+    await _supplier_or_404(supplier_id, db)
+    c = await db.get(SupplierContact, contact_id)
+    if not c or c.supplier_id != supplier_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(c, k, v)
+    await db.flush()
+    return _supplier_contact_out(c)
+
+
+@router.delete("/suppliers/{supplier_id}/contacts/{contact_id}", status_code=204)
+async def delete_supplier_contact(
+    supplier_id: UUID,
+    contact_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_supplier_editors),
+):
+    from app.models.purchasing import SupplierContact
+
+    await _supplier_or_404(supplier_id, db)
+    c = await db.get(SupplierContact, contact_id)
+    if not c or c.supplier_id != supplier_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+    await db.delete(c)
+    return None
 
 
 # ─── Supplier POs ────────────────────────────────────────────────────────────

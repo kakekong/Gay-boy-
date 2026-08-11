@@ -366,6 +366,32 @@ export default function PurchasingPage() {
 
 function idr(n: number) { return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0)); }
 
+/**
+ * A supplier you can actually use, filed in one pass.
+ *
+ * It used to take a name, a category, a rating and one loose phone number,
+ * which is not enough to raise a PO against: you still have to know where the
+ * goods are collected from, who to ring when the delivery slips, and which of
+ * the three people at that company signs the invoice. Those all lived in
+ * somebody's phone. Same shape as the customer wizard, for the same reason.
+ *
+ * Files are uploaded after the row exists — they need an id to hang from —
+ * so the supplier is created first and the queue is drained onto it. A file
+ * that fails to upload does not undo the supplier: the row is the valuable
+ * part and the upload can be retried on its page.
+ */
+interface DraftContact {
+  name: string;
+  position: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+}
+
+const EMPTY_CONTACT: DraftContact = {
+  name: "", position: "", phone: "", whatsapp: "", email: "",
+};
+
 function NewSupplierModal({ onClose, onCreated, onError }: {
   onClose: () => void;
   onCreated: (name: string) => void;
@@ -374,41 +400,79 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
   const [rating, setRating] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+  const [companyAddress, setCompanyAddress] = useState("");
+  const [warehouseAddress, setWarehouseAddress] = useState("");
+  const [phone, setPhone] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [email, setEmail] = useState("");
+  const [contacts, setContacts] = useState<DraftContact[]>([{ ...EMPTY_CONTACT }]);
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  const updateContact = (i: number, patch: Partial<DraftContact>) =>
+    setContacts((cur) => cur.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
   const create = useMutation({
-    mutationFn: () => api.post("/purchasing/suppliers", {
-      name: name.trim(),
-      category: category.trim() || null,
-      rating: rating ? Number(rating) : 0,
-      contact: {
-        name: contactName || undefined,
-        phone: contactPhone || undefined,
-        email: contactEmail || undefined,
-      },
-    }),
+    mutationFn: async () => {
+      const filled = contacts.filter((c) => c.name.trim());
+      const res = await api.post("/purchasing/suppliers", {
+        name: name.trim(),
+        category: category.trim() || null,
+        rating: rating ? Number(rating) : 0,
+        company_address: companyAddress.trim() || null,
+        warehouse_address: warehouseAddress.trim() || null,
+        phone: phone.trim() || null,
+        whatsapp: whatsapp.trim() || null,
+        email: email.trim() || null,
+        contacts: filled.map((c, i) => ({
+          name: c.name.trim(),
+          position: c.position.trim() || null,
+          phone: c.phone.trim() || null,
+          whatsapp: c.whatsapp.trim() || null,
+          email: c.email.trim() || null,
+          // The first person typed is the one to ring first, unless somebody
+          // says otherwise later on the supplier's page.
+          is_primary: i === 0,
+        })),
+      });
+      const id = res.data?.id as string | undefined;
+      if (id && files.length) {
+        setUploading(true);
+        for (const f of files) {
+          const fd = new FormData();
+          fd.append("owner_type", "supplier");
+          fd.append("owner_id", id);
+          fd.append("file", f);
+          await api.post("/attachments", fd);
+        }
+      }
+      return res.data;
+    },
     onSuccess: () => onCreated(name.trim()),
-    onError: (e: any) => onError(
-      e?.response?.data?.errors?.[0]?.message
-        ?? e?.response?.data?.detail
-        ?? e?.message
-        ?? "Failed to create supplier"
-    ),
+    onError: (e: any) => {
+      setUploading(false);
+      onError(
+        e?.response?.data?.errors?.[0]?.message
+          ?? e?.response?.data?.detail
+          ?? e?.message
+          ?? "Failed to create supplier",
+      );
+    },
   });
+
+  const busy = create.isPending || uploading;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold">{T("New supplier")}</h2>
           <p className="text-sm muted mt-0.5">{T("Add a vendor so you can issue POs against them.")}</p>
         </header>
         <form
           onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
-          className="flex-1 overflow-auto p-5 space-y-3"
+          className="flex-1 overflow-auto p-5 space-y-4"
         >
           <Field label={T("Name *")}>
             <input
@@ -433,34 +497,124 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
               />
             </Field>
           </div>
+
+          {/* ── the company: where it is, and how the switchboard answers ── */}
           <div className="rounded-xl border border-ink-100 p-3 space-y-3">
-            <div className="text-[10px] uppercase tracking-wider muted">{T("Contact (optional)")}</div>
-            <Field label={T("PIC name")}>
-              <input
-                className="input"
-                value={contactName} onChange={(e) => setContactName(e.target.value)}
+            <div className="text-[10px] uppercase tracking-wider muted">
+              {T("Company address & contact")}
+            </div>
+            <Field label={T("Company address")}>
+              <textarea
+                className="input min-h-[60px]"
+                value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)}
+                placeholder={T("Jl. Industri Raya No. 12, Kawasan Industri Jababeka, Cikarang")}
               />
             </Field>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label={T("Phone")}>
-                <input
-                  className="input"
-                  value={contactPhone} onChange={(e) => setContactPhone(e.target.value)}
-                />
+            <Field label={T("Warehouse / pickup address")}>
+              <textarea
+                className="input min-h-[50px]"
+                value={warehouseAddress} onChange={(e) => setWarehouseAddress(e.target.value)}
+                placeholder={T("Leave blank if goods are collected from the office address")}
+              />
+            </Field>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Field label={T("Company phone")}>
+                <input className="input" value={phone}
+                  onChange={(e) => setPhone(e.target.value)} placeholder="+62…" />
               </Field>
-              <Field label={T("Email")}>
-                <input
-                  className="input" type="email"
-                  value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
-                />
+              <Field label={T("Company WhatsApp")}>
+                <input className="input" value={whatsapp}
+                  onChange={(e) => setWhatsapp(e.target.value)} placeholder="+62…" />
+              </Field>
+              <Field label={T("Company email")}>
+                <input className="input" type="email" value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="sales@pemasok.co.id" />
               </Field>
             </div>
           </div>
+
+          {/* ── the people, each with their own line ── */}
+          <div className="rounded-xl border border-ink-100 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider muted">
+                  {T("Contacts (PIC)")}
+                </div>
+                <div className="text-[11px] muted">
+                  {T("Their own phone and email, separate from the company's above.")}
+                </div>
+              </div>
+              <button type="button" className="btn-ghost text-xs"
+                onClick={() => setContacts((c) => [...c, { ...EMPTY_CONTACT }])}>
+                <Plus size={13} /> {T("Add another PIC")}
+              </button>
+            </div>
+            {contacts.map((c, i) => (
+              <div key={i} className="rounded-lg border border-ink-100 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium muted">
+                    {i === 0 ? T("Primary PIC") : `${T("PIC")} ${i + 1}`}
+                  </span>
+                  {contacts.length > 1 && (
+                    <button type="button" className="text-red-600 hover:opacity-80"
+                      title={T("Remove")}
+                      onClick={() => setContacts((cur) => cur.filter((_, idx) => idx !== i))}>
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field label={T("PIC name")}>
+                    <input className="input" value={c.name}
+                      onChange={(e) => updateContact(i, { name: e.target.value })} />
+                  </Field>
+                  <Field label={T("Position / title")}>
+                    <input className="input" value={c.position}
+                      onChange={(e) => updateContact(i, { position: e.target.value })}
+                      placeholder={T("Sales Engineer")} />
+                  </Field>
+                  <Field label={T("PIC phone")}>
+                    <input className="input" value={c.phone}
+                      onChange={(e) => updateContact(i, { phone: e.target.value })} />
+                  </Field>
+                  <Field label={T("PIC WhatsApp")}>
+                    <input className="input" value={c.whatsapp}
+                      onChange={(e) => updateContact(i, { whatsapp: e.target.value })} />
+                  </Field>
+                  <div className="md:col-span-2">
+                    <Field label={T("PIC email")}>
+                      <input className="input" type="email" value={c.email}
+                        onChange={(e) => updateContact(i, { email: e.target.value })} />
+                    </Field>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── the paperwork ── */}
+          <div className="rounded-xl border border-ink-100 p-3 space-y-2">
+            <div className="text-[10px] uppercase tracking-wider muted">{T("Files")}</div>
+            <div className="text-[11px] muted">
+              {T("Company deed, NPWP, bank details, price list — anything you would otherwise email yourself.")}
+            </div>
+            <input
+              type="file" multiple className="text-xs"
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+            />
+            {files.length > 0 && (
+              <ul className="text-xs muted space-y-0.5">
+                {files.map((f) => <li key={f.name}>· {f.name}</li>)}
+              </ul>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
-            <button type="submit" className="btn-primary" disabled={create.isPending}>
-              {create.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {T("Create supplier")}</button>
+            <button type="submit" className="btn-primary" disabled={busy}>
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {uploading ? T("Uploading files…") : T("Create supplier")}</button>
           </div>
         </form>
       </div>

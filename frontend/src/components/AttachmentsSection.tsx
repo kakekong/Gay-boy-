@@ -28,7 +28,7 @@ interface AttachmentRow {
 interface Props {
   ownerType: "customer" | "quotation" | "project" | "supplier_po"
     | "customer_po" | "invoice" | "delivery_order" | "price_request"
-    | "daily_log";
+    | "daily_log" | "supplier";
   ownerId: string;
 }
 

@@ -68,6 +68,16 @@ async def main():
     if ct.get("id"):
         ids["customer_contact"] = ct["id"]
 
+    sup = J(await c.post("/purchasing/suppliers", headers=d, json={
+        "name": f"PT Pemasok Simetri {tag}", "category": "fabrication",
+        "company_address": "Jl. Simetri 1"}))
+    if sup.get("id"):
+        ids["supplier"] = sup["id"]
+        sc = J(await c.post(f"/purchasing/suppliers/{sup['id']}/contacts",
+                            headers=d, json={"name": f"Pemasok PIC {tag}"}))
+        if sc.get("id"):
+            ids["supplier_contact"] = sc["id"]
+
     pr = J(await c.post("/price-requests", headers=s1, json={
         "customer_id": cust,
         "items": [{"description": f"Gearbox {tag}", "qty": 1, "uom": "pcs"}]}))["id"]

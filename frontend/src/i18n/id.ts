@@ -174,7 +174,31 @@ export const ID_STATIC: Record<string, string> = {
   "Conditional": "Bersyarat",
   "Confirm what arrived against a supplier PO.": "Konfirmasi barang yang tiba terhadap PO pemasok.",
   "Contact": "Kontak",
-  "Contact (optional)": "Kontak (opsional)",
+  // The supplier form: the company's own details, then the people at it.
+  "Company address & contact": "Alamat & kontak perusahaan",
+  "Company address": "Alamat perusahaan",
+  "Warehouse / pickup address": "Alamat gudang / pengambilan",
+  "Leave blank if goods are collected from the office address":
+    "Kosongkan jika barang diambil di alamat kantor",
+  "Jl. Industri Raya No. 12, Kawasan Industri Jababeka, Cikarang":
+    "Jl. Industri Raya No. 12, Kawasan Industri Jababeka, Cikarang",
+  "Company phone": "Telepon perusahaan",
+  "Company WhatsApp": "WhatsApp perusahaan",
+  "Company email": "Email perusahaan",
+  "Contacts (PIC)": "Kontak (PIC)",
+  "Their own phone and email, separate from the company's above.":
+    "Telepon dan email milik mereka sendiri, terpisah dari milik perusahaan di atas.",
+  "Add another PIC": "Tambah PIC lain",
+  "Primary PIC": "PIC utama",
+  "PIC": "PIC",
+  "Position / title": "Posisi / jabatan",
+  "PIC phone": "Telepon PIC",
+  "PIC WhatsApp": "WhatsApp PIC",
+  "PIC email": "Email PIC",
+  "Sales Engineer": "Sales Engineer",
+  "Company deed, NPWP, bank details, price list — anything you would otherwise email yourself.":
+    "Akta pendirian, NPWP, rekening bank, daftar harga — apa pun yang biasanya Anda kirim ke email sendiri.",
+  "Uploading files…": "Mengunggah berkas…",
   "Contract": "Kontrak",
   "Controls what the API allows. Pages below control what they see.": "Mengatur apa yang diizinkan API. Halaman di bawah mengatur apa yang mereka lihat.",
   "Conversation": "Percakapan",

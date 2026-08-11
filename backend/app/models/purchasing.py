@@ -19,8 +19,44 @@ class Supplier(Base, UUIDPK, TimestampMixin):
     lead_time_days_avg: Mapped[float] = mapped_column(Numeric(6, 2), default=0, nullable=False)
     qc_fail_rate: Mapped[float] = mapped_column(Numeric(6, 4), default=0, nullable=False)
     price_volatility: Mapped[float] = mapped_column(Numeric(6, 4), default=0, nullable=False)
+
+    # Where they are, and how the *company* is reached — the switchboard and
+    # the sales@ mailbox, which outlive whichever person currently answers
+    # them. A named person's own number lives on their SupplierContact row.
+    company_address: Mapped[str | None] = mapped_column(Text)
+    warehouse_address: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(String(40))
+    whatsapp: Mapped[str | None] = mapped_column(String(40))
+    email: Mapped[str | None] = mapped_column(String(255))
+
+    # Legacy free-form contact blob, kept because rows created before the
+    # columns above still carry {name, phone, email} in it and the supplier
+    # page reads it as a fallback. New writes go to the columns.
     contact: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class SupplierContact(Base, UUIDPK, TimestampMixin):
+    """The people at a supplier company — the same shape as CustomerContact.
+
+    A supplier is not one phone number: the sales rep quotes, a different
+    person confirms the delivery date, and a third chases the invoice. Which
+    one you need depends on what you are asking, so they are rows rather than
+    a single `contact` blob.
+    """
+    __tablename__ = "supplier_contacts"
+
+    supplier_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="CASCADE"),
+        index=True, nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[str | None] = mapped_column(String(120))
+    phone: Mapped[str | None] = mapped_column(String(40))
+    whatsapp: Mapped[str | None] = mapped_column(String(40))
+    email: Mapped[str | None] = mapped_column(String(255))
+    is_primary: Mapped[bool] = mapped_column(default=False, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class PurchaseRequest(Base, UUIDPK, TimestampMixin):

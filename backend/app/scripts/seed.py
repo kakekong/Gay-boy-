@@ -377,6 +377,15 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
     # Scanned signature, drawn onto the documents this person signs
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS signature_path VARCHAR(500)",
+
+    # Suppliers gained an address and company-level contact details — the
+    # switchboard and the sales@ mailbox, as opposed to a named person's own
+    # number, which now lives on supplier_contacts (created by create_all).
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS company_address TEXT",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS warehouse_address TEXT",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(40)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(40)",
+    "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
 ]
 
 

@@ -8,9 +8,36 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT, t as tt, T } from "@/store/lang";
 
+/**
+ * The people at a company, on the company's page.
+ *
+ * Written for customers, now used by suppliers too: the two directories are
+ * the same job seen from opposite ends of the same deal, and a card that
+ * behaves differently on one of them is a card somebody has to relearn. The
+ * only differences are the URL the rows live at, the attachment owner type
+ * for their ID cards, and one line of copy.
+ */
+type OwnerKind = "customer" | "supplier";
+
+const OWNER: Record<OwnerKind, {
+  base: (id: string) => string;
+  attachmentOwner: string;
+  queryKey: string;
+}> = {
+  customer: {
+    base: (id) => `/customers/${id}/contacts`,
+    attachmentOwner: "customer_contact",
+    queryKey: "customer-contacts",
+  },
+  supplier: {
+    base: (id) => `/purchasing/suppliers/${id}/contacts`,
+    attachmentOwner: "supplier_contact",
+    queryKey: "supplier-contacts",
+  },
+};
+
 interface Contact {
   id: string;
-  customer_id: string;
   name: string;
   position: string | null;
   phone: string | null;
@@ -35,7 +62,12 @@ const EMPTY: ContactForm = {
   is_primary: false, notes: "",
 };
 
-export function ContactsSection({ customerId }: { customerId: string }) {
+export function ContactsSection(
+  { customerId, supplierId }: { customerId?: string; supplierId?: string },
+) {
+  const kind: OwnerKind = supplierId ? "supplier" : "customer";
+  const ownerId = (supplierId ?? customerId)!;
+  const cfg = OWNER[kind];
   const t = useT();
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -44,12 +76,11 @@ export function ContactsSection({ customerId }: { customerId: string }) {
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const list = useQuery({
-    queryKey: ["customer-contacts", customerId],
-    queryFn: () =>
-      api.get(`/customers/${customerId}/contacts`).then((r) => r.data as Contact[]),
+    queryKey: [cfg.queryKey, ownerId],
+    queryFn: () => api.get(cfg.base(ownerId)).then((r) => r.data as Contact[]),
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["customer-contacts", customerId] });
+  const refresh = () => qc.invalidateQueries({ queryKey: [cfg.queryKey, ownerId] });
   const onErr = (e: any) => setFlash({
     kind: "err",
     text: e?.response?.data?.errors?.[0]?.message
@@ -58,7 +89,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
   });
 
   const create = useMutation({
-    mutationFn: () => api.post(`/customers/${customerId}/contacts`, form),
+    mutationFn: () => api.post(cfg.base(ownerId), form),
     onSuccess: () => {
       refresh(); setAdding(false); setForm(EMPTY);
       setFlash({ kind: "ok", text: tt("Contact added.", "PIC ditambahkan.") });
@@ -66,7 +97,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
     onError: onErr,
   });
   const patch = useMutation({
-    mutationFn: (id: string) => api.patch(`/customers/${customerId}/contacts/${id}`, form),
+    mutationFn: (id: string) => api.patch(`${cfg.base(ownerId)}/${id}`, form),
     onSuccess: () => {
       refresh(); setEditing(null); setForm(EMPTY);
       setFlash({ kind: "ok", text: tt("Contact updated.", "PIC diperbarui.") });
@@ -74,7 +105,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
     onError: onErr,
   });
   const del = useMutation({
-    mutationFn: (id: string) => api.delete(`/customers/${customerId}/contacts/${id}`),
+    mutationFn: (id: string) => api.delete(`${cfg.base(ownerId)}/${id}`),
     onSuccess: () => { refresh(); setFlash({ kind: "ok", text: tt("Contact removed.", "PIC dihapus.") }); },
     onError: onErr,
   });
@@ -205,10 +236,11 @@ export function ContactsSection({ customerId }: { customerId: string }) {
         </div>
       ) : !list.data?.length ? (
         <div className="p-8 text-center text-sm muted">
-          {t(
-            "No additional contacts yet. The primary PIC on the customer header is enough — add more people here.",
-            "Belum ada kontak tambahan. PIC utama di header pelanggan sudah cukup — tambahkan orang lain di sini."
-          )}
+          {kind === "supplier"
+            ? t("Nobody listed yet. Add the person who quotes, the one who confirms delivery, and whoever chases the invoice.",
+                "Belum ada PIC. Tambahkan orang yang memberi penawaran, yang mengonfirmasi pengiriman, dan yang menagih faktur.")
+            : t("No additional contacts yet. The primary PIC on the customer header is enough — add more people here.",
+                "Belum ada kontak tambahan. PIC utama di header pelanggan sudah cukup — tambahkan orang lain di sini.")}
         </div>
       ) : (
         <ul className="divide-y divide-ink-100">
@@ -251,7 +283,7 @@ export function ContactsSection({ customerId }: { customerId: string }) {
                 {c.notes && (
                   <div className="mt-1 text-xs muted">{c.notes}</div>
                 )}
-                <ContactIdCards contactId={c.id} />
+                <ContactIdCards contactId={c.id} ownerType={cfg.attachmentOwner} />
               </div>
               <div className="flex gap-1 shrink-0">
                 <button
@@ -265,8 +297,8 @@ export function ContactsSection({ customerId }: { customerId: string }) {
                   className="btn-ghost text-red-600 hover:bg-red-50"
                   onClick={() => {
                     if (window.confirm(tt(
-                      `Remove ${c.name} from this customer's contacts?`,
-                      `Hapus ${c.name} dari daftar kontak pelanggan ini?`
+                      `Remove ${c.name} from this company's contacts?`,
+                      `Hapus ${c.name} dari daftar kontak perusahaan ini?`
                     ))) {
                       del.mutate(c.id);
                     }
@@ -295,22 +327,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // KTP / passport / other ID cards attached to a specific contact. Reuses the
 // generic /attachments endpoints with owner_type='customer_contact'.
-function ContactIdCards({ contactId }: { contactId: string }) {
+function ContactIdCards({ contactId, ownerType }: { contactId: string; ownerType: string }) {
   const t = useT();
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const list = useQuery({
-    queryKey: ["contact-idcards", contactId],
+    queryKey: ["contact-idcards", ownerType, contactId],
     queryFn: () => api.get("/attachments", {
-      params: { owner_type: "customer_contact", owner_id: contactId },
+      params: { owner_type: ownerType, owner_id: contactId },
     }).then((r) => r.data as any[]),
   });
-  const refresh = () => qc.invalidateQueries({ queryKey: ["contact-idcards", contactId] });
+  const refresh = () => qc.invalidateQueries({ queryKey: ["contact-idcards", ownerType, contactId] });
 
   const upload = useMutation({
     mutationFn: (file: File) => {
       const fd = new FormData();
-      fd.append("owner_type", "customer_contact");
+      fd.append("owner_type", ownerType);
       fd.append("owner_id", contactId);
       fd.append("description", "id_card");
       fd.append("file", file);

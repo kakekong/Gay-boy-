@@ -227,6 +227,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_attendance_alert_window.py` | attendance alerts stay silent before 08:30 **WIB** — includes a threshold that only passes if the comparison isn't done in server/UTC time |
 | `test_mark_read.py` | marking a section's alerts read from its sidebar badge: batched, per-user, tolerant of ids that resolved on their own |
 | `test_efaktur.py` | e-Faktur CSV export |
+| `test_supplier_record.py` | the supplier as a real company record: address + pickup address, the company's line kept separate from each PIC's own, PICs added/edited/removed after the fact, the header editable in place (it used to be write-once), vendor paperwork readable by purchasing but not sales, and rows created before the columns existed still showing their legacy `contact` blob |
 | `test_quotation_layout.py` | where the printed quotation puts things: the totals block sits on the item grid's own rule (measured out of the PDF, not eyeballed), the KETERANGAN panel gets the width that frees up, and a note the sender numbered themselves prints numbered once |
 
 Plus `pytest tests/test_permissions.py tests/test_discount_rules.py tests/test_financials.py`
@@ -363,6 +364,16 @@ no customer↔supplier map can be reconstructed. Preserve this on any new screen
 
 **Sales sees only their own customers** (`can_view_customer`). Everyone above
 sees all.
+
+**The supplier record has three different audiences, on purpose.** The row
+itself (name, category, rating, address, PICs) is readable by any internal
+role — it is a directory. Editing it is `_supplier_editors` = admin,
+director, manager, **purchasing**: onboarding a vendor stays a management
+decision (`_admin_or_director` on POST), but maintaining the record belongs to
+the department that talks to them daily. The vendor's *paperwork* —
+`owner_type` `supplier` and `supplier_contact`, i.e. company deed, NPWP, bank
+details, a PIC's ID card — is narrower again and excludes sales. Supplier
+pricing (`supplier_po` files) stays narrowest: director + purchasing only.
 
 **A document is a rep's if it names them OR if the customer is theirs.** That
 union lives in `sales_scope()` / `sales_may_see()` in `permissions.py` and is
