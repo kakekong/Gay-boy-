@@ -106,7 +106,14 @@ async def main():
         (ok(f"export.{e}: {len(r.content)}B {r.headers.get('content-type')}") if r.status_code==200 and r.content
             else bad(f"export.{e} HTTP{r.status_code}"))
 
-    step("B5 mark Won -> director approval -> won, stage->negotiation")
+    step("B5 customer PO first, then mark Won -> director approval -> won")
+    # Won rests on the customer's order: the PO is filed here, and the PO's own
+    # director approval (which spawns the project) still happens in phase C.
+    po_pre=J(await c.post("/customer-pos",headers=H["sales1"],json={"customer_id":cust,"quotation_id":q,
+        "number":f"PO-CUST-{uuid.uuid4().hex[:6]}","po_date":"2026-07-20",
+        "items":[{"description":"Gearbox","qty":1,"unit_price":9_000_000}],"is_downpayment":False}))
+    (ok(f"customer PO filed {po_pre.get('number')}") if po_pre.get("id")
+        else bad(f"customer PO not filed: {str(po_pre)[:120]}"))
     r=await c.post(f"/quotations/{q}/won",headers=H["sales1"]); print(f"     won click HTTP {r.status_code} status={J(r).get('status')}")
     ra,req=await approve_in_inbox(c,H,"won",q)
     if ra is None: bad("no won approval in inbox")
@@ -120,12 +127,13 @@ async def main():
     (ok(f"lost blocked (HTTP {r.status_code})") if r.status_code>=400 else bad("lost not blocked"))
 
     # ===== PHASE C =====
-    step("C1 sales1 files Customer PO -> pending_approval")
-    b=J(await c.post("/customer-pos",headers=H["sales1"],json={"customer_id":cust,"quotation_id":q,
-        "number":f"PO-CUST-{uuid.uuid4().hex[:6]}","po_date":"2026-07-20",
-        "items":[{"description":"Gearbox housing","qty":2,"unit_price":1500000,"uom":"pcs"}],
-        "is_downpayment":False}))
-    cpo=b["id"]; ok(f"PO {b['number']} status={b['status']}")
+    step("C1 the Customer PO filed in B5 is waiting on the director")
+    # It was filed before the win, because the win rests on it. What is left
+    # here is the director's approval, which is what spawns the project.
+    b=J(await c.get(f"/customer-pos/{po_pre['id']}",headers=H["sales1"]))
+    cpo=b["id"]
+    ok(f"PO {b['number']} status={b['status']}") if b.get("status")=="pending_approval" \
+        else bad(f"PO status={b.get('status')}")
 
     step("C2 director approves Customer PO -> project spawned")
     b=J(await c.post(f"/customer-pos/{cpo}/approve",headers=H["director"],json={"notes":""}))

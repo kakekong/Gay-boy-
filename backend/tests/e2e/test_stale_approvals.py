@@ -31,6 +31,12 @@ async def main():
     await c.post(f"/quotations/{q}/submit",headers=s)
     await c.post(f"/quotations/{q}/approve",headers=d,json={"notes":""})
 
+    # The customer's PO is what Won rests on — file it before either attempt.
+    _po=J(await c.post("/customer-pos",headers=s,json={"customer_id":cust,"quotation_id":q,
+        "number":f"PO-STALE-{tag}","items":[{"description":"X","qty":1,"unit_price":200}],
+        "is_downpayment":False}))
+    if _po.get("id"): await c.post(f"/customer-pos/{_po['id']}/approve",headers=d,json={"notes":""})
+
     # 1. Sales requests Mark-Won -> pending request created
     r=await c.post(f"/quotations/{q}/won",headers=s)
     check("sales won -> 202 pending", r.status_code==202, str(r.status_code))

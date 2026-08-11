@@ -77,6 +77,18 @@ export default function QuotationDetailPage() {
     enabled: !!q.data?.customer_id,
   });
 
+  // The customer's own PO against this quotation. Won is gated on it: the
+  // claim "they ordered" needs their order behind it, and the button that
+  // starts a project and posts revenue should not be available on somebody's
+  // word alone. Same query key the PO card below uses, so it is fetched once.
+  const pos = useQuery({
+    queryKey: ["customer-pos-for-quote", id],
+    queryFn: () => api.get("/customer-pos", {
+      params: { customer_id: q.data!.customer_id },
+    }).then((r) => (r.data as any[]).filter((p) => p.quotation_id === id)),
+    enabled: !!q.data?.customer_id,
+  });
+
   const followups = useQuery({
     queryKey: ["followups", id],
     queryFn: () => api.get(`/quotations/${id}/followups`).then((r) => r.data),
@@ -218,6 +230,11 @@ export default function QuotationDetailPage() {
   // Mark-won request sits with the director (won_pending).
   const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent")
     && !Q.won_pending;
+  // A PO that is filed or approved is evidence; one that was rejected or
+  // cancelled is not. The backend draws the same line, so the button and the
+  // endpoint agree instead of the click producing a 409.
+  const hasCustomerPO = (pos.data ?? []).some(
+    (p: any) => !["rejected", "cancelled"].includes(p.status));
   const canEdit = (isOwner || user?.role === "director") &&
     (Q.status === "draft" || Q.status === "rejected");
   // Approved/sent quotes can still be edited, but a non-director's edit
@@ -451,7 +468,14 @@ export default function QuotationDetailPage() {
             )}
             {canMarkWonLost && (
               <>
-                <button className="btn-success" onClick={() => won.mutate()} disabled={won.isPending}>
+                <button
+                  className="btn-success"
+                  onClick={() => won.mutate()}
+                  disabled={won.isPending || !hasCustomerPO}
+                  title={hasCustomerPO ? undefined : t(
+                    "File the customer's PO first — Won is marked on the strength of their order.",
+                    "Masukkan PO pelanggan dulu — Menang ditandai berdasarkan order mereka.")}
+                >
                   <Trophy size={15} /> {t("Mark won", "Tandai menang")}
                 </button>
                 <button className="btn-ghost text-red-600" onClick={() => setLostOpen(true)} disabled={lost.isPending}>
@@ -560,11 +584,14 @@ export default function QuotationDetailPage() {
       {/* Linked Accounts (CoA) — back-office only, hidden from sales */}
       {user?.role !== "sales" && <LinkedAccountsPanel quotationId={Q.id} />}
 
-      {/* Customer-PO submission gate (only when the quote is Won) */}
-      {Q.status === "won" && (
+      {/* The customer's PO. Shown from the moment the quotation is in the
+          customer's hands, because that is when their order can arrive — and
+          filing it is now what unlocks Mark won, not what follows it. */}
+      {["approved", "sent", "won"].includes(Q.status) && (
         <WonNextStepCard
           quotationId={Q.id}
           customerId={Q.customer_id}
+          quotationWon={Q.status === "won"}
         />
       )}
 
@@ -1102,8 +1129,8 @@ interface CPORow {
 }
 
 function WonNextStepCard({
-  quotationId, customerId,
-}: { quotationId: string; customerId: string }) {
+  quotationId, customerId, quotationWon,
+}: { quotationId: string; customerId: string; quotationWon: boolean }) {
   const [open, setOpen] = useState(false);
   const q = useQuery({
     queryKey: ["customer-pos-for-quote", quotationId],
@@ -1135,6 +1162,13 @@ function WonNextStepCard({
                 ? T("The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed.")
                 : T("Once you have the signed PO from the customer, file it here. You'll attach the actual PO file, pick the items they ordered out of this quote, and the director will approve it. Approval is what creates the project.")}
           </p>
+          {/* Filing the PO is what unlocks Mark won — say so here rather than
+              leaving a greyed-out button on the header to be puzzled over. */}
+          {!quotationWon && !rows.length && (
+            <p className="text-xs mt-2 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 inline-block">
+              {T("Mark won stays locked until the customer's PO is on file — Won is marked on the strength of their order.")}
+            </p>
+          )}
         </div>
         {!hasApproved && (
           <button className="btn-primary" onClick={() => setOpen(true)}>

@@ -240,11 +240,19 @@ async def create_customer_po(
             status.HTTP_400_BAD_REQUEST,
             "Quotation does not belong to this customer",
         )
-    if quotation.status != "won":
+    # The PO comes BEFORE the win, not after it. "Won" means the customer
+    # actually ordered, and their PO is the evidence of that — requiring the
+    # win first meant a rep ticked Won on their own say-so and the paperwork
+    # caught up later, or didn't. So a PO may be filed against any quotation
+    # the customer has actually been given: approved, sent, or already won
+    # (a second PO against a won quote is normal — staged orders).
+    _PO_READY = ("approved", "sent", "won")
+    if quotation.status not in _PO_READY:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Quotation status is '{quotation.status}', "
-            "but only Won quotations can have a customer PO submitted.",
+            f"Quotation status is '{quotation.status}' — a customer PO can "
+            "only be filed against a quotation the customer has been given "
+            "(approved or sent).",
         )
     if not payload.number.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO number required")

@@ -186,6 +186,13 @@ async def main():
     hist = J(await c.post(f"/quotations/from-price-request/{own_pr}", headers=s1))
     await c.post(f"/quotations/{hist['id']}/submit", headers=s1)
     await c.post(f"/quotations/{hist['id']}/approve", headers=d, json={})
+    # Won rests on the customer's own PO, so file one first.
+    _po = J(await c.post("/customer-pos", headers=s1, json={
+        "customer_id": mine, "quotation_id": hist["id"], "number": f"PO-HIST-{tag}",
+        "items": [{"description": f"Old deal {tag}", "qty": 1, "unit_price": 5_000_000}],
+        "is_downpayment": False}))
+    if _po.get("id"):
+        await c.post(f"/customer-pos/{_po['id']}/approve", headers=d, json={"notes": ""})
     await c.post(f"/quotations/{hist['id']}/won", headers=d)
     won = J(await c.get(f"/quotations/{hist['id']}", headers=d))
     check("sales1 closed a deal on this account", won["status"] == "won", won["status"])
@@ -215,6 +222,12 @@ async def main():
                    "uom": "pcs", "unit_price": 2_000_000}]}))
     await c.post(f"/quotations/{q2['id']}/submit", headers=d)
     await c.post(f"/quotations/{q2['id']}/approve", headers=d, json={})
+    _po2 = J(await c.post("/customer-pos", headers=s2, json={
+        "customer_id": theirs, "quotation_id": q2["id"], "number": f"PO-DEAL-{tag}",
+        "items": [{"description": f"Deal {tag}", "qty": 1, "unit_price": 2_000_000}],
+        "is_downpayment": False}))
+    if _po2.get("id"):
+        await c.post(f"/customer-pos/{_po2['id']}/approve", headers=d, json={"notes": ""})
     r = await c.post(f"/quotations/{q2['id']}/won", headers=s2)
     check("sales files a mark-won request", r.status_code in (200, 202),
           str(r.status_code))

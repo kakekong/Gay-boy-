@@ -74,12 +74,14 @@ async def main():
             "items": [{"line_no": 1, "sell_price": 9_000_000, "basis": "unit"}]})
         quo = J(await c.post(f"/quotations/from-price-request/{pr}", headers=s1))["id"]
         await c.post(f"/quotations/{quo}/submit", headers=d)
-        await c.post(f"/quotations/{quo}/won", headers=d)
+        await c.post(f"/quotations/{quo}/approve", headers=d, json={"notes": ""})
+        # The customer's PO is filed before the win, not after it.
         po = J(await c.post("/customer-pos", headers=s1, json={
             "customer_id": cust, "quotation_id": quo, "number": po_no,
             "po_date": "2026-08-06",
             "items": [{"description": f"Gearbox {tag}", "qty": 2, "uom": "pcs",
                        "unit_price": 9_000_000}], "is_downpayment": False}))["id"]
+        await c.post(f"/quotations/{quo}/won", headers=d)
         ap = J(await c.post(f"/customer-pos/{po}/approve", headers=d, json={}))
         proj = ap.get("project_id")
         inv = J(await c.post(f"/operation/projects/{proj}/issue-invoice", headers=fin,

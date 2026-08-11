@@ -67,8 +67,9 @@ async def main():
         {"line_no": 2, "sell_price": 1_500_000, "basis": "unit"}]})
     quo = J(await c.post(f"/quotations/from-price-request/{pr}", headers=s1))["id"]
     await c.post(f"/quotations/{quo}/submit", headers=d)
-    await c.post(f"/quotations/{quo}/won", headers=d)
+    await c.post(f"/quotations/{quo}/approve", headers=d, json={"notes": ""})
 
+    # The customer's PO first — Won rests on it now.
     po = J(await c.post("/customer-pos", headers=s1, json={
         "customer_id": cust, "quotation_id": quo, "number": f"PO-PREV-{tag}",
         "po_date": "2026-07-31", "items": [
@@ -78,6 +79,7 @@ async def main():
              "unit_price": 1_500_000}],
         "is_downpayment": False}))
     po_id = po.get("id")
+    await c.post(f"/quotations/{quo}/won", headers=d)
     KET = f"Kirim bertahap, konfirmasi H-2 [{tag}]"
     await c.patch(f"/customer-pos/{po_id}", headers=s1, json={"notes": KET})
     # A file on the *document*, not on the approval request — the case the

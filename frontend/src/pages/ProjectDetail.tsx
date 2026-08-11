@@ -747,11 +747,18 @@ export default function ProjectDetailPage() {
             disabled={patchProject.isPending}
             onChange={(v) => patchProject.mutate({ po_date: v || null })}
           />
+          {/* Delivery dates are read-only for sales. They are promises about
+              physical goods somebody else is moving — purchasing books the
+              origin leg, admin the arrival legs, the director owns what the
+              customer is told. A rep who could type here was really filing an
+              approval request against a shipment they cannot see. */}
           <EditableDateField
             label={t("Target delivery", "Target pengiriman")}
             icon={<Truck size={13} />}
             value={p.target_delivery ?? ""}
             disabled={patchProject.isPending}
+            readOnly={isSales}
+            readOnlyHint={t("Set by the director", "Ditetapkan oleh direktur")}
             onChange={(v) => patchProject.mutate({ target_delivery: v || null })}
           />
           <EditableDateField
@@ -759,11 +766,25 @@ export default function ProjectDetailPage() {
             icon={<Truck size={13} />}
             value={p.actual_delivery ?? ""}
             disabled={patchProject.isPending}
+            readOnly={isSales}
+            readOnlyHint={t("Set when delivery is confirmed", "Diisi saat pengiriman dikonfirmasi")}
             onChange={(v) => patchProject.mutate({ actual_delivery: v || null })}
           />
         </div>
 
-        {/* Delivery-date guide: what each date means and when to set it */}
+        {/* Delivery-date guide: what each date means and when to set it.
+            Hidden from sales — it is a set of instructions for a field they
+            do not fill in, and telling somebody to "click the date field
+            above" when the field is read-only for them is just confusing. */}
+        {isSales ? (
+          <div className="mt-4 rounded-xl border border-ink-100 bg-ink-50/60 p-3 text-xs muted flex gap-2">
+            <Truck size={13} className="mt-px shrink-0" />
+            <span>
+              {t("Delivery dates are set by the people moving the goods — purchasing for the origin leg, admin on arrival, the director for what the customer is promised. Ask them if a date needs to change.",
+                 "Tanggal pengiriman diisi oleh pihak yang menangani barang — pembelian untuk tahap asal, admin saat kedatangan, direktur untuk yang dijanjikan ke pelanggan. Hubungi mereka jika tanggal perlu diubah.")}
+            </span>
+          </div>
+        ) : (
         <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/40 p-4 text-sm">
           <div className="font-semibold text-ink-800 flex items-center gap-2">
             <Truck size={14} className="text-brand-600" /> {t("How to set the delivery dates", "Cara mengisi tanggal pengiriman")}
@@ -799,6 +820,7 @@ export default function ProjectDetailPage() {
             )}
           </p>
         </div>
+        )}
       </div>
 
       {/* Profit / Margin — hidden from purchasing and sales */}
@@ -2048,18 +2070,36 @@ function EditableTextField({
 }
 
 function EditableDateField({
-  label, icon, value, disabled, onChange,
+  label, icon, value, disabled, onChange, readOnly, readOnlyHint,
 }: {
   label: string;
   icon?: React.ReactNode;
   value: string;
   disabled?: boolean;
   onChange: (v: string) => void;
+  /** Show the date, don't offer to change it. Used where the role may see a
+   *  date but is not the one who sets it — the backend refuses those writes,
+   *  and an input that 403s reads as a broken page rather than a rule. */
+  readOnly?: boolean;
+  readOnlyHint?: string;
 }) {
   // The PATCH endpoint refuses to wipe a date when null is sent — once a
   // date is set, the user can change it but not clear it from this field.
   // Editing fires onChange only on a real value to keep semantics matching
   // the backend's "protected date fields" rule.
+  if (readOnly) {
+    return (
+      <div>
+        <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">
+          {icon} {T(label)}
+        </div>
+        <div className="mt-1 text-sm text-ink-900 py-0.5">{value || "—"}</div>
+        {readOnlyHint && (
+          <div className="text-[10px] muted mt-0.5">{readOnlyHint}</div>
+        )}
+      </div>
+    );
+  }
   return (
     <div>
       <div className="flex items-center gap-1 text-[11px] uppercase tracking-wider muted">

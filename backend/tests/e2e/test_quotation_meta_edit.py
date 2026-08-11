@@ -270,7 +270,15 @@ async def main():
     check("...and does not wipe the notes typed on the page",
           after.get("notes") == f"approved note {tag}", str(after.get("notes")))
 
-    # closed is closed, for notes as much as for prices
+    # closed is closed, for notes as much as for prices. Winning it needs the
+    # customer's PO on file, so file one.
+    _po = J(await c.post("/customer-pos", headers=s1, json={
+        "customer_id": q6["customer_id"], "quotation_id": q6["id"],
+        "number": f"PO-META-{tag}",
+        "items": [{"description": "line", "qty": 1, "unit_price": 1}],
+        "is_downpayment": False}))
+    if _po.get("id"):
+        await c.post(f"/customer-pos/{_po['id']}/approve", headers=d, json={"notes": ""})
     await c.post(f"/quotations/{q6['id']}/won", headers=d)
     r = await c.patch(f"/quotations/{q6['id']}", headers=s1,
                       json={"notes": "too late"})

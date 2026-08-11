@@ -97,7 +97,7 @@ async def main():
 
     # ── 4. the signed customer PO — the case that started this ───────────────
     await c.post(f"/quotations/{quo}/submit", headers=d)
-    await c.post(f"/quotations/{quo}/won", headers=d)
+    await c.post(f"/quotations/{quo}/approve", headers=d, json={"notes": ""})
     po = J(await c.post("/customer-pos", headers=s1, json={
         "customer_id": cust, "quotation_id": quo, "number": f"PO-FILE-{tag}",
         "po_date": "2026-08-05",
@@ -106,6 +106,7 @@ async def main():
         "is_downpayment": False}))
     po_id = po.get("id")
     check("the rep files a customer PO", bool(po_id), str(po)[:140])
+    await c.post(f"/quotations/{quo}/won", headers=d)
 
     r = await upload(s1, "customer_po", po_id, "signed-po.txt")
     check("the rep attaches the signed PO scan", r.status_code in (200, 201), J(r))

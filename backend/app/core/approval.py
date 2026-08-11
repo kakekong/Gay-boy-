@@ -459,6 +459,25 @@ async def apply_to_target(
             )
             return applied
         if q and approve:
+            # Re-check the customer's PO at decision time, not only when the
+            # request was filed. A PO rejected in between would otherwise let
+            # an approval signed off yesterday win a deal whose evidence is
+            # gone — and this is the signature that posts the revenue.
+            from sqlalchemy import func as _func
+
+            from app.models.customer_po import CustomerPO as _CPO
+            still = await db.scalar(
+                select(_func.count(_CPO.id)).where(
+                    _CPO.quotation_id == q.id,
+                    _CPO.status.notin_(("rejected", "cancelled")),
+                )
+            )
+            if not still:
+                applied["skipped"] = (
+                    "the customer PO behind this request is gone — decision "
+                    "recorded, but the quotation was not marked Won"
+                )
+                return applied
             q.status = "won"
             # Fused pipeline: the Won approval is also the sign-off that the
             # deal reached negotiation — bump the stage in the same stroke.

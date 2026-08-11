@@ -67,13 +67,16 @@ async def full_deal(c, sales, d, pu, name, tag):
     quo = J(await c.post(f"/quotations/from-price-request/{pr}", headers=sales))["id"]
     await c.post("/comments", headers=sales, json={
         "owner_type": "quotation", "owner_id": quo, "body": f"discussion on {tag}"})
-    # The quotation has to be WON before a customer PO can be filed against it.
+    # The customer's PO comes BEFORE the win — Won is marked on the strength
+    # of their order, so the quotation is approved, their PO is filed, and only
+    # then can it be won.
     await c.post(f"/quotations/{quo}/submit", headers=d)
-    await c.post(f"/quotations/{quo}/won", headers=d)
+    await c.post(f"/quotations/{quo}/approve", headers=d, json={"notes": ""})
     cpo = J(await c.post("/customer-pos", headers=sales, json={
         "customer_id": cust, "quotation_id": quo, "number": f"PO-{tag}",
         "items": [{"description": "Gearbox", "qty": 1, "unit_price": 9_000_000}],
         "is_downpayment": False}))
+    await c.post(f"/quotations/{quo}/won", headers=d)
     proj = None
     if cpo.get("id"):
         proj = J(await c.post(f"/customer-pos/{cpo['id']}/approve", headers=d,

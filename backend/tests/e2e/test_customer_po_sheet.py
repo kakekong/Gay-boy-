@@ -68,7 +68,7 @@ async def main():
     quo = J(await c.post(f"/quotations/from-price-request/{pr}", headers=s1))["id"]
     quo_no = J(await c.get(f"/quotations/{quo}", headers=s1)).get("number")
     await c.post(f"/quotations/{quo}/submit", headers=d)
-    await c.post(f"/quotations/{quo}/won", headers=d)
+    await c.post(f"/quotations/{quo}/approve", headers=d, json={"notes": ""})
     po = J(await c.post("/customer-pos", headers=s1, json={
         "customer_id": cust, "quotation_id": quo, "number": f"PO-SHEET-{tag}",
         "po_date": "2026-07-30",
@@ -77,6 +77,7 @@ async def main():
         "is_downpayment": False}))
     po_id = po.get("id")
     check("the customer PO was filed", bool(po_id), str(po)[:160])
+    await c.post(f"/quotations/{quo}/won", headers=d)
 
     # ── 1. keterangan ────────────────────────────────────────────────────────
     KET = f"Kirim bertahap, konfirmasi unloading H-2 [{tag}]"

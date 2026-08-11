@@ -529,6 +529,22 @@ async def update_project(project_id: UUID,
         "est_arrive_customer", "act_arrive_customer",
     }
     user_role = Role(user.role)
+    if user_role == Role.SALES:
+        # Sales has no lane on the shipping strip at all — not even a queued
+        # one. Every date here is a promise about physical goods that sales is
+        # not the one moving: purchasing books the origin leg, admin owns both
+        # arrival legs, and the customer-facing target/actual delivery is the
+        # director's. Letting a rep *propose* a date was worse than useless —
+        # it looked like an edit to them, and arrived in the director's inbox
+        # as a decision about a shipment the requester has no visibility of.
+        bad = sorted(k for k in data
+                     if k in SHIPPING_FIELDS or k in {"is_import", "origin_location"})
+        if bad:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Delivery and shipping dates aren't sales' to set — "
+                f"ask purchasing (origin) or admin (arrival). Got {bad}.",
+            )
     if user_role == Role.PURCHASING:
         allowed = _PURCHASING_SHIPPING | _PURCHASING_META
         gated_keys = SHIPPING_FIELDS | {"is_import", "origin_location"}

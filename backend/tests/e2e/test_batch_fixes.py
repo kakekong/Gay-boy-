@@ -57,6 +57,11 @@ async def main():
     check("submitted quote still approves", r.status_code==200, f"HTTP{r.status_code}")
 
     # ---- 3. Revise blocked while a mark-won request is pending ----
+    # Won needs the customer's PO on file first, so file one.
+    _po=J(await c.post("/customer-pos",headers=s1,json={"customer_id":cust2,"quotation_id":q,
+        "number":f"PO-BATCH-{tag}","items":[{"description":"X","qty":1,"unit_price":200}],
+        "is_downpayment":False}))
+    if _po.get("id"): await c.post(f"/customer-pos/{_po['id']}/approve",headers=d,json={"notes":""})
     await c.post(f"/quotations/{q}/won",headers=s1)     # files a request
     r=await c.post(f"/quotations/{q}/revise",headers=s1)
     check("revise blocked while mark-won pending", r.status_code==409, f"HTTP{r.status_code}")

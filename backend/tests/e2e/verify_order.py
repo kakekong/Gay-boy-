@@ -20,10 +20,11 @@ async def build_project(c,H):
     await c.post(f"/price-requests/{pr}/approve",headers=H["d"],json={"items":[{"line_no":1,"sell_price":200,"basis":"unit"}]})
     q=J(await c.post(f"/quotations/from-price-request/{pr}",headers=H["s"]))["id"]
     await c.post(f"/quotations/{q}/submit",headers=H["s"]); await c.post(f"/quotations/{q}/approve",headers=H["d"],json={"notes":""})
+    # The customer's PO is the evidence Won rests on, so it is filed first.
+    cpo=J(await c.post("/customer-pos",headers=H["s"],json={"customer_id":cust,"quotation_id":q,"number":f"PO-{uuid.uuid4().hex[:8]}","items":[{"description":"X","qty":1,"unit_price":200}],"is_downpayment":False}))["id"]
     await c.post(f"/quotations/{q}/won",headers=H["s"])
     inbox=J(await c.get("/approvals",headers=H["d"])); reqs=inbox if isinstance(inbox,list) else inbox.get("items",[])
     wr=next(x for x in reqs if x.get("target_type")=="quotation_won" and str(x.get("target_id"))==str(q)); await c.post(f"/approvals/{wr['id']}/approve",headers=H["d"],json={"notes":""})
-    cpo=J(await c.post("/customer-pos",headers=H["s"],json={"customer_id":cust,"quotation_id":q,"number":f"PO-{uuid.uuid4().hex[:8]}","items":[{"description":"X","qty":1,"unit_price":200}],"is_downpayment":False}))["id"]
     proj=J(await c.post(f"/customer-pos/{cpo}/approve",headers=H["d"],json={"notes":""}))["project_id"]
     return proj
 

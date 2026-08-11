@@ -219,13 +219,18 @@ async def main():
     # ══ the customer PO sheet, which shares the module ═══════════════════════
     print("\n── the customer PO sheet uses the same list ──")
     await c.post(f"/quotations/{qid}/submit", headers=d)
-    await c.post(f"/quotations/{qid}/won", headers=d)
+    await c.post(f"/quotations/{qid}/approve", headers=d, json={"notes": ""})
     po = J(await c.post("/customer-pos", headers=s1, json={
         "customer_id": cid, "quotation_id": qid, "number": f"PO-ADDR-{tag}",
         "po_date": "2026-08-07",
         "items": [{"description": f"Chain {tag}", "qty": 10, "uom": "meter",
                    "unit_price": 2_000_000}], "is_downpayment": False}))
     po_id = po.get("id")
+    # Said out loud rather than skipped in silence: this block used to sit
+    # behind a bare `if po_id`, so when the PO stopped being creatable the
+    # driver reported five fewer checks and still called itself green.
+    check("the customer PO for the sheet was filed", bool(po_id), str(po)[:180])
+    await c.post(f"/quotations/{qid}/won", headers=d)
     if po_id:
         po_opts = J(await c.get(f"/customer-pos/{po_id}/pdf-options", headers=s1))
         check("the PO offers the same three addresses",

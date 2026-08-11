@@ -108,9 +108,23 @@ async def main():
     quote = r.json()
     r = await director.post(f"/quotations/{quote['id']}/submit")
     r = await director.post(f"/quotations/{quote['id']}/approve", json={"notes": ""})
+    # Won rests on the customer's order, so their PO is filed first. This one
+    # is the plain (non-DP) PO; the DP POs below are the flow under test.
+    r = await sales.post("/customer-pos", json={
+        "customer_id": cust_id, "quotation_id": quote["id"], "number": "PO-WIN-001",
+        "items": [{"description": "Test gearbox", "qty": 2, "unit_price": 5_000_000}],
+        "is_downpayment": False,
+    })
+    check("customer PO filed before the win", r.status_code == 201, r.text[:200])
+    win_po = r.json()
     r = await director.post(f"/quotations/{quote['id']}/won")
     won_status = r.json().get("status") if r.status_code == 200 else None
     check("quotation reaches won", won_status == "won", f"{r.status_code} {r.text[:200]}")
+    # ...and it is approved here so the global "nothing left pending" sweep at
+    # the end of this driver stays true.
+    r = await director.post(f"/customer-pos/{win_po['id']}/approve", json={"notes": ""})
+    check("...and that PO is decided rather than left in the queue",
+          r.status_code == 200, f"{r.status_code} {r.text[:160]}")
 
     # sales blocked from direct quotation create (regression check)
     r = await sales.post("/quotations", json={

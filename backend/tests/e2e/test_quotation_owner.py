@@ -86,6 +86,13 @@ async def main():
           f"{r.status_code} {J(r)}"[:140])
     await c.post(f"/quotations/{q['id']}/submit", headers=s1)
     await c.post(f"/quotations/{q['id']}/approve", headers=d, json={})
+    # Won needs the customer's own PO behind it.
+    _po = J(await c.post("/customer-pos", headers=s1, json={
+        "customer_id": cust, "quotation_id": q["id"], "number": f"PO-OWN-{tag}",
+        "items": [{"description": f"Sprocket {tag}", "qty": 5, "unit_price": 1_100_000}],
+        "is_downpayment": False}))
+    if _po.get("id"):
+        await c.post(f"/customer-pos/{_po['id']}/approve", headers=d, json={"notes": ""})
     r = await c.post(f"/quotations/{q['id']}/won", headers=s1)
     check("...and mark it won (which files the director's approval)",
           r.status_code in (200, 202), f"{r.status_code} {J(r)}"[:140])
@@ -152,6 +159,12 @@ async def main():
     q3 = J(await c.post("/quotations", headers=d, json=director_quote(f"Belt {tag}")))
     await c.post(f"/quotations/{q3['id']}/submit", headers=s1)
     await c.post(f"/quotations/{q3['id']}/approve", headers=d, json={})
+    _po3 = J(await c.post("/customer-pos", headers=s1, json={
+        "customer_id": cust, "quotation_id": q3["id"], "number": f"PO-BELT-{tag}",
+        "items": [{"description": f"Belt {tag}", "qty": 2, "unit_price": 1_000_000}],
+        "is_downpayment": False}))
+    if _po3.get("id"):
+        await c.post(f"/customer-pos/{_po3['id']}/approve", headers=d, json={"notes": ""})
     await c.post(f"/quotations/{q3['id']}/won", headers=d)
     closed = J(await c.get(f"/quotations/{q3['id']}", headers=d))
     check("it is won", closed["status"] == "won", closed["status"])

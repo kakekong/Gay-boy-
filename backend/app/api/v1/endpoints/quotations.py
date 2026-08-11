@@ -886,6 +886,27 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
             status.HTTP_409_CONFLICT,
             f"A '{q.status}' quotation can't be marked Won.",
         )
+    # Won is a claim about the customer, so it needs the customer's own
+    # document behind it. Their PO is that document: until one is on file
+    # here, "we won this" is one person's word, and it is the word that
+    # starts a project, posts revenue and moves the sales figures.
+    #
+    # This binds the director too. It is not a permission — it is what the
+    # word means — and an escape hatch for the one person whose sign-off the
+    # rule exists to inform would empty it out.
+    from app.models.customer_po import CustomerPO
+    evidence = await db.scalar(
+        select(func.count(CustomerPO.id)).where(
+            CustomerPO.quotation_id == q.id,
+            CustomerPO.status.notin_(("rejected", "cancelled")),
+        )
+    )
+    if not evidence:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Enter the customer's PO first — a quotation is marked Won on the "
+            "strength of their order, not before it.",
+        )
     # Fused pipeline: no more "advance to negotiation first" bounce. The
     # director's Won approval IS the sign-off that the deal reached
     # negotiation — the customer's stage is bumped automatically when the
