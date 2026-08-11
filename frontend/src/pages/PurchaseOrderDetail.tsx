@@ -32,6 +32,9 @@ interface PO {
   project_target_delivery: string | null;
   project_actual_delivery: string | null;
   po_date: string | null;
+  /** What the supplier says, not what the lead time implies. Drives the
+   *  project page's shipment list. */
+  eta: string | null;
   quoted_lead_days: number | null;
   total: number;
   items: POItem[];
@@ -92,6 +95,12 @@ export default function PurchaseOrderDetailPage() {
         ?? "Update failed",
     });
   };
+
+  // An order covering more than one job. Only then is the per-line project
+  // worth a column; on an ordinary PO it would be the same code repeated.
+  const sharedOrder = new Set(
+    ((q.data?.items ?? []) as any[]).map((i) => i.project_code).filter(Boolean),
+  ).size > 1;
 
   const patch = useMutation({
     mutationFn: (body: Record<string, any>) =>
@@ -199,9 +208,9 @@ export default function PurchaseOrderDetailPage() {
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <div>
-            <div className="font-medium">{T("Approval required for every change")}</div>
+            <div className="font-medium">{T("Changes here need the director — except the ETA")}</div>
             <div className="text-xs mt-0.5">
-              {T("Edits you make here are queued for director approval. The PO won't show your change until the director approves it from the Approvals page.")}</div>
+              {T("Edits you make here are queued for director approval, and the PO won't show them until it's granted from the Approvals page. The expected arrival is the exception: it saves straight away, so the project's shipment list stays current when a supplier moves their date.")}</div>
           </div>
         </div>
       )}
@@ -359,6 +368,23 @@ export default function PurchaseOrderDetailPage() {
               className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
             />
           </Meta>
+          {/* The date the project page counts on. It applies immediately
+              rather than queueing for the director, because a vendor moving
+              their truck is news to record, not a decision to approve — and a
+              shipment list nobody can correct is a shipment list nobody
+              trusts. */}
+          <Meta label={T("Expected arrival (ETA)")} icon={<Truck size={12} />}>
+            <input
+              type="date"
+              value={p.eta ?? ""}
+              onChange={(e) => patch.mutate({ eta: e.target.value || null })}
+              disabled={patch.isPending}
+              className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
+            />
+            <div className="text-[11px] muted mt-0.5">
+              {T("Shows on the project as this shipment's date")}
+            </div>
+          </Meta>
           <Meta label={T("Lead time (days)")}>
             <input
               type="number"
@@ -401,6 +427,7 @@ export default function PurchaseOrderDetailPage() {
 
       <ShippingPanel
         poDate={p.po_date}
+        eta={p.eta ?? null}
         leadDays={p.quoted_lead_days}
         targetDelivery={p.project_target_delivery}
         actualDelivery={p.project_actual_delivery}
@@ -492,14 +519,23 @@ export default function PurchaseOrderDetailPage() {
               <tr>
                 <th className="th">#</th>
                 <th className="th">{T("Description")}</th>
+                {sharedOrder && <th className="th">{T("For project")}</th>}
                 <th className="th text-right">{T("Qty")}</th>
               </tr>
             </thead>
             <tbody>
-              {p.items.map((it, i) => (
+              {p.items.map((it: any, i: number) => (
                 <tr key={i} className="border-t border-ink-100">
                   <td className="td muted">{i + 1}</td>
                   <td className="td">{it.description ?? "—"}</td>
+                  {/* One truck can carry three customers' work. When it does,
+                      each line says whose — otherwise the goods arrive and
+                      nobody knows which job to book them against. */}
+                  {sharedOrder && (
+                    <td className="td font-mono text-xs muted">
+                      {it.project_code ?? "—"}
+                    </td>
+                  )}
                   <td className="td text-right tabular-nums">{it.qty ?? 0}</td>
                 </tr>
               ))}
@@ -516,16 +552,21 @@ export default function PurchaseOrderDetailPage() {
   );
 }
 
-function ShippingPanel({ poDate, leadDays, targetDelivery, actualDelivery }: {
+function ShippingPanel({ poDate, eta, leadDays, targetDelivery, actualDelivery }: {
   poDate: string | null;
+  eta: string | null;
   leadDays: number | null;
   targetDelivery: string | null;
   actualDelivery: string | null;
 }) {
   const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString(locale()) : "—");
-  // Expected supplier delivery = PO date + quoted lead time.
-  let expected: Date | null = null;
-  if (poDate && leadDays != null) {
+  // A date the supplier actually gave beats one we worked out from their lead
+  // time. This panel used to only ever compute it, which meant that once
+  // purchasing entered a real ETA the page showed two different arrival dates
+  // — the typed one at the top and the arithmetic one here.
+  let expected: Date | null = eta ? new Date(eta) : null;
+  const quoted = !!eta;
+  if (!expected && poDate && leadDays != null) {
     expected = new Date(poDate);
     expected.setDate(expected.getDate() + leadDays);
   }
@@ -549,7 +590,18 @@ function ShippingPanel({ poDate, leadDays, targetDelivery, actualDelivery }: {
         <Meta label={T("PO date")} icon={<Calendar size={12} />}>{fmt(poDate)}</Meta>
         <Meta label={T("Lead time")}>{leadDays != null ? tt(`${leadDays} days`, `${leadDays} hari`) : "—"}</Meta>
         <Meta label={T("Expected arrival")}>
-          {expected ? expected.toLocaleDateString(locale()) : <span className="muted">{T("set a lead time")}</span>}
+          {expected ? (
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              {expected.toLocaleDateString(locale())}
+              <span className="chip text-[10px] uppercase bg-ink-100 text-ink-600">
+                {quoted
+                  ? tt("from the supplier", "dari pemasok")
+                  : tt("from lead time", "dari waktu tunggu")}
+              </span>
+            </span>
+          ) : (
+            <span className="muted">{T("set a lead time")}</span>
+          )}
         </Meta>
         <Meta label={T("Customer target")}>
           <span className="inline-flex items-center gap-2">

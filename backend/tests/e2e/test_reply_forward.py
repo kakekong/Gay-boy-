@@ -11,8 +11,11 @@ what a quote and a forward may NOT do:
 * A forward requires read access to the source and membership of the
   destination — a director may read any channel from the monitor view, but may
   not post into one they never joined.
-* Forwarding to a person means opening a DM, so it has to obey the
-  cross-department rule that governs starting one.
+* Forwarding to a person opens a DM. That used to mean obeying the
+  cross-department approval rule; that rule is gone — talking to a colleague
+  is not a decision — so a forward now opens the conversation it needs. The
+  wall that stays is membership: you may not post into a channel you are not
+  in, whoever you are.
 * A forwarded message names the original author and nothing else. It must not
   carry the quotation number, the customer, or the channel it came from — that
   is what would turn a forward into a hole in the scoping rules.
@@ -181,15 +184,20 @@ async def main():
     check("...and does not create a new channel",
           len(J(await c.get("/chat/channels",headers=s1)))==before)
 
+    # Forwarding across departments used to be refused unless you were the
+    # director — the same approval gate that fronted starting the chat. Both
+    # are gone: talking to a colleague is not a decision, and a forward that
+    # is refused just gets screenshotted into WhatsApp instead.
     r=await c.post(f"/chat/messages/{src['id']}/forward",headers=s1,
                    json={"user_ids":[hr_id]})
-    check("sales cannot forward to another department (no DM exists yet)",
-          r.status_code==403, str(r.status_code))
-    check("...for the cross-department reason, not a generic one",
-          "department" in r.text.lower(), r.text[:120])
+    check("sales can forward to another department, opening the DM",
+          r.status_code==200, f"{r.status_code} {r.text[:140]}")
+    check("...and it was actually delivered somewhere",
+          J(r).get("count")==1 and J(r)["delivered"][0].get("channel_id"),
+          str(J(r))[:150])
     r=await c.post(f"/chat/messages/{src['id']}/forward",headers=d,
                    json={"user_ids":[hr_id]})
-    check("the director may forward across departments", r.status_code==200, J(r))
+    check("the director may too, as before", r.status_code==200, J(r))
 
     targets=J(await c.get("/chat/forward-targets",headers=s1))
     by_name={x["full_name"]:x for x in targets.get("contacts",[])}
@@ -198,8 +206,8 @@ async def main():
           str([x["title"] for x in targets.get("channels",[])]))
     check("the picker allows a same-department colleague",
           by_name.get("Sales Two",{}).get("can_dm") is True, str(by_name.get("Sales Two")))
-    check("the picker greys out a cross-department colleague",
-          by_name.get("HR Demo",{}).get("can_dm") is False, str(by_name.get("HR Demo")))
+    check("the picker no longer greys out a cross-department colleague",
+          by_name.get("HR Demo",{}).get("can_dm") is True, str(by_name.get("HR Demo")))
     check("the picker never offers portal accounts",
           not any(x["role"] in ("customer","supplier") for x in targets.get("contacts",[])))
 

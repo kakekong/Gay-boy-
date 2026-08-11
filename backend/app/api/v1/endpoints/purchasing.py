@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval, require_pr_approval
@@ -425,13 +425,22 @@ async def delete_supplier_contact(
 
 class PoCreate(BaseModel):
     supplier_id: UUID
+    # The job this order is for. On an order covering several jobs — one
+    # vendor, one truck, three customers — this is the first of them and the
+    # per-line `project_id` on each item is the real answer.
     project_id: UUID
     po_date: str | None = None  # ISO date
     quoted_lead_days: int | None = None
+    # When this shipment lands. Per PO, because a job split across three
+    # vendors arrives in three deliveries.
+    eta: str | None = None      # ISO date
     items: list[dict] = []
     total: float = 0
     number: str | None = None  # auto-generated if missing
     price_request_id: UUID | None = None  # source the buying price from this PR
+    # Build the lines straight off a supplier's answered quote, keeping every
+    # line's project and price-request origin.
+    supplier_price_request_id: UUID | None = None
 
 
 _purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.ADMIN)
@@ -495,6 +504,187 @@ async def po_prefill(
         "price_request_number": pr.number,
         "items": items,
         "total": total,
+    }
+
+
+@router.get("/po/from-quote/{spr_id}")
+async def po_prefill_from_quote(
+    spr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    """PO lines built from a supplier's answered quote.
+
+    The other prefill reads a customer price request and gives you its costs.
+    This one reads the quote *that vendor actually gave*, which is the right
+    source once the asking has been done — and it carries each line's job with
+    it, so an order covering three customers' work arrives with every line
+    already pointing at the right project instead of being sorted out by hand.
+    """
+    from app.models.operation import Project
+    from app.models.price_request import PriceRequest
+    from app.models.purchasing import SupplierPriceRequest
+    from app.models.quotation import Quotation
+
+    spr = await db.get(SupplierPriceRequest, spr_id)
+    if not spr:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Supplier price request not found")
+
+    # Which project each source price request ended up as. A PR reaches a
+    # project through its quotation, or directly.
+    project_for_pr: dict[str, dict] = {}
+    for sid in (spr.source_pr_ids or []):
+        pr = await db.get(PriceRequest, UUID(str(sid)))
+        if not pr:
+            continue
+        proj = await db.scalar(
+            select(Project).where(Project.price_request_id == pr.id,
+                                  Project.is_deleted.is_(False))
+        )
+        if proj is None and pr.quotation_id:
+            proj = await db.scalar(
+                select(Project).where(Project.quotation_id == pr.quotation_id,
+                                      Project.is_deleted.is_(False))
+            )
+        if proj is None:
+            q = await db.scalar(
+                select(Quotation).where(Quotation.price_request_id == pr.id))
+            if q:
+                proj = await db.scalar(
+                    select(Project).where(Project.quotation_id == q.id,
+                                          Project.is_deleted.is_(False)))
+        project_for_pr[str(sid)] = {
+            "price_request_number": pr.number,
+            "project_id": str(proj.id) if proj else None,
+            "project_code": proj.code if proj else None,
+        }
+
+    items, total = [], 0.0
+    for it in (spr.items or []):
+        qty = float(it.get("qty") or 0)
+        unit = float(it.get("quoted_price") or 0)
+        amount = qty * unit
+        total += amount
+        src = project_for_pr.get(str(it.get("source_pr_id")), {})
+        items.append({
+            "line_no": it.get("line_no"),
+            "description": it.get("description"),
+            "qty": qty,
+            "uom": it.get("uom"),
+            "spec": it.get("spec"),
+            "unit_price": unit,
+            "amount": amount,
+            # Where it is going, and where it came from — both travel with the
+            # line so the PO can be built without re-deriving either.
+            "project_id": src.get("project_id"),
+            "project_code": src.get("project_code"),
+            "source_pr_id": it.get("source_pr_id"),
+            "source_pr_number": it.get("source_pr_number") or src.get("price_request_number"),
+            "source_line_no": it.get("source_line_no"),
+            "quote_number": spr.number,
+        })
+
+    projects = sorted({(i["project_id"], i["project_code"]) for i in items
+                       if i["project_id"]})
+    return {
+        "supplier_price_request_id": str(spr.id),
+        "number": spr.number,
+        "supplier_id": str(spr.supplier_id),
+        "quoted_lead_days": spr.quoted_lead_days,
+        "items": items,
+        "total": total,
+        "projects": [{"id": p, "code": code} for p, code in projects],
+        # Lines whose job could not be resolved — usually the deal has not
+        # been won yet, so there is no project to point at. Said plainly
+        # rather than silently dropped.
+        "unassigned_lines": [i["line_no"] for i in items if not i["project_id"]],
+    }
+
+
+@router.get("/po/for-project/{project_id}")
+async def pos_for_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Every supplier order feeding one project, as shipments.
+
+    A job that needed three vendors arrives in three deliveries, and the
+    project's own `est_arrive_*` fields cannot hold three answers. So each PO
+    is a shipment with its own ETA and its own share of the items, numbered in
+    the order they are expected — "shipment 1, 2, 3" — and the latest of them
+    is the date the whole job is actually complete.
+    """
+    from datetime import date as date_t
+
+    from app.models.operation import Project
+    from app.models.purchasing import GoodsReceipt, Supplier, SupplierPO
+
+    project = await db.get(Project, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+
+    rows = list((await db.scalars(
+        select(SupplierPO).where(or_(
+            SupplierPO.project_id == project_id,
+            SupplierPO.project_ids.contains([str(project_id)]),
+        ))
+    )).all())
+    sups = {s.id: s for s in (await db.scalars(
+        select(Supplier).where(
+            Supplier.id.in_({r.supplier_id for r in rows}))))} if rows else {}
+
+    def sort_key(p):
+        return (p.eta or date_t.max, p.created_at)
+
+    rows.sort(key=sort_key)
+    shipments, latest = [], None
+    for n, po in enumerate(rows, 1):
+        mine = [i for i in (po.items or [])
+                if not i.get("project_id")
+                or str(i.get("project_id")) == str(project_id)]
+        received = await db.scalar(
+            select(func.count(GoodsReceipt.id)).where(GoodsReceipt.po_id == po.id))
+        if po.eta and (latest is None or po.eta > latest):
+            latest = po.eta
+        sup = sups.get(po.supplier_id)
+        shipments.append({
+            "shipment_no": n,
+            "po_id": str(po.id),
+            "number": po.number,
+            "status": po.status,
+            "supplier_id": str(po.supplier_id),
+            "supplier_name": sup.name if sup else None,
+            "eta": po.eta,
+            "quoted_lead_days": po.quoted_lead_days,
+            "po_date": po.po_date,
+            "is_shared": len(po.project_ids or []) > 1,
+            "other_projects": [c for c in (po.project_ids or [])
+                               if str(c) != str(project_id)],
+            "received": bool(received),
+            "items": [{
+                "description": i.get("description"),
+                "qty": i.get("qty"),
+                "uom": i.get("uom"),
+                "supplier_name": sup.name if sup else None,
+            } for i in mine],
+            "total_for_project": sum(
+                float(i.get("amount") or 0) or
+                float(i.get("qty") or 0) * float(i.get("unit_price") or 0)
+                for i in mine),
+        })
+
+    return {
+        "project_id": str(project.id),
+        "project_code": project.code,
+        "shipments": shipments,
+        "supplier_count": len({s["supplier_id"] for s in shipments}),
+        # The one date that answers "when is this job actually here": the last
+        # shipment to land. Offered rather than written onto the project, so
+        # the director's promised date stays theirs.
+        "last_eta": latest,
+        "all_received": bool(shipments) and all(s["received"] for s in shipments),
     }
 
 
@@ -671,16 +861,41 @@ async def create_po(
         quote = await db.get(Quotation, project.quotation_id)
         price_request_id = quote.price_request_id if quote else None
 
+    eta_parsed = None
+    if payload.eta:
+        try:
+            eta_parsed = date_t.fromisoformat(payload.eta)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "eta must be YYYY-MM-DD")
+
+    # Lines carry the job they belong to. A line that does not name one is
+    # for the PO's own project, which is every ordinary single-job order.
+    items = [dict(it) for it in (payload.items or [])]
+    project_cache: dict[str, Project] = {str(project.id): project}
+    for it in items:
+        pid = str(it.get("project_id") or payload.project_id)
+        if pid not in project_cache:
+            other = await db.get(Project, UUID(pid))
+            if not other:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"Line names project {pid}, which does not exist")
+            project_cache[pid] = other
+        it["project_id"] = pid
+        it["project_code"] = project_cache[pid].code
+    project_ids = sorted({it["project_id"] for it in items}) or [str(project.id)]
+
     is_director = Role(user.role) == Role.DIRECTOR
     po = SupplierPO(
         number=number,
         supplier_id=payload.supplier_id,
         project_id=payload.project_id,
+        project_ids=project_ids,
         price_request_id=price_request_id,
         po_date=po_date_parsed,
+        eta=eta_parsed,
         quoted_lead_days=payload.quoted_lead_days,
         total=payload.total,
-        items=payload.items,
+        items=items,
         status="open" if is_director else "pending_approval",
     )
     db.add(po)
@@ -764,9 +979,11 @@ async def get_po(
         "project_target_delivery": project.target_delivery if project else None,
         "project_actual_delivery": project.actual_delivery if project else None,
         "po_date": po.po_date,
+        "eta": po.eta,
         "quoted_lead_days": po.quoted_lead_days,
         "total": float(po.total or 0),
         "items": po.items,
+        "project_ids": [str(x) for x in (po.project_ids or [])],
         "created_at": po.created_at,
     }
 
@@ -960,6 +1177,7 @@ async def export_po_excel(
 class POPatch(BaseModel):
     number: str | None = None
     po_date: str | None = None        # ISO YYYY-MM-DD
+    eta: str | None = None            # ISO YYYY-MM-DD — when the vendor says it lands
     quoted_lead_days: int | None = None
     total: float | None = None
     status: str | None = None         # open | received | closed | cancelled
@@ -1016,9 +1234,35 @@ async def update_po(
             date_t.fromisoformat(data["po_date"])
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "po_date must be YYYY-MM-DD")
+    if "eta" in data and data["eta"] not in (None, ""):
+        try:
+            date_t.fromisoformat(data["eta"])
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "eta must be YYYY-MM-DD")
+
+    # The vendor's promised arrival applies straight away, unlike everything
+    # else on this PO. It is not a money decision — it moves whenever the
+    # supplier calls to say the truck slipped a week — and the shipment list on
+    # the project page is only worth reading if purchasing can keep it current.
+    # Queuing it behind the director would mean the dates staff actually plan
+    # around live in WhatsApp again. It is audited instead, and it changes no
+    # customer-facing date: the project's target/actual delivery stay gated in
+    # operation.py, where the customer sees them.
+    if "eta" in data:
+        raw = data.pop("eta")
+        before = po.eta
+        po.eta = None if raw in (None, "") else date_t.fromisoformat(raw)
+        await audit_record(
+            db, actor=user, action="update", entity="supplier_po", entity_id=po.id,
+            before={"eta": before.isoformat() if before else None},
+            after={"eta": po.eta.isoformat() if po.eta else None},
+        )
 
     is_director = Role(user.role) == Role.DIRECTOR
-    if not is_director:
+    # `data` can be empty now if the ETA was the only change — filing an
+    # approval for "no fields" would put a meaningless row in the director's
+    # queue, so fall through to the apply path and return the updated PO.
+    if not is_director and data:
         # Drop the field outright if it would clear an existing date — the
         # rule everywhere else in the app is "null doesn't wipe protected
         # dates". The director can still set a date explicitly.
@@ -1041,7 +1285,7 @@ async def update_po(
             "id": str(po.id), "number": po.number, "status": po.status,
             "supplier_id": str(po.supplier_id),
             "project_id": str(po.project_id) if po.project_id else None,
-            "po_date": po.po_date, "total": float(po.total or 0),
+            "po_date": po.po_date, "eta": po.eta, "total": float(po.total or 0),
             "quoted_lead_days": po.quoted_lead_days, "items": po.items,
             "pending_approval": True,
             "detail": "Submitted for director approval; changes will apply once approved.",
@@ -1067,7 +1311,7 @@ async def update_po(
         "id": str(po.id), "number": po.number, "status": po.status,
         "supplier_id": str(po.supplier_id),
         "project_id": str(po.project_id) if po.project_id else None,
-        "po_date": po.po_date, "total": float(po.total or 0),
+        "po_date": po.po_date, "eta": po.eta, "total": float(po.total or 0),
         "quoted_lead_days": po.quoted_lead_days,
         "items": po.items,
     }

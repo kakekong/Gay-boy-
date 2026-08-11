@@ -169,8 +169,19 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     price_request_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     po_date: Mapped[date | None] = mapped_column(Date)
     quoted_lead_days: Mapped[int | None] = mapped_column()
+    # When this shipment is expected. Per PO rather than per project, because
+    # a job split across three vendors arrives in three deliveries and the
+    # project's own dates cannot hold three answers.
+    eta: Mapped[date | None] = mapped_column(Date)
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    # Lines carry `project_id` / `project_code` and their price-request origin,
+    # so one order to one vendor can cover several jobs — the shipment is one
+    # truck, the jobs are still separate.
     items: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # Every project this PO feeds. `project_id` above is the single-job case
+    # and stays set for it; this is what the project page queries so a
+    # multi-job order shows up on all of them.
+    project_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="open", nullable=False, index=True)
 
 

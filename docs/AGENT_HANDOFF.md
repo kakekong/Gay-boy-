@@ -210,7 +210,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_storage_layout.py` | bucket key layout: grouped by owner type / month / document, user-supplied names can't traverse, and files written under the **old** flat layout still download |
 | `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
-| `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, the cross-department DM gate, chained attribution |
+| `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, forwarding across departments, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |
 | `test_data_import.py` | the other three Accurate imports: the chart of accounts never renames an account already on the books, the parts catalogue admits it has no prices, and the quotation export's two self-inflicted data defects are told apart — one repaired, one left alone — with each sheet's stated subtotal as the proof |
 | `test_import_undo.py` | undoing an import: it removes exactly what that run created, refuses records somebody has since filed work against (naming both), takes them only on a second explicit yes, and never touches a hand-typed record or a different run |
@@ -222,7 +222,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
 | `test_customer_po_sheet.py` | the order-confirmation PDF: ship-to and PIC chosen at download, address fallback, cross-customer contact refused |
 | `test_pr_revisions.py` | negotiation revisions: capped at 3 applied, one pending at a time, a rejection changes nothing and costs nothing |
-| `test_cross_dept_chat.py` | cross-department chat by request: approving opens it, rejecting opens nothing, no duplicate asks |
+| `test_cross_dept_chat.py` | cross-department chat needs no approval: any internal pair may DM and be group members, the director still monitors silently, portal logins still cannot reach an internal inbox, and the old request endpoint no longer files anything |
 | `test_approval_preview.py` | the document preview on an approval request: lines and per-line money, the keterangan, files attached to the *document*, revision before/after, director-only |
 | `test_attendance_alert_window.py` | attendance alerts stay silent before 08:30 **WIB** — includes a threshold that only passes if the comparison isn't done in server/UTC time |
 | `test_mark_read.py` | marking a section's alerts read from its sidebar badge: batched, per-user, tolerant of ids that resolved on their own |
@@ -230,6 +230,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_won_needs_po.py` | Won waits for the customer's PO (the director included), a rejected PO is not evidence, a request signed off after its PO disappeared does not win the deal — and sales is refused every shipping/delivery date outright while purchasing, admin and the director keep their lanes |
 | `test_multi_supplier.py` | the two purchasing shapes: one job split across vendors line by line, several jobs combined onto one vendor, line provenance surviving both, per-line apply, and a customer price request that refuses to go to the director until every line is costed — plus the discussion + attachments on the buy-side request |
 | `test_po_export.py` | the supplier PO as PDF and xlsx: the address the goods leave from, the PIC, the lines, the total, and sales refused both formats |
+| `test_po_shipments.py` | the PO side of the same two shapes: a PO drafted straight off a supplier quote keeps each line's project, one order feeding three jobs shows on all three project pages, a job served by three vendors reads as Shipment 1/2/3 ordered by ETA with the last one as the date that matters, and the per-project total counts only that project's lines |
 | `test_supplier_price_request.py` | asking vendors what they charge: one request per supplier, quotes recorded per line (per-unit or per-line, normalised), the chosen one applied as the cost with its number stamped on the line, a later cheaper quote superseding it, losing quotes kept, and sales locked out of every endpoint |
 | `test_supplier_record.py` | the supplier as a real company record: address + pickup address, the company's line kept separate from each PIC's own, PICs added/edited/removed after the fact, the header editable in place (it used to be write-once), vendor paperwork readable by purchasing but not sales, and rows created before the columns existed still showing their legacy `contact` blob |
 | `test_quotation_layout.py` | where the printed quotation puts things: the totals block sits on the item grid's own rule (measured out of the PDF, not eyeballed), the KETERANGAN panel gets the width that frees up, and a note the sender numbered themselves prints numbered once |
@@ -524,6 +525,43 @@ that drives that (`uncovered`, `fully_costed`). Applying supersedes only
 requests whose lines actually overlap, so two vendors each covering half a job
 are both live at once.
 
+**A supplier PO carries the same provenance forward, one step further.** The
+line knows its job: `SupplierPO.items[*]` carry `project_id` / `project_code`
+alongside the `source_pr_id` they inherited, and the row rolls those up into
+`project_ids` (JSONB, queried with `@>`). `project_id` on the row stays set for
+the ordinary single-job order; `project_ids` is what the project page asks.
+Two endpoints fall out of it:
+
+* `GET /purchasing/po/from-quote/{spr_id}` drafts a PO off a supplier quote —
+  each priced line arrives with its project already resolved through
+  `source_pr_id`, so purchasing confirms rather than re-types. Purchasing can
+  still override any line's project before saving, which is the manual half of
+  the user's "or a more automatic system I suggested in step one".
+* `GET /purchasing/po/for-project/{project_id}` is the project's view of its
+  incoming goods: every PO touching it, **numbered Shipment 1/2/3 by `eta`**
+  (nulls last), with `last_eta` — the date the job is actually complete — and
+  `is_shared` on an order that also feeds other projects. `total_for_project`
+  counts only that project's lines, because a shared truck's grand total is not
+  this job's cost.
+
+`eta` lives on the PO, not the project, for the reason the whole feature
+exists: a job split across three vendors arrives three times, and the project's
+own delivery fields cannot hold three answers. The project page shows the
+shipments; the customer-facing date remains the project's, set by admin.
+
+**`eta` is the one field on a supplier PO that skips the director.** Every
+other change there files an `ApprovalRequest` and leaves the row untouched
+until it is granted (`PATCH /purchasing/po/{id}`). The arrival date applies
+immediately, audited, for purchasing and above — a vendor phoning to say the
+truck slipped a week is news to record, not a decision to approve, and a
+shipment list nobody can correct is one nobody reads. Mixing it with a gated
+field in one PATCH does both things: the ETA lands, the rest still queues.
+Sales is refused it like every other delivery date. Two places would otherwise
+contradict each other and are wired to the same value: the PO page's
+*Shipping & ETA* panel prefers the quoted date over `po_date + lead_days` (and
+labels which it showed), and the shipments card says "not complete before"
+rather than naming a completion date when any shipment is still undated.
+
 **A price request has a buy side now, and it is a separate document.**
 `PriceRequest` (PR-…) is the sell side: what a customer wants, what it costs
 us, what we charge. `SupplierPriceRequest` (SPR-…, `supplier_price_requests`,
@@ -773,6 +811,24 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Show a job's shipments, and let anyone chat across departments
+Split one order across suppliers, and combine several onto one
+A way out of every dialog, and a purchase order you can send
+Let purchasing add a supplier
+Win a deal on the customer's PO, and keep delivery dates off sales
+Ask suppliers what they charge, on the purchasing page
+Make the supplier a real company record, like the customer
+Type quotation notes on the quotation page, not in the edit form
+Put the quotation's price block behind the column rule
+Move one quotation's rep, and let the rep work the director's quotations
+Give a user a contact address and a signature, and put both on the documents
+Make rejection recoverable, and say why it happened
+Let sales write notes, and make the account's rep own its paperwork
+Scope sales by the customer they own, not only the documents naming them
+Let the director change a cost or a price after the request has settled
+Drop the KPI strip from the dashboard
+Make the customer list countable: numbers, paging, and a stable order
+Keep the rep name the import file carried, and assign by it
 Let the director change which sales rep is in charge of a customer
 Make an import undoable in one action, and refuse the parts that aren't
 Ask which address to print on before exporting
@@ -818,7 +874,12 @@ data purge, director-editable price requests with capped negotiation revisions,
 the customer-PO keterangan and order confirmation sheet, cross-department chat
 by request, document previews in the approval inbox, a director-only
 customer importer for the old Accurate data, an address picker on every
-export, and director-controlled customer ownership.
+export, director-controlled customer ownership, the supplier as a full company
+record with its own PICs, the buy-side supplier price request (splittable
+across vendors, joinable across jobs, with its own discussion and attachments),
+Won gated on the customer's PO, delivery dates taken off sales, a close button
+on every dialog, the supplier PO as PDF/Excel, per-project shipments on a
+multi-vendor job, and cross-department chat with no approval at all.
 
 ## 10. Open items
 
@@ -853,7 +914,17 @@ export, and director-controlled customer ownership.
 - **The Hugging Face Space still needs a manual rebuild.** A large batch of
   backend fixes (security lockdown, money integrity, stale queues, approval
   gates, outstanding-AR netting) is pushed but **not live** until the user
-  rebuilds. Remind them.
+  rebuilds. Remind them. The newest batch also carries **schema work**, which
+  only lands on that rebuild because `seed.py` runs it at boot: new tables
+  `supplier_contacts` and `supplier_price_requests`, and new columns on
+  `suppliers` (addresses, phone/whatsapp/email),
+  `supplier_price_requests.source_pr_ids`, `supplier_pos.eta` and
+  `supplier_pos.project_ids`. Until it happens the purchasing price request and
+  the shipments card 500 in production.
+- **Pending `cross_dept_chat` approvals in production are now meaningless.**
+  Chat no longer needs the director's sign-off, but requests filed under the
+  old rule are still sitting in the queue. They can be approved or rejected —
+  either way the DM is already open. I did not touch live data.
 - **Rebuilding the local scratch environment.** A fresh container has neither
   the Postgres data directory nor the Python packages. Before any driver runs:
   `initdb -D /tmp/pgdata_test -U postgres -A trust` (as `nobody`) then the

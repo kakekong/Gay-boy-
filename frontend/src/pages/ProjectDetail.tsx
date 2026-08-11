@@ -848,6 +848,10 @@ export default function ProjectDetailPage() {
       <ShippingTimeline projectId={p.id} />
       {canSeeOpsDetails && <ShippingTimelineEditor projectId={p.id} />}
 
+      {/* One row per supplier order feeding this job — the answer to "when is
+          it here" when three vendors are bringing three parts of it. */}
+      {canSeeOpsDetails && <SupplierShipments projectId={p.id} />}
+
       {/* Price request (the approved order behind this project) */}
       {priceReq && canSeeOpsDetails && (
         <div className="card overflow-hidden">
@@ -2065,6 +2069,135 @@ function EditableTextField({
         }}
         className="mt-1 w-full bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm py-0.5 px-0 disabled:opacity-50"
       />
+    </div>
+  );
+}
+
+/**
+ * Every supplier order feeding this job, as the deliveries they actually are.
+ *
+ * A job nobody could fill on their own arrives in pieces: the chain from one
+ * vendor, the sprockets from another, on different trucks on different days.
+ * The project's own `est_arrive_*` fields hold one answer, so this is where
+ * the several live — numbered in the order they are expected, each naming the
+ * vendor bringing it and the items on it.
+ *
+ * An order can also be *shared*: one vendor filling three customers' jobs on
+ * one truck. Then it appears on all three project pages, marked, showing only
+ * that job's share — because the rest of what is on that truck is somebody
+ * else's and does not belong on this page.
+ */
+function SupplierShipments({ projectId }: { projectId: string }) {
+  const t = useT();
+  const q = useQuery({
+    queryKey: ["project-shipments", projectId],
+    queryFn: () => api.get(`/purchasing/po/for-project/${projectId}`)
+      .then((r) => r.data as any),
+    retry: false,
+  });
+  // Purchasing-side data; sales and anyone without the PO scope just gets a
+  // 403 and the card stays out of the way rather than showing an error.
+  if (q.error || !q.data || !(q.data.shipments ?? []).length) return null;
+  const s = q.data;
+
+  return (
+    <div className="card overflow-hidden">
+      <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2 flex-wrap">
+        <Truck size={15} className="text-brand-600" />
+        <span className="font-semibold">{t("Incoming shipments", "Pengiriman masuk")}</span>
+        <span className="text-xs muted">
+          {s.shipments.length}{" "}
+          {s.shipments.length === 1
+            ? t("delivery", "pengiriman")
+            : t("deliveries", "pengiriman")}
+          {s.supplier_count > 1 && (
+            <> · {s.supplier_count} {t("suppliers", "pemasok")}</>
+          )}
+        </span>
+        {s.last_eta && (() => {
+          // The latest ETA is only the completion date if every shipment has
+          // one. With a supplier who hasn't committed to a date, the honest
+          // reading is "not before this" — a job is not complete while one of
+          // its trucks is unscheduled, and printing a firm date here is how a
+          // customer gets promised a week that nobody actually holds.
+          const undated = s.shipments.filter((sh: any) => !sh.eta).length;
+          return (
+            <span className="ml-auto text-xs">
+              <span className="muted">
+                {undated
+                  ? t("not complete before", "tidak lengkap sebelum")
+                  : t("complete when the last lands", "lengkap saat yang terakhir tiba")}:{" "}
+              </span>
+              <span className="font-medium tabular-nums">{s.last_eta}</span>
+              {undated > 0 && (
+                <span className="ml-1 chip bg-amber-50 text-amber-700">
+                  {undated} {undated === 1
+                    ? t("shipment has no date", "pengiriman belum ada tanggal")
+                    : t("shipments have no date", "pengiriman belum ada tanggal")}
+                </span>
+              )}
+            </span>
+          );
+        })()}
+      </header>
+      <ul className="divide-y divide-ink-100">
+        {s.shipments.map((sh: any) => (
+          <li key={sh.po_id} className="p-4 flex items-start gap-3 flex-wrap">
+            <div className="h-8 w-8 rounded-full bg-brand-100 text-brand-700 grid place-items-center text-sm font-semibold shrink-0">
+              {sh.shipment_no}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Named, not just numbered. A circled "2" beside a vendor is
+                    ambiguous — the word is what makes "it comes in three
+                    shipments" readable at a glance. */}
+                <span className="font-semibold">
+                  {t("Shipment", "Pengiriman")} {sh.shipment_no}
+                </span>
+                <Link to={`/purchase-orders/${sh.po_id}`}
+                  className="font-mono text-xs text-brand-700 hover:underline">
+                  {sh.number}
+                </Link>
+                <span className="font-medium">{sh.supplier_name}</span>
+                <span className="chip bg-ink-100 text-ink-700 uppercase">{sh.status}</span>
+                {sh.is_shared && (
+                  <span className="chip bg-amber-50 text-amber-700"
+                    title={t("This truck also carries another job's goods",
+                             "Truk ini juga membawa barang pekerjaan lain")}>
+                    {t("shared truck", "satu truk bersama")}
+                  </span>
+                )}
+                {sh.received && (
+                  <span className="chip bg-emerald-50 text-emerald-700">
+                    {t("received", "diterima")}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 text-xs text-ink-600">
+                {sh.items.map((i: any, n: number) => (
+                  <span key={n}>
+                    {n > 0 && " · "}
+                    {i.description}{" "}
+                    {/* A line whose UoM was never filled in must not print
+                        "(2 )" with a hole where the unit goes. */}
+                    <span className="muted">({i.qty}{i.uom ? ` ${i.uom}` : ""})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-[10px] uppercase tracking-wider muted">
+                {t("Expected", "Perkiraan")}
+              </div>
+              <div className="tabular-nums text-sm">
+                {sh.eta ?? (sh.quoted_lead_days != null
+                  ? `${sh.quoted_lead_days} ${t("days", "hari")}`
+                  : "—")}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

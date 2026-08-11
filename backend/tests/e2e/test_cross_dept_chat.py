@@ -1,18 +1,29 @@
-"""Cross-department chat by request instead of a flat refusal.
+"""Talking to a colleague is not a decision.
 
-The old rule was a dead end: anyone below director/manager/HR simply could not
-start a conversation with another department. The intent is right — the
-director wants to see cross-team traffic — but a blocked conversation doesn't
-stop happening, it just moves to WhatsApp where nobody can oversee it at all.
+Cross-department chat used to need the director's approval: anyone below
+director/manager/HR filed a request and waited before they could message
+someone on another team. That was a request, then a queue, then an approval,
+for a conversation.
 
-So it becomes a request. What has to hold:
+It was already the second version of this rule. The first was a flat refusal;
+that got replaced by request-and-approve because a blocked conversation does
+not stop happening, it moves to WhatsApp where nobody can oversee it. The same
+argument finishes the job: the work crosses those lines constantly — purchasing
+asks sales what the customer actually wants, finance asks admin where an
+invoice went — and a queue in front of it just moves the conversation off the
+system again.
 
-* Approving actually **opens the conversation**, and both sides can then use it
-  without asking again — the gate is about starting one.
-* Rejecting opens nothing, and the requester can see that it was refused.
-* Nobody can spam the queue with the same request twice.
-* A conversation that never needed approval still opens immediately, so the
-  button never claims to have asked when it just opened a chat.
+So it opens. What has to still hold:
+
+* **Oversight, not permission.** The director still sees cross-department
+  channels and can read them silently. Knowing what was said is the part worth
+  keeping; gating whether it may be said was not.
+* **Externals stay out.** A customer or supplier portal login must never reach
+  an internal person's inbox. That is not governance, it is the tenancy
+  boundary, and it is enforced in the policy as well as by the router.
+* **The old asking endpoint still answers**, because the button that calls it
+  is still on somebody's screen until the frontend catches up — it just opens
+  the conversation now instead of filing anything.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -24,7 +35,7 @@ def check(n,c,d=""):
     (PASS if c else FAIL).append(n); print(("  PASS " if c else "  FAIL ")+n+(f"  [{d}]" if d and not c else ""))
 def J(r):
     try: return r.json()
-    except: return {"_":r.text[:200]}
+    except Exception: return {"_":r.text[:200]}
 async def login(c,e):
     r=await c.post("/auth/login",json={"email":e,"password":"test-pass-123"})
     return {"Authorization":f"Bearer {r.json()['access_token']}"}
@@ -50,104 +61,105 @@ async def main():
     s_email, sales = await mkuser("xsales", "sales")
     f_email, fin = await mkuser("xfin", "finance")
     s2_email, sales2 = await mkuser("xsales2", "sales")
+    # Deliberately the existing demo account rather than a fresh one: a
+    # second user with the same role pollutes role-keyed pickers in other
+    # drivers sharing this database.
+    pur = await login(c, "purchasing@demo.local")
 
     ids = {u["full_name"]: u["id"] for u in J(await c.get("/chat/contacts", headers=d))}
     fin_id = ids[f"Xfin {tag}"]
     sales2_id = ids[f"Xsales2 {tag}"]
+    pur_id = next(u["id"] for u in J(await c.get("/chat/contacts", headers=d))
+                  if u.get("role") == "purchasing"
+                  and u["full_name"] == "Purchasing Demo")
+    sales_id = ids[f"Xsales {tag}"]
 
-    # ── 1. same department needs no approval ─────────────────────────────────
-    r = J(await c.post("/chat/cross-dept-request", headers=sales,
-                       json={"user_id": sales2_id}))
-    check("a same-department chat opens straight away", r.get("already_open") is True, str(r))
-    check("...and hands back the channel", bool(r.get("channel_id")), str(r))
-
-    # ── 2. crossing departments is refused, but points somewhere ─────────────
+    # ══ it just opens ════════════════════════════════════════════════════════
+    print("\n── a sales rep messages finance ──")
     r = await c.post(f"/chat/dm/{fin_id}", headers=sales)
-    check("opening a cross-department DM directly is still refused",
-          r.status_code == 403, str(r.status_code))
-    check("...and the message tells you to ask the director",
-          "director" in r.text.lower(), r.text[:160])
+    check("the conversation opens, with nobody asked", r.status_code == 200,
+          f"{r.status_code} {r.text[:160]}")
+    chan = J(r).get("id")
+    check("...handing back the channel", bool(chan), str(J(r))[:150])
 
-    # ── 3. the request ───────────────────────────────────────────────────────
+    r = await c.post(f"/chat/channels/{chan}/messages", headers=sales,
+                     json={"body": f"invoice status? {tag}"})
+    check("...and they can actually say something", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:150])
+    rows = J(await c.get(f"/chat/channels/{chan}/messages", headers=fin))
+    rows = rows if isinstance(rows, list) else rows.get("data", [])
+    check("...which the other side reads",
+          any(f"invoice status? {tag}" in (m.get("body") or "") for m in rows),
+          str(rows)[:200])
+    r = await c.post(f"/chat/channels/{chan}/messages", headers=fin,
+                     json={"body": f"paid friday {tag}"})
+    check("...and answers", r.status_code == 201, f"{r.status_code} {J(r)}"[:150])
+
+    print("\n── every other pairing too ──")
+    for who, hdr, target, label in (
+        ("purchasing → sales", pur, sales_id, "purchasing to sales"),
+        ("sales → purchasing", sales, pur_id, "sales to purchasing"),
+        ("finance → purchasing", fin, pur_id, "finance to purchasing"),
+    ):
+        r = await c.post(f"/chat/dm/{target}", headers=hdr)
+        check(f"{who} opens straight away", r.status_code == 200,
+              f"{r.status_code} {r.text[:140]}")
+
+    r = await c.post(f"/chat/dm/{sales2_id}", headers=sales)
+    check("a same-department chat is unaffected", r.status_code == 200,
+          str(r.status_code))
+
+    # ══ the old asking endpoint ══════════════════════════════════════════════
+    print("\n── the button that used to file a request ──")
     r = await c.post("/chat/cross-dept-request", headers=sales,
                      json={"user_id": fin_id, "reason": "need the payment status"})
-    check("sales can ask for the conversation", r.status_code == 200, J(r))
-    check("...and it is not open yet", J(r).get("already_open") is False, str(J(r)))
-    req_id = J(r).get("approval_request_id")
+    check("still answers rather than 404ing", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+    check("...saying the conversation is open", J(r).get("already_open") is True,
+          str(J(r))[:150])
+    check("...and pointing at the same channel it already opened",
+          J(r).get("channel_id") == chan, f"{J(r).get('channel_id')} vs {chan}")
 
-    r2 = await c.post("/chat/cross-dept-request", headers=sales, json={"user_id": fin_id})
-    check("asking twice is refused", r2.status_code == 409, str(r2.status_code))
+    pending = J(await c.get("/chat/cross-dept-requests", headers=sales))
+    pending = pending if isinstance(pending, list) else pending.get("data", [])
+    check("nothing was filed for anybody to decide",
+          not [x for x in pending if x.get("status") == "pending"], str(pending)[:200])
 
-    mine = J(await c.get("/chat/cross-dept-requests", headers=sales))
-    check("the requester can see it pending",
-          any(x["status"] == "pending" and x["with_user_id"] == fin_id for x in mine),
-          str(mine)[:200])
+    inbox = J(await c.get("/approvals", headers=d))
+    inbox = inbox if isinstance(inbox, list) else inbox.get("data", [])
+    check("...and the director's queue stays clear of chat requests",
+          not [x for x in inbox if x.get("target_type") == "cross_dept_chat"
+               and str(x.get("requested_by")) == str(ids.get(f"Xsales {tag}"))],
+          str([x.get("target_type") for x in inbox])[:200])
 
-    q = J(await c.get("/approvals", headers=d))
-    row = [a for a in q if str(a.get("id")) == str(req_id)] if isinstance(q, list) else []
-    check("it lands in the director's queue", len(row) == 1, str(len(row)))
-    check("...naming both people and the reason",
-          all(w in (row[0].get("reason") or "") for w in ("Xsales", "Xfin", "payment status"))
-          if row else False, str(row[0].get("reason") if row else None))
+    # ══ what did not change ══════════════════════════════════════════════════
+    print("\n── the oversight that was the point ──")
+    seen = J(await c.get("/chat/monitor", headers=d))
+    seen = seen if isinstance(seen, list) else seen.get("data", [])
+    check("the director still sees cross-department channels",
+          any(str(x.get("id")) == str(chan) for x in seen), str(seen)[:250])
+    r = await c.get(f"/chat/channels/{chan}/messages", headers=d)
+    check("...and can read them without joining", r.status_code == 200,
+          str(r.status_code))
 
-    # Still nothing open while it waits.
-    ch = J(await c.get("/chat/channels", headers=sales))
-    check("no conversation exists while it waits",
-          not any(f"Xfin {tag}" == (x.get("title") or "") for x in ch), str(len(ch)))
-
-    # ── 4. approving opens it ────────────────────────────────────────────────
-    r = await c.post(f"/approvals/{req_id}/approve", headers=d)
-    check("the director approves it", r.status_code == 200, J(r))
-    check("...and the response says a channel was opened",
-          bool((J(r).get("applied") or {}).get("channel_id")), str(J(r))[:200])
-
-    ch = J(await c.get("/chat/channels", headers=sales))
-    opened = [x for x in ch if (x.get("title") or "") == f"Xfin {tag}"]
-    check("the conversation is now in the requester's list", len(opened) == 1, str(len(opened)))
-    if opened:
-        cid = opened[0]["id"]
-        r = await c.post(f"/chat/channels/{cid}/messages", headers=sales,
-                         json={"body": f"hello from sales [{tag}]"})
-        check("the requester can actually message in it", r.status_code == 201, J(r))
-        msgs = J(await c.get(f"/chat/channels/{cid}/messages", headers=fin))
-        check("and the other side sees it",
-              any(f"hello from sales [{tag}]" == m["body"] for m in msgs), str(msgs)[:160])
-        # The gate is about *starting* — now it exists, no more asking.
-        r = await c.post(f"/chat/dm/{fin_id}", headers=sales)
-        check("reopening it needs no further approval", r.status_code == 200, J(r))
-
-    mine = J(await c.get("/chat/cross-dept-requests", headers=sales))
-    check("the requester sees it approved",
-          any(x["with_user_id"] == fin_id and x["status"] == "approved" for x in mine),
-          str(mine)[:200])
-
-    # ── 5. rejection opens nothing ───────────────────────────────────────────
-    a_email, adm = await mkuser("xadm", "admin")
-    adm_id = {u["full_name"]: u["id"]
-              for u in J(await c.get("/chat/contacts", headers=d))}[f"Xadm {tag}"]
-    r = J(await c.post("/chat/cross-dept-request", headers=sales,
-                       json={"user_id": adm_id, "reason": "no"}))
-    rej_id = r.get("approval_request_id")
-    check("a second request can be raised for a different person", bool(rej_id), str(r))
-    await c.post(f"/approvals/{rej_id}/reject", headers=d, params={"notes": "use the group"})
-    ch = J(await c.get("/chat/channels", headers=sales))
-    check("a rejected request opens no conversation",
-          not any((x.get("title") or "") == f"Xadm {tag}" for x in ch),
-          str([x.get("title") for x in ch])[:160])
-    mine = J(await c.get("/chat/cross-dept-requests", headers=sales))
-    check("the requester sees it was refused",
-          any(x["with_user_id"] == adm_id and x["status"] == "rejected" for x in mine),
-          str(mine)[:200])
-    check("...with the director's note",
-          any("use the group" in (x.get("decision_notes") or "") for x in mine),
-          str(mine)[:240])
-
-    # And asking again after a refusal is allowed — circumstances change.
-    r = await c.post("/chat/cross-dept-request", headers=sales, json={"user_id": adm_id})
-    check("you may ask again after a refusal", r.status_code == 200, J(r))
+    print("\n── and the boundary that is not governance ──")
+    from app.core.db import SessionLocal
+    from app.services.chat_policy import may_start_cross_dept
+    check("a customer portal login may never start one",
+          may_start_cross_dept("customer") is False)
+    check("...nor a supplier one", may_start_cross_dept("supplier") is False)
+    check("...while every internal role may",
+          all(may_start_cross_dept(r) for r in
+              ("sales", "purchasing", "finance", "admin", "hr", "manager",
+               "director")))
+    r = await c.post(f"/chat/dm/{fin_id}", headers={"Authorization": "Bearer nope"})
+    check("an unauthenticated caller gets nowhere", r.status_code in (401, 403),
+          str(r.status_code))
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
+    if FAIL:
+        print("FAILED:", FAIL); sys.exit(1)
 
 
 asyncio.run(main())

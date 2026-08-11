@@ -54,9 +54,27 @@ def is_cross_dept(roles) -> bool:
 
 
 def may_start_cross_dept(role: str | None) -> bool:
-    # Director, HR and managers may start cross-department chats. When HR or a
-    # manager does, the director is notified and can view it silently.
-    return role in ("director", "hr", "manager")
+    """Everyone internal. Talking to a colleague is not a decision.
+
+    This used to be director/HR/manager only, and everybody else had to file a
+    request and wait for the director to approve a *conversation*. In a company
+    this size that is friction with nothing on the other side of it: the work
+    already crosses those lines constantly — purchasing asks sales what the
+    customer actually wants, finance asks admin where an invoice went — and
+    making them ask permission first just meant the conversation happened on
+    WhatsApp instead, where nobody can oversee it at all.
+
+    Oversight stays: the director still sees cross-department channels through
+    `monitor_cross_dept` and can read them silently. That is the part worth
+    keeping — knowing what was said, rather than gating whether it may be said.
+
+    The external portal roles are excluded, and that is not governance: a
+    customer or supplier login must never reach an internal person's inbox.
+    The router already blocks them at tier 0; this is the same rule stated
+    where the policy lives, so a future caller outside that router cannot
+    quietly open one.
+    """
+    return role not in (None, "customer", "supplier")
 
 
 async def channel_member_roles(db: AsyncSession, channel_id: UUID) -> list[str]:
@@ -262,13 +280,19 @@ async def deliver_forward(
 
 async def request_cross_dept_chat(db: AsyncSession, *, me: User, other: User,
                                   reason: str | None) -> dict:
-    """Ask the director to open a conversation that crosses departments.
+    """Open a conversation that crosses departments.
 
-    The rule used to be a flat no for everyone below director/manager/HR, which
-    is the right default and a dead end in practice — people genuinely need to
-    talk across teams, and a blocked conversation just moves to WhatsApp where
-    nobody can oversee it. So it becomes a request the director decides, and
-    approving it opens the DM.
+    Vestigial, and deliberately kept. The rule was once a flat no below
+    director/manager/HR, then a request the director approved, and is now no
+    gate at all (`may_start_cross_dept`). This endpoint therefore takes the
+    early return below every time for an internal caller: it opens the DM and
+    reports `already_open`, so an older client still holding the "Ask the
+    director" button does the useful thing instead of erroring.
+
+    The approval branch underneath is unreachable for internal roles and is
+    left in place because `approvals.py` and `core/approval.py` still know how
+    to decide a `cross_dept_chat` request — production has pending ones from
+    before the rule changed, and they must still resolve.
     """
     if other.id == me.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That is you")

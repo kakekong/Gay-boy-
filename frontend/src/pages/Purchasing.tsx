@@ -1107,6 +1107,9 @@ function NewPOModal({
   const [poNumber, setPoNumber] = useState("");
   const [poDate, setPoDate] = useState(new Date().toISOString().slice(0, 10));
   const [leadDays, setLeadDays] = useState("");
+  // Blank on purpose: an ETA guessed at PO time is worse than no ETA, because
+  // the project page presents it as the date this shipment lands.
+  const [eta, setEta] = useState("");
   const [total, setTotal] = useState("");
   const [totalEdited, setTotalEdited] = useState(false);
   const [description, setDescription] = useState("");
@@ -1145,6 +1148,7 @@ function NewPOModal({
       project_id: projectId,
       number: poNumber.trim() || null,
       po_date: poDate || null,
+      eta: eta || null,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
       total: total ? Number(total) : 0,
       price_request_id: linkedPR,
@@ -1337,6 +1341,17 @@ function NewPOModal({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Expected arrival (ETA)")}</span>
+              <input
+                type="date"
+                className="input"
+                value={eta}
+                onChange={(e) => setEta(e.target.value)}
+              />
+              <span className="block text-[10px] text-ink-400 mt-1">
+                {T("When this order lands. The project lists it as a shipment on this date; leave blank if the supplier hasn't said.")}</span>
+            </label>
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">{T("Lead time (days)")}</span>
               <input

@@ -366,8 +366,8 @@ A month grid aggregating the same material with identical role routing and purch
 ## 11. Chat & discussions
 
 - **Chat** (internal): DMs and named group channels with unread badges in the sidebar and header.
-  - **Cross-department DMs** can only be *started* by a director, manager, or HR — peers within a department chat freely.
-  - The **director has a monitor mode**: silently read (not join) cross-department conversations; a digest of cross-dept activity appears in their bell.
+  - **Any internal account can DM any other**, across departments, with no approval. This used to need the director's sign-off; it doesn't, because gating whether a conversation may happen only pushed it onto WhatsApp. External portal logins (customer, supplier) still cannot reach an internal inbox.
+  - The **director has a monitor mode**: silently read (not join) cross-department conversations; a digest of cross-dept activity appears in their bell. That oversight is what was kept — knowing what was said, rather than approving that it may be said.
   - Messages can be edited/deleted (soft-delete leaves "message deleted").
   - On phones the chat is **WhatsApp-style**: full-screen list, tap opens a full-screen thread with a back arrow, composer pinned to the bottom.
   - Every message triggers an instant device push to the other members (§10.4).

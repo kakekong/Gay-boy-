@@ -392,6 +392,12 @@ COLUMN_MIGRATIONS: list[str] = [
     # price_request_id is no longer the whole story.
     "ALTER TABLE supplier_price_requests ADD COLUMN IF NOT EXISTS "
     "source_pr_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
+
+    # A supplier PO is one shipment with its own ETA, and one order to one
+    # vendor can cover several projects (one truck, several jobs).
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS eta DATE",
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS "
+    "project_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
 ]
 
 

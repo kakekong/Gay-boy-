@@ -90,7 +90,7 @@ export const ID_STATIC: Record<string, string> = {
   "Amount claimed": "Jumlah yang diklaim",
   "An internal team requests materials they need against a project. A PR commits no money — it signals demand so purchasing can source it.": "Tim internal meminta material yang mereka butuhkan untuk sebuah proyek. PR tidak mengikat uang — ia menandakan kebutuhan agar pembelian bisa mencarikannya.",
   "Approval inbox": "Kotak masuk persetujuan",
-  "Approval required for every change": "Setiap perubahan butuh persetujuan",
+  "Changes here need the director — except the ETA": "Perubahan di sini butuh direktur — kecuali ETA",
   "Approve": "Setujui",
   "Approved": "Disetujui",
   "Approved invoices with a faktur pajak number, as an e-Faktur import CSV for the chosen masa pajak.": "Invoice yang disetujui dan bernomor faktur pajak, sebagai CSV impor e-Faktur untuk masa pajak yang dipilih.",
@@ -174,6 +174,7 @@ export const ID_STATIC: Record<string, string> = {
   "Conditional": "Bersyarat",
   "Confirm what arrived against a supplier PO.": "Konfirmasi barang yang tiba terhadap PO pemasok.",
   "Contact": "Kontak",
+  "Contact email": "Email kontak",
   // Price requests to suppliers — the buy side of the pricing workflow.
   "Price requests": "Permintaan harga",
   "Price requests to suppliers": "Permintaan harga ke pemasok",
@@ -182,6 +183,9 @@ export const ID_STATIC: Record<string, string> = {
     "Harga yang Anda tanyakan ke tiap pemasok, dan jawabannya. Terapkan yang Anda ambil sebagai biaya pada permintaan harga yang dibiayai.",
   "One request per supplier, so you can put their answers side by side.":
     "Satu permintaan per pemasok, agar jawabannya bisa dibandingkan berdampingan.",
+  // Step 2 — the shipments a job actually arrives in.
+  "For project": "Untuk proyek",
+
   "Which price requests are you costing?":
     "Permintaan harga mana yang Anda biayai?",
   "Tick more than one to send a vendor several jobs as a single order — they arrive on one truck, so they are one conversation.":
@@ -196,7 +200,6 @@ export const ID_STATIC: Record<string, string> = {
   "Pick at least one line, or this vendor gets a blank sheet.":
     "Pilih minimal satu baris, atau pemasok ini menerima lembar kosong.",
   "also asked of": "juga ditanyakan ke",
-  "of": "dari",
   "Who are you asking?": "Siapa yang Anda tanya?",
   "Search suppliers…": "Cari pemasok…",
   "No suppliers match.": "Tidak ada pemasok yang cocok.",
@@ -310,7 +313,6 @@ export const ID_STATIC: Record<string, string> = {
   "Delivery (landing)": "Pengiriman (landing)",
   "Description": "Deskripsi",
   "Description (optional)": "Deskripsi (opsional)",
-  "Different department — asks the director first": "Departemen berbeda — minta izin direktur dulu",
   "Direct message": "Pesan langsung",
   "Direct messages between employees. Polls every 5 seconds for new messages.": "Pesan langsung antar karyawan. Mengecek pesan baru setiap 5 detik.",
   "Direction": "Arah",
@@ -325,6 +327,8 @@ export const ID_STATIC: Record<string, string> = {
   "Documents waiting for your decision": "Dokumen menunggu keputusan Anda",
   "Done": "Selesai",
   "Download": "Unduh",
+  "Download as PDF": "Unduh sebagai PDF",
+  "Download as Excel": "Unduh sebagai Excel",
   "Drag any card to a different stage to move the deal. Sales sees only their own customers.": "Seret kartu ke tahap lain untuk memindahkan deal. Sales hanya melihat pelanggannya sendiri.",
   "Drawing": "Gambar teknik",
   "Drawing PDF required": "PDF gambar teknik wajib diisi",
@@ -338,7 +342,10 @@ export const ID_STATIC: Record<string, string> = {
   "Edit": "Ubah",
   "Edit item": "Ubah barang",
   "Edit items": "Ubah barang",
-  "Edits you make here are queued for director approval. The PO won't show your change until the director approves it from the Approvals page.": "Perubahan yang Anda buat di sini masuk antrean persetujuan direktur. PO tidak akan menampilkan perubahan Anda sampai direktur menyetujuinya dari halaman Persetujuan.",
+  "Edits you make here are queued for director approval, and the PO won't show them until it's granted from the Approvals page. The expected arrival is the exception: it saves straight away, so the project's shipment list stays current when a supplier moves their date.": "Perubahan yang Anda buat di sini masuk antrean persetujuan direktur, dan PO tidak akan menampilkannya sampai disetujui dari halaman Persetujuan. Perkiraan kedatangan adalah pengecualian: langsung tersimpan, sehingga daftar pengiriman proyek tetap terkini saat pemasok mengubah tanggalnya.",
+  "Expected arrival (ETA)": "Perkiraan kedatangan (ETA)",
+  "Shows on the project as this shipment's date": "Tampil di proyek sebagai tanggal pengiriman ini",
+  "When this order lands. The project lists it as a shipment on this date; leave blank if the supplier hasn't said.": "Kapan pesanan ini tiba. Proyek mencatatnya sebagai pengiriman pada tanggal ini; kosongkan bila pemasok belum memberi tahu.",
   "Email": "Email",
   "Login email *": "Email login *",
   "Employee": "Karyawan",
@@ -973,7 +980,6 @@ export const ID_STATIC: Record<string, string> = {
   "Viewing as": "Melihat sebagai",
   "Viewing cross-dept chats": "Melihat obrolan lintas departemen",
   "Volatility": "Fluktuasi",
-  "Waiting for the director to approve this conversation": "Menunggu direktur menyetujui percakapan ini",
   "Waiting on director approval": "Menunggu persetujuan direktur",
   "Warehouse ETA": "ETA gudang",
   "Warehousing": "Pergudangan",
@@ -1004,8 +1010,6 @@ export const ID_STATIC: Record<string, string> = {
   "active": "aktif",
   "all open quotations": "semua penawaran terbuka",
   "approval": "persetujuan",
-  "ask director": "minta direktur",
-  "asked": "sudah diminta",
   "available": "tersedia",
   "base:": "dasar:",
   "build": "build",
