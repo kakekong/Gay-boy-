@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ModalCloseX } from "@/components/ModalCloseX";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Undo2, Loader2, History, AlertTriangle, CheckCircle2, Link2,
@@ -185,6 +186,7 @@ export default function ImportRuns() {
           <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm"
                onClick={() => setOpenId(null)} />
           <div className="relative w-full max-w-lg bg-white dark:bg-ink-800 rounded-2xl
+            <ModalCloseX onClose={() => setOpenId(null)} />
                           shadow-card max-h-[85vh] overflow-y-auto">
             <header className="p-4 border-b border-ink-100 dark:border-white/10
                                flex items-center gap-2">

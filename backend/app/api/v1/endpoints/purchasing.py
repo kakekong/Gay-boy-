@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval, require_pr_approval
+from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
@@ -768,6 +769,192 @@ async def get_po(
         "items": po.items,
         "created_at": po.created_at,
     }
+
+
+# ─── Printing a supplier PO ──────────────────────────────────────────────────
+#
+# A purchase order that only exists on a screen is one somebody has to retype
+# into an email. Two formats because they are used differently: the PDF is
+# what gets sent to the vendor, the spreadsheet is what gets pasted into a
+# stock sheet or a payment schedule.
+
+
+async def _po_print_bundle(po_id: UUID, db: AsyncSession) -> dict:
+    """Everything the two exporters need, gathered once."""
+    from app.models.operation import Project
+    from app.models.purchasing import Supplier, SupplierContact, SupplierPO
+
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    supplier = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    project = await db.get(Project, po.project_id) if po.project_id else None
+    pic = None
+    if supplier:
+        pic = await db.scalar(
+            select(SupplierContact)
+            .where(SupplierContact.supplier_id == supplier.id)
+            .order_by(SupplierContact.is_primary.desc(),
+                      SupplierContact.created_at.asc())
+            .limit(1)
+        )
+    return {"po": po, "supplier": supplier, "project": project, "pic": pic}
+
+
+@router.get("/po/{po_id}/export.pdf")
+async def export_po_pdf(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_purchasing_or_director),
+):
+    from fastapi.responses import Response
+
+    from app.services.signature import load_for
+    from app.services.supplier_po_pdf import build_supplier_po_pdf
+
+    b = await _po_print_bundle(po_id, db)
+    po, supplier, project, pic = b["po"], b["supplier"], b["project"], b["pic"]
+
+    # Where the goods come from: the warehouse if they gave one, because that
+    # is the gate the truck actually pulls up to, otherwise the office.
+    supplier_address = ""
+    if supplier:
+        supplier_address = (supplier.warehouse_address
+                            or supplier.company_address or "")
+
+    rows = []
+    for it in (po.items or []):
+        qty = float(it.get("qty") or 0)
+        unit = float(it.get("unit_price") or 0)
+        rows.append({
+            "description": it.get("description"),
+            "qty": qty, "uom": it.get("uom"),
+            "unit_price": unit,
+            "amount": float(it.get("amount") or qty * unit),
+        })
+
+    pdf = build_supplier_po_pdf(
+        number=po.number,
+        po_date=po.po_date.strftime("%d %b %Y") if po.po_date else "—",
+        supplier_name=supplier.name if supplier else "—",
+        supplier_address=supplier_address,
+        supplier_pic=(pic.name if pic else ((supplier.contact or {}).get("name")
+                                            if supplier else "")) or "",
+        supplier_phone=(pic.phone if pic and pic.phone
+                        else (supplier.phone if supplier else "")) or "",
+        supplier_email=(pic.email if pic and pic.email
+                        else (supplier.email if supplier else "")) or "",
+        ship_to_label="Gudang PT. Transmisi Enjinering",
+        ship_to_address="Jl. Raya Serang KM 16, Cikupa, Tangerang",
+        project_code=project.code if project else None,
+        lead_days=po.quoted_lead_days,
+        rows=rows,
+        total=float(po.total or 0),
+        # A supplier PO has no keterangan field of its own yet; when it
+        # gains one this is where it prints.
+        notes=None,
+        issued_by=user.full_name or "—",
+        issuer_signature=await load_for(user),
+    )
+    await audit_record(db, actor=user, action="export", entity="supplier_po",
+                       entity_id=po.id, after={"format": "pdf"})
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="PO-{po.number}.pdf"'},
+    )
+
+
+@router.get("/po/{po_id}/export.xlsx")
+async def export_po_excel(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_purchasing_or_director),
+):
+    from io import BytesIO
+
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    b = await _po_print_bundle(po_id, db)
+    po, supplier, project, pic = b["po"], b["supplier"], b["project"], b["pic"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"PO {po.number}"[:31]
+    bold = Font(bold=True)
+    thin = Side(border_style="thin", color="CBD1DC")
+    boxed = Border(left=thin, right=thin, top=thin, bottom=thin)
+    right = Alignment(horizontal="right")
+    head_fill = PatternFill("solid", fgColor="EEF0F4")
+
+    ws["A1"] = "PT. Transmisi Enjinering"
+    ws["A1"].font = Font(bold=True, size=16)
+    ws.merge_cells("A1:E1")
+    ws["A2"] = f"Purchase Order {po.number}"
+    ws["A2"].font = bold
+    ws.merge_cells("A2:E2")
+
+    row = 4
+    for label, value in (
+        ("Supplier", supplier.name if supplier else "—"),
+        ("Address", (supplier.warehouse_address or supplier.company_address or "—")
+         if supplier else "—"),
+        ("PIC", (pic.name if pic else "—")),
+        ("Phone", (pic.phone if pic and pic.phone
+                   else (supplier.phone if supplier else "")) or "—"),
+        ("PO date", str(po.po_date) if po.po_date else "—"),
+        ("Project", project.code if project else "—"),
+        ("Lead time (days)", po.quoted_lead_days if po.quoted_lead_days is not None else "—"),
+        ("Status", po.status),
+    ):
+        ws.cell(row=row, column=1, value=label).font = bold
+        ws.cell(row=row, column=2, value=value)
+        row += 1
+
+    row += 1
+    for col, header in enumerate(
+            ["#", "Description", "Qty", "UoM", "Unit price", "Amount"], start=1):
+        c = ws.cell(row=row, column=col, value=header)
+        c.font = bold
+        c.fill = head_fill
+        c.border = boxed
+    row += 1
+    for i, it in enumerate((po.items or []), 1):
+        qty = float(it.get("qty") or 0)
+        unit = float(it.get("unit_price") or 0)
+        values = [i, it.get("description") or "—", qty, it.get("uom") or "",
+                  unit, float(it.get("amount") or qty * unit)]
+        for col, v in enumerate(values, start=1):
+            c = ws.cell(row=row, column=col, value=v)
+            c.border = boxed
+            if col in (3, 5, 6):
+                c.alignment = right
+                if col in (5, 6):
+                    c.number_format = "#,##0"
+        row += 1
+
+    ws.cell(row=row, column=5, value="TOTAL").font = bold
+    tot = ws.cell(row=row, column=6, value=float(po.total or 0))
+    tot.font = bold
+    tot.number_format = "#,##0"
+    tot.alignment = right
+
+    for col, width in zip("ABCDEF", (6, 46, 10, 10, 16, 18)):
+        ws.column_dimensions[col].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    await audit_record(db, actor=user, action="export", entity="supplier_po",
+                       entity_id=po.id, after={"format": "xlsx"})
+    return Response(
+        content=buf.getvalue(),
+        media_type=("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+        headers={"Content-Disposition":
+                 f'attachment; filename="PO-{po.number}.xlsx"'},
+    )
 
 
 class POPatch(BaseModel):

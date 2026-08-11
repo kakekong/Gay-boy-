@@ -10,6 +10,12 @@ interface Props {
   children: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
   footer?: React.ReactNode;
+  /** Let a click on the dimmed background close this. Off by default: these
+   *  dialogs hold typed work, and losing a half-filled supplier or PO to a
+   *  stray click beside the box is the most annoying way to lose it. Escape
+   *  and the X in the corner still close. Turn it on for anything with
+   *  nothing to lose — a picker, a preview. */
+  dismissOnBackdrop?: boolean;
 }
 
 const SIZE = {
@@ -19,7 +25,10 @@ const SIZE = {
   xl: "max-w-4xl",
 };
 
-export function Modal({ open, onClose, title, subtitle, children, size = "md", footer }: Props) {
+export function Modal({
+  open, onClose, title, subtitle, children, size = "md", footer,
+  dismissOnBackdrop = false,
+}: Props) {
   useEffect(() => {
     if (!open) return;
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -37,7 +46,7 @@ export function Modal({ open, onClose, title, subtitle, children, size = "md", f
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
       <div
         className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={dismissOnBackdrop ? onClose : undefined}
       />
       <div className={`relative w-full ${SIZE[size]} bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col`}>
         <header className="flex items-start justify-between gap-4 px-5 py-4 border-b border-ink-100">

@@ -3,10 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Truck, Building2, Briefcase, Calendar, Loader2, Save,
-  Pencil, Check, X, AlertCircle, Plus, Trash2,
+  Pencil, Check, X, AlertCircle, Plus, Trash2, FileText, FileSpreadsheet,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { downloadFile } from "@/lib/download";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { UserLink } from "@/components/UserLink";
@@ -275,6 +276,26 @@ export default function PurchaseOrderDetailPage() {
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
+            {/* The order as a document. A PO that only exists on a screen is
+                one somebody has to retype into an email; the PDF is what goes
+                to the vendor, the sheet is what gets pasted into a stock or
+                payment schedule. */}
+            <button
+              className="btn-ghost"
+              title={T("Download as PDF")}
+              onClick={() => downloadFile(
+                `/purchasing/po/${p.id}/export.pdf`, `PO-${p.number}.pdf`)}
+            >
+              <FileText size={15} /> {T("PDF")}
+            </button>
+            <button
+              className="btn-ghost"
+              title={T("Download as Excel")}
+              onClick={() => downloadFile(
+                `/purchasing/po/${p.id}/export.xlsx`, `PO-${p.number}.xlsx`)}
+            >
+              <FileSpreadsheet size={15} /> {T("Excel")}
+            </button>
             <div className="text-right">
               <div className="text-[10px] uppercase muted tracking-wider">{T("Total")}</div>
               <div className="text-xl font-semibold tabular-nums">{idr(p.total)}</div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ModalCloseX } from "@/components/ModalCloseX";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -978,8 +979,11 @@ function QuotationReassign({ quotationId, current, onClose, onDone }: {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      {/* No onClick: a stray click beside the box must not throw away
+          what has been typed into it. The X and Escape close it. */}
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
       <div className="relative w-full max-w-md bg-white dark:bg-ink-800 rounded-2xl
+        <ModalCloseX onClose={onClose} />
                       shadow-card max-h-[85vh] overflow-y-auto">
         <header className="p-4 border-b border-ink-100 flex items-center gap-2">
           <UserIcon size={16} className="text-brand-600" />

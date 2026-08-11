@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ModalCloseX } from "@/components/ModalCloseX";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { api } from "@/api/client";
@@ -135,11 +136,14 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      {/* No onClick: a stray click beside the box must not throw away
+          what has been typed into it. The X and Escape close it. */}
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
       <form
         onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
         className="relative w-full max-w-2xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col"
       >
+        <ModalCloseX onClose={onClose} />
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold">
             {editing ? `Edit account · ${account!.account_no}` : T("New account")}

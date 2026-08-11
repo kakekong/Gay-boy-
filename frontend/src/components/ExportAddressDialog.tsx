@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ModalCloseX } from "@/components/ModalCloseX";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileText, Loader2, MapPin, User as UserIcon, X } from "lucide-react";
 import clsx from "clsx";
@@ -75,6 +76,7 @@ export function ExportAddressDialog({
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
       <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-white dark:bg-ink-800 rounded-2xl
+        <ModalCloseX onClose={onClose} />
                       shadow-card max-h-[85vh] overflow-y-auto">
         <header className="p-4 border-b border-ink-100 dark:border-white/10 flex items-center gap-2">
           <FileText size={16} className="text-brand-600" />

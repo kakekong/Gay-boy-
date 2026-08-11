@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ModalCloseX } from "@/components/ModalCloseX";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, FileText, Truck, Receipt, Hammer, CheckCircle2, RotateCcw, Loader2,
@@ -319,10 +320,13 @@ function PaymentClaimModal({ invoice, onClose }: { invoice: any; onClose: () => 
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      {/* No onClick: a stray click beside the box must not throw away
+          what has been typed into it. The X and Escape close it. */}
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
       <form onSubmit={(e) => { e.preventDefault(); setErr(null); submit.mutate(); }}
         className="relative w-full max-w-md bg-white rounded-2xl shadow-card p-5 space-y-3"
       >
+        <ModalCloseX onClose={onClose} />
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-lg font-semibold">{T("Submit payment for")}{" "}{invoice.number}</h2>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ModalCloseX } from "@/components/ModalCloseX";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -513,8 +514,11 @@ function Modal({ title, subtitle, onClose, children }: {
 }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" onClick={onClose} />
+      {/* No onClick: a stray click beside the box must not throw away
+          what has been typed into it. The X and Escape close it. */}
+      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+        <ModalCloseX onClose={onClose} />
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold">{title}</h2>
           {subtitle && <p className="text-sm muted mt-0.5">{subtitle}</p>}
