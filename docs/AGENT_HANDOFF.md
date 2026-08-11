@@ -641,6 +641,14 @@ Chat messages and discussion comments both push instantly.
   request" on a draft, and silently became a director approval request on an
   approved one. Any new guard that branches on a field's presence needs the
   same treatment.
+- **A field that changes on its own belongs on the page, not in the form.**
+  Quotation notes are now typed in a card on the quotation page (`NotesCard`,
+  mirroring the customer PO's `KeteranganCard`) that PATCHes `{notes}` alone;
+  the edit modal no longer has the box and **omits the key entirely** when
+  editing, rather than posting `null`, so it cannot clobber what was typed on
+  the page while the modal was open. Two boxes for one field is the bug this
+  avoids, and the last save would have won it. The card's preview numbers the
+  lines exactly as `quotation_pdf.py` does, so the screen shows what prints.
 - **`GET /customers` is the only paged list, and its sort must stay a total
   order.** It was `ORDER BY created_at DESC` alone; an import writes dozens of
   customers in one transaction, so they share a timestamp to the microsecond

@@ -276,7 +276,7 @@ export const ID_STATIC: Record<string, string> = {
   "Edit items": "Ubah barang",
   "Edits you make here are queued for director approval. The PO won't show your change until the director approves it from the Approvals page.": "Perubahan yang Anda buat di sini masuk antrean persetujuan direktur. PO tidak akan menampilkan perubahan Anda sampai direktur menyetujuinya dari halaman Persetujuan.",
   "Email": "Email",
-  "Email *": "Email *",
+  "Login email *": "Email login *",
   "Employee": "Karyawan",
   "Employee *": "Karyawan *",
   "Employee documents": "Dokumen karyawan",

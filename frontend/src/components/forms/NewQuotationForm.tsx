@@ -194,7 +194,10 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       discount_pct: discountPct,
       tax_pct: taxPct,
       valid_until: validUntil || null,
-      notes: notes || null,
+      // Omitted entirely when editing, not sent as null: this form no longer
+      // shows the box, so posting its stale copy back would wipe whatever was
+      // typed on the quotation page since the modal opened.
+      ...(editing ? {} : { notes: notes || null }),
       items: items.map((it, i) => ({
         line_no: i + 1,
         source: it.source,
@@ -397,11 +400,24 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
         </div>
       </div>
 
-      <Field label={t("Notes", "Catatan")}>
-        <textarea className="input min-h-[60px]" value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={t("Scope, exclusions, delivery terms…", "Lingkup, pengecualian, syarat pengiriman…")} />
-      </Field>
+      {/* Notes are typed on the quotation page itself once the document
+          exists — they change on their own, far more often than the lines,
+          and reopening this whole form to retype one delivery term was the
+          slow way round. Leaving the box here as well would mean two places
+          to edit one thing, and this one would silently win on save. */}
+      {editing ? (
+        <p className="text-xs muted">
+          {t("Notes are edited on the quotation page, under the figures.",
+             "Catatan diubah di halaman penawaran, di bawah rincian angka.")}
+        </p>
+      ) : (
+        <Field label={t("Notes", "Catatan")}>
+          <textarea className="input min-h-[60px]" value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder={t("One point per line — numbered automatically when it prints",
+                           "Satu poin per baris — penomoran otomatis saat dicetak")} />
+        </Field>
+      )}
 
       {err && (
         <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">

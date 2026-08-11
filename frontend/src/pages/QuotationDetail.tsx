@@ -582,13 +582,16 @@ export default function QuotationDetailPage() {
       {/* Notes — directly under the figures, not below the discussion and the
           follow-up log. It is the one part of this page a sales rep types
           themselves, and three cards further down it reads as not having
-          saved. */}
-      {Q.notes && (
-        <div className="card p-5">
-          <div className="font-semibold mb-2">{t("Notes", "Catatan")}</div>
-          <pre className="whitespace-pre-wrap text-sm text-ink-700 font-sans">{Q.notes}</pre>
-        </div>
-      )}
+          saved. Edited here rather than in the edit form: the notes are what
+          gets changed most often and on their own, and reopening the whole
+          document to retype one delivery term was the slow way round. Same
+          card the customer PO's keterangan already uses. */}
+      <NotesCard
+        quotationId={Q.id}
+        notes={Q.notes}
+        canEdit={canEditMeta}
+        onSaved={refresh}
+      />
 
       {/* Attachments */}
       <AttachmentsSection ownerType="quotation" ownerId={Q.id} />
@@ -800,6 +803,115 @@ export default function QuotationDetailPage() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * The notes, edited where they are read.
+ *
+ * These are the terms the customer actually argues about — delivery window,
+ * validity, who pays freight — so they change on their own, often, long after
+ * the numbers are settled. Reopening the whole edit form to retype one line
+ * was the slow way round, and on an approved quotation the form is shut
+ * anyway (the backend has always allowed notes through at that stage; the UI
+ * just never offered a way in). Same card the customer PO's keterangan uses.
+ *
+ * The preview is numbered the way the PDF numbers it — one line per point,
+ * a number the writer typed themselves is not repeated — so what is on the
+ * screen is what comes out of the printer.
+ */
+export function printedNotes(notes: string | null | undefined): string[] {
+  return (notes ?? "")
+    .split("\n")
+    .map((line) => line.trim().replace(/^\d+\s*[.)]\s*/, ""))
+    .filter(Boolean);
+}
+
+function NotesCard({ quotationId, notes, canEdit, onSaved }: {
+  quotationId: string;
+  notes: string | null;
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(notes ?? "");
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/quotations/${quotationId}`, { notes: draft || null }),
+    onSuccess: () => { setEditing(false); setErr(null); onSaved(); },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message
+      ?? tt("Couldn't save the notes.", "Tidak dapat menyimpan catatan.")),
+  });
+
+  const lines = printedNotes(notes);
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-semibold">{t("Notes", "Catatan")}</span>
+        <span className="text-xs muted">
+          {t("Prints as KETERANGAN on the quotation",
+             "Tercetak sebagai KETERANGAN pada penawaran")}
+        </span>
+        {canEdit && !editing && (
+          <button
+            className="btn-ghost text-xs ml-auto"
+            onClick={() => { setDraft(notes ?? ""); setErr(null); setEditing(true); }}
+          >
+            <Pencil size={13} /> {lines.length ? t("Edit", "Ubah") : t("Add notes", "Tambah catatan")}
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            className="input min-h-[180px] font-mono text-[13px]" autoFocus value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={t(
+              "One point per line, e.g.\nDrawing akan diberikan setelah PO diterima dan harus approval.\nPenawaran berlaku selama 1 Bulan.\nPembayaran : 30 hari setelah Barang dan Invoice diterima.",
+              "Satu poin per baris, cth.\nDrawing akan diberikan setelah PO diterima dan harus approval.\nPenawaran berlaku selama 1 Bulan.\nPembayaran : 30 hari setelah Barang dan Invoice diterima.")}
+          />
+          <p className="text-[11px] muted">
+            {t("One point per line — they are numbered automatically when the quotation prints.",
+               "Satu poin per baris — penomoran dibuat otomatis saat penawaran dicetak.")}
+          </p>
+          {err && (
+            <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
+              {err}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {t("Save notes", "Simpan catatan")}
+            </button>
+            <button className="btn-ghost" onClick={() => { setEditing(false); setErr(null); }}>
+              {t("Cancel", "Batal")}
+            </button>
+          </div>
+        </div>
+      ) : lines.length ? (
+        <ol className="text-sm text-ink-700 space-y-1">
+          {lines.map((line, i) => (
+            <li key={i} className="flex gap-2">
+              <span className="tabular-nums text-ink-500 shrink-0">{i + 1}.</span>
+              <span className="whitespace-pre-wrap">{line}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="text-sm muted">
+          {canEdit
+            ? t("No notes yet — delivery terms, validity and exclusions go here.",
+                "Belum ada catatan — syarat pengiriman, masa berlaku dan pengecualian ditulis di sini.")
+            : t("No notes.", "Tidak ada catatan.")}
+        </div>
+      )}
     </div>
   );
 }

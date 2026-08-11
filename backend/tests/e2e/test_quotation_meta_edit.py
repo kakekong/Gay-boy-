@@ -231,6 +231,55 @@ async def main():
     check("...and lands", str(got.get("valid_until")) == "2026-12-31",
           str(got.get("valid_until")))
 
+    # ══ what the notes card on the page sends ════════════════════════════════
+    # The edit form no longer carries a notes box — notes are typed on the
+    # quotation page itself, which PATCHes the one field on its own. Two
+    # things have to hold for that to be safe: the bare {notes} payload is
+    # accepted at every stage the page offers it, and the form's full-document
+    # save, which now omits notes entirely, leaves them where they are.
+    print("\n── the notes card: one field, on its own ──")
+    q6 = await pr_quotation()
+    r = await c.patch(f"/quotations/{q6['id']}", headers=s1,
+                      json={"notes": f"draft note {tag}"})
+    check("a notes-only save works on a draft", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+
+    await c.post(f"/quotations/{q6['id']}/submit", headers=s1)
+    r = await c.patch(f"/quotations/{q6['id']}", headers=s1,
+                      json={"notes": f"pending note {tag}"})
+    check("...and while it sits with the director", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+    await c.post(f"/quotations/{q6['id']}/approve", headers=d, json={})
+    before = await pending_edits(q6["id"])
+    r = await c.patch(f"/quotations/{q6['id']}", headers=s1,
+                      json={"notes": f"approved note {tag}"})
+    check("...and once it is approved, without asking anyone",
+          r.status_code == 200 and await pending_edits(q6["id"]) == before,
+          f"{r.status_code} {J(r)}"[:150])
+    got = J(await c.get(f"/quotations/{q6['id']}", headers=d))
+    check("...the last one is what is stored",
+          got.get("notes") == f"approved note {tag}", str(got.get("notes")))
+
+    # the form's save, with no notes key at all
+    formish = form_payload(got, valid_until="2027-01-31")
+    formish.pop("notes")
+    r = await c.patch(f"/quotations/{q6['id']}", headers=s1, json=formish)
+    check("the edit form saving without a notes key is accepted",
+          r.status_code in (200, 202), f"{r.status_code} {J(r)}"[:150])
+    after = J(await c.get(f"/quotations/{q6['id']}", headers=d))
+    check("...and does not wipe the notes typed on the page",
+          after.get("notes") == f"approved note {tag}", str(after.get("notes")))
+
+    # closed is closed, for notes as much as for prices
+    await c.post(f"/quotations/{q6['id']}/won", headers=d)
+    r = await c.patch(f"/quotations/{q6['id']}", headers=s1,
+                      json={"notes": "too late"})
+    check("a won quotation refuses even a note", r.status_code == 409,
+          str(r.status_code))
+    check("...and keeps the one it had",
+          J(await c.get(f"/quotations/{q6['id']}", headers=d)).get("notes")
+          == f"approved note {tag}")
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
