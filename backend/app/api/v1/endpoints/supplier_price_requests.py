@@ -61,15 +61,48 @@ class ItemIn(BaseModel):
     note: str | None = None
 
 
+class LineRef(BaseModel):
+    """One line of one customer price request."""
+    price_request_id: UUID
+    line_no: int
+
+
+class Assignment(BaseModel):
+    """Which supplier is being asked about which lines.
+
+    This is the shape of "PT A does the chain, PT B does the sprockets": one
+    job, split down the line list, each half sent to whoever can make it. An
+    empty `lines` means "everything in scope", which is the ordinary
+    ask-them-all case written the same way.
+    """
+    supplier_ids: list[UUID] = []
+    supplier_id: UUID | None = None      # convenience for a single vendor
+    lines: list[LineRef] = []
+
+    def suppliers(self) -> list[UUID]:
+        out = list(self.supplier_ids)
+        if self.supplier_id and self.supplier_id not in out:
+            out.append(self.supplier_id)
+        return out
+
+
 class CreateIn(BaseModel):
-    # One request per supplier, created in one go so "ask these three" is one
-    # action rather than three trips through a form.
-    supplier_ids: list[UUID]
+    # The simple path: these suppliers, everything in scope, one request each.
+    supplier_ids: list[UUID] = []
+    # The split path: this supplier gets these lines, that one gets those.
+    # Scenario 1 — several suppliers needed to fill one order.
+    assignments: list[Assignment] = []
+
+    # What is in scope. One price request, or several combined into a single
+    # ask — scenario 2, one vendor covering several jobs in one shipment.
     price_request_id: UUID | None = None
-    # Omitted when price_request_id is given: the lines are copied from it,
-    # which is the point — asking about something other than what the customer
-    # asked for would compare two different things.
+    price_request_ids: list[UUID] = []
+    # A subset of the scope for the simple path. Empty = all of it.
+    lines: list[LineRef] = []
+
+    # Standalone: no price request behind it at all.
     items: list[ItemIn] = []
+
     notes: str | None = None
     valid_until: date | None = None
     currency: str = "IDR"
@@ -120,7 +153,8 @@ def _line_total(it: dict) -> float:
 
 
 def _out(spr: SupplierPriceRequest, supplier: Supplier | None,
-         pr: PriceRequest | None = None) -> dict:
+         pr: PriceRequest | None = None,
+         sources: list[dict] | None = None) -> dict:
     items = [dict(i) for i in (spr.items or [])]
     quoted = [i for i in items if i.get("quoted_price") is not None]
     return {
@@ -131,6 +165,12 @@ def _out(spr: SupplierPriceRequest, supplier: Supplier | None,
         "supplier_name": supplier.name if supplier else None,
         "price_request_id": str(spr.price_request_id) if spr.price_request_id else None,
         "price_request_number": pr.number if pr else None,
+        # Where the lines came from. On a joint request `price_request_id` is
+        # NULL and this is the real answer; on a single-source one it is a
+        # list of one and says the same thing twice, on purpose, so a caller
+        # never has to branch.
+        "source_price_requests": sources or [],
+        "is_joint": len(sources or []) > 1,
         "requested_by": str(spr.requested_by) if spr.requested_by else None,
         "items": items,
         "notes": spr.notes,
@@ -159,14 +199,90 @@ async def _load(spr_id: UUID, db: AsyncSession) -> SupplierPriceRequest:
 
 async def _decorate(db: AsyncSession, rows: list[SupplierPriceRequest]) -> list[dict]:
     sup_ids = {r.supplier_id for r in rows}
-    pr_ids = {r.price_request_id for r in rows if r.price_request_id}
+    pr_ids: set[UUID] = {r.price_request_id for r in rows if r.price_request_id}
+    for r in rows:
+        for sid in (r.source_pr_ids or []):
+            try:
+                pr_ids.add(UUID(str(sid)))
+            except (ValueError, TypeError):
+                continue
     sups = {s.id: s for s in (await db.scalars(
         select(Supplier).where(Supplier.id.in_(sup_ids)))).all()} if sup_ids else {}
     prs = {p.id: p for p in (await db.scalars(
         select(PriceRequest).where(PriceRequest.id.in_(pr_ids)))).all()} if pr_ids else {}
-    return [_out(r, sups.get(r.supplier_id),
-                 prs.get(r.price_request_id) if r.price_request_id else None)
-            for r in rows]
+
+    out = []
+    for r in rows:
+        sources = []
+        for sid in (r.source_pr_ids or []):
+            try:
+                pr = prs.get(UUID(str(sid)))
+            except (ValueError, TypeError):
+                continue
+            if pr:
+                lines = [i.get("line_no") for i in (r.items or [])
+                         if str(i.get("source_pr_id")) == str(sid)]
+                sources.append({"id": str(pr.id), "number": pr.number,
+                                "status": pr.status, "lines": sorted(
+                                    x for x in lines if x is not None)})
+        out.append(_out(r, sups.get(r.supplier_id),
+                        prs.get(r.price_request_id) if r.price_request_id else None,
+                        sources))
+    return out
+
+
+def _scope_prs(payload: "CreateIn") -> list[UUID]:
+    """Which customer price requests this call is about, in the order given."""
+    ids: list[UUID] = []
+    if payload.price_request_id:
+        ids.append(payload.price_request_id)
+    for x in payload.price_request_ids:
+        if x not in ids:
+            ids.append(x)
+    return ids
+
+
+def _pr_line(pr: PriceRequest, line_no: int) -> dict | None:
+    for it in (pr.items or []):
+        if int(it.get("line_no") or 0) == int(line_no):
+            return it
+    return None
+
+
+def _copy_line(pr: PriceRequest, it: dict, line_no: int) -> dict:
+    """A customer PR line, as a line of something we send to an outside
+    company: the goods and nothing about who wants them or what they pay."""
+    return {
+        "line_no": line_no,
+        "description": it.get("description"),
+        "qty": float(it.get("qty") or 0),
+        "uom": it.get("uom"),
+        "spec": it.get("spec") or {},
+        # Where it came from. This is the whole trick: it survives being split
+        # across suppliers and being combined with other jobs, so a quote can
+        # be applied back to exactly the right line of the right request.
+        "source_pr_id": str(pr.id),
+        "source_pr_number": pr.number,
+        "source_line_no": it.get("line_no"),
+    }
+
+
+async def _touching(db: AsyncSession, pr_id: UUID) -> list[SupplierPriceRequest]:
+    """Every supplier request that draws a line from this price request.
+
+    Matched on `source_pr_ids` rather than the header link, because a request
+    covering three jobs has no single header link and a request covering half
+    a job is still about this one.
+    """
+    return list((await db.scalars(
+        select(SupplierPriceRequest)
+        .where(or_(
+            SupplierPriceRequest.price_request_id == pr_id,
+            SupplierPriceRequest.source_pr_ids.contains([str(pr_id)]),
+        ))
+        .order_by(SupplierPriceRequest.created_at.asc())
+    )).all())
+
 
 
 # ─── endpoints ───────────────────────────────────────────────────────────────
@@ -177,59 +293,125 @@ async def create_requests(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Ask one or more suppliers what they charge.
+    """Ask suppliers what they charge — for everything, or line by line.
 
-    Returns one request per supplier. Asking three vendors is one action here
-    because it is one action in life — the same list, sent three times.
+    Three shapes, one endpoint, because they are the same act with different
+    line lists:
+
+    * **Ask them all.** `supplier_ids` + a price request: one request each,
+      every line. What most jobs are.
+    * **Split the job.** `assignments`: this vendor gets these lines, that one
+      gets those. Nobody makes the whole basket, so nobody is asked to quote
+      for the parts they don't make.
+    * **Combine the jobs.** `price_request_ids`: several customer requests in
+      one ask, because one vendor is filling all of them in one shipment.
+
+    Every line keeps a pointer home either way, so applying a quote later
+    lands on the right line of the right request no matter how it was cut.
     """
-    if not payload.supplier_ids:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at least one supplier")
-    if len(set(payload.supplier_ids)) != len(payload.supplier_ids):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "The same supplier is listed twice")
-
-    pr: PriceRequest | None = None
-    if payload.price_request_id:
-        pr = await db.get(PriceRequest, payload.price_request_id)
+    scope_ids = _scope_prs(payload)
+    prs: dict[UUID, PriceRequest] = {}
+    for pid in scope_ids:
+        pr = await db.get(PriceRequest, pid)
         if not pr or pr.is_deleted:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                f"Price request {pid} not found")
+        prs[pid] = pr
 
-    # Lines: copied from the customer request when there is one, so the two
-    # documents are asking about the same goods and the answer can be applied
-    # line for line. Costs and selling prices are NOT copied — this goes to an
-    # outside company, and what we charge is none of their business.
-    if pr is not None:
-        items = [{
-            "line_no": it.get("line_no"),
-            "description": it.get("description"),
-            "qty": float(it.get("qty") or 0),
-            "uom": it.get("uom"),
-            "spec": it.get("spec") or {},
-        } for it in (pr.items or [])]
-        if not items:
-            raise HTTPException(status.HTTP_409_CONFLICT,
-                                "That price request has no lines to ask about")
-    else:
-        if not payload.items:
+    def lines_for(refs: list[LineRef]) -> list[dict]:
+        """Resolve line references into copied lines, renumbered 1..n."""
+        chosen = refs or [
+            LineRef(price_request_id=pid, line_no=int(it.get("line_no") or 0))
+            for pid in scope_ids for it in (prs[pid].items or [])
+        ]
+        out: list[dict] = []
+        for ref in chosen:
+            pr = prs.get(ref.price_request_id)
+            if pr is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Line {ref.line_no} names price request "
+                    f"{ref.price_request_id}, which is not in this request.",
+                )
+            it = _pr_line(pr, ref.line_no)
+            if it is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"{pr.number} has no line {ref.line_no}.",
+                )
+            out.append(_copy_line(pr, it, len(out) + 1))
+        return out
+
+    # Work out the (supplier, lines) pairs this call creates.
+    plan: list[tuple[UUID, list[dict]]] = []
+    if payload.assignments:
+        for a in payload.assignments:
+            sups = a.suppliers()
+            if not sups:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "An assignment needs a supplier")
+            if not scope_ids:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Splitting lines between suppliers needs a price request "
+                    "to split.")
+            picked = lines_for(a.lines)
+            if not picked:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "An assignment needs at least one line")
+            for sid in sups:
+                plan.append((sid, [dict(x) for x in picked]))
+    elif payload.supplier_ids:
+        if len(set(payload.supplier_ids)) != len(payload.supplier_ids):
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                "Add at least one line, or pick a price request")
-        items = [{
-            "line_no": i.line_no, "description": i.description,
-            "qty": float(i.qty or 0), "uom": i.uom, "note": i.note,
-        } for i in payload.items]
+                                "The same supplier is listed twice")
+        if scope_ids:
+            picked = lines_for(payload.lines)
+            if not picked:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Those price requests have no lines to ask about")
+        else:
+            if not payload.items:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Add at least one line, or pick a price request")
+            picked = [{"line_no": i.line_no, "description": i.description,
+                       "qty": float(i.qty or 0), "uom": i.uom, "note": i.note}
+                      for i in payload.items]
+        for sid in payload.supplier_ids:
+            plan.append((sid, [dict(x) for x in picked]))
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Pick at least one supplier")
+
+    # One supplier must not end up with two requests for the same lines from
+    # one click — that is a mis-click, not an order.
+    seen: set[tuple] = set()
+    for sid, items in plan:
+        key = (sid, tuple(sorted((i.get("source_pr_id"), i.get("source_line_no"))
+                                 for i in items)))
+        if key in seen:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "The same supplier is asked the same lines twice")
+        seen.add(key)
 
     created: list[SupplierPriceRequest] = []
-    for sid in payload.supplier_ids:
+    for sid, items in plan:
         supplier = await db.get(Supplier, sid)
         if not supplier:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"Supplier {sid} not found")
+        srcs = sorted({str(i["source_pr_id"]) for i in items if i.get("source_pr_id")})
         spr = SupplierPriceRequest(
             number=await next_supplier_price_request_number(db),
             supplier_id=sid,
-            price_request_id=pr.id if pr else None,
+            # The single-source shorthand, and NULL the moment it is joint —
+            # a request covering three jobs does not belong to one of them.
+            price_request_id=(UUID(srcs[0]) if len(srcs) == 1 else None),
+            source_pr_ids=srcs,
             requested_by=user.id,
             status="draft",
-            items=[dict(i) for i in items],
+            items=items,
             notes=payload.notes,
             currency=payload.currency or "IDR",
             valid_until=payload.valid_until,
@@ -244,7 +426,7 @@ async def create_requests(
     await audit_record(db, actor=user, action="create",
                        entity="supplier_price_request", entity_id=created[0].id,
                        after={"numbers": [s.number for s in created],
-                              "price_request": pr.number if pr else None})
+                              "price_requests": [prs[p].number for p in scope_ids]})
     return await _decorate(db, created)
 
 
@@ -404,19 +586,24 @@ async def apply_to_price_request(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Make this supplier's quote the cost on the customer price request.
+    """Make this supplier's quote the cost on the lines it was asked about.
 
     This is why the record exists. The cost that reaches the director now has
     a document behind it — this supplier, this price, this date — instead of
     being a number somebody remembered, and the quotes that lost are still on
     file next to it.
 
-    Applying a second quote to the same request is allowed and simply
-    supersedes the first: a better price arriving late is good news, not an
-    error. The one that is current carries `applied_at`.
+    It applies **per line**, which is what makes the two hard cases work. A
+    request split between two vendors writes each vendor's half onto its own
+    lines. A request covering three jobs writes onto all three. And a customer
+    price request only goes to the director once *every* one of its lines has
+    a cost — a half-costed job reaching a decision is how a margin gets set on
+    a number nobody has.
+
+    Applying again supersedes: a better price arriving late is good news.
     """
     spr = await _load(spr_id, db)
-    if not spr.price_request_id:
+    if not spr.source_pr_ids and not spr.price_request_id:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This request isn't costing anything — it has no price request "
@@ -425,63 +612,126 @@ async def apply_to_price_request(
     if spr.status != "quoted":
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Record the supplier's quote first.")
-    pr = await db.get(PriceRequest, spr.price_request_id)
-    if not pr or pr.is_deleted:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
-    if pr.status not in ("pending_purchasing", "pending_director"):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Can't cost a price request in status '{pr.status}'.",
-        )
 
-    priced = {i.get("line_no"): i for i in (spr.items or [])
-              if i.get("quoted_price") is not None}
+    priced = [i for i in (spr.items or []) if i.get("quoted_price") is not None]
     if not priced:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "This quote has no prices on it yet.")
 
     supplier = await db.get(Supplier, spr.supplier_id)
-    items = [dict(it) for it in (pr.items or [])]
-    touched = 0
-    for it in items:
-        q = priced.get(it.get("line_no"))
-        if q is None:
-            continue
-        it["cost_price"] = float(q["quoted_price"])
-        it["cost_basis"] = "unit"
-        # Where this number came from, on the line itself — the PR page reads
-        # its lines, not this table.
-        it["cost_source"] = spr.number
-        touched += 1
-    pr.items = items
-    pr.priced_by = user.id
-    pr.priced_at = datetime.now(UTC)
-    pr.status = "pending_director"
-    pr.notes = ((pr.notes or "")
-                + f"\n[purchasing] Cost from {spr.number}"
-                + (f" ({supplier.name})" if supplier else "")).strip()
+    results: list[dict] = []
+    touched_total = 0
 
-    # Only one quote is the live cost. Stand the others down so the page can
-    # say which one the price came from without guessing.
+    # Group the priced lines by the request they came from, and write each
+    # group home.
+    by_pr: dict[str, list[dict]] = {}
+    for i in priced:
+        src = i.get("source_pr_id") or (str(spr.price_request_id)
+                                        if spr.price_request_id else None)
+        if src:
+            by_pr.setdefault(str(src), []).append(i)
+    if not by_pr:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "These lines don't point back at a price request.")
+
+    for pr_id_str, lines in by_pr.items():
+        pr = await db.get(PriceRequest, UUID(pr_id_str))
+        if not pr or pr.is_deleted:
+            results.append({"price_request_id": pr_id_str,
+                            "skipped": "price request no longer exists"})
+            continue
+        if pr.status not in ("pending_purchasing", "pending_director"):
+            results.append({"price_request_id": pr_id_str,
+                            "price_request_number": pr.number,
+                            "skipped": f"status is '{pr.status}'"})
+            continue
+
+        want = {int(i.get("source_line_no") or i.get("line_no") or 0):
+                float(i["quoted_price"]) for i in lines}
+        items = [dict(it) for it in (pr.items or [])]
+        touched = 0
+        for it in items:
+            price = want.get(int(it.get("line_no") or 0))
+            if price is None:
+                continue
+            it["cost_price"] = price
+            it["cost_basis"] = "unit"
+            # Where this number came from, on the line itself — the PR page
+            # reads its lines, not this table. On a split job the lines
+            # legitimately name different suppliers, which is the point.
+            it["cost_source"] = spr.number
+            it["cost_supplier"] = supplier.name if supplier else None
+            touched += 1
+        pr.items = items
+        pr.priced_by = user.id
+        pr.priced_at = datetime.now(UTC)
+        part = (f" — lines {', '.join(str(k) for k in sorted(want))}"
+                if len(want) < len(items) else "")
+        pr.notes = ((pr.notes or "")
+                    + f"\n[purchasing] Cost from {spr.number}"
+                    + (f" ({supplier.name})" if supplier else "")
+                    + part).strip()
+
+        # Only a fully-costed request goes up. A split job waits for the other
+        # supplier's half rather than reaching the director half-priced.
+        missing = [int(it.get("line_no") or 0) for it in items
+                   if it.get("cost_price") in (None, "")]
+        pr.status = "pending_purchasing" if missing else "pending_director"
+        touched_total += touched
+        results.append({
+            "price_request_id": str(pr.id),
+            "price_request_number": pr.number,
+            "applied_lines": touched,
+            "status": pr.status,
+            "lines_still_uncosted": missing,
+        })
+        await audit_record(db, actor=user, action="apply_quote",
+                           entity="price_request", entity_id=pr.id,
+                           after={"from": spr.number, "lines": touched,
+                                  "supplier": supplier.name if supplier else None,
+                                  "still_uncosted": missing})
+
+    # Nothing landed anywhere: that is a refusal, not a success with an empty
+    # report. It is the single-request case that used to 409 — an approved
+    # price request being re-costed underneath the director — and it has to
+    # keep saying so. When *some* of a joint request applied, it is a partial
+    # success and the per-request results carry the skips.
+    if touched_total == 0:
+        why = "; ".join(
+            f"{r.get('price_request_number') or r['price_request_id']}: "
+            f"{r.get('skipped')}" for r in results if r.get("skipped"))
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Nothing to cost — {why}" if why else "Nothing to cost.",
+        )
+
+    # Only one quote per *line* is the live cost — but two suppliers each
+    # covering half a job are both live. So the mark is cleared only from
+    # requests whose lines this one actually overlaps.
+    mine = {(str(i.get("source_pr_id")), i.get("source_line_no")) for i in priced}
     siblings = (await db.scalars(
         select(SupplierPriceRequest).where(
-            SupplierPriceRequest.price_request_id == pr.id,
             SupplierPriceRequest.id != spr.id,
+            SupplierPriceRequest.applied_at.is_not(None),
         )
     )).all()
     for other in siblings:
-        other.applied_at = None
+        if any((str(i.get("source_pr_id")), i.get("source_line_no")) in mine
+               for i in (other.items or [])):
+            other.applied_at = None
     spr.applied_at = datetime.now(UTC)
     spr.status = "closed"
 
-    await audit_record(db, actor=user, action="apply_quote",
-                       entity="price_request", entity_id=pr.id,
-                       after={"from": spr.number, "lines": touched,
-                              "supplier": supplier.name if supplier else None})
     await db.flush()
-    return {"applied_lines": touched, "price_request_status": pr.status,
-            "price_request_number": pr.number,
-            "supplier_price_request": (await _decorate(db, [spr]))[0]}
+    first = results[0] if results else {}
+    return {
+        "applied_lines": touched_total,
+        "price_requests": results,
+        # Kept flat for the single-request case every existing caller reads.
+        "price_request_status": first.get("status"),
+        "price_request_number": first.get("price_request_number"),
+        "supplier_price_request": (await _decorate(db, [spr]))[0],
+    }
 
 
 @router.post("/{spr_id}/close")
@@ -540,16 +790,15 @@ async def compare_for_price_request(
     """Every vendor asked about one job, side by side.
 
     Ordered cheapest complete quote first, then the ones still outstanding —
-    which is the order the decision is made in.
+    which is the order the decision is made in. Finds requests by their
+    *lines*, not by the header link, so a vendor asked about half the job and
+    a vendor asked about it inside a combined order both show up here.
     """
     pr = await db.get(PriceRequest, pr_id)
     if not pr or pr.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
-    rows = (await db.scalars(
-        select(SupplierPriceRequest)
-        .where(SupplierPriceRequest.price_request_id == pr_id)
-    )).all()
-    out = await _decorate(db, list(rows))
+    rows = await _touching(db, pr_id)
+    out = await _decorate(db, rows)
 
     def key(r: dict):
         complete = r["lines_quoted"] == r["lines_total"] and r["lines_total"] > 0
@@ -558,3 +807,72 @@ async def compare_for_price_request(
     out.sort(key=key)
     return {"price_request_number": pr.number, "price_request_status": pr.status,
             "requests": out}
+
+
+@router.get("/for-price-request/{pr_id}/coverage")
+async def coverage_for_price_request(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Line by line: who has been asked, who answered, what it cost.
+
+    The question purchasing actually has in front of a split job — *which
+    lines still have nobody on them* — and the reason the customer request
+    does not go to the director until the answer is "none".
+    """
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
+    rows = await _touching(db, pr_id)
+    sups = {s.id: s for s in (await db.scalars(
+        select(Supplier).where(
+            Supplier.id.in_({r.supplier_id for r in rows}))))} if rows else {}
+
+    lines = []
+    for it in (pr.items or []):
+        no = int(it.get("line_no") or 0)
+        asked = []
+        for r in rows:
+            for i in (r.items or []):
+                if str(i.get("source_pr_id")) != str(pr_id):
+                    continue
+                if int(i.get("source_line_no") or 0) != no:
+                    continue
+                sup = sups.get(r.supplier_id)
+                asked.append({
+                    "supplier_price_request_id": str(r.id),
+                    "number": r.number,
+                    "status": r.status,
+                    "supplier_id": str(r.supplier_id),
+                    "supplier_name": sup.name if sup else None,
+                    "quoted_price": i.get("quoted_price"),
+                    "lead_days": i.get("lead_days"),
+                    "is_applied": r.applied_at is not None,
+                })
+        lines.append({
+            "line_no": no,
+            "description": it.get("description"),
+            "qty": it.get("qty"),
+            "uom": it.get("uom"),
+            "cost_price": it.get("cost_price"),
+            "cost_source": it.get("cost_source"),
+            "cost_supplier": it.get("cost_supplier"),
+            "asked": asked,
+            "is_asked": bool(asked),
+            "is_quoted": any(a["quoted_price"] is not None for a in asked),
+            "is_costed": it.get("cost_price") not in (None, ""),
+        })
+
+    return {
+        "price_request_id": str(pr.id),
+        "price_request_number": pr.number,
+        "price_request_status": pr.status,
+        "lines": lines,
+        "lines_total": len(lines),
+        "lines_asked": sum(1 for x in lines if x["is_asked"]),
+        "lines_costed": sum(1 for x in lines if x["is_costed"]),
+        "uncovered": [x["line_no"] for x in lines if not x["is_costed"]],
+        # The whole point in one field: can this go to the director yet.
+        "fully_costed": all(x["is_costed"] for x in lines) and bool(lines),
+    }

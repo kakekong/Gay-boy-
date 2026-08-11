@@ -386,6 +386,12 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(40)",
     "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(40)",
     "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+
+    # A supplier price request can draw its lines from several customer price
+    # requests at once (one vendor, several jobs, one shipment), so the single
+    # price_request_id is no longer the whole story.
+    "ALTER TABLE supplier_price_requests ADD COLUMN IF NOT EXISTS "
+    "source_pr_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
 ]
 
 

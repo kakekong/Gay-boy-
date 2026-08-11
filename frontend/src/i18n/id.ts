@@ -182,11 +182,21 @@ export const ID_STATIC: Record<string, string> = {
     "Harga yang Anda tanyakan ke tiap pemasok, dan jawabannya. Terapkan yang Anda ambil sebagai biaya pada permintaan harga yang dibiayai.",
   "One request per supplier, so you can put their answers side by side.":
     "Satu permintaan per pemasok, agar jawabannya bisa dibandingkan berdampingan.",
-  "Costing which price request?": "Membiayai permintaan harga yang mana?",
-  "— nothing, this is a standalone enquiry —":
-    "— tidak ada, ini permintaan mandiri —",
-  "Lines copied from": "Baris disalin dari",
-  "What are you asking about?": "Apa yang Anda tanyakan?",
+  "Which price requests are you costing?":
+    "Permintaan harga mana yang Anda biayai?",
+  "Tick more than one to send a vendor several jobs as a single order — they arrive on one truck, so they are one conversation.":
+    "Centang lebih dari satu untuk mengirim beberapa pekerjaan ke satu pemasok sebagai satu order — barangnya datang satu truk, jadi satu percakapan.",
+  "Nothing is waiting for a cost right now.":
+    "Tidak ada yang menunggu biaya saat ini.",
+  "Or ask about something with no job behind it":
+    "Atau tanyakan sesuatu tanpa pekerjaan di belakangnya",
+  "Split the lines between suppliers": "Bagi baris antar pemasok",
+  "For when nobody makes the whole basket — each vendor is asked only about the lines they can actually quote.":
+    "Untuk saat tidak ada satu pemasok yang bisa semuanya — tiap pemasok hanya ditanya baris yang memang bisa mereka penuhi.",
+  "Pick at least one line, or this vendor gets a blank sheet.":
+    "Pilih minimal satu baris, atau pemasok ini menerima lembar kosong.",
+  "also asked of": "juga ditanyakan ke",
+  "of": "dari",
   "Who are you asking?": "Siapa yang Anda tanya?",
   "Search suppliers…": "Cari pemasok…",
   "No suppliers match.": "Tidak ada pemasok yang cocok.",

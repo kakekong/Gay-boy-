@@ -764,33 +764,42 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
 }
 
 /**
- * Ask several suppliers what they charge, in one action.
+ * Ask suppliers what they charge — for a whole job, or line by line.
  *
- * Two ways in, and the difference matters. Picking a price request copies its
- * lines, so every vendor is answering the same question and the answers can be
- * applied to it line for line — that is the path that ends in a cost the
- * director can trace. Typing lines by hand is for the rest of purchasing's
- * life: refreshing a price list, checking a rate before a tender.
+ * Three shapes, one form, because they are the same act with different line
+ * lists:
  *
- * The customer is never named here, and the picker shows only the request's
- * own number. Purchasing does not see who the deal is with, and a form that
- * leaked it on the way to a supplier would be the worst place to start.
+ *  - **Ask them all.** Pick a price request, tick the vendors. Most jobs.
+ *  - **Split the job** (scenario 1). Nobody makes the whole basket: the chain
+ *    comes from one vendor and the sprockets from another. Turn on "split by
+ *    line" and each vendor gets only the lines they can actually quote.
+ *  - **Combine the jobs** (scenario 2). One vendor filling three customers'
+ *    orders on one truck is one conversation, so it is one request — with
+ *    each line still pointing back at the job it belongs to.
+ *
+ * The customer is never named here, on any of the three paths. This form ends
+ * in a document that goes to an outside company.
  */
+interface DraftLine { prId: string; prNumber: string; lineNo: number; description: string; qty: number; uom: string }
+
 function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
   suppliers: Supplier[];
   onClose: () => void;
   onCreated: (count: number) => void;
   onError: (msg: string) => void;
 }) {
+  const [prIds, setPrIds] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
-  const [prId, setPrId] = useState("");
+  const [split, setSplit] = useState(false);
+  // supplier id → the "prId:lineNo" keys they are being asked about
+  const [assign, setAssign] = useState<Record<string, string[]>>({});
   const [notes, setNotes] = useState("");
   const [validUntil, setValidUntil] = useState("");
   const [lines, setLines] = useState([{ description: "", qty: 1, uom: "pcs" }]);
   const [search, setSearch] = useState("");
 
-  // Only requests that are still waiting on a cost — asking a vendor about a
-  // job the director already priced is answering a question nobody asked.
+  // Only requests still waiting on a cost — asking a vendor about a job the
+  // director already priced is answering a question nobody asked.
   const openPrs = useQuery({
     queryKey: ["price-requests-costable"],
     queryFn: () => api.get("/price-requests").then((r) => {
@@ -801,23 +810,58 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
     retry: false,
   });
 
-  const chosenPr = (openPrs.data ?? []).find((p: any) => p.id === prId);
-  const shown = suppliers.filter((s) =>
-    !search.trim() || s.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const chosen = (openPrs.data ?? []).filter((p: any) => prIds.includes(p.id));
+  const allLines: DraftLine[] = chosen.flatMap((p: any) =>
+    (p.items ?? []).map((it: any) => ({
+      prId: p.id, prNumber: p.number, lineNo: it.line_no,
+      description: it.description, qty: it.qty, uom: it.uom ?? "",
+    })));
+  const keyOf = (l: DraftLine) => `${l.prId}:${l.lineNo}`;
+
+  const toggleLine = (sid: string, key: string) =>
+    setAssign((cur) => {
+      const held = cur[sid] ?? [];
+      return { ...cur, [sid]: held.includes(key)
+        ? held.filter((k) => k !== key) : [...held, key] };
+    });
+
+  // In split mode every picked supplier needs at least one line, or the ask
+  // is empty for them and the vendor gets a blank sheet.
+  const splitReady = picked.length > 0
+    && picked.every((sid) => (assign[sid] ?? []).length > 0);
+  const ready = split
+    ? splitReady
+    : picked.length > 0 && (prIds.length > 0 || lines.some((l) => l.description.trim()));
 
   const create = useMutation({
-    mutationFn: () => api.post("/purchasing/price-requests", {
-      supplier_ids: picked,
-      price_request_id: prId || null,
-      items: prId ? [] : lines
-        .filter((l) => l.description.trim())
-        .map((l, i) => ({
-          line_no: i + 1, description: l.description.trim(),
-          qty: Number(l.qty) || 0, uom: l.uom || null,
-        })),
-      notes: notes.trim() || null,
-      valid_until: validUntil || null,
-    }),
+    mutationFn: () => {
+      if (split) {
+        return api.post("/purchasing/price-requests", {
+          price_request_ids: prIds,
+          notes: notes.trim() || null,
+          valid_until: validUntil || null,
+          assignments: picked.map((sid) => ({
+            supplier_id: sid,
+            lines: (assign[sid] ?? []).map((k) => {
+              const [prId, lineNo] = k.split(":");
+              return { price_request_id: prId, line_no: Number(lineNo) };
+            }),
+          })),
+        });
+      }
+      return api.post("/purchasing/price-requests", {
+        supplier_ids: picked,
+        price_request_ids: prIds,
+        items: prIds.length ? [] : lines
+          .filter((l) => l.description.trim())
+          .map((l, i) => ({
+            line_no: i + 1, description: l.description.trim(),
+            qty: Number(l.qty) || 0, uom: l.uom || null,
+          })),
+        notes: notes.trim() || null,
+        valid_until: validUntil || null,
+      });
+    },
     onSuccess: () => onCreated(picked.length),
     onError: (e: any) => onError(
       e?.response?.data?.errors?.[0]?.message
@@ -826,15 +870,15 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
         ?? "Failed to send the request"),
   });
 
-  const ready = picked.length > 0
-    && (!!prId || lines.some((l) => l.description.trim()));
+  const shown = suppliers.filter((s) =>
+    !search.trim() || s.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
       {/* No onClick: a stray click beside the box must not throw away
           what has been typed into it. The X and Escape close it. */}
       <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
-      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
+      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-card max-h-[90vh] flex flex-col">
         <ModalCloseX onClose={onClose} />
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold">{T("Ask suppliers for a price")}</h2>
@@ -845,38 +889,41 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
           onSubmit={(e) => { e.preventDefault(); create.mutate(); }}
           className="flex-1 overflow-auto p-5 space-y-4"
         >
-          {/* What it is costing */}
-          <Field label={T("Costing which price request?")}>
-            <select className="input" value={prId} onChange={(e) => setPrId(e.target.value)}>
-              <option value="">{T("— nothing, this is a standalone enquiry —")}</option>
-              {(openPrs.data ?? []).map((p: any) => (
-                <option key={p.id} value={p.id}>
-                  {p.number} · {(p.items ?? []).length} {T("lines")}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {chosenPr && (
-            <div className="rounded-xl border border-ink-100 bg-ink-50/50 p-3 text-xs space-y-1">
-              <div className="uppercase tracking-wider muted">
-                {T("Lines copied from")} {chosenPr.number}
-              </div>
-              {(chosenPr.items ?? []).map((it: any) => (
-                <div key={it.line_no} className="flex gap-2">
-                  <span className="tabular-nums muted">{it.line_no}.</span>
-                  <span className="flex-1">{it.description}</span>
-                  <span className="tabular-nums muted">{it.qty} {it.uom}</span>
-                </div>
-              ))}
+          {/* ── what is in scope ── */}
+          <div className="rounded-xl border border-ink-100 p-3 space-y-2">
+            <div className="text-[10px] uppercase tracking-wider muted">
+              {T("Which price requests are you costing?")}
             </div>
-          )}
+            <div className="text-[11px] muted">
+              {T("Tick more than one to send a vendor several jobs as a single order — they arrive on one truck, so they are one conversation.")}
+            </div>
+            <div className="max-h-40 overflow-auto divide-y divide-ink-100">
+              {(openPrs.data ?? []).map((p: any) => (
+                <label key={p.id} className="flex items-center gap-2 py-1.5 text-sm cursor-pointer">
+                  <input type="checkbox" className="h-4 w-4 rounded border-ink-300 text-brand-600"
+                    checked={prIds.includes(p.id)}
+                    onChange={(ev) => setPrIds((cur) => ev.target.checked
+                      ? [...cur, p.id] : cur.filter((x) => x !== p.id))} />
+                  <span className="font-mono text-xs">{p.number}</span>
+                  <span className="text-[11px] muted">
+                    {(p.items ?? []).length} {T("lines")}
+                  </span>
+                </label>
+              ))}
+              {!(openPrs.data ?? []).length && (
+                <div className="py-3 text-center text-sm muted">
+                  {T("Nothing is waiting for a cost right now.")}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* ...or a list typed by hand */}
-          {!prId && (
+          {!prIds.length && (
             <div className="rounded-xl border border-ink-100 p-3 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] uppercase tracking-wider muted">
-                  {T("What are you asking about?")}
+                  {T("Or ask about something with no job behind it")}
                 </span>
                 <button type="button" className="btn-ghost text-xs"
                   onClick={() => setLines((l) => [...l, { description: "", qty: 1, uom: "pcs" }])}>
@@ -919,7 +966,7 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
             </div>
           )}
 
-          {/* Who to ask */}
+          {/* ── who to ask ── */}
           <div className="rounded-xl border border-ink-100 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="text-[10px] uppercase tracking-wider muted">
@@ -931,7 +978,7 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
             </div>
             <input className="input" placeholder={T("Search suppliers…")}
               value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="max-h-52 overflow-auto divide-y divide-ink-100">
+            <div className="max-h-40 overflow-auto divide-y divide-ink-100">
               {shown.map((s) => (
                 <label key={s.id} className="flex items-center gap-2 py-2 text-sm cursor-pointer">
                   <input type="checkbox" className="h-4 w-4 rounded border-ink-300 text-brand-600"
@@ -947,6 +994,70 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
               )}
             </div>
           </div>
+
+          {/* ── the split ── */}
+          {allLines.length > 0 && picked.length > 0 && (
+            <div className="rounded-xl border border-ink-100 p-3 space-y-3">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="checkbox" className="h-4 w-4 rounded border-ink-300 text-brand-600 mt-0.5"
+                  checked={split}
+                  onChange={(e) => setSplit(e.target.checked)} />
+                <span>
+                  <span className="font-medium">{T("Split the lines between suppliers")}</span>
+                  <span className="block text-[11px] muted">
+                    {T("For when nobody makes the whole basket — each vendor is asked only about the lines they can actually quote.")}
+                  </span>
+                </span>
+              </label>
+
+              {split && picked.map((sid) => {
+                const s = suppliers.find((x) => x.id === sid);
+                const held = assign[sid] ?? [];
+                return (
+                  <div key={sid} className="rounded-lg border border-ink-100 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{s?.name}</span>
+                      <span className="text-[11px] muted">
+                        {held.length} {T("of")} {allLines.length} {T("lines")}
+                      </span>
+                    </div>
+                    {held.length === 0 && (
+                      <div className="text-[11px] text-amber-700">
+                        {T("Pick at least one line, or this vendor gets a blank sheet.")}
+                      </div>
+                    )}
+                    {allLines.map((l) => {
+                      const k = keyOf(l);
+                      // A line already given to somebody else is still
+                      // offered — two vendors quoting the same line is a
+                      // comparison, not a mistake.
+                      const takenBy = picked.filter(
+                        (o) => o !== sid && (assign[o] ?? []).includes(k));
+                      return (
+                        <label key={k} className="flex items-start gap-2 text-xs cursor-pointer py-0.5">
+                          <input type="checkbox"
+                            className="h-3.5 w-3.5 rounded border-ink-300 text-brand-600 mt-0.5"
+                            checked={held.includes(k)}
+                            onChange={() => toggleLine(sid, k)} />
+                          <span className="flex-1">
+                            <span className="font-mono muted">{l.prNumber}#{l.lineNo}</span>{" "}
+                            {l.description}{" "}
+                            <span className="muted">({l.qty} {l.uom})</span>
+                            {takenBy.length > 0 && (
+                              <span className="ml-1 text-[10px] text-ink-400">
+                                · {T("also asked of")}{" "}
+                                {takenBy.map((o) => suppliers.find((x) => x.id === o)?.name).join(", ")}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label={T("Quote valid until")}>

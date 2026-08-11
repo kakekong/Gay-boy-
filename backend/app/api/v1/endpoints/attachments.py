@@ -23,7 +23,7 @@ ALLOWED_OWNERS = {
     "customer", "quotation", "project", "approval_request",
     "supplier_po", "customer_po", "invoice", "delivery_order",
     "customer_contact", "employee", "price_request", "daily_log",
-    "supplier", "supplier_contact",
+    "supplier", "supplier_contact", "supplier_price_request",
 }
 MAX_FILE_SIZE_MB = 20
 
@@ -50,6 +50,10 @@ def _attachment_visible_to(owner_type: str, role: Role) -> bool:
                               "delivery_order", "supplier_po", "customer")
     if owner_type == "supplier_po":
         return role in (Role.DIRECTOR, Role.PURCHASING)
+    if owner_type == "supplier_price_request":
+        # The vendor's own quotation sheet, their price list, the WhatsApp
+        # screenshot the number came off. Same audience as the request.
+        return role in (Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN)
     if owner_type in ("supplier", "supplier_contact"):
         # The vendor's own paperwork — company deed, NPWP, bank details, an
         # ID card for the person who signs collections. Narrower than the

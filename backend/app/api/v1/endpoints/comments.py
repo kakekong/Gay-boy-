@@ -40,7 +40,7 @@ router = APIRouter(
 
 ALLOWED_OWNERS = {
     "quotation", "customer_po", "supplier_po", "price_request",
-    "project", "invoice",
+    "project", "invoice", "supplier_price_request",
 }
 
 # Which roles have any business in a given thread, before row-level scoping.
@@ -53,6 +53,10 @@ _THREAD_ROLES: dict[str, set[Role]] = {
     "quotation":     {Role.SALES, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},
     "customer_po":   {Role.SALES, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},
     "supplier_po":   {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
+    # The buy-side price request: same audience as the document itself, which
+    # excludes sales entirely because its content is procurement cost.
+    "supplier_price_request": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR,
+                               Role.ADMIN},
     "project":       {Role.SALES, Role.PURCHASING, Role.ADMIN, Role.FINANCE,
                       Role.MANAGER, Role.DIRECTOR},
     "invoice":       {Role.SALES, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},
@@ -353,6 +357,10 @@ async def _document_label(db: AsyncSession, owner_type: str, owner_id: UUID) -> 
             from app.models.purchasing import SupplierPO
             row = await db.get(SupplierPO, owner_id)
             return row.number if row else "supplier PO"
+        if owner_type == "supplier_price_request":
+            from app.models.purchasing import SupplierPriceRequest
+            row = await db.get(SupplierPriceRequest, owner_id)
+            return row.number if row else "supplier price request"
         if owner_type == "project":
             from app.models.operation import Project
             row = await db.get(Project, owner_id)

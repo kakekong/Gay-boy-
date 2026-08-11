@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { CommentThread } from "@/components/CommentThread";
 import { useT, T } from "@/store/lang";
 
 const idr = (n: number) =>
@@ -40,6 +42,19 @@ interface Line {
   quoted_price?: number | null;
   lead_days?: number | null;
   note?: string | null;
+  /** Where this line came from. Survives the job being split between vendors
+   *  and several jobs being combined onto one, which is what lets a quote be
+   *  applied back to exactly the right line of the right request. */
+  source_pr_id?: string | null;
+  source_pr_number?: string | null;
+  source_line_no?: number | null;
+}
+
+interface SourceRef {
+  id: string;
+  number: string;
+  status: string;
+  lines: number[];
 }
 
 interface SPR {
@@ -50,6 +65,8 @@ interface SPR {
   supplier_name: string | null;
   price_request_id: string | null;
   price_request_number: string | null;
+  source_price_requests: SourceRef[];
+  is_joint: boolean;
   items: Line[];
   notes: string | null;
   currency: string;
@@ -274,9 +291,22 @@ export default function SupplierPriceRequestDetailPage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm border-t border-ink-100 pt-4">
           <Cell label={t("Costing", "Membiayai")}>
-            {r.price_request_number
-              ? <span className="font-mono text-xs">{r.price_request_number}</span>
-              : <span className="muted">{t("standalone enquiry", "permintaan mandiri")}</span>}
+            {(r.source_price_requests ?? []).length ? (
+              <span className="flex flex-wrap gap-1">
+                {r.source_price_requests.map((s2) => (
+                  <span key={s2.id} className="font-mono text-xs">
+                    {s2.number}
+                    <span className="muted">
+                      {" "}({s2.lines.length})
+                    </span>
+                  </span>
+                ))}
+              </span>
+            ) : r.price_request_number ? (
+              <span className="font-mono text-xs">{r.price_request_number}</span>
+            ) : (
+              <span className="muted">{t("standalone enquiry", "permintaan mandiri")}</span>
+            )}
           </Cell>
           <Cell label={t("Answered", "Dijawab")}>
             <span className="tabular-nums">{r.lines_quoted}/{r.lines_total}</span>
@@ -331,6 +361,7 @@ export default function SupplierPriceRequestDetailPage() {
             <tr>
               <th className="th w-10">#</th>
               <th className="th">{t("Description", "Deskripsi")}</th>
+              {r.is_joint && <th className="th">{t("For", "Untuk")}</th>}
               <th className="th text-right">{t("Qty", "Jml")}</th>
               <th className="th">{t("UoM", "Satuan")}</th>
               <th className="th text-right">{t("Their price", "Harga mereka")}</th>
@@ -346,6 +377,13 @@ export default function SupplierPriceRequestDetailPage() {
                 <tr key={it.line_no} className="border-t border-ink-100">
                   <td className="td font-mono text-xs muted">{it.line_no}</td>
                   <td className="td">{it.description}</td>
+                  {r.is_joint && (
+                    <td className="td font-mono text-[11px] muted">
+                      {it.source_pr_number
+                        ? `${it.source_pr_number}#${it.source_line_no}`
+                        : "—"}
+                    </td>
+                  )}
                   <td className="td text-right tabular-nums">{it.qty}</td>
                   <td className="td muted">{it.uom ?? "—"}</td>
                   <td className="td text-right">
@@ -451,6 +489,13 @@ export default function SupplierPriceRequestDetailPage() {
           </button>
         </div>
       )}
+
+      {/* The vendor's own quotation sheet, and the conversation about it —
+          the same two cards the sell-side price request carries, so the
+          screenshot of the WhatsApp reply lives on the request it answers
+          rather than in somebody's inbox. */}
+      <AttachmentsSection ownerType="supplier_price_request" ownerId={r.id} />
+      <CommentThread ownerType="supplier_price_request" ownerId={r.id} />
 
       {/* The other vendors asked about the same job */}
       {(compare.data?.requests?.length ?? 0) > 1 && (

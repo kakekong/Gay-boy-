@@ -198,6 +198,10 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             # (SPR-…). Rides with the cost and is hidden from whoever cannot
             # see the cost — the number is only meaningful next to it.
             row["cost_source"] = it.get("cost_source")
+            # ...and which vendor it was. On a job split between suppliers the
+            # lines legitimately name different ones, so this is per line and
+            # not a property of the request.
+            row["cost_supplier"] = it.get("cost_supplier")
         if see_sell:
             row["sell_price"] = it.get("sell_price")
             row["sell_basis"] = it.get("sell_basis") or "unit"

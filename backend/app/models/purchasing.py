@@ -99,6 +99,12 @@ class SupplierPriceRequest(Base, UUIDPK, TimestampMixin):
         String(20), default="draft", nullable=False, index=True
     )
     items: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # Every customer price request this one draws lines from, as a flat list of
+    # id strings. `price_request_id` above is the single-source case and goes
+    # NULL on a joint request; this is what "which SPRs touch PR-2026-0007"
+    # asks, and it stays queryable with a JSONB containment test instead of
+    # scanning every row's items.
+    source_pr_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(String(8), default="IDR", nullable=False)
     # How long the supplier's quote holds, and how long they said delivery
