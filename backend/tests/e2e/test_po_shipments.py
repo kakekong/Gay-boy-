@@ -316,6 +316,78 @@ async def main():
     check("sales cannot read a vendor's quoted prices", r.status_code == 403,
           str(r.status_code))
 
+    # ══ an edit purchasing files actually reaches the director ═══════════════
+    # It did not. Both the create request and the edit request are filed under
+    # target_type "supplier_po", and the inbox's staleness sweep dropped any of
+    # them whose PO was no longer `pending_approval` — true of every PO being
+    # edited, since an edit is filed against an order that is already open. So
+    # purchasing was told "submitted for director approval" and nothing ever
+    # arrived. The whole point of the gate is that somebody sees it.
+    print("\n── an edit reaches the director, and says what it changes ──")
+    live = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup_a, "project_id": proj, "po_date": "2026-08-11",
+        "items": [{"description": f"COUPLING {tag}", "qty": 3, "uom": "pcs",
+                   "unit_price": 500_000, "amount": 1_500_000}],
+        "total": 1_500_000}))
+    check("the director's own PO opens straight away", live["status"] == "open",
+          str(live.get("status")))
+
+    r = await c.patch(f"/purchasing/po/{live['id']}", headers=pur, json={
+        "total": 1_800_000, "quoted_lead_days": 21})
+    check("purchasing's edit is accepted", r.status_code == 200, str(r.status_code))
+    check("...and queued rather than applied",
+          J(r).get("pending_approval") is True, str(J(r))[:150])
+    check("...leaving the order untouched for now",
+          float(J(await c.get(f"/purchasing/po/{live['id']}", headers=pur))["total"])
+          == 1_500_000, str(J(await c.get(f"/purchasing/po/{live['id']}", headers=pur))["total"]))
+
+    inbox = J(await c.get("/approvals", headers=d))
+    mine = [x for x in inbox if x["target_type"] == "supplier_po"
+            and (x.get("payload") or {}).get("action") == "update"]
+    check("the director can see it waiting", len(mine) >= 1,
+          str([(x["target_type"], (x.get("payload") or {}).get("action")) for x in inbox])[:250])
+
+    if mine:
+        req = mine[-1]
+        pv = J(await c.get(f"/approvals/{req['id']}/preview", headers=d))
+        check("...titled as a change, not as the order",
+              "change" in (pv.get("title") or "").lower(), str(pv.get("title")))
+        vals = " | ".join(f"{f['label']}={f['value']}" for f in (pv.get("fields") or []))
+        check("...naming who asked", "Purchasing" in vals, vals[:200])
+        check("...showing the total it would replace, and the one it proposes",
+              "1.500.000" in vals and "1.800.000" in vals, vals[:250])
+        check("...and the lead time it sets", "21" in vals, vals[:250])
+        check("...linking to that order, not the list",
+              (pv.get("link") or "").endswith(live["id"]), str(pv.get("link")))
+
+        r = await c.post(f"/approvals/{req['id']}/approve", headers=d, json={"notes": ""})
+        check("the director approves it", r.status_code == 200, str(r.status_code))
+        after = J(await c.get(f"/purchasing/po/{live['id']}", headers=pur))
+        check("...and only then does the order move",
+              float(after["total"]) == 1_800_000 and after["quoted_lead_days"] == 21,
+              f"{after['total']} {after['quoted_lead_days']}")
+        gone = [x for x in J(await c.get("/approvals", headers=d)) if x["id"] == req["id"]]
+        check("...and it leaves the queue once decided", not gone, str(gone)[:120])
+
+    # A create request still goes stale the moment the PO is decided — the
+    # fix must not have turned that sweep off for everything.
+    r = await c.post("/purchasing/po", headers=pur, json={
+        "supplier_id": sup_a, "project_id": proj,
+        "items": [{"description": f"WASHER {tag}", "qty": 1, "unit_price": 100,
+                   "amount": 100}], "total": 100})
+    waiting = J(r)
+    check("purchasing raising a PO still needs approval too",
+          waiting.get("status") == "pending_approval", str(waiting.get("status")))
+    creates = [x for x in J(await c.get("/approvals", headers=d))
+               if x["target_type"] == "supplier_po"
+               and (x.get("payload") or {}).get("action") == "create"]
+    check("...and that request is in the queue", len(creates) >= 1, str(len(creates)))
+    await c.patch(f"/purchasing/po/{waiting['id']}", headers=d, json={"status": "cancelled"})
+    still = [x for x in J(await c.get("/approvals", headers=d))
+             if x["id"] in {y["id"] for y in creates}]
+    check("...and drops out once the PO is decided elsewhere", not still,
+          str(still)[:150])
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

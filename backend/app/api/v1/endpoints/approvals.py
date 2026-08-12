@@ -247,7 +247,19 @@ async def inbox(
             return bool(po and po.status not in _CPO_OPEN)
         if t == "supplier_po":
             spo = supplier_pos.get(r.target_id)
-            return bool(spo and spo.status != "pending_approval")
+            if not spo:
+                return False
+            # Two different requests share this target type and only one of
+            # them is answered by the PO's status. A *create* is settled the
+            # moment the order leaves pending_approval — that was the director
+            # deciding it. An *edit* is filed against an order that is already
+            # open, so the same test marked every edit stale the instant it was
+            # filed and the director never saw one: purchasing was told
+            # "submitted for approval" and nothing arrived. An edit only goes
+            # stale when the order it edits is finished with.
+            if (r.payload or {}).get("action") == "update":
+                return spo.status in ("cancelled", "closed")
+            return spo.status != "pending_approval"
         if t == "purchase_request":
             pr = prs.get(r.target_id)
             return bool(pr and pr.status != "pending_approval")
@@ -444,6 +456,10 @@ async def preview_request(
         "link": None,
     }
     t, tid = req.target_type, req.target_id
+    # Who asked. On an edit request this is half the decision — the director is
+    # approving somebody's proposed change, not a document that changed itself.
+    _asker = await db.get(User, req.requested_by) if req.requested_by else None
+    requester_name = (_asker.full_name if _asker else None) or "—"
 
     if t in ("quotation", "quotation_won", "discount"):
         from app.models.quotation import Quotation, QuotationItem
@@ -501,14 +517,67 @@ async def preview_request(
         sp = await db.get(SupplierPO, tid)
         if sp:
             sup = await db.get(Supplier, sp.supplier_id) if sp.supplier_id else None
+            action = (req.payload or {}).get("action")
+            changes = (req.payload or {}).get("changes") or {}
+            cur = sp.currency or "IDR"
+            # An *edit* request is the interesting case, and it used to render
+            # as the PO exactly as it already is — the director was approving a
+            # change they could not see. What is being changed lives in the
+            # approval's payload, not on the row, so show that: each field with
+            # the value it would replace beside it.
+            is_update = action == "update" and changes
+            fields = [{"label": "Status", "value": sp.status}]
+            items = [{"description": i.get("description"), "qty": _money(i.get("qty")),
+                      "unit_price": _money(i.get("unit_price")),
+                      "line_total": _money(i.get("qty")) * _money(i.get("unit_price"))}
+                     for i in (getattr(sp, "items", None) or [])]
+            if is_update:
+                labels = {
+                    "number": "PO number", "po_date": "PO date",
+                    "eta": "Expected arrival", "quoted_lead_days": "Lead time (days)",
+                    "currency": "Currency", "total": "Total", "status": "Status",
+                }
+
+                def _show(key, val):
+                    if val in (None, ""):
+                        return "—"
+                    if key == "total":
+                        return _rupiah(val) if cur == "IDR" else f"{cur} {_money(val):,.2f}"
+                    return str(val)
+
+                fields = [{"label": "Change requested by", "value": requester_name}]
+                for k, v in changes.items():
+                    if k == "items":
+                        continue                       # shown as the line table
+                    fields.append({
+                        "label": labels.get(k, k.replace("_", " ").capitalize()),
+                        "value": f"{_show(k, getattr(sp, k, None))}  →  {_show(k, v)}",
+                    })
+                if "items" in changes:
+                    was = {(i.get("description") or ""): i
+                           for i in (getattr(sp, "items", None) or [])}
+                    items = [{"description": i.get("description"),
+                              "qty": _money(i.get("qty")),
+                              "was_qty": (_money(was[i.get("description")].get("qty"))
+                                          if i.get("description") in was else None),
+                              "is_new": i.get("description") not in was,
+                              "unit_price": _money(i.get("unit_price")),
+                              "was_unit_price": (
+                                  _money(was[i.get("description")].get("unit_price"))
+                                  if i.get("description") in was else None),
+                              "line_total": _money(i.get("qty")) * _money(i.get("unit_price"))}
+                             for i in (changes.get("items") or [])]
+                    fields.append({"label": "Lines",
+                                   "value": f"{len(items)} proposed, replacing {len(was)}"})
             out.update(
-                title=sp.number, subtitle=sup.name if sup else None,
-                link="/purchase-orders", total=_money(getattr(sp, "total", 0)),
-                items=[{"description": i.get("description"), "qty": _money(i.get("qty")),
-                        "unit_price": _money(i.get("unit_price")),
-                        "line_total": _money(i.get("qty")) * _money(i.get("unit_price"))}
-                       for i in (getattr(sp, "items", None) or [])],
-                fields=[{"label": "Status", "value": sp.status}],
+                title=(f"{sp.number} — proposed changes" if is_update else sp.number),
+                subtitle=sup.name if sup else None,
+                # The specific order, not the list. A director deciding one of
+                # eight queued edits should not have to go and find it.
+                link=f"/purchase-orders/{sp.id}",
+                total=_money(changes.get("total", getattr(sp, "total", 0))),
+                items=items,
+                fields=fields,
             )
             out["attachments"] += await _attachments_for(db, "supplier_po", sp.id)
 

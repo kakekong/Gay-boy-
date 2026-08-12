@@ -26,6 +26,17 @@ export interface BadgeSource {
   link: string;
   /** Optional per-source severity — controls color, sound, OS-notify. */
   severity?: "low" | "medium" | "high";
+  /**
+   * Whether `count` is a real answer from the server yet.
+   *
+   * This is load-bearing. A count is `data ?? 0` while its query is in
+   * flight, so without this every source reads 0 on the first render and
+   * then "rises" to its real value a moment later — which the delta check
+   * below cannot tell apart from eight new approvals actually arriving. That
+   * is why the banners fired on every page load, and twice over when the two
+   * queries behind one badge landed a beat apart.
+   */
+  loaded?: boolean;
 }
 
 /**
@@ -109,21 +120,27 @@ export function NotificationBanner({ sources }: { sources: BadgeSource[] }) {
   useEffect(() => { WRITE_PREF(SFX_KEY, sfxOn); }, [sfxOn]);
   useEffect(() => { WRITE_PREF(OS_KEY,  osOn);  }, [osOn]);
 
-  // First-render snapshot — don't fire for existing pile.
-  useEffect(() => {
-    if (seenRef.current !== null) return;
-    const snap: Record<string, number> = {};
-    for (const s of sources) snap[s.key] = s.count;
-    seenRef.current = snap;
-  }, [sources]);
-
   // Deltas → banners. Runs every render (cheap; only diff triggers state).
+  //
+  // The baseline for each source is the first count that actually came back
+  // from the server, recorded silently. There is no whole-component snapshot:
+  // a single "have we started yet" flag was the bug, because the sources do
+  // not all load at the same moment, so the flag flipped on the first one and
+  // every later arrival read as new.
   useEffect(() => {
-    if (seenRef.current === null) return;
+    if (seenRef.current === null) seenRef.current = {};
     const seen = seenRef.current;
     const next: Banner[] = [];
     for (const s of sources) {
-      const prev = seen[s.key] ?? 0;
+      // Nothing to compare against yet — a loading count is 0, not zero items.
+      if (s.loaded === false) continue;
+      const prev = seen[s.key];
+      if (prev === undefined) {
+        // First real answer for this queue. Whatever is already waiting is
+        // not news; it is the pile you had when you opened the app.
+        seen[s.key] = s.count;
+        continue;
+      }
       if (s.count > prev) {
         next.push({
           id: ++idRef.current,

@@ -230,7 +230,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_won_needs_po.py` | Won waits for the customer's PO (the director included), a rejected PO is not evidence, a request signed off after its PO disappeared does not win the deal — and sales is refused every shipping/delivery date outright while purchasing, admin and the director keep their lanes |
 | `test_multi_supplier.py` | the two purchasing shapes: one job split across vendors line by line, several jobs combined onto one vendor, line provenance surviving both, per-line apply, and a customer price request that refuses to go to the director until every line is costed — plus the discussion + attachments on the buy-side request |
 | `test_po_export.py` | the supplier PO as PDF and xlsx: the address the goods leave from, the PIC, the lines, the total, sales refused both formats — plus the two things that make it usable abroad, that every label is English (checked as printed headings, so a vendor's own Indonesian address doesn't fail it) and that every figure carries its currency, written the way that currency is written |
-| `test_po_shipments.py` | the PO side of the same two shapes: a PO drafted straight off a supplier quote keeps each line's project, one order feeding three jobs shows on all three project pages, a job served by three vendors reads as Shipment 1/2/3 ordered by ETA with the last one as the date that matters, and the per-project total counts only that project's lines |
+| `test_po_shipments.py` | the PO side of the same two shapes: a PO drafted straight off a supplier quote keeps each line's project, one order feeding three jobs shows on all three project pages, a job served by three vendors reads as Shipment 1/2/3 ordered by ETA with the last one as the date that matters, and the per-project total counts only that project's lines — plus the gate itself: an edit purchasing files reaches the director's queue, shows what it would change and who asked, applies only on approval, and leaves the queue once decided, while a create request still goes stale the moment its PO is decided |
 | `test_supplier_price_request.py` | asking vendors what they charge: one request per supplier, quotes recorded per line (per-unit or per-line, normalised), the chosen one applied as the cost with its number stamped on the line, a later cheaper quote superseding it, losing quotes kept, and sales locked out of every endpoint |
 | `test_supplier_record.py` | the supplier as a real company record: address + pickup address, the company's line kept separate from each PIC's own, PICs added/edited/removed after the fact, the header editable in place (it used to be write-once), vendor paperwork readable by purchasing but not sales, and rows created before the columns existed still showing their legacy `contact` blob |
 | `test_quotation_layout.py` | where the printed quotation puts things: the totals block sits on the item grid's own rule (measured out of the PDF, not eyeballed), the KETERANGAN panel gets the width that frees up, and a note the sender numbered themselves prints numbered once |
@@ -567,6 +567,19 @@ somebody sets that env var**, which is deliberate — an admission is recoverabl
 a wrong address is a container in the wrong town. The letterhead address is a
 different thing: `COMPANY_ADDRESS` in `quotation_pdf.py`, shared by every PDF.
 
+**`target_type: "supplier_po"` is two different requests, and the inbox's
+staleness sweep has to know which.** A *create* is answered by the PO's own
+status — once the order leaves `pending_approval` the director has decided it,
+so the request is stale. An *update* is filed against an order that is already
+open, so the same test marked every edit stale the moment it was filed: the
+director's queue never showed one, and purchasing was told "submitted for
+director approval" by a screen that was telling the truth about a request
+nobody would ever see. An edit is stale only when its PO is `cancelled` or
+`closed`. The preview splits on the same `payload["action"]`: an edit renders
+the *changes* (each field as `was → becomes`, proposed lines against current
+ones, who asked) rather than the row as it currently stands, which is what it
+used to show — a director approving a change they could not see.
+
 **A supplier PO carries the same provenance forward, one step further.** The
 line knows its job: `SupplierPO.items[*]` carry `project_id` / `project_code`
 alongside the `source_pr_id` they inherited, and the row rolls those up into
@@ -853,6 +866,7 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Show the director what purchasing changed, and stop the toast storm
 Write the supplier PO in English, and say which currency it is in
 Make a PO's price request number something you can open
 Let purchasing correct a cost after the fact, with the director's say-so

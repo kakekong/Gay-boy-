@@ -802,6 +802,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {
               key: "approvals-pending",
               count: (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
+              // Both halves of this badge must have answered; otherwise the
+              // second to arrive reads as a pile of new approvals.
+              loaded: !pendingApprovals.isPending && !pendingDocs.isPending,
               title: t("Approvals & documents", "Persetujuan & dokumen"),
               body: (n: number) => t(`${n} item${n === 1 ? "" : "s"} waiting for a decision.`,
                                      `${n} item menunggu keputusan.`),
@@ -811,6 +814,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {
               key: "finance-pending",
               count: pendingInvoices.data ?? 0,
+              loaded: !pendingInvoices.isPending,
               title: t("Invoices waiting for finance", "Invoice menunggu keuangan"),
               body: (n: number) => t(`${n} new invoice${n === 1 ? "" : "s"} to review + sign off on the faktur pajak.`,
                                      `${n} invoice baru untuk ditinjau + tanda tangan faktur pajak.`),
@@ -820,6 +824,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {
               key: "claims-pending",
               count: pendingClaims.data ?? 0,
+              loaded: !pendingClaims.isPending,
               title: t("Payment claims", "Klaim pembayaran"),
               body: (n: number) => t(`${n} customer payment${n === 1 ? "" : "s"} to verify.`,
                                      `${n} pembayaran pelanggan untuk diverifikasi.`),
@@ -829,6 +834,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {
               key: "dp-pending",
               count: pendingDp.data ?? 0,
+              loaded: !pendingDp.isPending,
               title: role === "sales"
                 ? t("DP deposits to confirm", "DP untuk dikonfirmasi")
                 : t("DP POs awaiting finance", "PO DP menunggu keuangan"),
@@ -844,6 +850,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {
               key: "chat-unread",
               count: unread.data ?? 0,
+              loaded: !unread.isPending,
               title: t("Chat messages", "Pesan obrolan"),
               body: (n: number) => t(`${n} unread message${n === 1 ? "" : "s"}.`,
                                      `${n} pesan belum dibaca.`),
