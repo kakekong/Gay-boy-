@@ -357,6 +357,13 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   >(null);
   const [repriceWhy, setRepriceWhy] = useState("");
   const [repriceDone, setRepriceDone] = useState<any | null>(null);
+  // Purchasing correcting a cost on a request that has already been approved.
+  // Same inline cells as the director's reprice, but it files a revision
+  // instead of applying one — the director decides, every time.
+  const [costRev, setCostRev] = useState<
+    Record<number, { cost?: number; costBasis?: string }> | null
+  >(null);
+  const [costRevWhy, setCostRevWhy] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [editingNumber, setEditingNumber] = useState(false);
   const [numberDraft, setNumberDraft] = useState("");
@@ -463,13 +470,48 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     onError: onErr,
   });
 
+  const proposeCost = useMutation({
+    // Every line goes up, not just the touched ones: the server matches lines
+    // by description and carries across whatever a revision doesn't mention,
+    // so sending the whole list is what keeps the untouched costs intact.
+    mutationFn: () => api.post(`/price-requests/${id}/revise`, {
+      items: (pr.items ?? []).map((it: any) => {
+        const edit = (costRev ?? {})[it.line_no];
+        return {
+          description: it.description,
+          qty: Number(it.qty) || 0,
+          uom: it.uom || null,
+          spec: it.spec || null,
+          ...(edit?.cost !== undefined
+            ? { cost_price: edit.cost, cost_basis: edit.costBasis ?? "unit" }
+            : {}),
+        };
+      }),
+      reason: costRevWhy.trim() || null,
+    }).then((r) => r.data),
+    onSuccess: () => {
+      setCostRev(null); setCostRevWhy("");
+      qc.invalidateQueries({ queryKey: ["pr-revisions", id] });
+      refresh();
+    },
+    onError: onErr,
+  });
+
   // Editable price cell with a per-line "/unit" vs "total" basis selector.
   // Storage is always per-unit; "total" just means the entered figure covers
   // the whole line, and we show the implied unit price (or vice-versa) live.
-  const editCell = (it: any, kind: "cost" | "sell", which: "flow" | "reprice" = "flow") => {
-    const book = which === "reprice" ? (reprice ?? {}) : draft;
-    const write = which === "reprice" ? setReprice : setDraft;
-    const v = book[it.line_no] ?? {};
+  const editCell = (
+    it: any, kind: "cost" | "sell",
+    which: "flow" | "reprice" | "costrev" = "flow",
+  ) => {
+    const book = which === "reprice" ? (reprice ?? {})
+      : which === "costrev" ? (costRev ?? {}) : draft;
+    const write = which === "reprice" ? setReprice
+      : which === "costrev" ? setCostRev : setDraft;
+    // One cell renderer over three books that hold different halves: the
+    // cost-revision book has no sell side because purchasing never sets one.
+    const v: { cost?: number; sell?: number; costBasis?: string; sellBasis?: string } =
+      (book as any)[it.line_no] ?? {};
     const amount = kind === "cost" ? v.cost : v.sell;
     const basis = (kind === "cost" ? v.costBasis : v.sellBasis) ?? "unit";
     const qty = Number(it.qty) || 0;
@@ -545,6 +587,12 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   // Negotiation path: propose a change on a request that has already gone out.
   const canPropose = !stillDraft && !revPending && revLeft > 0
     && (role === "sales" || role === "manager" || role === "admin" || isDirector);
+  // Purchasing's own path, for after the director has signed the request off
+  // and `canCost` has closed: a supplier moving their price is not a reason to
+  // go and ask somebody else to retype it. Uncapped — it spends none of the
+  // negotiation budget — but every one goes to the director.
+  const canProposeCost = isPurchasing && !stillDraft && !canCost && !revPending;
+  const costRevising = costRev !== null;
   const editingLocked = editItems !== null && !stillDraft;
 
   return (
@@ -792,6 +840,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 {"cost_price" in it && (
                   <td className="td text-right">
                     {repricing ? editCell(it, "cost", "reprice")
+                      : costRevising ? editCell(it, "cost", "costrev")
                       : canCost && (isPurchasing || isDirector)
                         ? editCell(it, "cost")
                         : readCell(it.cost_price, it.cost_total, it.qty)}
@@ -840,6 +889,35 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             </div>
           </div>
         )}
+        {/* ── purchasing asking to move a cost that has already been signed ── */}
+        {costRevising && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <div className="text-sm font-semibold text-amber-900 flex items-center gap-2">
+              <Pencil size={14} />
+              {t("Proposing a new cost", "Mengajukan biaya baru")}
+            </div>
+            <p className="text-xs text-amber-900">
+              {t("Type over the costs above that have changed — the rest stay as they are. Nothing moves until the director approves it, and this doesn't use up the sales team's revisions.",
+                 "Ketik ulang biaya di atas yang berubah — sisanya tetap. Tidak ada yang berubah sampai direktur menyetujui, dan ini tidak memakai jatah revisi tim penjualan.")}
+            </p>
+            <input className="input" value={costRevWhy} maxLength={200}
+              onChange={(e) => setCostRevWhy(e.target.value)}
+              placeholder={t("Why is it changing? e.g. supplier revised the quote",
+                             "Mengapa berubah? mis. supplier merevisi penawarannya")} />
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost"
+                onClick={() => { setCostRev(null); setCostRevWhy(""); }}>
+                {t("Cancel", "Batal")}
+              </button>
+              <button className="btn-primary ml-auto"
+                disabled={proposeCost.isPending || !costRevWhy.trim()
+                          || !Object.keys(costRev ?? {}).length}
+                onClick={() => proposeCost.mutate()}>
+                <Send size={14} /> {t("Send to director", "Kirim ke direktur")}
+              </button>
+            </div>
+          </div>
+        )}
         {repriceDone && (
           <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2
                           text-sm text-emerald-900">
@@ -853,6 +931,26 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                         `Penawaran ${repriceDone.quotation.number} masih draf dan kini sudah sesuai.`)
               : " " + t(`Quotation ${repriceDone.quotation.number} has already gone out (${repriceDone.quotation.status}) and was left as it is — issue a revision if the customer needs the new price.`,
                         `Penawaran ${repriceDone.quotation.number} sudah keluar (${repriceDone.quotation.status}) dan dibiarkan — terbitkan revisi bila pelanggan perlu harga baru.`))}
+          </div>
+        )}
+
+        {canProposeCost && !costRevising && (
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            <button className="btn-ghost border-ink-200"
+              onClick={() => setCostRev({})}
+              title={t("Ask the director to change a cost that has already been approved",
+                       "Minta direktur mengubah biaya yang sudah disetujui")}>
+              <Pencil size={14} /> {t("Propose a cost change", "Ajukan perubahan biaya")}
+            </button>
+            <span className="text-xs muted">
+              {t("The director approves each one.", "Direktur menyetujui setiap perubahan.")}
+            </span>
+          </div>
+        )}
+        {isPurchasing && revPending && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {t("A change is already with the director. Wait for that decision before proposing another.",
+               "Sebuah perubahan sudah berada di direktur. Tunggu keputusannya sebelum mengajukan lagi.")}
           </div>
         )}
 
@@ -1020,6 +1118,13 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
               )}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">#{rv.n}</span>
+                  {rv.kind === "cost" && (
+                    <span className="chip bg-ink-100 text-ink-700"
+                      title={t("A cost correction from purchasing — it doesn't use a negotiation revision",
+                               "Koreksi biaya dari pembelian — tidak memakai jatah revisi negosiasi")}>
+                      {t("cost", "biaya")}
+                    </span>
+                  )}
                   <span className={clsx("chip",
                     rv.status === "approved" ? "bg-emerald-100 text-emerald-800"
                     : rv.status === "rejected" ? "bg-red-100 text-red-800"
@@ -1049,6 +1154,9 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                                                     `hapus ${ch.description}`)}
                         {ch.kind === "qty" && t(`${ch.description}: ${ch.from} → ${ch.to}`,
                                                 `${ch.description}: ${ch.from} → ${ch.to}`)}
+                        {ch.kind === "cost" && t(
+                          `${ch.description}: cost ${idr(ch.from ?? 0)} → ${idr(ch.to ?? 0)}`,
+                          `${ch.description}: biaya ${idr(ch.from ?? 0)} → ${idr(ch.to ?? 0)}`)}
                       </li>
                     ))}
                   </ul>

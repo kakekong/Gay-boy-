@@ -419,6 +419,13 @@ def _money(n) -> float:
         return 0.0
 
 
+def _rupiah(n) -> str:
+    """Rp 8.900.000 — thousands separated the Indonesian way, as everywhere
+    else in the app. A field formatted with commas beside a table formatted
+    with dots reads as two different currencies."""
+    return "Rp " + f"{round(_money(n)):,}".replace(",", ".")
+
+
 @router.get("/{req_id}/preview")
 async def preview_request(
     req_id: UUID,
@@ -514,8 +521,35 @@ async def preview_request(
             rev = next((r for r in (pr.revisions or []) if r.get("n") == n), None)
             proposed = (rev or {}).get("proposed_items") or []
             before = {(i.get("description") or ""): i for i in ((rev or {}).get("before_items") or [])}
+            kind = (rev or {}).get("kind", "scope")
+            # On a purchasing revision the cost is the whole decision, so it is
+            # shown as the unit price with the old one beside it. A scope
+            # revision leaves that column empty as before — the question there
+            # is what is being bought, not what it costs.
+            is_cost = kind == "cost"
+            scope_used = len([r for r in (pr.revisions or [])
+                              if r.get("status") == "approved"
+                              and r.get("kind", "scope") != "cost"])
+            fields = [{"label": "Requested by",
+                       "value": (rev or {}).get("requested_by_name") or "—"}]
+            if is_cost:
+                was_total = sum(_money(i.get("qty")) * _money(i.get("cost_price"))
+                                for i in ((rev or {}).get("before_items") or []))
+                now_total = sum(_money(i.get("qty")) * _money(i.get("cost_price"))
+                                for i in proposed)
+                fields += [
+                    {"label": "Change", "value": "Cost correction by purchasing"},
+                    # Dots, not commas: the whole app prints rupiah id-ID, and
+                    # two conventions in one card reads as two currencies.
+                    {"label": "Total cost was", "value": _rupiah(was_total)},
+                    {"label": "Total cost becomes", "value": _rupiah(now_total)},
+                ]
+            else:
+                fields.append({"label": "Revisions used",
+                               "value": f"{scope_used} of 3"})
             out.update(
-                title=f"{pr.number} — revision {n}",
+                title=(f"{pr.number} — cost revision {n}" if is_cost
+                       else f"{pr.number} — revision {n}"),
                 subtitle=cust.company_name if cust else None,
                 link=f"/price-requests?open={pr.id}",
                 notes=(rev or {}).get("reason"),
@@ -525,12 +559,14 @@ async def preview_request(
                         "was_qty": _money(before[i.get("description")].get("qty"))
                         if i.get("description") in before else None,
                         "is_new": i.get("description") not in before,
-                        "unit_price": None, "line_total": None}
+                        "unit_price": _money(i.get("cost_price")) if is_cost else None,
+                        "was_unit_price": (
+                            _money(before[i.get("description")].get("cost_price"))
+                            if is_cost and i.get("description") in before else None),
+                        "line_total": (_money(i.get("qty")) * _money(i.get("cost_price"))
+                                       if is_cost else None)}
                        for i in proposed],
-                fields=[{"label": "Requested by",
-                         "value": (rev or {}).get("requested_by_name") or "—"},
-                        {"label": "Revisions used",
-                         "value": f"{len([r for r in (pr.revisions or []) if r.get('status') == 'approved'])} of 3"}],
+                fields=fields,
             )
             out["attachments"] += await _attachments_for(db, "price_request", pr.id)
 

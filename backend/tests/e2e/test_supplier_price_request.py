@@ -194,6 +194,24 @@ async def main():
                                        params={"price_request_id": pr["id"]}))
               if x["applied_at"]) == 1)
 
+    # Editing the request rebuilds its lines from scratch, which used to drop
+    # every field the rebuild didn't name — including which quote the cost came
+    # from. Losing that turns a sourced cost back into a number somebody typed.
+    print("\n── and an edit afterwards does not forget where the cost came from ──")
+    src = recost["items"][0].get("cost_source")
+    rev = J(await c.post(f"/price-requests/{pr['id']}/revise", headers=pur, json={
+        "items": [{"description": i["description"], "qty": i["qty"], "uom": i.get("uom")}
+                  for i in recost["items"]],
+        "reason": "tidy up the wording"}))
+    await c.post(f"/approvals/{rev['approval_request_id']}/approve", headers=d)
+    edited = J(await c.get(f"/price-requests/{pr['id']}", headers=pur))
+    check("the quote number is still stamped on the line after an edit",
+          edited["items"][0].get("cost_source") == src,
+          f"{edited['items'][0].get('cost_source')} vs {src}")
+    check("...and so is the supplier that gave it",
+          edited["items"][0].get("cost_supplier") == recost["items"][0].get("cost_supplier"),
+          str(edited["items"][0].get("cost_supplier")))
+
     # ══ standing alone ═══════════════════════════════════════════════════════
     print("\n── an enquiry with no deal behind it ──")
     r = await c.post(BASE, headers=pur, json={

@@ -146,10 +146,119 @@ async def main():
         "items": [{"description": G, "qty": 1}]})
     check("another rep cannot revise someone else's request",
           r.status_code in (403, 404), str(r.status_code))
+    # ── 7. purchasing correcting a cost after the fact ───────────────────────
+    # Asked for: purchasing can edit a request past submission, and every edit
+    # goes to the director. Their edit is the cost — and it must not be paid
+    # for out of the sales team's three negotiation revisions, which are
+    # already spent by this point in the driver. That is the whole test: the
+    # request above is capped, and this still gets through.
+    print("\n── purchasing corrects a cost, the director signs it ──")
+    before = J(await c.get(f"/price-requests/{pr}", headers=pu))
+    old_cost = (line(before, G) or {}).get("cost_price")
     r = await c.post(f"/price-requests/{pr}/revise", headers=pu, json={
-        "items": [{"description": G, "qty": 1}]})
-    check("purchasing cannot revise it either", r.status_code in (403, 404, 409),
+        "items": [{"description": G, "qty": 7, "uom": "pcs",
+                   "cost_price": 6_500_000, "cost_basis": "unit"},
+                  {"description": C, "qty": 4, "uom": "pcs"}],
+        "reason": "Supplier raised the gearbox price"})
+    check("purchasing can revise a submitted request", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:160])
+    check("...even though sales has used every negotiation revision",
+          J(r).get("kind") == "cost", str(J(r).get("kind")))
+    check("...and it does not claim to spend one",
+          J(r).get("revisions_left") is None, str(J(r).get("revisions_left")))
+    cost_req = J(r).get("approval_request_id")
+
+    live = J(await c.get(f"/price-requests/{pr}", headers=pu))
+    check("nothing moves until the director says so",
+          (line(live, G) or {}).get("cost_price") == old_cost,
+          f"{(line(live, G) or {}).get('cost_price')} vs {old_cost}")
+
+    r = await c.post(f"/price-requests/{pr}/revise", headers=pu, json={
+        "items": [{"description": G, "qty": 7, "cost_price": 1}]})
+    check("...and one at a time, same as everyone", r.status_code == 409,
           str(r.status_code))
+
+    prev = J(await c.get(f"/approvals/{cost_req}/preview", headers=d))
+    check("the director's preview names it a cost correction",
+          any("cost" in str(f.get("value", "")).lower()
+              or "cost" in str(f.get("label", "")).lower()
+              for f in (prev.get("fields") or [])), str(prev.get("fields"))[:200])
+    check("...and shows the new cost against the old",
+          any(i.get("unit_price") == 6_500_000 and i.get("was_unit_price") == old_cost
+              for i in (prev.get("items") or [])), str(prev.get("items"))[:240])
+
+    r = await c.post(f"/approvals/{cost_req}/approve", headers=d)
+    check("the director approves it", r.status_code == 200, str(r.status_code))
+    after = J(await c.get(f"/price-requests/{pr}", headers=pu))
+    check("...and the new cost lands", (line(after, G) or {}).get("cost_price") == 6_500_000,
+          str(line(after, G)))
+
+    log = J(await c.get(f"/price-requests/{pr}/revisions", headers=pu))
+    check("the cost revision is on the record as its own kind",
+          any(rv.get("kind") == "cost" and rv.get("status") == "approved"
+              for rv in log.get("revisions", [])), str(log.get("revisions"))[-240:])
+    check("...and still nothing is left of the negotiation budget",
+          log.get("applied") == 3 and log.get("left") == 0, str(log)[:140])
+    check("...with the cost movement spelled out for whoever may see costs",
+          any(ch.get("kind") == "cost" and ch.get("to") == 6_500_000
+              for rv in log.get("revisions", []) for ch in (rv.get("changes") or [])),
+          str(log.get("revisions"))[-300:])
+
+    seen = J(await c.get(f"/price-requests/{pr}/revisions", headers=s1))
+    check("sales is not shown the cost that moved",
+          not any(ch.get("kind") == "cost"
+                  for rv in seen.get("revisions", []) for ch in (rv.get("changes") or [])),
+          str(seen.get("revisions"))[-200:])
+
+    # ── 8. a second request, with its budget intact ──────────────────────────
+    # The one above has spent its three revisions, which makes it the wrong
+    # place to ask what happens to a line nobody touched (earlier rounds had
+    # already dropped one) or to catch sales on a cost — the cap would answer
+    # first and hide both.
+    print("\n── one line moves, the rest is left exactly as it was ──")
+    pr2 = J(await c.post("/price-requests", headers=s1, json={
+        "customer_id": cust,
+        "items": [{"description": G, "qty": 2, "uom": "pcs"},
+                  {"description": S, "qty": 10, "uom": "pcs"}]}))["id"]
+    await c.post(f"/price-requests/{pr2}/submit", headers=s1)
+    await c.post(f"/price-requests/{pr2}/price", headers=pu, json={"items": [
+        {"line_no": 1, "cost_price": 4_000_000, "basis": "unit"},
+        {"line_no": 2, "cost_price": 90_000, "basis": "unit"}]})
+    r = await c.post(f"/price-requests/{pr2}/approve", headers=d, json={"items": [
+        {"line_no": 1, "sell_price": 6_000_000, "basis": "unit"},
+        {"line_no": 2, "sell_price": 150_000, "basis": "unit"}]})
+    check("the director signs the second request off", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+
+    r = await c.post(f"/price-requests/{pr2}/revise", headers=pu, json={
+        "items": [{"description": G, "qty": 2, "uom": "pcs",
+                   "cost_price": 8_400_000, "cost_basis": "total"},
+                  {"description": S, "qty": 10, "uom": "pcs"}],
+        "reason": "New quote from the vendor"})
+    check("purchasing can still correct an approved request", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+    await c.post(f"/approvals/{J(r)['approval_request_id']}/approve", headers=d)
+    got = J(await c.get(f"/price-requests/{pr2}", headers=pu))
+    check("a cost entered as a line total is stored per unit, as everywhere else",
+          (line(got, G) or {}).get("cost_price") == 4_200_000, str(line(got, G)))
+    check("...the line nobody touched keeps its cost",
+          (line(got, S) or {}).get("cost_price") == 90_000, str(line(got, S)))
+    seller = J(await c.get(f"/price-requests/{pr2}", headers=d))
+    check("...and the director's selling prices survive the correction",
+          (line(seller, G) or {}).get("sell_price") == 6_000_000
+          and (line(seller, S) or {}).get("sell_price") == 150_000,
+          f"{line(seller, G)} {line(seller, S)}")
+
+    r = await c.post(f"/price-requests/{pr2}/revise", headers=s1, json={
+        "items": [{"description": G, "qty": 2, "cost_price": 1}], "reason": "sneak"})
+    check("sales cannot set a cost through a revision", r.status_code == 403,
+          f"{r.status_code} {r.text[:120]}")
+    r = await c.post(f"/price-requests/{pr2}/revise", headers=s1, json={
+        "items": [{"description": G, "qty": 3}], "reason": "a real one"})
+    check("...but its own scope revision still works", r.status_code == 200,
+          f"{r.status_code} {r.text[:120]}")
+    check("...and purchasing's correction cost it nothing",
+          J(r).get("revisions_left") == 3, str(J(r).get("revisions_left")))
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

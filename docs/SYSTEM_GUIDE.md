@@ -162,6 +162,7 @@ Around the PR:
 - **A discussion thread** (sales ↔ purchasing ↔ director) lives on the PR — and posting in it **pushes a device notification** to the other participants and the PR's stakeholders (§10.4).
 - **Handoffs notify instantly**: submitting a PR pings purchasing; purchasing finishing costing pings the director; the director's decision pings the requesting sales rep — each as bell items and device pushes.
 - Serialization is role-aware: purchasing never receives sell price or customer name; sales never receives cost.
+- **A submitted request can still be changed, by proposal.** Nobody edits a live request in place (the director aside). Sales propose a **scope revision** — quantities, specs, lines — capped at three applied. Purchasing propose a **cost revision** when a supplier moves their price after the fact; it is uncapped and spends none of sales' three, because it is not a negotiation with the customer. **The director approves every one**, seeing the old figure beside the new one in the approval inbox, and nothing on the request moves until they do. One pending at a time either way.
 - The PR links forward: PR → quotation → project, all clickable on each other's pages.
 
 ---

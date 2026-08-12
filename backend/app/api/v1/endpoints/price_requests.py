@@ -286,7 +286,7 @@ def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list
     for i, it in enumerate(items):
         pool = by_desc.get((it.description or "").strip().casefold())
         old = pool.pop(0) if pool else None
-        out.append({
+        row = {
             "line_no": i + 1,
             "description": it.description,
             "qty": float(it.qty or 0),
@@ -294,7 +294,23 @@ def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list
             "spec": it.spec,
             "cost_price": old.get("cost_price") if old else None,
             "sell_price": old.get("sell_price") if old else None,
-        })
+        }
+        # Carry the surviving line's *provenance* too, not just its numbers.
+        # This rebuilds each row from scratch, so anything not named here is
+        # dropped — which used to quietly erase which supplier quote a cost
+        # came from the first time anybody edited the request.
+        for k in ("cost_basis", "cost_source", "cost_supplier"):
+            if old and old.get(k) is not None:
+                row[k] = old[k]
+        # A revision that carries a new cost overrides what was carried across;
+        # that is the whole point of purchasing proposing one.
+        new_cost = getattr(it, "cost_price", None)
+        if new_cost is not None:
+            row["cost_price"] = _to_unit(
+                float(new_cost), getattr(it, "cost_basis", "unit") or "unit",
+                row["qty"])
+            row["cost_basis"] = getattr(it, "cost_basis", "unit") or "unit"
+        out.append(row)
     return out
 
 
@@ -767,14 +783,35 @@ async def pending_counts(
 MAX_APPLIED_REVISIONS = 3
 
 
+class ReviseItemIn(ItemIn):
+    """A proposed line. Purchasing may also move its cost.
+
+    Sales revise *what is being bought* — a spec changed, the customer wants
+    forty metres instead of fifty. Purchasing revise *what it costs us*, which
+    is the correction they could not make before: once they had costed a
+    request and sent it on, a supplier coming back with a different number left
+    them nothing to do but ask somebody else to retype it.
+    """
+    cost_price: float | None = None
+    cost_basis: str = "unit"           # "unit" | "total", as everywhere else
+
+
 class ReviseIn(BaseModel):
-    items: list[ItemIn] = Field(default_factory=list)
+    items: list[ReviseItemIn] = Field(default_factory=list)
     notes: str | None = None
     reason: str | None = None
 
 
 def _applied_revisions(pr: PriceRequest) -> int:
-    return len([r for r in (pr.revisions or []) if r.get("status") == "approved"])
+    """How many *scope* revisions have been approved.
+
+    The cap is on renegotiating the order, which is why purchasing's cost
+    corrections are not counted: a supplier moving their price twice must not
+    be what stops sales agreeing a quantity with the customer. Revisions filed
+    before `kind` existed are scope revisions, which is what they were.
+    """
+    return len([r for r in (pr.revisions or [])
+                if r.get("status") == "approved" and r.get("kind", "scope") != "cost"])
 
 
 def _pending_revision(pr: PriceRequest) -> dict | None:
@@ -788,11 +825,20 @@ async def propose_revision(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Propose a change to a submitted request. The director decides."""
+    """Propose a change to a submitted request. The director decides.
+
+    Purchasing get here too. Their edit is a *cost* revision: uncapped, because
+    it is not a negotiation with the customer, but never silent — the director
+    signs off each one, which is the point. Everyone else's is a scope
+    revision, capped at three, exactly as before.
+    """
     pr = await _scoped(pr_id, db, user)
-    if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.ADMIN, Role.DIRECTOR):
+    role = Role(user.role)
+    if role not in (Role.SALES, Role.MANAGER, Role.ADMIN, Role.DIRECTOR,
+                    Role.PURCHASING):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only sales, a manager, admin or the director can revise a request")
+                            "Only sales, purchasing, a manager, admin or the "
+                            "director can revise a request")
     if pr.status in ("draft", "rejected"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -804,8 +850,9 @@ async def propose_revision(
             "A revision is already waiting for the director. Wait for that "
             "decision before proposing another.",
         )
+    kind = "cost" if role == Role.PURCHASING else "scope"
     used = _applied_revisions(pr)
-    if used >= MAX_APPLIED_REVISIONS:
+    if kind != "cost" and used >= MAX_APPLIED_REVISIONS:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"This request has already been revised {used} times, the limit. "
@@ -813,11 +860,17 @@ async def propose_revision(
         )
     if not payload.items:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "A revision needs at least one line")
+    # A cost sent by somebody who cannot see costs would be a write without a
+    # read — the property `test_write_read_symmetry` exists to protect.
+    if not _can_see_cost(role) and any(i.cost_price is not None for i in payload.items):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Costs aren't yours to set on a price request.")
 
     proposed = _norm_items(payload.items, list(pr.items or []))
     n = len(pr.revisions or []) + 1
     entry = {
         "n": n,
+        "kind": kind,
         "status": "pending",
         "requested_by": str(user.id),
         "requested_by_name": user.full_name,
@@ -837,9 +890,10 @@ async def propose_revision(
         target_id=pr.id,
         requested_by=user.id,
         required_role=Role.DIRECTOR,
-        reason=(f"Revision {n} of {pr.number}"
+        reason=((f"Cost revision {n} of {pr.number}" if kind == "cost"
+                 else f"Revision {n} of {pr.number}")
                 + (f" — {entry['reason']}" if entry["reason"] else "")),
-        payload={"revision_n": n},
+        payload={"revision_n": n, "kind": kind},
     )
     entry["approval_request_id"] = str(req.id)
     pr.revisions = list(pr.revisions)          # re-assign so JSONB is flagged dirty
@@ -848,10 +902,13 @@ async def propose_revision(
                        after={"revision": n, "reason": entry["reason"]})
     await db.flush()
     return {
-        "ok": True, "revision": n,
-        "revisions_left": MAX_APPLIED_REVISIONS - used,
+        "ok": True, "revision": n, "kind": kind,
+        # A cost revision spends none of the negotiation budget, so reporting
+        # one fewer left would be a lie the UI then repeats.
+        "revisions_left": (None if kind == "cost"
+                           else MAX_APPLIED_REVISIONS - used),
         "approval_request_id": str(req.id),
-        "price_request": await _serialize(db, pr, Role(user.role)),
+        "price_request": await _serialize(db, pr, role),
     }
 
 
@@ -869,6 +926,7 @@ async def list_revisions(
         row = {k: r.get(k) for k in
                ("n", "status", "requested_by_name", "requested_at", "reason",
                 "decided_by_name", "decided_at", "decision_notes")}
+        row["kind"] = r.get("kind", "scope")
         # Show what actually changed, not two raw item blobs.
         before = {(i.get("description") or "").strip(): i for i in (r.get("before_items") or [])}
         after = {(i.get("description") or "").strip(): i for i in (r.get("proposed_items") or [])}
@@ -880,6 +938,14 @@ async def list_revisions(
             elif float(old.get("qty") or 0) != float(item.get("qty") or 0):
                 changes.append({"kind": "qty", "description": desc,
                                 "from": old.get("qty"), "to": item.get("qty")})
+            # A cost that moved is the whole content of a purchasing revision,
+            # and invisible in a qty-only diff. Only for eyes that may see cost
+            # — for sales this line simply isn't in the log.
+            if old is not None and _can_see_cost(role):
+                was, now = old.get("cost_price"), item.get("cost_price")
+                if (was or 0) != (now or 0):
+                    changes.append({"kind": "cost", "description": desc,
+                                    "from": was, "to": now})
         for desc in before:
             if desc not in after:
                 changes.append({"kind": "removed", "description": desc})

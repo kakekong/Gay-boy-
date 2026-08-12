@@ -516,6 +516,8 @@ interface PreviewShape {
     description: string | null; qty: number;
     unit_price: number | null; line_total: number | null;
     was_qty?: number | null; is_new?: boolean;
+    /** Set on a purchasing cost revision: the figure this one replaces. */
+    was_unit_price?: number | null;
   }[];
   total: number | null;
   notes: string | null;
@@ -612,7 +614,17 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                           </td>
                           {p.items.some((x) => x.unit_price != null) && (
                             <>
-                              <td className="td text-right tabular-nums">{rp(it.unit_price)}</td>
+                              <td className="td text-right tabular-nums">
+                                {/* On a cost revision the old figure is the
+                                    decision: approving means replacing it. */}
+                                {it.was_unit_price != null
+                                  && it.was_unit_price !== it.unit_price && (
+                                  <span className="muted line-through mr-1">
+                                    {rp(it.was_unit_price)}
+                                  </span>
+                                )}
+                                {rp(it.unit_price)}
+                              </td>
                               <td className="td text-right tabular-nums">{rp(it.line_total)}</td>
                             </>
                           )}

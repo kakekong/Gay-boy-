@@ -221,7 +221,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_pr_director_edit.py` | the director editing a price request past draft — and costing/approved prices surviving the edit |
 | `test_lost_and_badges.py` | a lost deal must carry a reason; a dismissed alert stays dismissed when its count moves |
 | `test_customer_po_sheet.py` | the order-confirmation PDF: ship-to and PIC chosen at download, address fallback, cross-customer contact refused |
-| `test_pr_revisions.py` | negotiation revisions: capped at 3 applied, one pending at a time, a rejection changes nothing and costs nothing |
+| `test_pr_revisions.py` | revisions on a submitted price request: sales' negotiation revisions capped at 3 applied, one pending at a time, a rejection changes nothing and costs nothing — and purchasing's cost corrections, which the director signs off one by one, get through on a request whose negotiation budget is spent, carry the basis conversion, leave every untouched line and the director's sell prices alone, and are invisible to sales |
 | `test_cross_dept_chat.py` | cross-department chat needs no approval: any internal pair may DM and be group members, the director still monitors silently, portal logins still cannot reach an internal inbox, and the old request endpoint no longer files anything |
 | `test_approval_preview.py` | the document preview on an approval request: lines and per-line money, the keterangan, files attached to the *document*, revision before/after, director-only |
 | `test_attendance_alert_window.py` | attendance alerts stay silent before 08:30 **WIB** — includes a threshold that only passes if the comparison isn't done in server/UTC time |
@@ -525,6 +525,28 @@ that drives that (`uncovered`, `fully_costed`). Applying supersedes only
 requests whose lines actually overlap, so two vendors each covering half a job
 are both live at once.
 
+**Two kinds of revision live in the same `pr.revisions` list, and the `kind`
+field is what keeps them apart.** A submitted price request is not editable in
+place, so a change is proposed and the director decides — that much was already
+true for sales. Purchasing now file them too, and the difference is what gets
+counted:
+
+* `kind: "scope"` — sales, admin, manager: *what is being bought*. Capped at
+  three applied (`MAX_APPLIED_REVISIONS`); a rejected one is free, because
+  nothing changed.
+* `kind: "cost"` — purchasing: *what it costs us*, carried on the line as
+  `cost_price` + `cost_basis`. **Uncapped**, and `_applied_revisions()`
+  deliberately does not count it. A supplier moving their price twice must not
+  be the reason sales cannot agree a quantity with the customer.
+
+Rows written before `kind` existed default to `"scope"`, which is what they
+were. Everything else is shared: one pending at a time (two would race on
+apply), the director signs each one, and nothing moves on the request until
+they do. Sales sending a `cost_price` through `/revise` is a 403 — a write
+without a read is the property `test_write_read_symmetry` exists to defend —
+and the cost movement is stripped from the revision log for anyone who cannot
+see costs.
+
 **A supplier PO carries the same provenance forward, one step further.** The
 line knows its job: `SupplierPO.items[*]` carry `project_id` / `project_code`
 alongside the `source_pr_id` they inherited, and the row rolls those up into
@@ -811,6 +833,8 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Let purchasing correct a cost after the fact, with the director's say-so
+Print the stamp the size it is signed, across the line
 Show a job's shipments, and let anyone chat across departments
 Split one order across suppliers, and combine several onto one
 A way out of every dialog, and a purchase order you can send
@@ -879,7 +903,10 @@ record with its own PICs, the buy-side supplier price request (splittable
 across vendors, joinable across jobs, with its own discussion and attachments),
 Won gated on the customer's PO, delivery dates taken off sales, a close button
 on every dialog, the supplier PO as PDF/Excel, per-project shipments on a
-multi-vendor job, and cross-department chat with no approval at all.
+multi-vendor job, cross-department chat with no approval at all, the printed
+signature sized and placed like the wet-signed original, and purchasing able to
+correct a cost on a submitted price request with the director signing off each
+one.
 
 ## 10. Open items
 
