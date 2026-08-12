@@ -23,8 +23,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    BaseDocTemplate, Frame, KeepTogether, PageTemplate, Paragraph, Spacer,
-    Table, TableStyle,
+    BaseDocTemplate, Flowable, Frame, KeepTogether, PageTemplate, Paragraph,
+    Spacer, Table, TableStyle,
 )
 
 NAVY = colors.HexColor("#033171")
@@ -288,7 +288,6 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
                          textColor=NAVY, spaceAfter=3)
     body = ParagraphStyle("body", fontName="Helvetica", fontSize=8.4,
                           textColor=INK, leading=12)
-    body_b = ParagraphStyle("bodyb", parent=body, fontName="Helvetica-Bold", fontSize=9.6)
     small = ParagraphStyle("small", parent=body, fontSize=7.2, leading=10.4,
                            textColor=INK_SOFT)
 
@@ -434,31 +433,128 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
     flow.append(Spacer(1, 4 * mm))
 
     # ── Signature ───────────────────────────────────────────────────────
-    # The scan goes in the gap that was always left for a wet signature, and
-    # is scaled to this block's shape — 62mm wide, and no taller than the gap
-    # it replaces, so the name below never gets pushed off the page.
     from app.services.signature import fitted_flowable
-    ink = (fitted_flowable(signer_signature, max_w_mm=58, max_h_mm=11)
+    ink = (fitted_flowable(signer_signature,
+                           max_w_mm=_SignatureBlock.INK_W_MM,
+                           max_h_mm=_SignatureBlock.INK_H_MM)
            if signer_signature else None)
-    sign = [
-        [Paragraph("Hormat kami,", body)],
-        [ink if ink is not None else Spacer(1, 11 * mm)],
-        [Paragraph(signer_name.upper(), body_b)],
-        [Paragraph(f"Hp&nbsp;&nbsp;&nbsp;: {signer_phone}", small)],
-        [Paragraph(f"Email : {signer_email}", small)],
-    ]
-    sign_t = Table(sign, colWidths=[62 * mm], hAlign="LEFT")
-    sign_t.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-        ("LINEABOVE", (0, 2), (0, 2), 1.1, INK),
-        ("TOPPADDING", (0, 2), (0, 2), 3),
-    ]))
-    flow.append(KeepTogether(sign_t))
+    flow.append(KeepTogether(_SignatureBlock(
+        name=signer_name.upper(), phone=signer_phone, email=signer_email,
+        ink=ink)))
 
     # BaseDocTemplate takes the page callback from the template, not build().
     doc.build(flow)
     return buf.getvalue()
+
+
+class _SignatureBlock(Flowable):
+    """Hormat kami, the stamp, the rule, and who signed it.
+
+    This used to be a five-row table, which is the tidy way to do it and the
+    wrong way to look at it: the scan sat politely in its own row above the
+    rule, small, boxed in by the row height. Nobody signs paper like that. On
+    the company's own wet-signed quotations the stamp is big enough to read
+    the company name in, and it comes down *across* the ruled line.
+
+    Platypus stacks flowables and cannot overlap them, so this draws its five
+    pieces itself at measured offsets. Two of those measurements are the whole
+    point:
+
+    * the ink hangs `OVERHANG` of its height below the rule, so the rule
+      crosses it rather than fencing it in — and the rule is painted after the
+      ink, so it stays visible even over a scan with an opaque background;
+    * that overhang shares a band with the printed name, so the ink is placed
+      off the name actually being printed rather than off a fixed inset. GORA
+      leaves the stamp near the middle of the block, as on the original. A
+      longer name pushes it right, then shrinks it, and if there is still not
+      room the overhang is given up altogether and the ink sits on the rule —
+      because a stamp through the signatory's name is worse than a tidy one.
+    """
+
+    NAME_SIZE = 10.4
+    W_MM = 72.0          # block width — the rule's length
+    INK_W_MM = 42.0      # the box the scan is fitted into
+    INK_H_MM = 24.0
+    OVERHANG = 0.26      # how much of the ink's height falls below the rule
+    INK_GAP_MM = 3.0     # clear space between the name and the ink's left edge
+    INK_MIN_W_MM = 24.0  # below this the stamp is too small to read
+
+    def __init__(self, *, name: str, phone: str, email: str, ink=None):
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+
+        super().__init__()
+        self.name, self.phone, self.email, self.ink = name, phone, email, ink
+        self._w = self.W_MM * mm
+        self._ink_x = 0.0
+        overhang = self.OVERHANG
+
+        # The name is drawn, not flowed, so nothing wraps it: a long one would
+        # run off the end of its own rule and into the margin. Shrink it to
+        # fit instead, down to a floor where it is still clearly the signatory.
+        self._name_size = self.NAME_SIZE
+        name_w = stringWidth(name, "Helvetica-Bold", self._name_size)
+        if name_w > self._w:
+            self._name_size = max(7.6, self._name_size * self._w / name_w)
+            name_w = stringWidth(name, "Helvetica-Bold", self._name_size)
+
+        # Whether the ink ended up beside the name or above the rule. The two
+        # are alternatives, never both, and nothing else keeps them apart.
+        self._clears_name = True
+        if ink is not None:
+            self._ink_x = max(0.17 * self._w, name_w + self.INK_GAP_MM * mm)
+            room = self._w - self._ink_x
+            if ink.drawWidth > room:
+                if room >= self.INK_MIN_W_MM * mm:
+                    ink.drawHeight *= room / ink.drawWidth
+                    ink.drawWidth = room
+                else:
+                    # The name owns that band. Keep the stamp its full size,
+                    # sit it flush right, and lift it clear of the rule.
+                    self._ink_x = max(0.0, self._w - ink.drawWidth)
+                    self._clears_name = False
+                    overhang = 0.0
+
+        ink_h = getattr(ink, "drawHeight", 0) or 0
+        # With no signature on file the block keeps the old empty gap, which
+        # is what somebody signs by hand after printing.
+        self._gap = max(ink_h * (1 - overhang), 11 * mm)
+        self._rule_y = 4.6 * mm + self._gap          # from the top, downwards
+        self._name_y = self._rule_y + 5.4 * mm
+        self._phone_y = self._name_y + 5.2 * mm
+        self._email_y = self._phone_y + 4.8 * mm
+        # The ink may hang past the last text line if the scan is very tall;
+        # reserve for whichever ends lower so the next flowable never lands on
+        # top of it.
+        self._h = max(self._email_y + 1.8 * mm,
+                      4.6 * mm + ink_h + 1.5 * mm)
+
+    def wrap(self, avail_w, avail_h):  # noqa: D102
+        return self._w, self._h
+
+    def draw(self):  # noqa: D102
+        c = self.canv
+        top = self._h                     # flowable origin is bottom-left
+
+        c.setFillColor(INK)
+        c.setFont("Helvetica", 8.4)
+        c.drawString(0, top - 4.0 * mm, "Hormat kami,")
+
+        # Ink first, rule second — see the class docstring.
+        if self.ink is not None:
+            self.ink.drawOn(c, self._ink_x,
+                            top - 4.6 * mm - self.ink.drawHeight)
+
+        c.setStrokeColor(INK)
+        c.setLineWidth(1.1)
+        c.line(0, top - self._rule_y, self._w, top - self._rule_y)
+
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", self._name_size)
+        c.drawString(0, top - self._name_y, self.name)
+        c.setFillColor(INK_SOFT)
+        c.setFont("Helvetica", 7.6)
+        c.drawString(0, top - self._phone_y, f"Hp    : {self.phone}")
+        c.drawString(0, top - self._email_y, f"Email : {self.email}")
 
 
 class _OrangeRule(Spacer):

@@ -33,6 +33,22 @@ def J(r):
 
 MM = 72 / 25.4                     # PDF points per millimetre
 
+
+def stamp_png(w: int = 730, h: int = 450) -> bytes:
+    """A stand-in for the company stamp: the same proportions as the real one,
+    which is what decides how it lands on the block."""
+    import io as _io
+
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.polygon([(w * .05, h * .55), (w * .42, h * .06), (w * .95, h * .06),
+               (w * .55, h * .96)], fill=(37, 78, 210, 255))
+    d.line([(w * .45, h * .85), (w * .60, h * .30), (w * .72, h * .78),
+            (w * .86, h * .22)], fill=(10, 10, 10, 255), width=9)
+    buf = _io.BytesIO(); img.save(buf, "PNG")
+    return buf.getvalue()
+
 # What a sender actually types: their own numbering, one clause per line.
 NOTES = "\n".join([
     "1. Drawing akan diberikan setelah PO diterima dan harus approval.",
@@ -157,6 +173,94 @@ async def main():
     check('...and "1)" is stripped the same as "1."',
           "1) syarat" not in "".join(p.get_text() for p in long_doc),
           "".join(p.get_text() for p in long_doc)[:200])
+
+    # ══ the signature block ══════════════════════════════════════════════════
+    # Asked for against a photo of a wet-signed quotation: the stamp printed
+    # small and tucked above the rule, where on the original it is large and
+    # comes down across the line. Measured out of the PDF because "bigger" and
+    # "over the line" are both geometry.
+    print("\n── the stamp is signed over the line, not above it ──")
+    await c.patch(f"/quotations/{q['id']}", headers=rp, json={"notes": NOTES})
+    me = J(await c.get("/auth/me", headers=rp))
+    r = await c.post(f"/users/{me['id']}/signature", headers=rp,
+                     files={"file": ("stamp.png", stamp_png(), "image/png")})
+    check("the signer has a signature on file", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:120])
+
+    r = await c.get(f"/quotations/{q['id']}/export.pdf", headers=rp)
+    sdoc = fitz.open(stream=r.content, filetype="pdf")
+    check("it still prints on one page with the stamp on it",
+          r.status_code == 200 and sdoc.page_count == 1, str(sdoc.page_count))
+    spage = sdoc.load_page(sdoc.page_count - 1)
+    imgs = [spage.get_image_bbox(i) for i in spage.get_images(full=True)]
+    # The letterhead mark is up in the header; the signature is the one down
+    # in the signing block, below "Hormat kami,".
+    hormat = (spage.search_for("Hormat kami,") or [None])[0]
+    name_hit = (spage.search_for("Sales One".upper()) or
+                spage.search_for("SALES ONE") or [None])[0]
+    ink = None
+    if hormat:
+        below = [b for b in imgs if b.y1 > hormat.y0]
+        ink = max(below, key=lambda b: b.get_area(), default=None)
+    check("the block prints the stamp under Hormat kami,",
+          hormat is not None and ink is not None,
+          f"hormat={hormat} imgs={len(imgs)}")
+
+    rules = [g["rect"] for g in spage.get_drawings()
+             if not g.get("fill") and g["rect"].height < 1.5
+             and hormat and g["rect"].y0 > hormat.y0]
+    rule = min(rules, key=lambda r_: r_.y0, default=None)
+    check("...and a rule under it for the name to sit on", rule is not None,
+          str(len(rules)))
+
+    if ink is not None and rule is not None:
+        check("the stamp is printed large, not thumbnail-sized",
+              ink.width > 25 * MM and ink.height > 12 * MM,
+              f"{ink.width / MM:.1f}×{ink.height / MM:.1f}mm")
+        check("...and it crosses the rule rather than stopping above it",
+              ink.y0 < rule.y0 < ink.y1,
+              f"ink {ink.y0 / MM:.1f}–{ink.y1 / MM:.1f} rule {rule.y0 / MM:.1f}")
+        over = (ink.y1 - rule.y0) / ink.height
+        check("...by about a quarter of its height, as on the original",
+              0.12 < over < 0.42, f"{over:.0%}")
+    if ink is not None and name_hit is not None:
+        check("the name is never printed through the stamp",
+              name_hit.x1 <= ink.x0 + 0.2 * MM,
+              f"name ends {name_hit.x1 / MM:.1f}mm, ink starts {ink.x0 / MM:.1f}mm")
+
+    # A name long enough to reach where the stamp wants to be: the stamp gives
+    # way, because a signatory whose name is struck through by a logo is worse
+    # than a stamp that sits politely on the line.
+    long_name = "MUHAMMAD RIZKY PRATAMA WIJAYA"
+    await c.patch(f"/users/{me['id']}", headers=d, json={"full_name": long_name})
+    r = await c.get(f"/quotations/{q['id']}/export.pdf", headers=rp)
+    ldoc = fitz.open(stream=r.content, filetype="pdf")
+    lpage = ldoc.load_page(ldoc.page_count - 1)
+    lh = (lpage.search_for("Hormat kami,") or [None])[0]
+    lname = (lpage.search_for(long_name) or [None])[0]
+    link = max([b for b in (lpage.get_image_bbox(i)
+                            for i in lpage.get_images(full=True))
+                if lh and b.y1 > lh.y0], key=lambda b: b.get_area(), default=None)
+    lrules = [g["rect"] for g in lpage.get_drawings()
+              if not g.get("fill") and g["rect"].height < 1.5
+              and lh and g["rect"].y0 > lh.y0]
+    lrule = min(lrules, key=lambda r_: r_.y0, default=None)
+    check("a long signatory name still prints in full",
+          lname is not None, str(lpage.get_text()[-200:]))
+    # Two ways to stay off the name and only two: beside it, or lifted off the
+    # rule entirely. Either is fine; overlapping it is not.
+    check("...with the stamp out of its way",
+          lname is not None and link is not None and lrule is not None
+          and (lname.x1 <= link.x0 + 0.2 * MM or link.y1 <= lrule.y1 + 0.6 * MM),
+          lname and link and lrule
+          and f"name→{lname.x1 / MM:.1f} ink {link.x0 / MM:.1f}"
+              f" ink_bottom {link.y1 / MM:.1f} rule {lrule.y1 / MM:.1f}")
+    check("...and the name stays inside its own rule",
+          lname is not None and lrule is not None and lname.x1 <= lrule.x1 + 0.5 * MM,
+          lname and lrule and f"name ends {lname.x1 / MM:.1f}, rule ends {lrule.x1 / MM:.1f}")
+    check("...and the page count unchanged", ldoc.page_count == 1,
+          str(ldoc.page_count))
+    await c.patch(f"/users/{me['id']}", headers=d, json={"full_name": "Sales One"})
 
     # the director's copy of the same document is the same document
     r = await c.get(f"/quotations/{q['id']}/export.pdf", headers=d)
