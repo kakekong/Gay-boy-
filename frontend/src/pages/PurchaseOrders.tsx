@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ModalCloseX } from "@/components/ModalCloseX";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Truck, Plus, Loader2, AlertCircle, X, Save, Pencil, Check,
   Search, Filter, ChevronRight,
@@ -10,7 +10,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { UserLink } from "@/components/UserLink";
-import { T } from "@/store/lang";
+import { T, t } from "@/store/lang";
 
 interface SupplierLite {
   id: string;
@@ -527,10 +527,21 @@ function NewPOModal({
               <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm">
                 <div className="flex items-center gap-2 text-emerald-800 font-medium">
                   <Check size={14} className="shrink-0" />
-                  {T("Linked to price request")}{" "}{prefill.data?.price_request_number ?? ""}
+                  {T("Linked to price request")}{" "}
+                  {/* Same tab — see the twin of this panel in Purchasing.tsx:
+                      a new tab loses the session for anyone who did not tick
+                      "keep me signed in". */}
+                  <Link to={`/price-requests?open=${linkedPR}`}
+                    className="font-mono underline underline-offset-2 hover:text-emerald-900"
+                    title={T("Open this price request")}>
+                    {prefill.data?.price_request_number ?? ""}
+                  </Link>
                 </div>
                 <p className="text-[11px] text-emerald-700/90 mt-0.5">
-                  {T("Buying prices below are pulled from purchasing's costing — no need to retype.")}</p>
+                  {(prefill.data?.uncosted ?? 0) > 0
+                    ? t(`${prefill.data.uncosted} of ${prItems.length} line${prItems.length === 1 ? "" : "s"} on this request has no buying price yet — those show Rp 0. Cost them on the price request, or type the total in below.`,
+                        `${prefill.data.uncosted} dari ${prItems.length} baris pada permintaan ini belum ada harga beli — yang itu tampil Rp 0. Isi biayanya di permintaan harga, atau ketik totalnya di bawah.`)
+                    : T("Buying prices below are pulled from purchasing's costing — no need to retype.")}</p>
                 {prItems.length > 0 && (
                   <table className="w-full text-xs mt-2">
                     <thead className="text-ink-500">

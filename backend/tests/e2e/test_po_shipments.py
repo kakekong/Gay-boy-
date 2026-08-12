@@ -213,6 +213,52 @@ async def main():
           got["shipments"][-1]["number"] == plain["number"],
           str([(s["number"], s["eta"]) for s in got["shipments"]]))
 
+    # ══ what the new-PO form is told about the price request ═════════════════
+    # The form prints the request's number and offers to open it, and it says
+    # the buying prices came from purchasing's costing. Both have to be true:
+    # the id has to come back so the number can be a link, and a request whose
+    # lines were never costed must not be announced as costed — it prefills a
+    # column of Rp 0, and a purchase order for nothing is easy to raise by
+    # accident when the panel says the figures came from somewhere.
+    print("\n── the prefill panel ──")
+    pf = J(await c.get("/purchasing/po/prefill", headers=pur,
+                       params={"project_id": proj}))
+    check("the prefill names the price request", pf.get("price_request_number"),
+          str(pf)[:160])
+    check("...and returns its id, so the number can be opened",
+          pf.get("price_request_id") == job["pr"]["id"],
+          f"{pf.get('price_request_id')} vs {job['pr']['id']}")
+    check("...with every line costed on a request that went through costing",
+          pf.get("uncosted") == 0 and all(i.get("costed") for i in pf["items"]),
+          str(pf.get("uncosted")))
+
+    bare_cust = J(await c.post("/customers", headers=s1, json={
+        "company_name": f"PT Belum {tag}", "industry": "mining"}))["id"]
+    bare = J(await c.post("/price-requests", headers=s1, json={
+        "customer_id": bare_cust,
+        "items": [{"description": f"BELT {tag}", "qty": 5, "uom": "meter"},
+                  {"description": f"PIN {tag}", "qty": 2, "uom": "pcs"}]}))
+    await c.post(f"/price-requests/{bare['id']}/submit", headers=s1)
+    pf2 = J(await c.get("/purchasing/po/prefill", headers=pur,
+                        params={"price_request_id": bare["id"]}))
+    check("an uncosted request says so rather than claiming Rp 0 is a price",
+          pf2.get("uncosted") == 2, str(pf2.get("uncosted")))
+    check("...naming which lines have nothing on them",
+          not any(i.get("costed") for i in pf2["items"]), str(pf2["items"])[:200])
+    check("...and its total is genuinely nothing", float(pf2.get("total") or 0) == 0,
+          str(pf2.get("total")))
+
+    await c.post(f"/price-requests/{bare['id']}/price", headers=pur, json={
+        "items": [{"line_no": 1, "cost_price": 300_000, "basis": "unit"}]})
+    pf3 = J(await c.get("/purchasing/po/prefill", headers=pur,
+                        params={"price_request_id": bare["id"]}))
+    check("costing one of the two lines leaves the other counted",
+          pf3.get("uncosted") == 1, str(pf3.get("uncosted")))
+
+    detail = J(await c.get(f"/purchasing/po/{po_a['id']}", headers=pur))
+    check("a PO carries its price request's id, not just its number",
+          "price_request_id" in detail, str(list(detail))[:200])
+
     # ══ keeping the date current ═════════════════════════════════════════════
     # The whole card is worthless if the one field it reads can only be set at
     # creation. A vendor phoning to say the truck slipped a week is news, not a

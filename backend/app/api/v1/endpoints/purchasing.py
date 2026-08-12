@@ -484,12 +484,14 @@ async def po_prefill(
     if not pr:
         return {"price_request_id": None, "items": [], "total": 0}
 
-    items, total = [], 0.0
+    items, total, uncosted = [], 0.0, 0
     for it in (pr.items or []):
         qty = float(it.get("qty") or 0)
         unit_cost = float(it.get("cost_price") or 0)
         amount = unit_cost * qty
         total += amount
+        if not unit_cost:
+            uncosted += 1
         items.append({
             "line_no": it.get("line_no"),
             "description": it.get("description"),
@@ -498,12 +500,18 @@ async def po_prefill(
             "spec": it.get("spec"),
             "unit_price": unit_cost,   # buying price per unit
             "amount": amount,
+            "costed": bool(unit_cost),
         })
     return {
         "price_request_id": str(pr.id),
         "price_request_number": pr.number,
         "items": items,
         "total": total,
+        # How many lines have no cost on them. An imported request, or one
+        # still being worked, prefills a column of Rp 0 — and the panel used to
+        # announce that as "pulled from purchasing's costing", which is how a
+        # purchase order for nothing gets raised without anyone noticing.
+        "uncosted": uncosted,
     }
 
 

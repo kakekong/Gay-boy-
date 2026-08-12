@@ -353,7 +353,16 @@ export default function PurchaseOrderDetailPage() {
           </Meta>
           {p.price_request_number && (
             <Meta label={T("Price request")}>
-              <span className="font-mono text-xs">{p.price_request_number}</span>
+              {/* "Sourced from here" was a claim you had to take on trust —
+                  the number was printed but not reachable. */}
+              {p.price_request_id ? (
+                <Link to={`/price-requests?open=${p.price_request_id}`}
+                  className="font-mono text-xs text-brand-700 hover:underline">
+                  {p.price_request_number}
+                </Link>
+              ) : (
+                <span className="font-mono text-xs">{p.price_request_number}</span>
+              )}
               <span className="block text-[11px] muted">{T("buying price sourced from here")}</span>
             </Meta>
           )}

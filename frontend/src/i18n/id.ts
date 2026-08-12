@@ -641,6 +641,7 @@ export const ID_STATIC: Record<string, string> = {
   "Open link": "Buka tautan",
   "Open menu": "Buka menu",
   "Open the document →": "Buka dokumen →",
+  "Open this price request": "Buka permintaan harga ini",
   "Open verification queue": "Buka antrean verifikasi",
   "Opening balance": "Saldo awal",
   "Opening stock": "Stok awal",
