@@ -1,0 +1,281 @@
+"""Two drawings, two audiences — and admin moved to the customer side.
+
+Asked for as one list of rules, which turn out to be one idea: the wall that
+already runs between the customer side and the vendor side now runs through the
+drawings too, and admin ends up on the customer side of it.
+
+**A drawing is either the customer's or the supplier's.** The supplier's is
+what the vendor sent us to make the part from; the customer's is what we put in
+front of the customer to approve, drawn up *from* the supplier's rather than
+being the same sheet forwarded on. They were one undifferentiated pile.
+
+Who may do what, and the reason each rule exists:
+
+* **Sales file neither and see only the customer's.** They were filing the
+  customer's; they are its reader, not its author. The supplier's is the
+  vendor relationship, which sales is kept out of everywhere else.
+* **Purchasing file the supplier's and see only that** — the customer drawing
+  carries the customer, and purchasing stays blind to that side.
+* **Admin file the customer's and see only that.**
+* **Manager and director see both**, which is what makes the handoff work:
+  they take the supplier's drawing and produce the customer's from it, and the
+  new drawing keeps a link back to the one it came off.
+
+And approving the *supplier's* drawing must not advance the project — the
+customer has not seen anything yet. Only the customer's sign-off does that.
+
+The rest is admin losing the procurement side: no cost, no margin (which is
+cost by subtraction), no supplier PO, and a shipment list that gives them the
+dates without naming the vendor.
+"""
+import asyncio, io, os, sys, uuid
+os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
+    APP_ENV="dev", DEMO_SEED_PASSWORD="test-pass-123",
+    STORAGE_LOCAL_DIR="/tmp/storage_test", JWT_SECRET="e2e-test-secret")
+sys.path.insert(0, "/home/user/Gay-boy-/backend")
+import httpx, logging; logging.disable(logging.INFO)
+PASS, FAIL = [], []
+def check(n, c, d=""):
+    (PASS if c else FAIL).append(n); print(("  PASS " if c else "  FAIL ")+n+(f"  [{d}]" if d and not c else ""))
+def J(r):
+    try: return r.json()
+    except Exception: return {"_": r.text[:200]}
+
+
+def pdf(tag: str) -> bytes:
+    return b"%PDF-1.4\n% " + tag.encode() + b"\n"
+
+
+async def main():
+    from app.scripts.seed import ensure_schema; await ensure_schema()
+    from app.main import app
+    c = httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                          base_url="http://t/api/v1", timeout=120)
+    tag = uuid.uuid4().hex[:5]
+
+    async def login(e):
+        r = await c.post("/auth/login", json={"email": e, "password": "test-pass-123"})
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    d = await login("director@demo.local")
+    adm = await login("admin@demo.local")
+    pur = await login("purchasing@demo.local")
+    s1 = await login("sales1@demo.local")
+    mgr = await login("manager@demo.local")
+
+    async def up(headers, project, kind, note, source=None):
+        data = {"kind": kind, "notes": note}
+        if source:
+            data["source_drawing_id"] = source
+        return await c.post(f"/operation/projects/{project}/drawings", headers=headers,
+                            data=data,
+                            files={"file": (f"{kind}.pdf", io.BytesIO(pdf(note)),
+                                            "application/pdf")})
+
+    # ── a live project with a costed, approved price request behind it ───────
+    cust = J(await c.post("/customers", headers=s1, json={
+        "company_name": f"PT Gambar {tag}", "industry": "mining"}))["id"]
+    pr = J(await c.post("/price-requests", headers=s1, json={
+        "customer_id": cust,
+        "items": [{"description": f"CHAIN {tag}", "qty": 10, "uom": "meter"}]}))
+    await c.post(f"/price-requests/{pr['id']}/submit", headers=s1)
+    await c.post(f"/price-requests/{pr['id']}/price", headers=pur, json={
+        "items": [{"line_no": 1, "cost_price": 1_000_000, "basis": "unit"}]})
+    await c.post(f"/price-requests/{pr['id']}/approve", headers=d, json={
+        "items": [{"line_no": 1, "sell_price": 2_000_000, "basis": "unit"}]})
+    q = J(await c.post(f"/quotations/from-price-request/{pr['id']}", headers=s1))
+    await c.post(f"/quotations/{q['id']}/submit", headers=s1)
+    await c.post(f"/quotations/{q['id']}/approve", headers=d, json={"notes": ""})
+    cpo = J(await c.post("/customer-pos", headers=s1, json={
+        "customer_id": cust, "quotation_id": q["id"], "number": f"CPO-{tag}",
+        "items": [{"description": f"CHAIN {tag}", "qty": 10, "unit_price": 2_000_000}],
+        "is_downpayment": False}))
+    await c.post(f"/quotations/{q['id']}/won", headers=d)
+    proj = J(await c.post(f"/customer-pos/{cpo['id']}/approve", headers=d,
+                          json={"notes": ""}))["project_id"]
+    check("the job became a project", bool(proj), str(proj))
+
+    # ══ who may file which ═══════════════════════════════════════════════════
+    print("\n── who files what ──")
+    r = await up(s1, proj, "customer", f"sales try {tag}")
+    check("sales cannot file the customer's drawing", r.status_code == 403,
+          f"{r.status_code} {J(r)}"[:140])
+    r = await up(s1, proj, "supplier", f"sales try {tag}")
+    check("...nor the supplier's", r.status_code == 403, str(r.status_code))
+
+    r = await up(pur, proj, "supplier", f"vendor sheet {tag}")
+    check("purchasing files the supplier's", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:140])
+    sup_drw = J(r).get("id")
+    check("...and it is recorded as one", J(r).get("kind") == "supplier",
+          str(J(r).get("kind")))
+    r = await up(pur, proj, "customer", f"vendor tries {tag}")
+    check("...but not the customer's", r.status_code == 403, str(r.status_code))
+
+    r = await up(adm, proj, "supplier", f"admin tries {tag}")
+    check("admin cannot file a supplier drawing", r.status_code == 403,
+          str(r.status_code))
+    r = await up(adm, proj, "customer", f"for the customer {tag}")
+    check("admin files the customer's", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:140])
+    cus_drw = J(r).get("id")
+
+    r = await up(mgr, proj, "customer", f"redrawn {tag}", source=sup_drw)
+    check("management can draw the customer's up from the supplier's",
+          r.status_code == 201, f"{r.status_code} {J(r)}"[:140])
+    redrawn = J(r)
+    check("...keeping a link back to the sheet it came off",
+          redrawn.get("source_drawing_id") == sup_drw,
+          f"{redrawn.get('source_drawing_id')} vs {sup_drw}")
+    check("...and numbering it in the customer series, not the supplier's",
+          redrawn.get("revision") == 2, str(redrawn.get("revision")))
+
+    r = await up(s1, proj, "customer", "x", source=sup_drw)
+    check("nobody can work from a drawing they may not open",
+          r.status_code == 403, str(r.status_code))
+    r = await up(adm, proj, "customer", "x", source=sup_drw)
+    check("...admin included", r.status_code == 403, str(r.status_code))
+
+    r = await up(pur, proj, "sideways", f"bad kind {tag}")
+    check("an unknown kind is refused", r.status_code == 400, str(r.status_code))
+
+    # ══ who may see which ════════════════════════════════════════════════════
+    print("\n── who sees what ──")
+
+    async def seen(headers):
+        got = J(await c.get(f"/operation/projects/{proj}/full", headers=headers))
+        return ([x["id"] for x in (got.get("drawings") or [])],
+                [x["id"] for x in (got.get("supplier_drawings") or [])])
+
+    cus_seen, sup_seen = await seen(s1)
+    check("sales see the customer's drawings", cus_drw in cus_seen, str(cus_seen))
+    check("...and no supplier drawing at all", sup_seen == [], str(sup_seen))
+
+    cus_seen, sup_seen = await seen(adm)
+    check("admin see the customer's", cus_drw in cus_seen, str(cus_seen))
+    check("...and not the supplier's", sup_seen == [], str(sup_seen))
+
+    cus_seen, sup_seen = await seen(pur)
+    check("purchasing see the supplier's", sup_drw in sup_seen, str(sup_seen))
+    check("...and not the customer's", cus_seen == [], str(cus_seen))
+
+    cus_seen, sup_seen = await seen(d)
+    check("the director sees both", cus_drw in cus_seen and sup_drw in sup_seen,
+          f"{cus_seen} / {sup_seen}")
+
+    got = J(await c.get(f"/operation/projects/{proj}/full", headers=adm))
+    check("the page is told what this role may file",
+          got["may_upload_drawing"] == {"customer": True, "supplier": False},
+          str(got.get("may_upload_drawing")))
+    got = J(await c.get(f"/operation/projects/{proj}/full", headers=s1))
+    check("...and sales are offered neither",
+          got["may_upload_drawing"] == {"customer": False, "supplier": False},
+          str(got.get("may_upload_drawing")))
+
+    # ══ the sign-off, and what it moves ══════════════════════════════════════
+    print("\n── approving one is not approving the other ──")
+    before = J(await c.get(f"/operation/projects/{proj}/full", headers=d))["project"]["status"]
+    r = await c.post(f"/operation/drawings/{sup_drw}/decide", headers=adm,
+                     json={"decision": "approve"})
+    check("admin cannot sign off a drawing they cannot see", r.status_code == 403,
+          str(r.status_code))
+    r = await c.post(f"/operation/drawings/{sup_drw}/decide", headers=d,
+                     json={"decision": "approve"})
+    check("the director signs off the supplier's", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+    after = J(await c.get(f"/operation/projects/{proj}/full", headers=d))["project"]["status"]
+    check("...and the job does not move — the customer has seen nothing yet",
+          after == before, f"{before} → {after}")
+
+    r = await c.post(f"/operation/drawings/{cus_drw}/decide", headers=d,
+                     json={"decision": "approve"})
+    check("the director signs off the customer's", r.status_code == 200,
+          str(r.status_code))
+    after = J(await c.get(f"/operation/projects/{proj}/full", headers=d))["project"]["status"]
+    check("...and that is what advances the job", after == "drawing_approved",
+          f"{before} → {after}")
+
+    # ══ admin is on the customer side of the wall now ════════════════════════
+    print("\n── what admin may no longer see ──")
+    got = J(await c.get(f"/operation/projects/{proj}/full", headers=adm))
+    line = (got.get("price_request") or {}).get("items", [{}])[0]
+    check("no buying cost on the price request behind the job",
+          "cost_price" not in line, str(line))
+    check("...but the customer's own order value is still theirs",
+          got["project"]["po_value"] is not None, str(got["project"]["po_value"]))
+    check("...and no margin, which is the cost by subtraction",
+          got["project"]["margin_estimate"] is None
+          and got["project"]["margin_actual"] is None,
+          f"{got['project']['margin_estimate']} {got['project']['margin_actual']}")
+
+    dgot = J(await c.get(f"/operation/projects/{proj}/full", headers=d))
+    check("the director still sees both figures",
+          dgot["project"]["margin_estimate"] is not None
+          and (dgot.get("price_request") or {}).get("items", [{}])[0].get("cost_price")
+          is not None, str(dgot["project"]["margin_estimate"]))
+
+    pr_seen = J(await c.get(f"/price-requests/{pr['id']}", headers=adm))
+    check("nor a cost on the price request itself",
+          all("cost_price" not in i for i in pr_seen.get("items", [])),
+          str(pr_seen.get("items"))[:200])
+    r = await c.post(f"/price-requests/{pr['id']}/price", headers=adm, json={
+        "items": [{"line_no": 1, "cost_price": 5, "basis": "unit"}]})
+    check("...and admin cannot type one in either", r.status_code == 403,
+          str(r.status_code))
+
+    print("\n── and the supplier side is closed to them ──")
+    sup = J(await c.post("/purchasing/suppliers", headers=pur, json={
+        "name": f"PT Rahasia {tag}"}))["id"]
+    po = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup, "project_id": proj, "eta": "2026-11-01",
+        "items": [{"description": f"CHAIN {tag}", "qty": 10, "uom": "meter",
+                   "unit_price": 1_000_000, "amount": 10_000_000}],
+        "total": 10_000_000}))
+    for path, label in ((f"/purchasing/po", "the supplier PO list"),
+                        (f"/purchasing/po/{po['id']}", "a supplier PO"),
+                        (f"/purchasing/po/{po['id']}/export.pdf", "its printed copy"),
+                        ("/purchasing/price-requests", "the buy-side price requests")):
+        r = await c.get(path, headers=adm)
+        check(f"admin is refused {label}", r.status_code == 403,
+              f"{path} → {r.status_code}")
+
+    ship = J(await c.get(f"/purchasing/po/for-project/{proj}", headers=adm))
+    check("admin still get the shipments — the dates are their job",
+          len(ship.get("shipments", [])) == 1, str(ship)[:160])
+    one = ship["shipments"][0]
+    check("...with the arrival date on it", one["eta"] == "2026-11-01", str(one["eta"]))
+    check("...and the vendor stripped out",
+          one["supplier_name"] is None and one["supplier_id"] is None
+          and one["po_id"] is None and one["number"] is None, str(one)[:220])
+    check("...including off every line", all(i["supplier_name"] is None
+                                             for i in one["items"]), str(one["items"]))
+    check("...and what we paid them", one["total_for_project"] is None,
+          str(one["total_for_project"]))
+    check("...while still saying how many are coming and from how many places",
+          ship["supplier_count"] == 1, str(ship["supplier_count"]))
+    check("no vendor name survives anywhere in that payload",
+          f"PT Rahasia {tag}" not in str(ship), str(ship)[:250])
+
+    # The project page carries its own list of supplier orders. Scrubbing the
+    # shipments card while that one still names the vendor would be theatre.
+    full_adm = J(await c.get(f"/operation/projects/{proj}/full", headers=adm))
+    check("the project page hands admin no supplier orders at all",
+          full_adm.get("supplier_pos") == [], str(full_adm.get("supplier_pos"))[:200])
+    check("...and no vendor name anywhere in the whole payload",
+          f"PT Rahasia {tag}" not in str(full_adm),
+          [k for k in full_adm if f"PT Rahasia {tag}" in str(full_adm[k])])
+    full_dir = J(await c.get(f"/operation/projects/{proj}/full", headers=d))
+    check("the director still gets them", len(full_dir.get("supplier_pos") or []) == 1,
+          str(len(full_dir.get("supplier_pos") or [])))
+
+    pship = J(await c.get(f"/purchasing/po/for-project/{proj}", headers=pur))
+    check("purchasing still see the vendor on theirs",
+          pship["shipments"][0]["supplier_name"] == f"PT Rahasia {tag}",
+          str(pship["shipments"][0]["supplier_name"]))
+
+    await c.aclose()
+    print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
+    if FAIL:
+        sys.exit(1)
+
+
+asyncio.run(main())

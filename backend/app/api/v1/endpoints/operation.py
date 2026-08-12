@@ -45,6 +45,35 @@ def _can_see_project_money(user: User) -> bool:
     return Role(user.role) != Role.PURCHASING
 
 
+def _can_see_project_cost(user: User) -> bool:
+    """Whether this user may see what the goods cost us.
+
+    Purchasing obviously may — it is their number. **Admin may not.** They run
+    the customer side of a job: drawings for the customer, logistics, delivery,
+    invoicing. What we paid the vendor is not part of any of that, and it is
+    the one figure that maps a customer to a supplier's price.
+
+    The margin fields go with it rather than being gated separately, because a
+    margin next to a PO value *is* the cost — subtract one from the other.
+    """
+    return Role(user.role) not in (Role.ADMIN,)
+
+
+def _drawing_row(d, deciders: dict) -> dict:
+    return {
+        "id": str(d.id), "revision": d.revision, "file_url": d.file_url,
+        "kind": d.kind, "status": d.status, "notes": d.notes,
+        "source_drawing_id": str(d.source_drawing_id) if d.source_drawing_id else None,
+        "customer_decision_at": d.customer_decision_at,
+        "decided_at": d.decided_at,
+        "decided_by": str(d.decided_by) if d.decided_by else None,
+        "decided_by_name": deciders.get(d.decided_by) if d.decided_by else None,
+        "uploaded_by": str(d.uploaded_by) if d.uploaded_by else None,
+        "uploaded_by_name": deciders.get(d.uploaded_by) if d.uploaded_by else None,
+        "created_at": d.created_at,
+    }
+
+
 def _can_see_project_customer(user: User) -> bool:
     """Whether this user may see the customer identity behind a project.
 
@@ -89,6 +118,10 @@ async def list_projects(db: AsyncSession = Depends(get_db),
         )).all():
             sales_by_id[u.id] = u.full_name
     show_money = _can_see_project_money(user)
+    # A margin is the sell price minus the cost, so it needs both
+    # permissions — showing it to someone barred from either half
+    # hands them the half they were barred from.
+    show_margin = show_money and _can_see_project_cost(user)
     show_customer = _can_see_project_customer(user)
     out = []
     for p in rows:
@@ -107,8 +140,8 @@ async def list_projects(db: AsyncSession = Depends(get_db),
             "status": p.status,
             "po_value": float(p.po_value) if show_money else None,
             "target_delivery": p.target_delivery, "actual_delivery": p.actual_delivery,
-            "margin_estimate": float(p.margin_estimate) if show_money else None,
-            "margin_actual": float(p.margin_actual) if show_money else None,
+            "margin_estimate": float(p.margin_estimate) if show_margin else None,
+            "margin_actual": float(p.margin_actual) if show_margin else None,
         })
     return out
 
@@ -127,6 +160,10 @@ async def get_project(project_id: UUID,
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
     show_money = _can_see_project_money(user)
+    # A margin is the sell price minus the cost, so it needs both
+    # permissions — showing it to someone barred from either half
+    # hands them the half they were barred from.
+    show_margin = show_money and _can_see_project_cost(user)
     show_customer = _can_see_project_customer(user)
     return {
         "id": str(p.id), "code": p.code, "status": p.status,
@@ -135,8 +172,8 @@ async def get_project(project_id: UUID,
         "start_date": p.start_date,
         "target_delivery": p.target_delivery,
         "actual_delivery": p.actual_delivery,
-        "margin_estimate": float(p.margin_estimate or 0) if show_money else None,
-        "margin_actual": float(p.margin_actual or 0) if show_money else None,
+        "margin_estimate": float(p.margin_estimate or 0) if show_margin else None,
+        "margin_actual": float(p.margin_actual or 0) if show_margin else None,
         # Shipping timeline + import flags — exposed so the timeline editor
         # can pre-fill the form instead of making purchasing retype every save.
         "is_import": bool(p.is_import),
@@ -293,9 +330,16 @@ async def project_full(project_id: UUID,
                 supplier_name_by_id[s.id] = s.name
 
     show_money = _can_see_project_money(user)
+    # A margin is the sell price minus the cost, so it needs both
+    # permissions — showing it to someone barred from either half
+    # hands them the half they were barred from.
+    show_margin = show_money and _can_see_project_cost(user)
+    show_cost = _can_see_project_cost(user)
+    _role = Role(user.role)
     # The approved price request behind this project — so purchasing can see
-    # exactly what to source. Costs are always shown (purchasing needs them);
-    # the selling price is gated to money-viewers (hidden from purchasing).
+    # exactly what to source. The selling price is gated to money-viewers
+    # (hidden from purchasing); the buying cost to cost-viewers (hidden from
+    # admin, who work the customer side and invoice against the sell price).
     price_request = None
     if p.price_request_id:
         from app.models.price_request import PriceRequest
@@ -306,8 +350,9 @@ async def project_full(project_id: UUID,
                 row = {
                     "line_no": it.get("line_no"), "description": it.get("description"),
                     "qty": it.get("qty"), "uom": it.get("uom"), "spec": it.get("spec"),
-                    "cost_price": it.get("cost_price"),
                 }
+                if show_cost:
+                    row["cost_price"] = it.get("cost_price")
                 if show_money:
                     row["sell_price"] = it.get("sell_price")
                 pr_items.append(row)
@@ -328,8 +373,8 @@ async def project_full(project_id: UUID,
             "start_date": p.start_date,
             "target_delivery": p.target_delivery,
             "actual_delivery": p.actual_delivery,
-            "margin_estimate": float(p.margin_estimate or 0) if show_money else None,
-            "margin_actual": float(p.margin_actual or 0) if show_money else None,
+            "margin_estimate": float(p.margin_estimate or 0) if show_margin else None,
+            "margin_actual": float(p.margin_actual or 0) if show_margin else None,
             "qc_decision": p.qc_decision,
             "qc_passed_at": p.qc_passed_at,
             "qc_findings": (p.meta or {}).get("qc_findings"),
@@ -385,19 +430,18 @@ async def project_full(project_id: UUID,
                 "started_at": w.started_at, "completed_at": w.completed_at,
             } for w in work_orders
         ],
-        "drawings": [
-            {
-                "id": str(d.id), "revision": d.revision, "file_url": d.file_url,
-                "status": d.status, "notes": d.notes,
-                "customer_decision_at": d.customer_decision_at,
-                "decided_at": d.decided_at,
-                "decided_by": str(d.decided_by) if d.decided_by else None,
-                "decided_by_name": deciders.get(d.decided_by) if d.decided_by else None,
-                "uploaded_by": str(d.uploaded_by) if d.uploaded_by else None,
-                "uploaded_by_name": deciders.get(d.uploaded_by) if d.uploaded_by else None,
-                "created_at": d.created_at,
-            } for d in drawings
-        ],
+        # Two lists, filtered by what this role may open. `drawings` keeps its
+        # old name and carries the customer's — the ones sales, admin and the
+        # customer portal were always looking at — so nothing that reads it
+        # starts showing vendor sheets to the wrong people if it is missed.
+        "drawings": [_drawing_row(d, deciders) for d in drawings
+                     if d.kind == "customer" and _may_see_drawing(_role, "customer")],
+        "supplier_drawings": [_drawing_row(d, deciders) for d in drawings
+                              if d.kind == "supplier"
+                              and _may_see_drawing(_role, "supplier")],
+        "may_upload_drawing": {
+            k: _may_upload_drawing(_role, k) for k in DRAWING_KINDS
+        },
         "deliveries": [
             {
                 "id": str(do.id), "number": do.number, "split_index": do.split_index,
@@ -416,7 +460,12 @@ async def project_full(project_id: UUID,
                 "items": pr.items, "created_at": pr.created_at,
             } for pr in purchase_requests
         ],
-        "supplier_pos": [
+        # The orders placed with vendors for this job. Empty for admin — they
+        # are barred from the supplier PO screens, and a card here listing the
+        # vendor and its number would hand back everything those screens hold.
+        # The shipments card is what they get instead: the dates, not the
+        # vendor.
+        "supplier_pos": [] if not show_cost else [
             {
                 "id": str(p.id), "number": p.number, "status": p.status,
                 "supplier_id": str(p.supplier_id) if p.supplier_id else None,
@@ -648,12 +697,45 @@ REQUIRED_DOCS = {
 _LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
 DOCS_DUE_WINDOW_DAYS = 14
 
-# Drawings: internal staff upload the file (on behalf of the supplier), and the
-# director signs it off. The customer-portal approval still works as a fallback.
-_DRAWING_UPLOAD_ROLES = {
-    Role.PURCHASING, Role.SALES, Role.MANAGER, Role.DIRECTOR, Role.ADMIN,
+# ── Drawings, and who they belong to ─────────────────────────────────────────
+#
+# Two documents, not one pile. The **supplier drawing** is what the vendor sent
+# us — it is procurement's side of the job and names the vendor. The **customer
+# drawing** is what we put in front of the customer for approval, and it is
+# *drawn up from* the supplier's rather than being the same sheet forwarded on.
+#
+# So the two have different authors and different readers, and the walls are
+# the same ones the rest of the app already keeps:
+#
+#   * **Sales** may see the customer drawing (they are the ones showing it to
+#     the customer) but never file one, and never see the supplier's at all —
+#     that is the vendor relationship, which sales is kept out of.
+#   * **Purchasing** files the supplier drawing and sees only that; the
+#     customer drawing carries the customer, and purchasing stays blind to it.
+#   * **Admin** works the customer side — they file the customer drawing and
+#     see only that.
+#   * **Manager / director** see both, which is what makes the handoff
+#     possible: they take the supplier drawing and produce the customer one
+#     from it (`POST /drawings/{id}/redraw`).
+DRAWING_KINDS = ("customer", "supplier")
+
+_DRAWING_UPLOAD_ROLES: dict[str, set[Role]] = {
+    "customer": {Role.ADMIN, Role.MANAGER, Role.DIRECTOR},
+    "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
+}
+_DRAWING_VIEW_ROLES: dict[str, set[Role]] = {
+    "customer": {Role.SALES, Role.ADMIN, Role.MANAGER, Role.DIRECTOR, Role.FINANCE},
+    "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
 }
 _DRAWING_APPROVE_ROLES = {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+
+
+def _may_upload_drawing(role: Role, kind: str) -> bool:
+    return role in _DRAWING_UPLOAD_ROLES.get(kind, set())
+
+
+def _may_see_drawing(role: Role, kind: str) -> bool:
+    return role in _DRAWING_VIEW_ROLES.get(kind or "customer", set())
 
 
 def _logistics_payload(p: Project) -> dict:
@@ -704,24 +786,42 @@ async def _has_approved_drawing(db: AsyncSession, project_id: UUID) -> bool:
 async def upload_drawing(
     project_id: UUID,
     notes: str | None = Form(None),
+    kind: str = Form("customer"),
+    source_drawing_id: UUID | None = Form(None),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Internal staff upload a drawing — sales files the customer's version,
-    purchasing the supplier's. It lands as 'submitted', awaiting the
-    director's sign-off — no supplier login needed."""
-    if Role(user.role) not in _DRAWING_UPLOAD_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to upload drawings")
+    """File a drawing — purchasing the supplier's, admin the customer's.
+
+    It lands as 'submitted', awaiting the director's sign-off. `kind` decides
+    who may file it at all (see `_DRAWING_UPLOAD_ROLES`): sales are readers of
+    the customer drawing, not its authors, and never touch the supplier's.
+    """
+    kind = (kind or "customer").strip().lower()
+    if kind not in DRAWING_KINDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"kind must be one of {list(DRAWING_KINDS)}")
+    role = Role(user.role)
+    if not _may_upload_drawing(role, kind):
+        who = ", ".join(sorted(r.value for r in _DRAWING_UPLOAD_ROLES[kind]))
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"A {kind} drawing is filed by {who} — not {role.value}.")
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
-    # Sales may only file drawings on their own customers' projects —
-    # same scope rule as the rest of the sales surface.
-    if Role(user.role) == Role.SALES:
-        cust = await db.get(Customer, p.customer_id) if p.customer_id else None
-        if not cust or cust.sales_pic_id != user.id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer's project")
+
+    # A customer drawing may be drawn up *from* a supplier's; keep the link so
+    # the lineage survives, and refuse a source the caller cannot even open.
+    src = None
+    if source_drawing_id:
+        src = await db.get(Drawing, source_drawing_id)
+        if not src or src.project_id != p.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Source drawing not found")
+        if not _may_see_drawing(role, src.kind):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "That drawing isn't yours to work from")
 
     data = await file.read()
     if not data:
@@ -744,13 +844,17 @@ async def upload_drawing(
     db.add(a)
     await db.flush()
 
+    # Revisions run per kind: the supplier's third sheet and the customer's
+    # first are not revisions of each other.
     prior = (await db.scalars(
-        select(Drawing).where(Drawing.project_id == p.id)
+        select(Drawing).where(Drawing.project_id == p.id, Drawing.kind == kind)
     )).all()
     next_rev = (max((d.revision for d in prior), default=0) or 0) + 1
     drw = Drawing(
         project_id=p.id,
         revision=next_rev,
+        kind=kind,
+        source_drawing_id=src.id if src else None,
         file_url=f"/api/v1/attachments/{a.id}/download",
         status="submitted",
         notes=notes,
@@ -762,7 +866,8 @@ async def upload_drawing(
     await db.flush()
     return {
         "id": str(drw.id), "revision": drw.revision, "status": drw.status,
-        "file_url": drw.file_url,
+        "kind": drw.kind, "file_url": drw.file_url,
+        "source_drawing_id": str(drw.source_drawing_id) if drw.source_drawing_id else None,
     }
 
 
@@ -785,13 +890,23 @@ async def decide_drawing(
     d = await db.get(Drawing, drawing_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Drawing not found")
+    # Admin approves drawings, but only the ones they may open — signing off a
+    # vendor sheet you cannot see is not a decision.
+    if not _may_see_drawing(Role(user.role), d.kind):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"A {d.kind} drawing isn't yours to decide")
     project = await db.get(Project, d.project_id)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
 
     if payload.decision == "approve":
         d.status = "approved"
-        advance_project_status(project, "drawing_approved")
+        # Only the *customer's* drawing being signed off means the job can move
+        # on — that is the approval the customer is waiting on. Approving a
+        # supplier sheet is an internal step; it must not skip the project past
+        # the drawing the customer has not seen yet.
+        if d.kind == "customer":
+            advance_project_status(project, "drawing_approved")
     elif payload.decision == "request_revision":
         d.status = "revision_requested"
     else:

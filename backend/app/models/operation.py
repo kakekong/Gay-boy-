@@ -129,6 +129,18 @@ class Drawing(Base, UUIDPK, TimestampMixin):
         nullable=False, index=True,
     )
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # 'customer' | 'supplier'. Two different documents that used to share one
+    # pile: the supplier's drawing is what the vendor sent us to make the part
+    # from, and the customer's is what we show the customer for approval. They
+    # have different authors, different readers, and the second is produced
+    # *from* the first — so which one a row is decides who may see it at all.
+    kind: Mapped[str] = mapped_column(String(20), default="customer",
+                                      nullable=False, index=True)
+    # Set on a customer drawing that was drawn up from a supplier's. Keeps the
+    # lineage visible so nobody has to remember which vendor sheet it came off.
+    source_drawing_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("drawings.id", ondelete="SET NULL")
+    )
     file_url: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
     # Who posted the drawing — so they can re-upload a revised file after the

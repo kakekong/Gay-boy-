@@ -214,9 +214,18 @@ function MainApp() {
           <Route path="/purchasing" element={<PurchasingPage />} />
           <Route path="/purchasing/stage/:stage" element={<PurchasingStagePage />} />
           <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
-          <Route path="/purchasing/price-requests/:id" element={<SupplierPriceRequestPage />} />
-          <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
-          <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+          <Route path="/purchasing/price-requests/:id" element={
+            <RequireRole roles={["purchasing", "manager", "director"]}>
+              <SupplierPriceRequestPage /></RequireRole>} />
+          {/* Supplier orders are procurement's, and admin work the customer
+              side — the backend refuses them too, but a route that renders a
+              permission error is a worse answer than one that never opens. */}
+          <Route path="/purchase-orders" element={
+            <RequireRole roles={["purchasing", "manager", "director"]}>
+              <PurchaseOrdersPage /></RequireRole>} />
+          <Route path="/purchase-orders/:id" element={
+            <RequireRole roles={["purchasing", "manager", "director"]}>
+              <PurchaseOrderDetailPage /></RequireRole>} />
           <Route path="/customer-pos" element={<CustomerPOsPage />} />
           <Route path="/customer-pos/:id" element={<CustomerPODetailPage />} />
           <Route path="/po-recap" element={<PORecapPage />} />

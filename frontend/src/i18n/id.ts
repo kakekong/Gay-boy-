@@ -275,12 +275,6 @@ export const ID_STATIC: Record<string, string> = {
   "Custom roles": "Peran khusus",
   "Currency": "Mata uang",
   "Printed on the PO next to every price. An overseas supplier reads Rp figures as their own currency otherwise.": "Dicetak di PO di samping setiap harga. Tanpa itu, pemasok luar negeri membaca angka Rp sebagai mata uang mereka sendiri.",
-  "Indonesian rupiah": "Rupiah",
-  "US dollar": "Dolar AS",
-  "Chinese yuan": "Yuan Tiongkok",
-  "Euro": "Euro",
-  "Singapore dollar": "Dolar Singapura",
-  "Japanese yen": "Yen Jepang",
   "Customer": "Pelanggan",
   "Customer (optional)": "Pelanggan (opsional)",
   "Customer PO approved — project created": "PO pelanggan disetujui — proyek dibuat",
@@ -940,7 +934,6 @@ export const ID_STATIC: Record<string, string> = {
   "Top customers": "Pelanggan teratas",
   "Top customers by lifetime value": "Pelanggan teratas menurut nilai seumur hidup",
   "Total": "Total",
-  "Total (Rp)": "Total (Rp)",
   "Total PO value": "Total nilai PO",
   "Total absences": "Total ketidakhadiran",
   "Total assets": "Total aset",
@@ -1110,6 +1103,15 @@ export const ID_STATIC: Record<string, string> = {
 // cannot find these by scanning for T("…"), so they live here and are exempt
 // from the stale-entry report.
 export const ID_RUNTIME: Record<string, string> = {
+  // Currency names reach T() from the CURRENCIES table, never as a
+  // literal, so the static checker cannot see them being used.
+  "Indonesian rupiah": "Rupiah",
+  "US dollar": "Dolar AS",
+  "Chinese yuan": "Yuan Tiongkok",
+  "Euro": "Euro",
+  "Singapore dollar": "Dolar Singapura",
+  "Japanese yen": "Yen Jepang",
+
   "Everything": "Semua",
   "absent": "tidak hadir",
   "applied": "diterapkan",

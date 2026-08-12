@@ -234,9 +234,7 @@ export default function ProjectDetailPage() {
   const canFinanceApprove = role === "finance" || role === "director";
   // Internal staff upload the drawing (on behalf of the supplier); the director
   // signs it off. The drawing file is viewable by either of those.
-  const canUploadDrawing = ["purchasing", "sales", "manager", "director", "admin"].includes(role);
   const canApproveDrawing = ["director", "manager", "admin"].includes(role);
-  const canViewDrawing = canUploadDrawing || canApproveDrawing;
   // Only purchasing / admin / director may file or move work orders — the
   // backend enforces the same set. Sales/finance/hr never touch WOs.
   const canManageWO = ["purchasing", "admin", "director"].includes(role);
@@ -343,10 +341,14 @@ export default function ProjectDetailPage() {
 
   // Drawings: internal upload + director sign-off.
   const uploadDrawing = useMutation({
-    mutationFn: (body: { file: File; notes: string }) => {
+    mutationFn: (body: {
+      file: File; notes: string; kind: "customer" | "supplier"; sourceId?: string;
+    }) => {
       const fd = new FormData();
       fd.append("file", body.file);
       if (body.notes) fd.append("notes", body.notes);
+      fd.append("kind", body.kind);
+      if (body.sourceId) fd.append("source_drawing_id", body.sourceId);
       return api.post(`/operation/projects/${id}/drawings`, fd);
     },
     onSuccess: refresh, onError: onErr,
@@ -557,7 +559,17 @@ export default function ProjectDetailPage() {
   const salesPicId   = data.data.sales_pic_id;
   const salesPicName = data.data.sales_pic_name;
   const wos = data.data.work_orders ?? [];
-  const dr  = data.data.drawings ?? [];
+  // Already filtered server-side by what this role may open, so an empty list
+  // here is indistinguishable from "not yours" on purpose.
+  const customerDrawings = data.data.drawings ?? [];
+  const supplierDrawings = data.data.supplier_drawings ?? [];
+  // Who may file which kind is the server's answer, echoed back on the project
+  // payload — a second copy of the matrix in the client is how the two drift
+  // apart. Sales are readers of the customer drawing, never its author.
+  const mayUpload: Record<string, boolean> = data.data.may_upload_drawing ?? {};
+  // A drawing this role was served is a drawing it may open; the filtering
+  // already happened upstream.
+  const canViewDrawing = true;
   const dos = data.data.deliveries ?? [];
   const inv = data.data.invoices ?? [];
   const prs = data.data.purchase_requests ?? [];
@@ -570,6 +582,182 @@ export default function ProjectDetailPage() {
   const shownStage = guideStage ?? p.status;
   const guide = STAGE_GUIDE[shownStage];
   const nextStage = PIPELINE_STAGES[PIPELINE_STAGES.indexOf(shownStage) + 1] ?? null;
+
+  // One card, rendered once per kind. The two lists are different documents
+  // with different authors and readers (see the backend's _DRAWING_VIEW_ROLES);
+  // what they share is the revision and sign-off machinery, which is why this
+  // is a parameter rather than a second copy.
+  const drawingsCard = (kind: "customer" | "supplier", rows: any[]) => (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100">
+            <div className="font-semibold flex items-center gap-2">
+              <Hammer size={15} className="text-brand-600" />
+              {kind === "supplier"
+                ? t("Supplier drawings", "Gambar supplier")
+                : t("Customer drawings", "Gambar pelanggan")}
+            </div>
+            <div className="text-xs muted">{rows.length} {t("revision(s)", "revisi")}</div>
+            <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
+              {kind === "supplier"
+                ? t(
+                  "What the vendor sent us to make the part from. Purchasing files it; the director signs it off. It is not shown to the customer — the customer's drawing is drawn up from this one.",
+                  "Gambar yang dikirim vendor sebagai acuan pembuatan. Pembelian yang mengunggah; direktur menyetujui. Tidak ditunjukkan ke pelanggan — gambar pelanggan dibuat dari gambar ini.",
+                )
+                : t(
+                  "What the customer approves. Admin files it, the director signs it off, and that approval moves the project to \"drawing approved\" so logistics can begin. Sales can open it to show the customer, but do not upload it.",
+                  "Gambar yang disetujui pelanggan. Admin yang mengunggah, direktur menyetujui, dan persetujuan itu memindahkan proyek ke \"gambar disetujui\" sehingga logistik bisa dimulai. Sales bisa membukanya untuk ditunjukkan ke pelanggan, tetapi tidak mengunggah.",
+                )}
+            </div>
+          </div>
+
+          {mayUpload[kind] && (
+            <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[180px]">
+                <label className="block text-[11px] uppercase muted mb-1">{t("Drawing file", "File gambar")}</label>
+                <input type="file"
+                  className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
+                  onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
+              </div>
+              <div className="flex-1 min-w-[180px]">
+                <label className="block text-[11px] uppercase muted mb-1">{t("Notes (optional)", "Catatan (opsional)")}</label>
+                <input className="input" value={drawingNotes}
+                  onChange={(e) => setDrawingNotes(e.target.value)} placeholder={kind === "supplier"
+                    ? t("e.g. rev 2 from the vendor", "cth. revisi 2 dari vendor")
+                    : t("e.g. redrawn from supplier rev 2", "cth. digambar ulang dari revisi 2 supplier")} />
+              </div>
+              <button className="btn-primary"
+                disabled={!drawingFile || uploadDrawing.isPending}
+                onClick={() => drawingFile && uploadDrawing.mutate(
+                  { file: drawingFile, notes: drawingNotes, kind },
+                  { onSuccess: () => { setDrawingFile(null); setDrawingNotes(""); } },
+                )}>
+                {uploadDrawing.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                {t("Upload drawing", "Unggah gambar")}
+              </button>
+            </div>
+          )}
+
+          {rows.length === 0 ? (
+            <div className="p-8 text-center muted text-sm">
+              {kind === "supplier"
+                ? t("No supplier drawing yet.", "Belum ada gambar supplier.")
+                : t("No customer drawing yet.", "Belum ada gambar pelanggan.")}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">{t("Rev", "Rev")}</th>
+                  <th className="th">{T("Status")}</th>
+                  <th className="th">{t("Decision", "Keputusan")}</th>
+                  <th className="th">{T("File")}</th>
+                  <th className="th">{t("Notes", "Catatan")}</th>
+                  {canApproveDrawing && <th className="th text-right">{t("Sign-off", "Persetujuan")}</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((d: any) => (
+                  <tr key={d.id} className="border-t border-ink-100">
+                    <td className="td font-mono">v{d.revision}</td>
+                    <td className="td">
+                      <span className={clsx("chip capitalize",
+                        d.status === "approved" ? "bg-emerald-50 text-emerald-700"
+                        : d.status === "submitted" ? "bg-amber-50 text-amber-700"
+                        : d.status === "revision_requested" ? "bg-red-50 text-red-700"
+                        : "bg-ink-100 text-ink-700"
+                      )}>
+                        {sl(d.status, DRAWING_STATUS_LABEL_ID)}
+                      </span>
+                      {/* After a revision is requested, only the account that
+                          uploaded the drawing can post a corrected file. */}
+                      {d.status === "revision_requested"
+                        && d.uploaded_by != null && d.uploaded_by === userId && (
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <input type="file"
+                            className="block text-[11px] file:mr-1.5 file:rounded file:border-0 file:bg-ink-100 file:px-1.5 file:py-0.5 file:text-[11px]"
+                            onChange={(e) => setRevFiles((f) => ({ ...f, [d.id]: e.target.files?.[0] ?? null }))} />
+                          <button className="btn-primary py-0.5 px-2 text-[11px] whitespace-nowrap"
+                            disabled={!revFiles[d.id] || reuploadDrawing.isPending}
+                            onClick={() => {
+                              const f = revFiles[d.id];
+                              if (f) reuploadDrawing.mutate(
+                                { drawingId: d.id, file: f },
+                                { onSuccess: () => setRevFiles((m) => ({ ...m, [d.id]: null })) },
+                              );
+                            }}>
+                            {t("Re-upload", "Unggah ulang")}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="td muted">
+                      {(d.decided_at || d.customer_decision_at) ? (
+                        <span>
+                          {new Date(d.decided_at ?? d.customer_decision_at).toLocaleDateString(locale())}
+                          {d.decided_by_name && <span className="block text-[11px]">{t("by", "oleh")} {d.decided_by_name}</span>}
+                        </span>
+                      ) : "—"}
+                    </td>
+                    <td className="td">
+                      {!d.file_url ? "—"
+                        : canViewDrawing ? (
+                          <button type="button" onClick={() => viewFile(d.file_url)}
+                             className="text-brand-700 hover:underline">{t("View", "Lihat")}</button>
+                        ) : (
+                          <span className="muted text-xs">{t("internal only", "hanya internal")}</span>
+                        )}
+                    </td>
+                    <td className="td muted">
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{d.notes ?? "—"}</span>
+                        {((d.uploaded_by != null && d.uploaded_by === userId) || canApproveDrawing) && (
+                          <button className="btn-ghost p-1 text-red-600 shrink-0"
+                            title={t("Delete this revision", "Hapus revisi ini")}
+                            disabled={deleteDrawing.isPending}
+                            onClick={() => {
+                              if (window.confirm(tt(
+                                `Delete revision v${d.revision}? This can't be undone.`,
+                                `Hapus revisi v${d.revision}? Tindakan ini tidak bisa dibatalkan.`,
+                              )))
+                                deleteDrawing.mutate(d.id);
+                            }}>
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    {canApproveDrawing && (
+                      <td className="td text-right">
+                        {d.status === "approved" ? (
+                          <span className="text-emerald-700 text-xs inline-flex items-center gap-1">
+                            <CheckCircle size={13} /> {t("Approved", "Disetujui")}
+                          </span>
+                        ) : (
+                          <div className="inline-flex gap-1.5">
+                            <button className="btn-primary py-1 px-2 text-xs"
+                              disabled={decideDrawing.isPending}
+                              onClick={() => decideDrawing.mutate({ drawingId: d.id, decision: "approve" })}>
+                              <CheckCircle size={13} /> {t("Approve", "Setujui")}
+                            </button>
+                            <button className="btn-ghost py-1 px-2 text-xs text-red-600"
+                              disabled={decideDrawing.isPending}
+                              onClick={() => {
+                                const notes = window.prompt(tt("What needs revising? (optional)", "Apa yang perlu direvisi? (opsional)")) ?? undefined;
+                                decideDrawing.mutate({ drawingId: d.id, decision: "request_revision", notes });
+                              }}>
+                              <XCircle size={13} /> {t("Revise", "Revisi")}
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -1050,163 +1238,14 @@ export default function ProjectDetailPage() {
           revision list only; approve/reject stays with director/manager/
           admin (canApproveDrawing). All other ops cards remain hidden from
           sales via canSeeOpsDetails. */}
-      {(canSeeOpsDetails || canUploadDrawing) && (
-      <div className="card overflow-hidden">
-        <div className="px-5 py-3 border-b border-ink-100">
-          <div className="font-semibold flex items-center gap-2">
-            <Hammer size={15} className="text-brand-600" /> {t("Drawings", "Gambar")}
-          </div>
-          <div className="text-xs muted">{dr.length} {t("revision(s)", "revisi")}</div>
-          <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
-            {t(
-              "Upload the customer's or supplier's drawing here — sales files the customer's version, purchasing the supplier's. The director reviews and approves (or requests a revision). An approval advances the project to \"drawing approved\" automatically so logistics can begin.",
-              "Unggah gambar dari pelanggan atau supplier di sini — sales mengunggah versi pelanggan, pembelian versi supplier. Direktur meninjau dan menyetujui (atau meminta revisi). Persetujuan otomatis memajukan proyek ke \"gambar disetujui\" sehingga logistik bisa dimulai.",
-            )}
-          </div>
-        </div>
-
-        {canUploadDrawing && (
-          <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 flex flex-wrap items-end gap-3">
-            <div className="flex-1 min-w-[180px]">
-              <label className="block text-[11px] uppercase muted mb-1">{t("Drawing file", "File gambar")}</label>
-              <input type="file"
-                className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
-                onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
-            </div>
-            <div className="flex-1 min-w-[180px]">
-              <label className="block text-[11px] uppercase muted mb-1">{t("Notes (optional)", "Catatan (opsional)")}</label>
-              <input className="input" value={drawingNotes}
-                onChange={(e) => setDrawingNotes(e.target.value)} placeholder={t("e.g. rev from supplier", "cth. revisi dari supplier")} />
-            </div>
-            <button className="btn-primary"
-              disabled={!drawingFile || uploadDrawing.isPending}
-              onClick={() => drawingFile && uploadDrawing.mutate(
-                { file: drawingFile, notes: drawingNotes },
-                { onSuccess: () => { setDrawingFile(null); setDrawingNotes(""); } },
-              )}>
-              {uploadDrawing.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              {t("Upload drawing", "Unggah gambar")}
-            </button>
-          </div>
-        )}
-
-        {dr.length === 0 ? (
-          <div className="p-8 text-center muted text-sm">{t("No drawings uploaded.", "Belum ada gambar diunggah.")}</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-ink-50/60">
-              <tr>
-                <th className="th">{t("Rev", "Rev")}</th>
-                <th className="th">{T("Status")}</th>
-                <th className="th">{t("Decision", "Keputusan")}</th>
-                <th className="th">{T("File")}</th>
-                <th className="th">{t("Notes", "Catatan")}</th>
-                {canApproveDrawing && <th className="th text-right">{t("Sign-off", "Persetujuan")}</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {dr.map((d: any) => (
-                <tr key={d.id} className="border-t border-ink-100">
-                  <td className="td font-mono">v{d.revision}</td>
-                  <td className="td">
-                    <span className={clsx("chip capitalize",
-                      d.status === "approved" ? "bg-emerald-50 text-emerald-700"
-                      : d.status === "submitted" ? "bg-amber-50 text-amber-700"
-                      : d.status === "revision_requested" ? "bg-red-50 text-red-700"
-                      : "bg-ink-100 text-ink-700"
-                    )}>
-                      {sl(d.status, DRAWING_STATUS_LABEL_ID)}
-                    </span>
-                    {/* After a revision is requested, only the account that
-                        uploaded the drawing can post a corrected file. */}
-                    {d.status === "revision_requested"
-                      && d.uploaded_by != null && d.uploaded_by === userId && (
-                      <div className="mt-1.5 flex items-center gap-1.5">
-                        <input type="file"
-                          className="block text-[11px] file:mr-1.5 file:rounded file:border-0 file:bg-ink-100 file:px-1.5 file:py-0.5 file:text-[11px]"
-                          onChange={(e) => setRevFiles((f) => ({ ...f, [d.id]: e.target.files?.[0] ?? null }))} />
-                        <button className="btn-primary py-0.5 px-2 text-[11px] whitespace-nowrap"
-                          disabled={!revFiles[d.id] || reuploadDrawing.isPending}
-                          onClick={() => {
-                            const f = revFiles[d.id];
-                            if (f) reuploadDrawing.mutate(
-                              { drawingId: d.id, file: f },
-                              { onSuccess: () => setRevFiles((m) => ({ ...m, [d.id]: null })) },
-                            );
-                          }}>
-                          {t("Re-upload", "Unggah ulang")}
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td className="td muted">
-                    {(d.decided_at || d.customer_decision_at) ? (
-                      <span>
-                        {new Date(d.decided_at ?? d.customer_decision_at).toLocaleDateString(locale())}
-                        {d.decided_by_name && <span className="block text-[11px]">{t("by", "oleh")} {d.decided_by_name}</span>}
-                      </span>
-                    ) : "—"}
-                  </td>
-                  <td className="td">
-                    {!d.file_url ? "—"
-                      : canViewDrawing ? (
-                        <button type="button" onClick={() => viewFile(d.file_url)}
-                           className="text-brand-700 hover:underline">{t("View", "Lihat")}</button>
-                      ) : (
-                        <span className="muted text-xs">{t("internal only", "hanya internal")}</span>
-                      )}
-                  </td>
-                  <td className="td muted">
-                    <div className="flex items-center justify-between gap-2">
-                      <span>{d.notes ?? "—"}</span>
-                      {((d.uploaded_by != null && d.uploaded_by === userId) || canApproveDrawing) && (
-                        <button className="btn-ghost p-1 text-red-600 shrink-0"
-                          title={t("Delete this revision", "Hapus revisi ini")}
-                          disabled={deleteDrawing.isPending}
-                          onClick={() => {
-                            if (window.confirm(tt(
-                              `Delete revision v${d.revision}? This can't be undone.`,
-                              `Hapus revisi v${d.revision}? Tindakan ini tidak bisa dibatalkan.`,
-                            )))
-                              deleteDrawing.mutate(d.id);
-                          }}>
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                  {canApproveDrawing && (
-                    <td className="td text-right">
-                      {d.status === "approved" ? (
-                        <span className="text-emerald-700 text-xs inline-flex items-center gap-1">
-                          <CheckCircle size={13} /> {t("Approved", "Disetujui")}
-                        </span>
-                      ) : (
-                        <div className="inline-flex gap-1.5">
-                          <button className="btn-primary py-1 px-2 text-xs"
-                            disabled={decideDrawing.isPending}
-                            onClick={() => decideDrawing.mutate({ drawingId: d.id, decision: "approve" })}>
-                            <CheckCircle size={13} /> {t("Approve", "Setujui")}
-                          </button>
-                          <button className="btn-ghost py-1 px-2 text-xs text-red-600"
-                            disabled={decideDrawing.isPending}
-                            onClick={() => {
-                              const notes = window.prompt(tt("What needs revising? (optional)", "Apa yang perlu direvisi? (opsional)")) ?? undefined;
-                              decideDrawing.mutate({ drawingId: d.id, decision: "request_revision", notes });
-                            }}>
-                            <XCircle size={13} /> {t("Revise", "Revisi")}
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      )}
+      {/* Two piles, not one. Each renders only if this role may see that
+          kind — the server already filtered the lists, so an empty array here
+          means either "none yet" or "not yours", and the card only shows when
+          the role has a reason to look. */}
+      {(customerDrawings.length > 0 || mayUpload.customer)
+        && drawingsCard("customer", customerDrawings)}
+      {(supplierDrawings.length > 0 || mayUpload.supplier)
+        && drawingsCard("supplier", supplierDrawings)}
 
       {/* Logistics & import documents — only meaningful once the drawing
           has been approved. Hidden before that so the project page stays
@@ -1917,8 +1956,11 @@ export default function ProjectDetailPage() {
       </div>
       )}
 
-      {/* Supplier POs — customer/supplier mapping is kept private from sales. */}
-      {canSeeOpsDetails && (
+      {/* Supplier POs — the customer↔supplier mapping is kept from sales, and
+          from admin, who are barred from the PO screens this card links into.
+          The server sends them an empty list, so an empty list here means
+          "not yours" and the card should not appear at all. */}
+      {canSeeOpsDetails && supplierPOs.length > 0 && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-end justify-between gap-3 flex-wrap">
           <div>
@@ -2154,11 +2196,18 @@ function SupplierShipments({ projectId }: { projectId: string }) {
                 <span className="font-semibold">
                   {t("Shipment", "Pengiriman")} {sh.shipment_no}
                 </span>
-                <Link to={`/purchase-orders/${sh.po_id}`}
-                  className="font-mono text-xs text-brand-700 hover:underline">
-                  {sh.number}
-                </Link>
-                <span className="font-medium">{sh.supplier_name}</span>
+                {/* Admin are served these rows with the vendor stripped out —
+                    they need the dates, not who is sending them — so there is
+                    no number to print and nothing to link to. */}
+                {sh.po_id && (
+                  <Link to={`/purchase-orders/${sh.po_id}`}
+                    className="font-mono text-xs text-brand-700 hover:underline">
+                    {sh.number}
+                  </Link>
+                )}
+                {sh.supplier_name && (
+                  <span className="font-medium">{sh.supplier_name}</span>
+                )}
                 <span className="chip bg-ink-100 text-ink-700 uppercase">{sh.status}</span>
                 {sh.is_shared && (
                   <span className="chip bg-amber-50 text-amber-700"

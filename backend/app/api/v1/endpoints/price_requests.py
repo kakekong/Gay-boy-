@@ -29,7 +29,10 @@ from app.services.numbering import next_price_request_number
 # Internal-only (sales tier and up); tier-0 externals (customer/supplier) blocked.
 router = APIRouter(dependencies=[Depends(require_min(Role.SALES))])
 
-_PURCHASING = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+# Who fills the buying cost. Admin is deliberately absent: they run the
+# customer side of a job and may not see what the goods cost us, so they
+# cannot be the ones typing it in either — a write without a read.
+_PURCHASING = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER}
 _MANAGEMENT = {Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.FINANCE}
 
 
@@ -166,7 +169,14 @@ def _to_unit(amount: float | None, basis: str | None, qty: float) -> float:
 
 
 def _can_see_cost(role: Role) -> bool:
-    return role in (Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN, Role.FINANCE)
+    """Everyone with a reason to know what we paid — which is not admin.
+
+    Admin work the customer side: drawings for the customer, logistics,
+    delivery, invoicing. Procurement cost is not part of any of that, and it is
+    the figure that maps a customer to a vendor's price. Finance keep it —
+    they pay the vendor's invoice against it.
+    """
+    return role in (Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.FINANCE)
 
 
 def _can_see_sell(role: Role) -> bool:

@@ -403,6 +403,26 @@ COLUMN_MIGRATIONS: list[str] = [
     # every PO raised before this column existed was an Indonesian one.
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS "
     "currency VARCHAR(8) NOT NULL DEFAULT 'IDR'",
+
+    # A drawing is either the customer's or the supplier's, and that decides
+    # who may open it. Existing rows are classified by who uploaded them —
+    # purchasing only ever filed the supplier's — because defaulting them all
+    # to 'customer' would hand sales a pile of vendor drawings on the next
+    # deploy, and defaulting to 'supplier' would hide the customer's own.
+    #
+    # Added nullable on purpose, so the backfill can key off NULL and run
+    # exactly once; the default and the NOT NULL go on afterwards. A sweep
+    # keyed off 'customer' instead would re-run every boot and would reclassify
+    # any customer drawing a purchasing user ever legitimately owned.
+    "ALTER TABLE drawings ADD COLUMN IF NOT EXISTS kind VARCHAR(20)",
+    "ALTER TABLE drawings ADD COLUMN IF NOT EXISTS source_drawing_id UUID",
+    """UPDATE drawings SET kind = CASE
+           WHEN uploaded_by IN (SELECT id FROM users WHERE role = 'purchasing')
+           THEN 'supplier' ELSE 'customer' END
+       WHERE kind IS NULL""",
+    "ALTER TABLE drawings ALTER COLUMN kind SET DEFAULT 'customer'",
+    "ALTER TABLE drawings ALTER COLUMN kind SET NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_drawings_kind ON drawings (kind)",
 ]
 
 

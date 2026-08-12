@@ -142,10 +142,15 @@ async def main():
     st=J(await c.get(f"/customers/{cust}",headers=H["sales1"]))["stage"]; ok(f"customer stage={st}")
 
     # ===== PHASE D: Drawing =====
-    step("D1 purchasing uploads a drawing -> submitted, project->drawing")
+    step("D1 purchasing files the vendor's sheet, admin the customer's -> submitted, project->drawing")
+    # Two documents now: the supplier's is procurement's, the customer's is
+    # admin's, and only the customer's sign-off moves the job on.
+    await c.post(f"/operation/projects/{proj}/drawings",headers=H["purchasing"],
+                 data={"notes":"vendor rev A","kind":"supplier"},
+                 files={"file":("supplier.pdf",io.BytesIO(b"%PDF-1.4 vendor"),"application/pdf")})
     files={"file":("drawing.pdf",io.BytesIO(b"%PDF-1.4 fake drawing"),"application/pdf")}
-    r=await c.post(f"/operation/projects/{proj}/drawings",headers=H["purchasing"],
-                   data={"notes":"rev A"},files=files); b=J(r)
+    r=await c.post(f"/operation/projects/{proj}/drawings",headers=H["admin"],
+                   data={"notes":"rev A","kind":"customer"},files=files); b=J(r)
     draw=b.get("id") or b.get("drawing",{}).get("id")
     (ok(f"drawing uploaded HTTP{r.status_code} id={draw}") if r.status_code==201 else bad(f"HTTP{r.status_code} {b}"))
     pj=J(await c.get(f"/operation/projects/{proj}",headers=H["director"]))

@@ -44,8 +44,12 @@ from app.services.numbering import next_supplier_price_request_number
 # Purchasing and management only. Not sales, at any tier — see the module
 # docstring — and not the tier-0 portal roles, which `require` excludes by
 # listing membership explicitly.
+#
+# Admin is out for the same reason sales is: this document's entire content is
+# what a vendor charges us, and admin work the customer side of a job. There is
+# no version of it they may open.
 router = APIRouter(dependencies=[Depends(require(
-    Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN,
+    Role.PURCHASING, Role.DIRECTOR, Role.MANAGER,
 ))])
 
 _OPEN = ("draft", "sent")

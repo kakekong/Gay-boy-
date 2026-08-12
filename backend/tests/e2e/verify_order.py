@@ -37,7 +37,10 @@ async def supplier_po(c,H,proj):
     if sr: await c.post(f"/approvals/{sr['id']}/approve",headers=H["d"],json={"notes":""})
 
 async def drawing(c,H,proj):
-    r=await c.post(f"/operation/projects/{proj}/drawings",headers=H["p"],data={"notes":"a"},files={"file":("d.pdf",io.BytesIO(b"x"),"application/pdf")})
+    # Purchasing file the vendor's sheet; admin file the one the customer
+    # approves, and only that second sign-off advances the job.
+    await c.post(f"/operation/projects/{proj}/drawings",headers=H["p"],data={"notes":"vendor","kind":"supplier"},files={"file":("s.pdf",io.BytesIO(b"x"),"application/pdf")})
+    r=await c.post(f"/operation/projects/{proj}/drawings",headers=H["a"],data={"notes":"a","kind":"customer"},files={"file":("d.pdf",io.BytesIO(b"x"),"application/pdf")})
     did=J(r).get("id")
     await c.post(f"/operation/drawings/{did}/decide",headers=H["d"],json={"decision":"approve"})
 

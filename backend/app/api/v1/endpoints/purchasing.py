@@ -448,7 +448,11 @@ class PoCreate(BaseModel):
     supplier_price_request_id: UUID | None = None
 
 
-_purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.ADMIN)
+# Who may work supplier purchase orders. Admin is out: a supplier PO is the
+# procurement side of a job — the vendor, what we paid them, when they ship —
+# and admin run the customer side. Every PO screen, export and detail hangs off
+# this one dependency, so removing them here closes all of them at once.
+_purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR)
 
 
 @router.get("/po/prefill")
@@ -651,6 +655,12 @@ async def pos_for_project(
     def sort_key(p):
         return (p.eta or date_t.max, p.created_at)
 
+    # Admin need the shipments — the dates are their job — but not who is
+    # sending them. They are barred from the supplier PO itself, and a card
+    # listing "Shipment 2 · PT Rantai" would hand back the vendor anyway. The
+    # money goes with it: a per-project total is what we paid the vendor.
+    hide_supplier = Role(_u.role) == Role.ADMIN
+
     rows.sort(key=sort_key)
     shipments, latest = [], None
     for n, po in enumerate(rows, 1):
@@ -664,11 +674,13 @@ async def pos_for_project(
         sup = sups.get(po.supplier_id)
         shipments.append({
             "shipment_no": n,
-            "po_id": str(po.id),
-            "number": po.number,
+            # No id either — an id is a lookup away from the name, and the PO
+            # page it points at is closed to them.
+            "po_id": None if hide_supplier else str(po.id),
+            "number": None if hide_supplier else po.number,
             "status": po.status,
-            "supplier_id": str(po.supplier_id),
-            "supplier_name": sup.name if sup else None,
+            "supplier_id": None if hide_supplier else str(po.supplier_id),
+            "supplier_name": None if hide_supplier else (sup.name if sup else None),
             "eta": po.eta,
             "quoted_lead_days": po.quoted_lead_days,
             "po_date": po.po_date, "currency": po.currency or "IDR",
@@ -680,9 +692,9 @@ async def pos_for_project(
                 "description": i.get("description"),
                 "qty": i.get("qty"),
                 "uom": i.get("uom"),
-                "supplier_name": sup.name if sup else None,
+                "supplier_name": None if hide_supplier else (sup.name if sup else None),
             } for i in mine],
-            "total_for_project": sum(
+            "total_for_project": None if hide_supplier else sum(
                 float(i.get("amount") or 0) or
                 float(i.get("qty") or 0) * float(i.get("unit_price") or 0)
                 for i in mine),
@@ -692,7 +704,11 @@ async def pos_for_project(
         "project_id": str(project.id),
         "project_code": project.code,
         "shipments": shipments,
-        "supplier_count": len({s["supplier_id"] for s in shipments}),
+        # Counted off the orders, not off the scrubbed rows — "3 deliveries
+        # from 2 suppliers" is a useful thing for admin to know, and it names
+        # nobody. Doing it from `shipments` would collapse every hidden id to
+        # one None and report a single supplier.
+        "supplier_count": len({r.supplier_id for r in rows}),
         # The one date that answers "when is this job actually here": the last
         # shipment to land. Offered rather than written onto the project, so
         # the director's promised date stays theirs.

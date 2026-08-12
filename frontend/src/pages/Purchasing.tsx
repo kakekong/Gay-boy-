@@ -77,6 +77,10 @@ export default function PurchasingPage() {
   const nav = useNavigate();
   const me = useAuthStore((s) => s.user);
   const isDirector = me?.role === "director";
+  // Admin reach this page for the supplier directory, and nothing else on it.
+  // What a vendor charges us is not theirs to read — the buy-side price
+  // request is that and only that, so the tab does not exist for them.
+  const seesBuySide = me?.role !== "admin";
 
   const [openNew, setOpenNew] = useState(false);
   const [openPO, setOpenPO] = useState(false);
@@ -85,6 +89,9 @@ export default function PurchasingPage() {
   // Tab persisted across sessions so the user lands back where they left off.
   const [tab, setTab] = useState<"suppliers" | "prices" | "pos">(() => {
     const stored = localStorage.getItem("purchasing-tab");
+    // A remembered tab this role can no longer open would land them on a blank
+    // page with no way to tell why.
+    if (stored === "prices" && me?.role === "admin") return "suppliers";
     if (stored === "pos" || stored === "prices") return stored;
     return "suppliers";
   });
@@ -104,6 +111,7 @@ export default function PurchasingPage() {
   const priceReqs = useQuery({
     queryKey: ["supplier-price-requests"],
     queryFn: () => api.get("/purchasing/price-requests").then((r) => r.data as SPR[]),
+    enabled: seesBuySide,
     retry: false,
   });
 
@@ -148,8 +156,10 @@ export default function PurchasingPage() {
         <div className="flex gap-2">
           <button className="btn-ghost" onClick={() => setOpenNew(true)}>
             <Plus size={15} /> {T("New supplier")}</button>
-          <button className="btn-ghost" onClick={() => setOpenSPR(true)}>
-            <Plus size={15} /> {T("Ask suppliers for a price")}</button>
+          {seesBuySide && (
+            <button className="btn-ghost" onClick={() => setOpenSPR(true)}>
+              <Plus size={15} /> {T("Ask suppliers for a price")}</button>
+          )}
           {isDirector && (
             <button className="btn-primary" onClick={() => setOpenPO(true)}>
               <Plus size={15} /> {T("New PO")}</button>
@@ -186,6 +196,7 @@ export default function PurchasingPage() {
             </span>
           )}
         </button>
+        {seesBuySide && (
         <button
           onClick={() => pickTab("prices")}
           className={clsx(
@@ -199,6 +210,7 @@ export default function PurchasingPage() {
             </span>
           )}
         </button>
+        )}
         {isDirector && (
           <button
             onClick={() => pickTab("pos")}
@@ -336,7 +348,7 @@ export default function PurchasingPage() {
           Purchasing used to ask two or three vendors on WhatsApp and type the
           winning number into the cost field; the losing quotes, the lead times
           and how long each price held went nowhere. */}
-      {tab === "prices" && (
+      {tab === "prices" && seesBuySide && (
       <div className="card overflow-hidden">
         <header className="px-5 py-4 border-b border-ink-100 flex items-end justify-between flex-wrap gap-3">
           <div>

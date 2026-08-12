@@ -229,6 +229,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_efaktur.py` | e-Faktur CSV export |
 | `test_won_needs_po.py` | Won waits for the customer's PO (the director included), a rejected PO is not evidence, a request signed off after its PO disappeared does not win the deal — and sales is refused every shipping/delivery date outright while purchasing, admin and the director keep their lanes |
 | `test_multi_supplier.py` | the two purchasing shapes: one job split across vendors line by line, several jobs combined onto one vendor, line provenance surviving both, per-line apply, and a customer price request that refuses to go to the director until every line is costed — plus the discussion + attachments on the buy-side request |
+| `test_drawing_kinds.py` | the customer/supplier drawing split and admin's new boundary: who may file each kind and who may open it, a customer drawing drawn up from a supplier's keeping the link, approving the supplier's moving nothing while the customer's advances the job — and admin left with no cost, no margin, no supplier PO and shipments whose vendor is stripped out |
 | `test_po_export.py` | the supplier PO as PDF and xlsx: the address the goods leave from, the PIC, the lines, the total, sales refused both formats — plus the two things that make it usable abroad, that every label is English (checked as printed headings, so a vendor's own Indonesian address doesn't fail it) and that every figure carries its currency, written the way that currency is written |
 | `test_po_shipments.py` | the PO side of the same two shapes: a PO drafted straight off a supplier quote keeps each line's project, one order feeding three jobs shows on all three project pages, a job served by three vendors reads as Shipment 1/2/3 ordered by ETA with the last one as the date that matters, and the per-project total counts only that project's lines — plus the gate itself: an edit purchasing files reaches the director's queue, shows what it would change and who asked, applies only on approval, and leaves the queue once decided, while a create request still goes stale the moment its PO is decided |
 | `test_supplier_price_request.py` | asking vendors what they charge: one request per supplier, quotes recorded per line (per-unit or per-line, normalised), the chosen one applied as the cost with its number stamped on the line, a later cheaper quote superseding it, losing quotes kept, and sales locked out of every endpoint |
@@ -567,6 +568,33 @@ somebody sets that env var**, which is deliberate — an admission is recoverabl
 a wrong address is a container in the wrong town. The letterhead address is a
 different thing: `COMPANY_ADDRESS` in `quotation_pdf.py`, shared by every PDF.
 
+**A drawing belongs to one side of the wall, and `Drawing.kind` says which.**
+`'supplier'` is the sheet the vendor sent us; `'customer'` is the one the
+customer approves, drawn up from it (`source_drawing_id` keeps the lineage).
+`_DRAWING_UPLOAD_ROLES` and `_DRAWING_VIEW_ROLES` in `operation.py` are the
+whole matrix — sales read the customer's and file neither, purchasing own the
+supplier's, admin own the customer's, management see both and do the handoff.
+Two rules are easy to break by accident: only the **customer** drawing's
+approval calls `advance_project_status(..., "drawing_approved")`, and
+`project_full` serves the two lists separately (`drawings` keeps its old name
+and its old contents, so anything still reading it cannot start showing vendor
+sheets to sales). The migration classifies existing rows by uploader role, and
+is written to key off a NULL `kind` so it runs exactly once.
+
+**Admin is procurement-blind — the mirror of purchasing's customer-blindness.**
+`_can_see_project_cost()` in `operation.py` and `_can_see_cost()` in
+`price_requests.py` are the two gates; margins hang off `show_margin`, which
+needs *both* permissions, because a margin beside a PO value is the cost by
+subtraction. Admin are also out of `_purchasing_or_director` (every supplier PO
+screen and export hangs off it), out of the supplier price request router, and
+out of `project_full`'s `supplier_pos` list. The shipments card is the
+exception that proves the rule: they keep it, because the arrival dates are
+their job, with `po_id`/`number`/`supplier_name`/`total_for_project` nulled —
+`supplier_count` is counted off the raw rows so it survives the scrubbing.
+**Not touched, and worth asking about:** admin can still open the supplier
+*directory* (`_supplier_editors`), which names vendors without connecting them
+to a job.
+
 **`target_type: "supplier_po"` is two different requests, and the inbox's
 staleness sweep has to know which.** A *create* is answered by the PO's own
 status — once the order leaves `pending_approval` the director has decided it,
@@ -866,6 +894,7 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Split the drawings in two, and move admin to the customer side
 Show the director what purchasing changed, and stop the toast storm
 Write the supplier PO in English, and say which currency it is in
 Make a PO's price request number something you can open
@@ -942,8 +971,9 @@ on every dialog, the supplier PO as PDF/Excel, per-project shipments on a
 multi-vendor job, cross-department chat with no approval at all, the printed
 signature sized and placed like the wet-signed original, and purchasing able to
 correct a cost on a submitted price request with the director signing off each
-one, and a supplier purchase order written in English with its currency on
-every figure.
+one, a supplier purchase order written in English with its currency on every
+figure, and the drawings split into the customer's and the supplier's with
+admin moved to the customer side of that wall.
 
 ## 10. Open items
 
@@ -983,8 +1013,10 @@ every figure.
   `supplier_contacts` and `supplier_price_requests`, and new columns on
   `suppliers` (addresses, phone/whatsapp/email),
   `supplier_price_requests.source_pr_ids`, `supplier_pos.eta`,
-  `supplier_pos.project_ids` and `supplier_pos.currency`. Until it happens the
-  purchasing price request and the shipments card 500 in production.
+  `supplier_pos.project_ids`, `supplier_pos.currency`, and `drawings.kind` /
+  `drawings.source_drawing_id` (whose backfill classifies existing drawings by
+  who uploaded them). Until it happens the purchasing price request and the
+  shipments card 500 in production, and every drawing stays in one pile.
 - **`COMPANY_WAREHOUSE_ADDRESS` is not set anywhere yet.** Until the user puts
   the real goods-inwards address in the Space's environment, every supplier PO
   prints "delivery address not set, please confirm with us" where the ship-to

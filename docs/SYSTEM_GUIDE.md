@@ -104,7 +104,7 @@ Nine base roles. Internal roles are capped by a sidebar/route allowlist enforced
 |---|---|---|
 | **Sales** | CRM, price requests, quotations, customer POs, projects (shell view), ops board (read-only), calendar, chat | Owns customers from first hello to signed PO; sees **only their own** customers |
 | **Purchasing** | Price requests, purchasing/suppliers, purchase orders, inventory, projects (customer-blind), calendar, attendance, chat | Prices deals, raises supplier POs, books origin shipping — never sees customer identity |
-| **Admin** | Projects, operation board, inventory, attendance, chat | Runs production: work orders, arrivals, delivery proofs. No CRM, no money pages |
+| **Admin** | Projects, operation board, inventory, attendance, chat | Runs the **customer side** of a live job: the customer's drawing, work orders, arrivals, delivery proofs, invoicing. Procurement-blind — no cost, no margin, no supplier PO, and shipments arrive without the vendor's name |
 | **Finance** | Finance, financial reports, estimated finance, payment verification, chart of accounts, recent ledgers, customer POs, projects, attendance, chat | Issues + approves invoices, gates DP POs, verifies/records payments |
 | **HR** | Employees, attendance, chat | Personnel documents and attendance |
 | **Manager** | Everything (oversight) | Clears manual stage moves + manager-tier changes; watches every queue |
@@ -117,6 +117,7 @@ Nine base roles. Internal roles are capped by a sidebar/route allowlist enforced
 ### 3.1 Information boundaries (deliberate)
 
 - **Purchasing is customer-blind.** Projects render as "Order PRJ-…"; price requests hide the customer; the calendar, notifications and PO screens are scrubbed server-side. Purchasing prices *items*, not *customers*.
+- **Admin is procurement-blind**, the mirror of purchasing's customer-blindness. They may not see what the goods cost us, the margin (which is that cost by subtraction against the PO value they *do* see, because they invoice against it), the supplier price requests, or any supplier PO. The project's shipment list still gives them every arrival date — that is their job — with the vendor stripped out of it.
 - **Sales is money/ops-blind.** On a project, sales sees only the customer-facing shell (header, pipeline, shipping timeline, drawings upload). Work orders, invoices, margins, supplier POs, QC internals and the ledger are hidden. Sales never sees procurement cost on a price request.
 - **Internal note scrubbing.** Lines beginning with `[purchasing]`, `[director]`, etc. in price-request notes are a staff side-channel; they are stripped before sales sees the PR and before notes are copied to a customer-facing quotation.
 - **Sales sees only its own records** — customers where they are the sales PIC, and the quotations/PRs/POs/projects of those customers. Enforced on every list *and* detail endpoint, not just hidden in the UI.
@@ -237,7 +238,8 @@ Work orders progress through **Receiving → Warehousing → QC → Packaging �
 
 ### 8.3 Drawings
 
-- Internal staff (purchasing/admin/manager/director) upload technical drawings; **sales can upload the customer's own drawing**; suppliers upload via their portal (mirrored to the project).
+- **Two drawings, two audiences.** The **supplier drawing** is what the vendor sent us to make the part from; the **customer drawing** is what the customer approves, drawn up *from* the supplier's rather than being the same sheet forwarded on. Purchasing file the supplier's and see only that (the customer drawing carries the customer). Admin file the customer's and see only that. Sales *read* the customer's — they show it to the customer — and file neither. Manager/director see both and are the ones who turn a supplier drawing into the customer one, which keeps a link back to the sheet it came off. Suppliers upload via their portal (mirrored to the project).
+- Only the **customer** drawing's approval advances the project to `drawing_approved`; signing off a supplier sheet is an internal step and moves nothing.
 - Submitted drawings are approved internally (manager/director/admin) and/or by the customer on their portal. Drawing approval advances the project (`drawing → drawing_approved`).
 
 ### 8.4 Logistics & imports
