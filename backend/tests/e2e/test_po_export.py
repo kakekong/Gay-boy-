@@ -92,8 +92,7 @@ async def main():
     check("...with the address the goods leave from, not the office",
           "Industri Selatan 9" in txt and "Sudirman 1" not in txt, txt[:400])
     check("...the person to ask for", f"Pak Yanto {tag}" in txt, txt[:400])
-    check("...where to deliver", "Cikupa" in txt or "Gudang PT" in txt.upper(),
-          txt[:500])
+    check("...where to deliver", "SHIP TO" in txt.upper(), txt[:500])
     check("...both lines", f"CHAIN C-2122 {tag}" in txt and f"SPROCKET 24T {tag}" in txt,
           txt[:600])
     check("...and the total", "76.000.000" in txt, txt[:600])
@@ -126,6 +125,71 @@ async def main():
     check("a PO that does not exist is a 404", r.status_code == 404,
           str(r.status_code))
 
+    # ══ the language, and the money ══════════════════════════════════════════
+    # This is the one document that leaves the company in English. It goes to
+    # a factory in Jiangsu; a sheet headed KEPADA — PEMASOK with the quantities
+    # under NAMA BARANG is unreadable to the person filling the order.
+    print("\n── it is written for the vendor, not for us ──")
+    for word in ("PURCHASE ORDER", "TO — SUPPLIER", "PO DETAILS", "SHIP TO",
+                 "TERMS", "DESCRIPTION", "UNIT PRICE", "AMOUNT", "TOTAL"):
+        check(f'it says "{word}"', word in txt.upper(), txt[:600])
+    def context(hay: str, needle: str) -> str:
+        """Where the word actually is — a failure that prints 600 characters
+        of letterhead tells you nothing about which line is still Indonesian."""
+        i = hay.upper().find(needle.upper())
+        return "—" if i < 0 else repr(hay[max(0, i - 60):i + 60])
+
+    # The *labels* have to be English. A vendor's own Indonesian address or
+    # email is their business and must not fail this — which is why these are
+    # the printed headings, not bare words that can appear in supplier data.
+    for word in ("KEPADA — PEMASOK", "INFORMASI PO", "NAMA BARANG",
+                 "HARGA SATUAN", "KIRIM KE", "SYARAT", "PROYEK", "TANGGAL",
+                 "KETERANGAN", "Hormat kami"):
+        check(f'...and never "{word}"', word.upper() not in txt.upper(),
+              context(txt, word))
+    check("...counting days in English, not hari",
+          "days" in txt and " hari" not in txt, txt[:600])
+
+    # A price with no currency beside it is the one thing that costs money to
+    # get wrong: a vendor quoting dollars reads 1.800.000 as their own number.
+    print("\n── every price says what it is denominated in ──")
+    check("the currency is stated in its own right", "CURRENCY" in txt.upper(),
+          txt[:600])
+    check("...on the money columns", "UNIT PRICE (IDR)" in txt.upper()
+          and "AMOUNT (IDR)" in txt.upper(), txt[:700])
+    check("...and again on the total line", "TOTAL IDR" in txt.upper(), txt[:700])
+    x0 = xlsx_text((await c.get(f"/purchasing/po/{po_id}/export.xlsx",
+                                headers=pur)).content)
+    check("the spreadsheet says so too",
+          "Currency" in x0 and "IDR" in x0 and "Unit price (IDR)" in x0, x0[:400])
+
+    # An order to an overseas vendor, in their currency. Dollars are written
+    # 1,800.00 — printing them the Indonesian way would read as 1.8 million.
+    print("\n── an order in dollars ──")
+    usd_po = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup, "project_id": proj, "currency": "usd",
+        "items": [{"description": f"CHAIN C-2122 {tag}", "qty": 40, "uom": "meter",
+                   "unit_price": 120.5, "amount": 4820}],
+        "total": 4820}))
+    check("a PO can be raised in another currency",
+          (usd_po.get("currency") or "") == "USD", str(usd_po.get("currency")))
+    u = pdf_text((await c.get(f"/purchasing/po/{usd_po['id']}/export.pdf",
+                              headers=pur)).content)
+    check("...the columns say USD", "UNIT PRICE (USD)" in u.upper(), u[:600])
+    check("...and never IDR", "IDR" not in u.upper(), u[:600])
+    check("...the figures are written the way dollars are written",
+          "4,820.00" in u and "4.820" not in u, u[:700])
+    check("...including the unit price's cents", "120.50" in u, u[:700])
+
+    r = await c.patch(f"/purchasing/po/{usd_po['id']}", headers=d,
+                      json={"currency": "cny"})
+    check("the currency can be corrected afterwards", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+    u2 = pdf_text((await c.get(f"/purchasing/po/{usd_po['id']}/export.pdf",
+                               headers=pur)).content)
+    check("...and the printed order follows", "UNIT PRICE (CNY)" in u2.upper(),
+          u2[:600])
+
     # a supplier with no warehouse address falls back to the office
     print("\n── a supplier who only gave one address ──")
     sup2 = J(await c.post("/purchasing/suppliers", headers=pur, json={
@@ -139,6 +203,26 @@ async def main():
     check("it still prints", r.status_code == 200, str(r.status_code))
     check("...using the office address", "Puri Niaga" in pdf_text(r.content),
           pdf_text(r.content)[:300])
+
+    # ══ the address we ask them to deliver to ════════════════════════════════
+    # It used to be a string literal in the endpoint — an address nobody at the
+    # company had confirmed, printed on every order as the place to send goods.
+    # It comes from configuration now, and says it is unset rather than
+    # inventing one, because a wrong address here is a container in the wrong
+    # town.
+    print("\n── where we ask them to deliver ──")
+    from app.core.config import settings as _s
+    ship = pdf_text((await c.get(f"/purchasing/po/{po_id}/export.pdf",
+                                 headers=pur)).content)
+    if _s.COMPANY_WAREHOUSE_ADDRESS.strip():
+        check("the configured warehouse address is what prints",
+              _s.COMPANY_WAREHOUSE_ADDRESS.strip().split(",")[0] in ship,
+              ship[:500])
+    else:
+        check("with none configured it admits so instead of inventing one",
+              "not set" in ship.lower(), ship[:500])
+    check("...and no hard-coded address survives in the code",
+          "Jl. Raya Serang KM 16" not in ship, ship[:500])
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

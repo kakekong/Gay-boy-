@@ -10,6 +10,17 @@ their office address when they don't.
 It also carries the ship-to — our own warehouse or, on a drop-ship, wherever
 the goods are actually going — because a PO that does not say where to deliver
 is a phone call waiting to happen.
+
+**This one document is in English, and the quotation is not.** Everything
+customer-facing is Indonesian because the customers are. Suppliers are not: the
+chain comes from Jiangsu, and a purchase order headed KEPADA — PEMASOK with
+its quantities under NAMA BARANG is a document the person filling the order
+cannot read. Nothing here should be translated back.
+
+**Money always carries its currency.** The columns say which, and the total
+repeats it. A vendor in China quoting USD and reading `1.800.000` as their own
+number is the mistake this exists to prevent — so the formatting follows the
+currency too, dots for rupiah and a decimal point for everything else.
 """
 
 from io import BytesIO
@@ -24,12 +35,27 @@ from reportlab.platypus import (
 
 from app.services.quotation_pdf import (
     FOOTER_H, HEADER_H, INK, INK_SOFT, MARGIN_X, NAVY, PANEL, RULE,
-    _draw_frame_and_chrome, _idr_plain, _OrangeRule,
+    _draw_frame_and_chrome, _OrangeRule,
 )
 
 
 class _Doc(BaseDocTemplate):
     footer_label = "PURCHASE ORDER"
+
+
+def money(amount, currency: str) -> str:
+    """A figure written the way its own currency is written.
+
+    Rupiah has no minor unit in practice and groups with dots — 1.800.000.
+    Everything else groups with commas and keeps two decimals — 1,800.00. Using
+    the Indonesian form for a dollar price turns 1,800.00 into 1.800.000, which
+    is three orders of magnitude of argument with a vendor.
+    """
+    amount = float(amount or 0)
+    sign = "-" if amount < 0 else ""
+    if (currency or "IDR").upper() == "IDR":
+        return sign + f"{abs(amount):,.0f}".replace(",", ".")
+    return sign + f"{abs(amount):,.2f}"
 
 
 def build_supplier_po_pdf(
@@ -39,6 +65,7 @@ def build_supplier_po_pdf(
     project_code: str | None, lead_days: int | None,
     rows: list[dict], total: float, notes: str | None,
     issued_by: str, issuer_signature: bytes | None = None,
+    currency: str = "IDR",
 ) -> bytes:
     buf = BytesIO()
     doc = _Doc(
@@ -96,37 +123,40 @@ def build_supplier_po_pdf(
     flow.append(_OrangeRule(width=40 * mm, thickness=2.2))
     flow.append(Spacer(1, 5 * mm))
 
+    cur = (currency or "IDR").upper()
+
     sup_html = f"<b>{supplier_name.upper()}</b>"
     if supplier_address:
         sup_html += "<br/>" + supplier_address.replace("\n", "<br/>")
     if supplier_pic:
-        sup_html += f'<br/><font color="#55585E">UP</font>&nbsp;&nbsp;&nbsp;&nbsp;: {supplier_pic}'
+        sup_html += f'<br/><font color="#55585E">Attn</font>&nbsp;&nbsp;: {supplier_pic}'
     if supplier_phone:
-        sup_html += f'<br/><font color="#55585E">Telp</font>&nbsp;&nbsp;: {supplier_phone}'
+        sup_html += f'<br/><font color="#55585E">Phone</font> : {supplier_phone}'
     if supplier_email:
         sup_html += f'<br/><font color="#55585E">Email</font> : {supplier_email}'
 
-    info = (f'<font color="#55585E">NO. PO</font>&nbsp;&nbsp;&nbsp;:&nbsp;&nbsp;<b>{number}</b>'
-            f'<br/><font color="#55585E">TANGGAL</font>&nbsp;:&nbsp;&nbsp;{po_date}')
+    info = (f'<font color="#55585E">PO NO.</font>&nbsp;&nbsp;&nbsp;&nbsp;:&nbsp;&nbsp;<b>{number}</b>'
+            f'<br/><font color="#55585E">DATE</font>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:&nbsp;&nbsp;{po_date}'
+            f'<br/><font color="#55585E">CURRENCY</font>&nbsp;&nbsp;:&nbsp;&nbsp;<b>{cur}</b>')
     if project_code:
-        info += (f'<br/><font color="#55585E">PROYEK</font>&nbsp;&nbsp;'
+        info += (f'<br/><font color="#55585E">PROJECT</font>&nbsp;&nbsp;&nbsp;'
                  f':&nbsp;&nbsp;{project_code}')
     if lead_days is not None:
-        info += (f'<br/><font color="#55585E">WAKTU</font>&nbsp;&nbsp;&nbsp;'
-                 f':&nbsp;&nbsp;{lead_days} hari')
+        info += (f'<br/><font color="#55585E">LEAD TIME</font>&nbsp;'
+                 f':&nbsp;&nbsp;{lead_days} days')
 
-    flow.append(panel_pair("KEPADA — PEMASOK", sup_html, "INFORMASI PO", info))
+    flow.append(panel_pair("TO — SUPPLIER", sup_html, "PO DETAILS", info))
     flow.append(Spacer(1, 4 * mm))
     flow.append(panel_pair(
-        f"KIRIM KE — {ship_to_label.upper()}",
+        f"SHIP TO — {ship_to_label.upper()}",
         (ship_to_address or "—").replace("\n", "<br/>"),
-        "SYARAT",
-        "Harga sudah termasuk PPN sesuai kesepakatan.<br/>"
-        "Mohon cantumkan nomor PO ini pada surat jalan dan faktur.",
+        "TERMS",
+        f"All prices are in <b>{cur}</b>, inclusive of tax as agreed.<br/>"
+        "Please quote this PO number on your delivery note and invoice.",
     ))
     flow.append(Spacer(1, 5 * mm))
 
-    head = ["NO", "NAMA BARANG", "QTY", "HARGA SATUAN", "JUMLAH"]
+    head = ["NO", "DESCRIPTION", "QTY", f"UNIT PRICE ({cur})", f"AMOUNT ({cur})"]
     data = [[Paragraph(f'<font color="#FFFFFF"><b>{h}</b></font>', cell) for h in head]]
     for i, r in enumerate(rows, 1):
         qty = float(r.get("qty") or 0)
@@ -135,8 +165,8 @@ def build_supplier_po_pdf(
             Paragraph(str(i), cell),
             Paragraph(str(r.get("description") or "—"), cell),
             Paragraph(f"{qty:g} {r.get('uom') or ''}".strip(), cell),
-            Paragraph(_idr_plain(unit), cell),
-            Paragraph(_idr_plain(float(r.get("amount") or qty * unit)), cell),
+            Paragraph(money(unit, cur), cell),
+            Paragraph(money(float(r.get("amount") or qty * unit), cur), cell),
         ])
     col_w = [content_w * 0.06, content_w * 0.46, content_w * 0.12,
              content_w * 0.18, content_w * 0.18]
@@ -153,8 +183,10 @@ def build_supplier_po_pdf(
     ])))
 
     flow.append(Table(
-        [["", Paragraph("<b>TOTAL</b>", cell),
-          Paragraph(f"<b>{_idr_plain(total)}</b>", cell)]],
+        # The total repeats the currency rather than relying on the column
+        # header above it — this is the line a vendor's finance office reads.
+        [["", Paragraph(f"<b>TOTAL {cur}</b>", cell),
+          Paragraph(f"<b>{money(total, cur)}</b>", cell)]],
         colWidths=[content_w * 0.64, content_w * 0.18, content_w * 0.18],
         style=TableStyle([
             ("BACKGROUND", (1, 0), (-1, 0), PANEL),
@@ -169,7 +201,7 @@ def build_supplier_po_pdf(
     flow.append(Spacer(1, 5 * mm))
 
     if (notes or "").strip():
-        flow.append(Paragraph("KETERANGAN", lbl))
+        flow.append(Paragraph("NOTES", lbl))
         flow.append(Table(
             [[Paragraph(notes.strip().replace("\n", "<br/>"), panel_body)]],
             colWidths=[content_w],
@@ -188,7 +220,7 @@ def build_supplier_po_pdf(
                             max_h_mm=16)
             if issuer_signature else None)
     flow.append(Table(
-        [[Paragraph("Hormat kami,", small)],
+        [[Paragraph("Yours sincerely,", small)],
          [_ink if _ink is not None else Spacer(1, 16 * mm)],
          [Paragraph(f"<b>{issued_by or '—'}</b>", body)],
          [Paragraph("PT. Transmisi Enjinering", small)]],

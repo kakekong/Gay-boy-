@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval, require_pr_approval
 from app.core.audit import record as audit_record
+from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
@@ -436,6 +437,10 @@ class PoCreate(BaseModel):
     eta: str | None = None      # ISO date
     items: list[dict] = []
     total: float = 0
+    # What the figures are denominated in. Defaults to rupiah because most
+    # orders are local; an overseas vendor's PO must say USD or CNY, and the
+    # printed order carries it on every money column.
+    currency: str = "IDR"
     number: str | None = None  # auto-generated if missing
     price_request_id: UUID | None = None  # source the buying price from this PR
     # Build the lines straight off a supplier's answered quote, keeping every
@@ -666,7 +671,7 @@ async def pos_for_project(
             "supplier_name": sup.name if sup else None,
             "eta": po.eta,
             "quoted_lead_days": po.quoted_lead_days,
-            "po_date": po.po_date,
+            "po_date": po.po_date, "currency": po.currency or "IDR",
             "is_shared": len(po.project_ids or []) > 1,
             "other_projects": [c for c in (po.project_ids or [])
                                if str(c) != str(project_id)],
@@ -813,7 +818,8 @@ async def list_pos(
             ),
             "sales_pic_id": None if hide_customer else (str(sales.id) if sales else None),
             "sales_pic_name": None if hide_customer else (sales.full_name if sales else None),
-            "po_date": r.po_date, "total": float(r.total or 0),
+            "po_date": r.po_date, "eta": r.eta,
+            "currency": r.currency or "IDR", "total": float(r.total or 0),
             "quoted_lead_days": r.quoted_lead_days,
             "items": r.items, "created_at": r.created_at,
         })
@@ -902,6 +908,7 @@ async def create_po(
         po_date=po_date_parsed,
         eta=eta_parsed,
         quoted_lead_days=payload.quoted_lead_days,
+        currency=(payload.currency or "IDR").strip().upper()[:8] or "IDR",
         total=payload.total,
         items=items,
         status="open" if is_director else "pending_approval",
@@ -935,6 +942,11 @@ async def create_po(
         "supplier_id": str(po.supplier_id),
         "project_id": str(po.project_id),
         "status": po.status,
+        # Echoed back because it is normalised on the way in ("usd" → "USD"),
+        # and a caller that cannot see what was stored cannot tell.
+        "currency": po.currency,
+        "eta": po.eta,
+        "total": float(po.total or 0),
         "pending_approval": not is_director,
     }
 
@@ -988,6 +1000,7 @@ async def get_po(
         "project_actual_delivery": project.actual_delivery if project else None,
         "po_date": po.po_date,
         "eta": po.eta,
+        "currency": po.currency or "IDR",
         "quoted_lead_days": po.quoted_lead_days,
         "total": float(po.total or 0),
         "items": po.items,
@@ -1069,11 +1082,17 @@ async def export_po_pdf(
                         else (supplier.phone if supplier else "")) or "",
         supplier_email=(pic.email if pic and pic.email
                         else (supplier.email if supplier else "")) or "",
-        ship_to_label="Gudang PT. Transmisi Enjinering",
-        ship_to_address="Jl. Raya Serang KM 16, Cikupa, Tangerang",
+        # Not a literal any more. This is the address a vendor ships to, so a
+        # value invented in code is a container sent to the wrong gate; it
+        # comes from COMPANY_WAREHOUSE_ADDRESS, and says it is unset rather
+        # than guessing when nobody has configured one.
+        ship_to_label=settings.COMPANY_WAREHOUSE_LABEL,
+        ship_to_address=(settings.COMPANY_WAREHOUSE_ADDRESS.strip()
+                         or "— delivery address not set, please confirm with us —"),
         project_code=project.code if project else None,
         lead_days=po.quoted_lead_days,
         rows=rows,
+        currency=po.currency or "IDR",
         total=float(po.total or 0),
         # A supplier PO has no keterangan field of its own yet; when it
         # gains one this is where it prints.
@@ -1132,6 +1151,7 @@ async def export_po_excel(
         ("PO date", str(po.po_date) if po.po_date else "—"),
         ("Project", project.code if project else "—"),
         ("Lead time (days)", po.quoted_lead_days if po.quoted_lead_days is not None else "—"),
+        ("Currency", po.currency or "IDR"),
         ("Status", po.status),
     ):
         ws.cell(row=row, column=1, value=label).font = bold
@@ -1139,8 +1159,13 @@ async def export_po_excel(
         row += 1
 
     row += 1
+    cur = po.currency or "IDR"
+    # Rupiah has no minor unit in practice; a dollar or yuan price without its
+    # cents is a rounded number pretending to be exact.
+    money_fmt = "#,##0" if cur.upper() == "IDR" else "#,##0.00"
     for col, header in enumerate(
-            ["#", "Description", "Qty", "UoM", "Unit price", "Amount"], start=1):
+            ["#", "Description", "Qty", "UoM", f"Unit price ({cur})",
+             f"Amount ({cur})"], start=1):
         c = ws.cell(row=row, column=col, value=header)
         c.font = bold
         c.fill = head_fill
@@ -1157,13 +1182,13 @@ async def export_po_excel(
             if col in (3, 5, 6):
                 c.alignment = right
                 if col in (5, 6):
-                    c.number_format = "#,##0"
+                    c.number_format = money_fmt
         row += 1
 
-    ws.cell(row=row, column=5, value="TOTAL").font = bold
+    ws.cell(row=row, column=5, value=f"TOTAL {cur}").font = bold
     tot = ws.cell(row=row, column=6, value=float(po.total or 0))
     tot.font = bold
-    tot.number_format = "#,##0"
+    tot.number_format = money_fmt
     tot.alignment = right
 
     for col, width in zip("ABCDEF", (6, 46, 10, 10, 16, 18)):
@@ -1187,6 +1212,7 @@ class POPatch(BaseModel):
     po_date: str | None = None        # ISO YYYY-MM-DD
     eta: str | None = None            # ISO YYYY-MM-DD — when the vendor says it lands
     quoted_lead_days: int | None = None
+    currency: str | None = None       # IDR | USD | CNY | …
     total: float | None = None
     status: str | None = None         # open | received | closed | cancelled
     items: list | None = None
@@ -1293,7 +1319,8 @@ async def update_po(
             "id": str(po.id), "number": po.number, "status": po.status,
             "supplier_id": str(po.supplier_id),
             "project_id": str(po.project_id) if po.project_id else None,
-            "po_date": po.po_date, "eta": po.eta, "total": float(po.total or 0),
+            "po_date": po.po_date, "eta": po.eta,
+            "currency": po.currency or "IDR", "total": float(po.total or 0),
             "quoted_lead_days": po.quoted_lead_days, "items": po.items,
             "pending_approval": True,
             "detail": "Submitted for director approval; changes will apply once approved.",
@@ -1307,6 +1334,8 @@ async def update_po(
         po.po_date = None if raw in (None, "") else date_t.fromisoformat(raw)
     if "quoted_lead_days" in data:
         po.quoted_lead_days = data["quoted_lead_days"]
+    if "currency" in data and data["currency"]:
+        po.currency = data["currency"].strip().upper()[:8]
     if "total" in data and data["total"] is not None:
         po.total = data["total"]
     if "status" in data and data["status"]:
@@ -1319,7 +1348,8 @@ async def update_po(
         "id": str(po.id), "number": po.number, "status": po.status,
         "supplier_id": str(po.supplier_id),
         "project_id": str(po.project_id) if po.project_id else None,
-        "po_date": po.po_date, "eta": po.eta, "total": float(po.total or 0),
+        "po_date": po.po_date, "eta": po.eta,
+            "currency": po.currency or "IDR", "total": float(po.total or 0),
         "quoted_lead_days": po.quoted_lead_days,
         "items": po.items,
     }

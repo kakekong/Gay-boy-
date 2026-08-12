@@ -173,6 +173,11 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # a job split across three vendors arrives in three deliveries and the
     # project's own dates cannot hold three answers.
     eta: Mapped[date | None] = mapped_column(Date)
+    # What the numbers on this order mean. Overseas vendors quote in USD or
+    # CNY, and a purchase order that prints 1.800.000 without saying which
+    # currency is an invoice dispute waiting to happen — read as rupiah it is
+    # a hundred and twenty dollars, read as dollars it is a fortune.
+    currency: Mapped[str] = mapped_column(String(8), default="IDR", nullable=False)
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     # Lines carry `project_id` / `project_code` and their price-request origin,
     # so one order to one vendor can cover several jobs — the shipment is one

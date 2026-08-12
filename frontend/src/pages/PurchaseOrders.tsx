@@ -11,6 +11,7 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { UserLink } from "@/components/UserLink";
 import { T, t } from "@/store/lang";
+import { CURRENCIES, money } from "@/lib/currency";
 
 interface SupplierLite {
   id: string;
@@ -29,6 +30,7 @@ interface PO {
   sales_pic_id: string | null;
   sales_pic_name: string | null;
   po_date: string | null;
+  currency: string;
   total: number;
   quoted_lead_days: number | null;
   items: Array<{ description?: string; qty?: number }>;
@@ -323,7 +325,7 @@ export default function PurchaseOrdersPage() {
                         {T(p.status.replace(/_/g, " "))}
                       </span>
                     </td>
-                    <td className="td text-right tabular-nums">{idr(p.total ?? 0)}</td>
+                    <td className="td text-right tabular-nums">{money(p.total ?? 0, p.currency)}</td>
                     <td className="td text-right">
                       <ChevronRight size={14} className="text-ink-400" />
                     </td>
@@ -374,6 +376,8 @@ function NewPOModal({
   const [poNumber, setPoNumber] = useState("");
   const [poDate, setPoDate] = useState(today);
   const [leadDays, setLeadDays] = useState("");
+  // Rupiah unless told otherwise — most orders are local.
+  const [currency, setCurrency] = useState("IDR");
   const [total, setTotal] = useState("");
   const [totalEdited, setTotalEdited] = useState(false);
   const [description, setDescription] = useState("");
@@ -417,6 +421,7 @@ function NewPOModal({
       number: poNumber.trim() || null,
       po_date: poDate || null,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
+      currency,
       total: total ? Number(total) : 0,
       price_request_id: linkedPR,
       // Prefer the price-request lines (with buying prices); fall back to the
@@ -627,7 +632,17 @@ function NewPOModal({
                 onChange={(e) => setLeadDays(e.target.value)}
               />
             </Field>
-            <Field label={T("Total (Rp)")}>
+            <Field label={T("Currency")}>
+              <select className="input" value={currency}
+                onChange={(e) => setCurrency(e.target.value)}>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} — {T(c.name)}</option>
+                ))}
+              </select>
+              <span className="block text-[10px] text-ink-400 mt-1">
+                {T("Printed on the PO next to every price. An overseas supplier reads Rp figures as their own currency otherwise.")}</span>
+            </Field>
+            <Field label={`${T("Total")} (${currency})`}>
               <input
                 type="number"
                 min={0}

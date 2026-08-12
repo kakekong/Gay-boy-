@@ -77,6 +77,15 @@ class Settings(BaseSettings):
     # per-quotation when needed (see QuotationCreate.number).
     QUOTATION_COMPANY_TOKEN: str = "TSE"
 
+    # Where a supplier delivers to. This prints on every purchase order as the
+    # ship-to, so it is the one address on our paperwork a vendor acts on —
+    # which is exactly why it must not be a literal buried in an endpoint, as
+    # it was. Set COMPANY_WAREHOUSE_ADDRESS in the environment to the real
+    # goods-inwards address; the PO says the address is unset rather than
+    # printing a guess when it is blank.
+    COMPANY_WAREHOUSE_ADDRESS: str = ""
+    COMPANY_WAREHOUSE_LABEL: str = "PT. Transmisi Enjinering Warehouse"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
+import { CURRENCIES, money } from "@/lib/currency";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { UserLink } from "@/components/UserLink";
@@ -36,6 +37,7 @@ interface PO {
    *  project page's shipment list. */
   eta: string | null;
   quoted_lead_days: number | null;
+  currency: string;
   total: number;
   items: POItem[];
   created_at: string;
@@ -307,7 +309,7 @@ export default function PurchaseOrderDetailPage() {
             </button>
             <div className="text-right">
               <div className="text-[10px] uppercase muted tracking-wider">{T("Total")}</div>
-              <div className="text-xl font-semibold tabular-nums">{idr(p.total)}</div>
+              <div className="text-xl font-semibold tabular-nums">{money(p.total, p.currency)}</div>
             </div>
           </div>
         </div>
@@ -411,7 +413,22 @@ export default function PurchaseOrderDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm border-t border-ink-100 pt-4">
-          <Meta label={T("Total (Rp)")}>
+          {/* The currency the vendor is being asked to invoice in. It prints
+              on every money column of the PO, so it belongs beside the total
+              rather than buried in the create form. */}
+          <Meta label={T("Currency")}>
+            <select
+              value={p.currency ?? "IDR"}
+              onChange={(e) => patch.mutate({ currency: e.target.value })}
+              disabled={patch.isPending}
+              className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.code} — {T(c.name)}</option>
+              ))}
+            </select>
+          </Meta>
+          <Meta label={`${T("Total")} (${p.currency ?? "IDR"})`}>
             <input
               type="number"
               min={0}

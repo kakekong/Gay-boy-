@@ -229,7 +229,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_efaktur.py` | e-Faktur CSV export |
 | `test_won_needs_po.py` | Won waits for the customer's PO (the director included), a rejected PO is not evidence, a request signed off after its PO disappeared does not win the deal — and sales is refused every shipping/delivery date outright while purchasing, admin and the director keep their lanes |
 | `test_multi_supplier.py` | the two purchasing shapes: one job split across vendors line by line, several jobs combined onto one vendor, line provenance surviving both, per-line apply, and a customer price request that refuses to go to the director until every line is costed — plus the discussion + attachments on the buy-side request |
-| `test_po_export.py` | the supplier PO as PDF and xlsx: the address the goods leave from, the PIC, the lines, the total, and sales refused both formats |
+| `test_po_export.py` | the supplier PO as PDF and xlsx: the address the goods leave from, the PIC, the lines, the total, sales refused both formats — plus the two things that make it usable abroad, that every label is English (checked as printed headings, so a vendor's own Indonesian address doesn't fail it) and that every figure carries its currency, written the way that currency is written |
 | `test_po_shipments.py` | the PO side of the same two shapes: a PO drafted straight off a supplier quote keeps each line's project, one order feeding three jobs shows on all three project pages, a job served by three vendors reads as Shipment 1/2/3 ordered by ETA with the last one as the date that matters, and the per-project total counts only that project's lines |
 | `test_supplier_price_request.py` | asking vendors what they charge: one request per supplier, quotes recorded per line (per-unit or per-line, normalised), the chosen one applied as the cost with its number stamped on the line, a later cheaper quote superseding it, losing quotes kept, and sales locked out of every endpoint |
 | `test_supplier_record.py` | the supplier as a real company record: address + pickup address, the company's line kept separate from each PIC's own, PICs added/edited/removed after the fact, the header editable in place (it used to be write-once), vendor paperwork readable by purchasing but not sales, and rows created before the columns existed still showing their legacy `contact` blob |
@@ -547,6 +547,26 @@ without a read is the property `test_write_read_symmetry` exists to defend —
 and the cost movement is stripped from the revision log for anyone who cannot
 see costs.
 
+**The supplier PO is the one document that leaves the company in English, and
+the only one with a currency.** Everything customer-facing is Indonesian
+because the customers are; the vendors are not — the chain comes from Jiangsu,
+and a sheet headed KEPADA — PEMASOK is unreadable to the person filling the
+order. Do not translate `supplier_po_pdf.py` back. `SupplierPO.currency`
+(default IDR) prints in the details panel, in both money column headers and on
+the total line, and the formatting follows the currency: dots and no decimals
+for rupiah, commas and cents for everything else — printing a dollar price the
+Indonesian way turns 1,800.00 into 1.800.000.
+
+**The ship-to address is configuration, not a literal.** It was
+`"Jl. Raya Serang KM 16, Cikupa, Tangerang"` typed into the export endpoint —
+an address nobody at the company had confirmed, printed on every order as the
+place to send goods. It comes from `COMPANY_WAREHOUSE_ADDRESS` /
+`COMPANY_WAREHOUSE_LABEL` now, and prints "delivery address not set, please
+confirm with us" rather than inventing one. **It is unset in production until
+somebody sets that env var**, which is deliberate — an admission is recoverable,
+a wrong address is a container in the wrong town. The letterhead address is a
+different thing: `COMPANY_ADDRESS` in `quotation_pdf.py`, shared by every PDF.
+
 **A supplier PO carries the same provenance forward, one step further.** The
 line knows its job: `SupplierPO.items[*]` carry `project_id` / `project_code`
 alongside the `source_pr_id` they inherited, and the row rolls those up into
@@ -833,6 +853,8 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Write the supplier PO in English, and say which currency it is in
+Make a PO's price request number something you can open
 Let purchasing correct a cost after the fact, with the director's say-so
 Print the stamp the size it is signed, across the line
 Show a job's shipments, and let anyone chat across departments
@@ -906,7 +928,8 @@ on every dialog, the supplier PO as PDF/Excel, per-project shipments on a
 multi-vendor job, cross-department chat with no approval at all, the printed
 signature sized and placed like the wet-signed original, and purchasing able to
 correct a cost on a submitted price request with the director signing off each
-one.
+one, and a supplier purchase order written in English with its currency on
+every figure.
 
 ## 10. Open items
 
@@ -945,9 +968,14 @@ one.
   only lands on that rebuild because `seed.py` runs it at boot: new tables
   `supplier_contacts` and `supplier_price_requests`, and new columns on
   `suppliers` (addresses, phone/whatsapp/email),
-  `supplier_price_requests.source_pr_ids`, `supplier_pos.eta` and
-  `supplier_pos.project_ids`. Until it happens the purchasing price request and
-  the shipments card 500 in production.
+  `supplier_price_requests.source_pr_ids`, `supplier_pos.eta`,
+  `supplier_pos.project_ids` and `supplier_pos.currency`. Until it happens the
+  purchasing price request and the shipments card 500 in production.
+- **`COMPANY_WAREHOUSE_ADDRESS` is not set anywhere yet.** Until the user puts
+  the real goods-inwards address in the Space's environment, every supplier PO
+  prints "delivery address not set, please confirm with us" where the ship-to
+  goes. That is the intended behaviour — the value it replaced was invented in
+  code — but it needs the real address to stop being a placeholder.
 - **Pending `cross_dept_chat` approvals in production are now meaningless.**
   Chat no longer needs the director's sign-off, but requests filed under the
   old rule are still sitting in the queue. They can be approved or rejected —

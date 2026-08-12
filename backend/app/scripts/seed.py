@@ -398,6 +398,11 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS eta DATE",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS "
     "project_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
+
+    # Which currency the order is written in. Existing rows are rupiah —
+    # every PO raised before this column existed was an Indonesian one.
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS "
+    "currency VARCHAR(8) NOT NULL DEFAULT 'IDR'",
 ]
 
 

@@ -10,6 +10,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { T, t } from "@/store/lang";
+import { CURRENCIES } from "@/lib/currency";
 
 interface PStage {
   key: string;
@@ -1110,6 +1111,9 @@ function NewPOModal({
   // Blank on purpose: an ETA guessed at PO time is worse than no ETA, because
   // the project page presents it as the date this shipment lands.
   const [eta, setEta] = useState("");
+  // Rupiah unless told otherwise: most orders are local, and a default nobody
+  // notices is only safe when it is the common case.
+  const [currency, setCurrency] = useState("IDR");
   const [total, setTotal] = useState("");
   const [totalEdited, setTotalEdited] = useState(false);
   const [description, setDescription] = useState("");
@@ -1149,6 +1153,7 @@ function NewPOModal({
       number: poNumber.trim() || null,
       po_date: poDate || null,
       eta: eta || null,
+      currency,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
       total: total ? Number(total) : 0,
       price_request_id: linkedPR,
@@ -1376,7 +1381,20 @@ function NewPOModal({
               />
             </label>
             <label className="block">
-              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Total (Rp)")}</span>
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Currency")}</span>
+              <select className="input" value={currency}
+                onChange={(e) => setCurrency(e.target.value)}>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} — {T(c.name)}</option>
+                ))}
+              </select>
+              <span className="block text-[10px] text-ink-400 mt-1">
+                {T("Printed on the PO next to every price. An overseas supplier reads Rp figures as their own currency otherwise.")}</span>
+            </label>
+            <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">
+                {T("Total")} ({currency})
+              </span>
               <input
                 type="number"
                 min={0}
