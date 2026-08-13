@@ -166,15 +166,27 @@ async def list_notifications(
 
     # 1b. Decision on YOUR request (any role) — surface the outcome + the
     # reason the approver gave so the requester learns why.
+    #
+    # The two outcomes do not deserve the same shelf life. A rejection is
+    # work — you have to fix the thing and resubmit — so it keeps the full
+    # week. An approval is news: it unblocks you, you read it once, and
+    # that is the end of it. Left at a week they stacked up, because every
+    # edit to a supplier PO needs its own approval: a purchaser who revised
+    # a few POs came back to a pile of "approved" notices, none of which
+    # asked anything of them. Two days is long enough for anyone to have
+    # opened the app since.
     decided_stmt = (
         select(ApprovalRequest)
         .where(
             ApprovalRequest.requested_by == me.id,
-            ApprovalRequest.status.in_([
-                ApprovalStatus.APPROVED.value, ApprovalStatus.REJECTED.value,
-            ]),
             ApprovalRequest.decided_at.is_not(None),
-            ApprovalRequest.decided_at >= now - timedelta(days=7),
+            (
+                (ApprovalRequest.status == ApprovalStatus.REJECTED.value)
+                & (ApprovalRequest.decided_at >= now - timedelta(days=7))
+            ) | (
+                (ApprovalRequest.status == ApprovalStatus.APPROVED.value)
+                & (ApprovalRequest.decided_at >= now - timedelta(days=2))
+            ),
         )
         .order_by(ApprovalRequest.decided_at.desc())
         .limit(20)
@@ -319,7 +331,9 @@ async def list_notifications(
         items.append({
             "id": f"pr-decided:{pr.id}:{pr.status}",
             "kind": "price_request_decided",
-            "severity": "low" if ok else "medium",
+            # Both outcomes hand the rep something to do — quote it, or
+            # revise and resubmit — so neither is the silent FYI tier.
+            "severity": "medium",
             "title": f"Price request {pr.number} "
                      + ("approved — quote it" if ok else "sent back"),
             "body": (f"{c.company_name}"

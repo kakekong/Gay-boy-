@@ -415,10 +415,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // Keep the ids, not just the tally. Marking a section read has to clear
   // exactly the alerts the badge counted — so it dismisses these ids rather
   // than re-deriving a set server-side from a rule the sidebar doesn't share.
+  //
+  // A red badge is a claim that work is waiting on you, so only alerts that
+  // ask something of you are counted. The bell still lists everything; what
+  // it must not do is put a "10" on Purchasing PO because ten of your own
+  // requests came back approved this week — nothing there needs doing, and a
+  // number nobody can clear is a number everybody learns to ignore. Severity
+  // already draws that line at the source: 'low' is the FYI tier (your
+  // request went through, a chat is busy, a rollup), high/medium is work.
   const pathItems: Record<string, string[]> = {};
   if (notif.data?.items) {
     const navPaths = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.to));
-    for (const item of notif.data.items as { id: string; link?: string }[]) {
+    for (const item of notif.data.items as
+         { id: string; link?: string; severity?: string }[]) {
+      if (item.severity === "low") continue;
       const link = item.link || "";
       let best = "";
       for (const p of navPaths) {
