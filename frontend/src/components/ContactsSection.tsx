@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { useT, t as tt, T } from "@/store/lang";
 
 /**
@@ -357,16 +358,9 @@ function ContactIdCards({ contactId, ownerType }: { contactId: string; ownerType
     onError: (e: any) => alert(e?.response?.data?.detail ?? tt("Delete failed", "Gagal menghapus")),
   });
 
-  const viewFile = async (id: string) => {
-    try {
-      const resp = await api.get(`/attachments/${id}/download`, { responseType: "blob" });
-      const url = URL.createObjectURL(resp.data as Blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e: any) {
-      alert(e?.response?.data?.detail ?? tt("Could not open file", "Tidak dapat membuka berkas"));
-    }
-  };
+  // Preview in-page. Fetching the blob and then window.open()ing it loses the
+  // click's transient activation, so the popup gets blocked and nothing opens.
+  const [preview, setPreview] = useState<{ id: string; filename: string } | null>(null);
 
   const files = list.data ?? [];
   return (
@@ -375,7 +369,7 @@ function ContactIdCards({ contactId, ownerType }: { contactId: string; ownerType
       {files.map((f: any) => (
         <span key={f.id}
           className="inline-flex items-center gap-1 rounded-full bg-ink-50 border border-ink-200 px-2 py-0.5">
-          <button type="button" onClick={() => viewFile(f.id)}
+          <button type="button" onClick={() => setPreview({ id: f.id, filename: f.filename })}
             className="text-brand-700 hover:underline inline-flex items-center gap-1">
             <FileText size={10} /> {f.filename}
           </button>
@@ -401,6 +395,14 @@ function ContactIdCards({ contactId, ownerType }: { contactId: string; ownerType
         {upload.isPending ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
         {t("Upload ID", "Unggah KTP/ID")}
       </button>
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={null}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }

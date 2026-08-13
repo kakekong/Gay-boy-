@@ -15,6 +15,7 @@ import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 const STATUS_CHIP: Record<string, string> = {
   new:              "bg-ink-100 text-ink-700",
@@ -288,20 +289,33 @@ export default function ProjectDetailPage() {
       ?? tt("Operation failed", "Operasi gagal")
   );
 
-  // Drawing files live behind the authenticated API. A plain <a href> opens a
+  // Project files live behind the authenticated API. A plain <a href> opens a
   // new tab with no auth token (and, in prod, hits the frontend origin instead
-  // of the API), which bounces to login. Fetch it through the API client (token
-  // + correct base URL) and open the blob instead.
-  const viewFile = async (fileUrl: string) => {
-    try {
-      const path = fileUrl.replace(/^\/api\/v1/, "");
-      const resp = await api.get(path, { responseType: "blob" });
-      const url = URL.createObjectURL(resp.data as Blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e) {
-      onErr(e);
+  // of the API), which bounces to login. We used to fetch the blob ourselves
+  // and window.open() it — but that popup is opened from an async callback,
+  // which Safari blocks outright and Chrome blocks too once the click's
+  // transient activation has expired on a slow request, so "View" did nothing.
+  // Render the file in-page instead, same as every other file list in the app.
+  const [preview, setPreview] = useState<
+    { id: string; filename: string; contentType: string | null } | null
+  >(null);
+  const openPreview = (
+    ref: string | null | undefined,
+    filename?: string | null,
+    contentType?: string | null,
+  ) => {
+    // Accepts either a bare attachment id or a /attachments/{id}/download URL.
+    const raw = ref || "";
+    const id = raw.match(/attachments\/([0-9a-fA-F-]{36})\/download/)?.[1] ?? raw;
+    if (!id) {
+      alert(tt("This file is missing its attachment.", "Berkas ini tidak punya lampiran."));
+      return;
     }
+    setPreview({
+      id,
+      filename: filename || tt("file", "berkas"),
+      contentType: contentType ?? null,
+    });
   };
   const addWO = useMutation({
     mutationFn: (vars: { stage: string }) =>
@@ -701,7 +715,12 @@ export default function ProjectDetailPage() {
                     <td className="td">
                       {!d.file_url ? "—"
                         : canViewDrawing ? (
-                          <button type="button" onClick={() => viewFile(d.file_url)}
+                          <button type="button"
+                             onClick={() => openPreview(
+                               d.attachment_id ?? d.file_url,
+                               d.file_name ?? `${t("drawing", "gambar")} v${d.revision}`,
+                               d.file_content_type,
+                             )}
                              className="text-brand-700 hover:underline">{t("View", "Lihat")}</button>
                         ) : (
                           <span className="muted text-xs">{t("internal only", "hanya internal")}</span>
@@ -1338,7 +1357,7 @@ export default function ProjectDetailPage() {
                     {d.attachment_id && (
                       <button type="button"
                         className="text-brand-700 hover:underline text-xs"
-                        onClick={() => viewFile(`/api/v1/attachments/${d.attachment_id}/download`)}>
+                        onClick={() => openPreview(d.attachment_id, d.filename)}>
                         {d.filename ? `${t("View", "Lihat")} (${d.filename})` : t("View", "Lihat")}
                       </button>
                     )}
@@ -1512,7 +1531,7 @@ export default function ProjectDetailPage() {
                     {iv.files.map((f: any) => (
                       <button key={f.id} type="button"
                         className="text-brand-700 hover:underline inline-flex items-center gap-1"
-                        onClick={() => viewFile(f.download_url)}>
+                        onClick={() => openPreview(f.download_url, f.filename, f.content_type)}>
                         <FileText size={11} />
                         {f.kind ? `${f.kind}: ` : ""}{f.filename}
                       </button>
@@ -1837,7 +1856,7 @@ export default function ProjectDetailPage() {
                           {d.files.map((f: any) => (
                             <button key={f.id} type="button"
                               className="text-brand-700 hover:underline inline-flex items-center gap-0.5"
-                              onClick={() => viewFile(f.download_url)}>
+                              onClick={() => openPreview(f.download_url, f.filename, f.content_type)}>
                               <FileText size={10} /> {f.filename}
                             </button>
                           ))}
@@ -2056,6 +2075,15 @@ export default function ProjectDetailPage() {
         ownerId={p.id}
         title={t("Discussion", "Diskusi")}
       />
+
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={preview.contentType}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 """Operation: projects, work orders, drawings, deliveries."""
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
@@ -59,9 +60,26 @@ def _can_see_project_cost(user: User) -> bool:
     return Role(user.role) not in (Role.ADMIN,)
 
 
-def _drawing_row(d, deciders: dict) -> dict:
+def _drawing_attachment_id(file_url: str | None) -> str | None:
+    """The attachment UUID behind a drawing's download URL, if any.
+
+    Drawings store a URL rather than a foreign key, so this is how the
+    frontend gets an id it can hand to the in-page preview modal.
+    """
+    m = re.search(r"/attachments/([0-9a-fA-F-]{36})/download", file_url or "")
+    return m.group(1) if m else None
+
+
+def _drawing_row(d, deciders: dict, atts: dict | None = None) -> dict:
+    # Preview needs an attachment id and a filename: the modal infers the MIME
+    # type from the extension when the stored content_type is generic.
+    att_id = _drawing_attachment_id(d.file_url)
+    att = (atts or {}).get(att_id)
     return {
         "id": str(d.id), "revision": d.revision, "file_url": d.file_url,
+        "attachment_id": att_id,
+        "file_name": att.filename if att else None,
+        "file_content_type": att.content_type if att else None,
         "kind": d.kind, "status": d.status, "notes": d.notes,
         "source_drawing_id": str(d.source_drawing_id) if d.source_drawing_id else None,
         "customer_decision_at": d.customer_decision_at,
@@ -249,6 +267,20 @@ async def project_full(project_id: UUID,
         for u in (await db.scalars(select(User).where(User.id.in_(drawing_user_ids)))).all():
             deciders[u.id] = u.full_name
 
+    # Batch-load the attachment behind each drawing so every row can carry the
+    # id + filename the in-page preview needs. Must run AFTER drawings.
+    drawing_atts: dict[str, Attachment] = {}
+    _d_att_ids = {
+        _drawing_attachment_id(d.file_url) for d in drawings
+    } - {None}
+    if _d_att_ids:
+        for a in (await db.scalars(
+            select(Attachment).where(Attachment.id.in_(
+                [UUID(x) for x in _d_att_ids]
+            ))
+        )).all():
+            drawing_atts[str(a.id)] = a
+
     # Batch-load invoice + delivery-order attachments so we can surface View
     # links on the project page without N+1 lookups. Must run AFTER invoices +
     # deliveries are loaded.
@@ -271,6 +303,7 @@ async def project_full(project_id: UUID,
         )).all():
             inv_files.setdefault(a.owner_id, []).append({
                 "id": str(a.id), "filename": a.filename,
+                "content_type": a.content_type,
                 "kind": (a.description or "").strip("[]").split("]")[0] or None,
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
@@ -283,6 +316,7 @@ async def project_full(project_id: UUID,
         )).all():
             do_files.setdefault(a.owner_id, []).append({
                 "id": str(a.id), "filename": a.filename,
+                "content_type": a.content_type,
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
 
@@ -434,9 +468,9 @@ async def project_full(project_id: UUID,
         # old name and carries the customer's — the ones sales, admin and the
         # customer portal were always looking at — so nothing that reads it
         # starts showing vendor sheets to the wrong people if it is missed.
-        "drawings": [_drawing_row(d, deciders) for d in drawings
+        "drawings": [_drawing_row(d, deciders, drawing_atts) for d in drawings
                      if d.kind == "customer" and _may_see_drawing(_role, "customer")],
-        "supplier_drawings": [_drawing_row(d, deciders) for d in drawings
+        "supplier_drawings": [_drawing_row(d, deciders, drawing_atts) for d in drawings
                               if d.kind == "supplier"
                               and _may_see_drawing(_role, "supplier")],
         "may_upload_drawing": {
@@ -1010,7 +1044,6 @@ async def delete_drawing(
     """Delete a drawing revision. Allowed for the account that posted it or for
     management. Best-effort removes the underlying file too."""
     import os
-    import re
 
     d = await db.get(Drawing, drawing_id)
     if not d:

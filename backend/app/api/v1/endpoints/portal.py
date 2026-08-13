@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.operation import _drawing_attachment_id
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role
@@ -133,7 +134,10 @@ async def customer_projects(
             ],
             "drawings": [
                 {"id": str(d.id), "revision": d.revision, "status": d.status,
-                 "file_url": d.file_url, "customer_decision_at": d.customer_decision_at}
+                 "file_url": d.file_url,
+                 # The portal previews the file in-page, which needs the id.
+                 "attachment_id": _drawing_attachment_id(d.file_url),
+                 "customer_decision_at": d.customer_decision_at}
                 for d in drawings
             ],
             "invoices": [

@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { T, locale } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -49,16 +50,16 @@ export default function CustomerPortalPage() {
   });
 
   // Files sit behind the authenticated API — a plain <a href> opens a tab with
-  // no auth token and bounces to login. Fetch via the API client and open the blob.
-  const viewFile = async (fileUrl: string) => {
-    try {
-      const resp = await api.get(fileUrl.replace(/^\/api\/v1/, ""), { responseType: "blob" });
-      const url = URL.createObjectURL(resp.data as Blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e: any) {
-      alert(e?.response?.data?.detail ?? e?.message ?? "Could not open file");
-    }
+  // no auth token and bounces to login. We used to fetch the blob and
+  // window.open() it, but a popup opened from an async callback no longer
+  // counts as user-initiated, so browsers block it and "View file" appears
+  // dead. Render it in a modal over the portal instead.
+  const [preview, setPreview] = useState<{ id: string; filename: string } | null>(null);
+  const viewDrawing = (d: any) => {
+    const id = d.attachment_id
+      ?? String(d.file_url || "").match(/attachments\/([0-9a-fA-F-]{36})\/download/)?.[1];
+    if (!id) return;
+    setPreview({ id, filename: `drawing-v${d.revision}` });
   };
 
   return (
@@ -165,7 +166,7 @@ export default function CustomerPortalPage() {
                         {T(d.status.replace(/_/g, " "))}
                       </span>
                       {d.file_url && (
-                        <button type="button" onClick={() => viewFile(d.file_url)}
+                        <button type="button" onClick={() => viewDrawing(d)}
                            className="text-brand-700 hover:underline text-sm">{T("View file")}</button>
                       )}
                       {d.status === "submitted" && (
@@ -226,6 +227,14 @@ export default function CustomerPortalPage() {
           </div>
         ))}
       </div>
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={null}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }

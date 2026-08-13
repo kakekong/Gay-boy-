@@ -39,7 +39,11 @@ function inferMime(filename: string, declared: string | null): string {
 export function FilePreviewModal({ attachmentId, filename, contentType, onClose }: Props) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const mime = inferMime(filename, contentType);
+  // Best guess before the file arrives; the response's own Content-Type
+  // refines it below, so callers that only know an id still get a real
+  // preview instead of the "can't render this" fallback.
+  const declaredMime = inferMime(filename, contentType);
+  const [mime, setMime] = useState(declaredMime);
   const isImage = mime.startsWith("image/");
   const isPdf   = mime.includes("pdf");
   const isText  = mime.startsWith("text/") || mime === "application/json";
@@ -54,7 +58,15 @@ export function FilePreviewModal({ attachmentId, filename, contentType, onClose 
     })
       .then((r) => {
         if (cancelled) return;
-        const blob = new Blob([r.data], { type: mime });
+        // The API serves the stored content type. Trust it over our guess
+        // unless it's the generic fallback, which tells us nothing.
+        const served = String((r.data as Blob)?.type || "")
+          .split(";")[0].trim().toLowerCase();
+        const effective = served && served !== "application/octet-stream"
+          ? served
+          : declaredMime;
+        setMime(effective);
+        const blob = new Blob([r.data], { type: effective });
         url = URL.createObjectURL(blob);
         setBlobUrl(url);
       })
@@ -75,7 +87,7 @@ export function FilePreviewModal({ attachmentId, filename, contentType, onClose 
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [attachmentId, mime]);
+  }, [attachmentId, declaredMime]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

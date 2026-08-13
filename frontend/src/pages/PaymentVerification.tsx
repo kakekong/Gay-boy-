@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { T, locale } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -230,30 +231,27 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 // Plain <a href> 401s here because the browser doesn't carry the bearer
-// token. Fetch the file as a blob via the authenticated client, then open
-// the resulting blob URL in a new tab so the browser previews it inline.
-function AttachmentLink({ id }: { id: string }) {
-  const [busy, setBusy] = useState(false);
-  function open() {
-    setBusy(true);
-    api.get(`/attachments/${id}/download`, {
-      params: { inline: 1 },
-      responseType: "blob",
-    })
-      .then((r) => {
-        const url = URL.createObjectURL(r.data);
-        window.open(url, "_blank", "noopener");
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      })
-      .finally(() => setBusy(false));
-  }
+// token, so the file has to be fetched through the authenticated client.
+// It renders in a modal rather than a new window: a popup opened from the
+// async response callback no longer counts as user-initiated, so browsers
+// block it and the button appears to do nothing.
+function AttachmentLink({ id, filename }: { id: string; filename?: string | null }) {
+  const [open, setOpen] = useState(false);
   return (
-    <button
-      onClick={open}
-      disabled={busy}
-      className="text-brand-700 hover:underline inline-flex items-center gap-1"
-    >
-      {busy && <Loader2 size={12} className="animate-spin" />}
-      {T("View")}</button>
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="text-brand-700 hover:underline inline-flex items-center gap-1"
+      >
+        {T("View")}</button>
+      {open && (
+        <FilePreviewModal
+          attachmentId={id}
+          filename={filename || T("Payment proof")}
+          contentType={null}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }

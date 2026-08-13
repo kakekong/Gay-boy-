@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { useAuthStore } from "@/store/auth";
 import { T } from "@/store/lang";
 
@@ -211,16 +212,9 @@ function PendingInvoiceApprovals() {
 
   // The approvals queue is the headline thing this page should show — render
   // even an empty state so finance knows it's empty (not broken).
-  const viewFile = async (url: string) => {
-    try {
-      const resp = await api.get(url.replace(/^\/api\/v1/, ""), { responseType: "blob" });
-      const blob = URL.createObjectURL(resp.data as Blob);
-      window.open(blob, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(blob), 60_000);
-    } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "Could not open file");
-    }
-  };
+  // Preview in-page. Fetching the blob and then window.open()ing it loses the
+  // click's transient activation, so the popup gets blocked and nothing opens.
+  const [preview, setPreview] = useState<{ id: string; filename: string } | null>(null);
 
   return (
     <div className="card overflow-hidden">
@@ -271,7 +265,7 @@ function PendingInvoiceApprovals() {
                     {iv.files.map((file: any) => (
                       <button key={file.id} type="button"
                         className="text-brand-700 hover:underline inline-flex items-center gap-1"
-                        onClick={() => viewFile(file.download_url)}>
+                        onClick={() => setPreview({ id: file.id, filename: file.filename })}>
                         <FileText size={11} /> {file.filename}
                       </button>
                     ))}
@@ -320,6 +314,14 @@ function PendingInvoiceApprovals() {
             );
           })}
         </ul>
+      )}
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={null}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   );

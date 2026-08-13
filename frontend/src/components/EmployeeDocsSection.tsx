@@ -1,10 +1,11 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileText, Upload, Loader2, X, IdCard, Landmark, HeartHandshake,
   FileSignature,
 } from "lucide-react";
 import { api } from "@/api/client";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { T } from "@/store/lang";
 
 interface DocRow {
@@ -64,16 +65,9 @@ export function EmployeeDocsSection({ employeeId }: { employeeId: string }) {
     onError: (e: any) => alert(e?.response?.data?.detail ?? "Delete failed"),
   });
 
-  const view = async (id: string) => {
-    try {
-      const r = await api.get(`/attachments/${id}/download`, { responseType: "blob" });
-      const url = URL.createObjectURL(r.data as Blob);
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "Could not open file");
-    }
-  };
+  // Preview in-page. Fetching the blob and then window.open()ing it loses the
+  // click's transient activation, so the popup gets blocked and nothing opens.
+  const [preview, setPreview] = useState<DocRow | null>(null);
 
   const byKind: Record<string, DocRow[]> = {};
   for (const k of DOC_KINDS) byKind[k.key] = [];
@@ -98,11 +92,19 @@ export function EmployeeDocsSection({ employeeId }: { employeeId: string }) {
             files={byKind[k.key]}
             uploading={upload.isPending}
             onUpload={(file) => upload.mutate({ kind: k.key, file })}
-            onView={view}
+            onView={setPreview}
             onDelete={(id) => del.mutate(id)}
           />
         ))}
       </div>
+      {preview && (
+        <FilePreviewModal
+          attachmentId={preview.id}
+          filename={preview.filename}
+          contentType={null}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }
@@ -114,7 +116,7 @@ function DocSlot({
   files: DocRow[];
   uploading: boolean;
   onUpload: (file: File) => void;
-  onView: (id: string) => void;
+  onView: (f: DocRow) => void;
   onDelete: (id: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -157,7 +159,7 @@ function DocSlot({
               className="flex items-center justify-between gap-2 rounded-lg bg-ink-50/60 px-2 py-1">
               <button
                 type="button"
-                onClick={() => onView(f.id)}
+                onClick={() => onView(f)}
                 className="text-brand-700 hover:underline inline-flex items-center gap-1 truncate"
               >
                 <FileText size={11} /> {f.filename}

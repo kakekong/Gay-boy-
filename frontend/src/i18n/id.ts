@@ -685,6 +685,7 @@ export const ID_STATIC: Record<string, string> = {
   "Password *": "Kata sandi *",
   "Payment": "Pembayaran",
   "Payment due": "Jatuh tempo pembayaran",
+  "Payment proof": "Bukti pembayaran",
   "Payment verification": "Verifikasi pembayaran",
   "Pending": "Menunggu",
   "Pending approval": "Menunggu persetujuan",

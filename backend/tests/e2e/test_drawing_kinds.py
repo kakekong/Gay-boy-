@@ -178,6 +178,34 @@ async def main():
           got["may_upload_drawing"] == {"customer": False, "supplier": False},
           str(got.get("may_upload_drawing")))
 
+    # ══ a row you can actually open ══════════════════════════════════════════
+    # "View" renders the file in a modal rather than opening a window, because
+    # a popup fired from the download's async callback is no longer a
+    # user-initiated one and browsers block it. The modal is addressed by
+    # attachment id and picks its renderer off the filename, so a row that
+    # carries only a URL is a row whose View button can't do anything.
+    print("\n── the row carries what the preview needs ──")
+    got = J(await c.get(f"/operation/projects/{proj}/full", headers=d))
+    rows = (got.get("drawings") or []) + (got.get("supplier_drawings") or [])
+    check("the director sees rows on both cards", len(rows) >= 3, str(len(rows)))
+    check("every drawing row names its attachment",
+          all(r.get("attachment_id") for r in rows),
+          str([(r.get("kind"), r.get("attachment_id")) for r in rows]))
+    check("...and the file behind it",
+          all((r.get("file_name") or "").endswith(".pdf") for r in rows),
+          str([r.get("file_name") for r in rows]))
+    check("...with the content type it was stored under",
+          all(r.get("file_content_type") == "application/pdf" for r in rows),
+          str([r.get("file_content_type") for r in rows]))
+    check("...and the id is the one in the download URL",
+          all(r["attachment_id"] in (r.get("file_url") or "") for r in rows),
+          str([(r.get("attachment_id"), r.get("file_url")) for r in rows]))
+    if rows:
+        r = await c.get(f"/attachments/{rows[0]['attachment_id']}/download",
+                        headers=d, params={"inline": 1})
+        check("...so the preview's own request succeeds", r.status_code == 200,
+              str(r.status_code))
+
     # ══ the file behind the drawing ══════════════════════════════════════════
     # The card can hide a row and still leave the file reachable: a drawing's
     # PDF is stored as an ordinary project attachment, which every internal
@@ -332,6 +360,9 @@ async def main():
         ids = [x["id"] for x in (mine_p.get("drawings") or [])]
         check("...listing only the drawings meant for them",
               cus_drw in ids and sup_drw not in ids, str(ids))
+        check("...each one openable in the portal's preview",
+              all(x.get("attachment_id") for x in (mine_p.get("drawings") or [])),
+              str([x.get("attachment_id") for x in (mine_p.get("drawings") or [])]))
     r = await c.post(f"/portal/customer/drawings/{sup_drw}/decide", headers=cu,
                      params={"decision": "approve"})
     check("a customer cannot approve the vendor's sheet", r.status_code == 403,
