@@ -133,8 +133,8 @@ export default function PurchasingPage() {
 
   // Live counts for the procurement-chain cards. Each stage endpoint is
   // purchasing-gated, same audience as this page.
-  const grList  = useQuery({ queryKey: ["gr-list"],  queryFn: () => api.get("/purchasing/gr").then((r) => r.data as any[]),  retry: false });
-  const qcList  = useQuery({ queryKey: ["qc-list"],  queryFn: () => api.get("/purchasing/qc").then((r) => r.data as any[]),  retry: false });
+  const grList  = useQuery({ queryKey: ["gr-list"],  queryFn: () => api.get("/purchasing/gr").then((r) => r.data as any[]),  enabled: seesBuySide, retry: false });
+  const qcList  = useQuery({ queryKey: ["qc-list"],  queryFn: () => api.get("/purchasing/qc").then((r) => r.data as any[]),  enabled: seesBuySide, retry: false });
 
   const stageCount = (key: string): number => {
     switch (key) {
@@ -228,6 +228,10 @@ export default function PurchasingPage() {
         )}
       </div>
 
+      {/* Supplier PO → goods receipt → QC. All three endpoints are closed to
+          admin now, so for them the strip would be three cards reading zero
+          that 403 on click. */}
+      {seesBuySide && (
       <div className="card p-4 lg:p-6 overflow-x-auto">
         <div className="flex items-stretch gap-3 min-w-[700px]">
           {STAGES.map((s, i) => {
@@ -261,6 +265,7 @@ export default function PurchasingPage() {
           })}
         </div>
       </div>
+      )}
 
       {tab === "suppliers" && (
       <div className="card overflow-hidden">

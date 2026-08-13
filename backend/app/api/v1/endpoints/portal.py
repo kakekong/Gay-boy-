@@ -100,8 +100,13 @@ async def customer_projects(
         deliveries = (await db.scalars(
             select(DeliveryOrder).where(DeliveryOrder.project_id == p.id)
         )).all()
+        # The customer's own drawings, and only those. A supplier drawing is
+        # the vendor's sheet — showing it here would hand the customer the
+        # vendor relationship the whole design keeps them out of, and let them
+        # approve a document nobody meant them to see.
         drawings = (await db.scalars(
-            select(Drawing).where(Drawing.project_id == p.id)
+            select(Drawing).where(Drawing.project_id == p.id,
+                                  Drawing.kind == "customer")
             .order_by(Drawing.revision.desc())
         )).all()
         invoices = (await db.scalars(
@@ -154,6 +159,11 @@ async def customer_decide_drawing(
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     project = await db.get(Project, d.project_id)
     if not project or project.customer_id != cid:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your drawing")
+    # Belt and braces against the list above: a customer holding a drawing id
+    # must not be able to decide the vendor's sheet with it, least of all
+    # because approving one advances the whole job.
+    if (d.kind or "customer") != "customer":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your drawing")
     if decision == "approve":
         d.status = "approved"
@@ -370,13 +380,18 @@ async def supplier_upload(
     # into the project's Drawing list so the customer can see (and approve)
     # it from their portal without an internal-team round-trip.
     if kind == "drawing" and po.project_id:
+        # A vendor's own upload is a *supplier* drawing by definition. It used
+        # to land in the pile the customer portal reads, which is how a sheet
+        # from Jiangsu could end up in front of the customer for approval.
         prior = (await db.scalars(
-            select(Drawing).where(Drawing.project_id == po.project_id)
+            select(Drawing).where(Drawing.project_id == po.project_id,
+                                  Drawing.kind == "supplier")
         )).all()
         next_rev = (max((d.revision for d in prior), default=0) or 0) + 1
         drw = Drawing(
             project_id=po.project_id,
             revision=next_rev,
+            kind="supplier",
             file_url=f"/api/v1/attachments/{a.id}/download",
             status="submitted",
             uploaded_by=me.id,

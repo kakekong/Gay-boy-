@@ -727,7 +727,15 @@ async def create_activity(
 
 # ─── Aggregated summary + export ─────────────────────────────────────────────
 
-async def _build_summary(db: AsyncSession, c: Customer) -> dict:
+def _viewer_sees_margin(viewer) -> bool:
+    """Admin run the customer side and may not see procurement cost; a margin
+    beside the PO value is that cost. No viewer (an internal caller that did
+    not pass one) is treated as allowed, as before."""
+    return viewer is None or Role(viewer.role) != Role.ADMIN
+
+
+async def _build_summary(db: AsyncSession, c: Customer,
+                         viewer: User | None = None) -> dict:
     """Aggregate everything we know about this customer for the detail page."""
     # Quotations
     quotes = (await db.scalars(
@@ -841,8 +849,13 @@ async def _build_summary(db: AsyncSession, c: Customer) -> dict:
                 "po_number": p.po_number, "po_value": float(p.po_value or 0),
                 "target_delivery": p.target_delivery,
                 "actual_delivery": p.actual_delivery,
-                "margin_estimate": float(p.margin_estimate or 0),
-                "margin_actual":   float(p.margin_actual or 0),
+                # A margin against a PO value is the buying cost by
+                # subtraction, and admin may not see what the goods cost us.
+                # Blanked rather than dropped so every export keeps its shape.
+                "margin_estimate": (None if not _viewer_sees_margin(viewer)
+                                    else float(p.margin_estimate or 0)),
+                "margin_actual": (None if not _viewer_sees_margin(viewer)
+                                  else float(p.margin_actual or 0)),
             }
             for p in projects
         ],
@@ -1232,7 +1245,7 @@ async def customer_summary(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if not can_view_customer(user, c.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    return await _build_summary(db, c)
+    return await _build_summary(db, c, user)
 
 
 def _csv_quote(v) -> str:
@@ -1273,7 +1286,7 @@ async def export_customer_csv(
     if not can_view_customer(user, c.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
 
-    s = await _build_summary(db, c)
+    s = await _build_summary(db, c, user)
     stats = s["stats"]
     cust = s["customer"]
     today = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
@@ -1354,7 +1367,8 @@ async def export_customer_csv(
             p["code"], p["status"], p["po_number"] or "",
             _fmt_idr(p["po_value"]),
             p["target_delivery"] or "", p["actual_delivery"] or "",
-            f"{p['margin_estimate']*100:.1f}%", f"{p['margin_actual']*100:.1f}%",
+            "—" if p["margin_estimate"] is None else f"{p['margin_estimate']*100:.1f}%",
+            "—" if p["margin_actual"] is None else f"{p['margin_actual']*100:.1f}%",
         ]))
 
     # Invoices table
@@ -1491,7 +1505,7 @@ async def export_customer_pdf(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if not can_view_customer(user, c.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    s = await _build_summary(db, c)
+    s = await _build_summary(db, c, user)
     from app.services.tabular_export import render_pdf
     data = render_pdf(f"Customer report — {c.company_name}", _customer_export_sections(s))
     safe = "".join(ch if ch.isalnum() else "_" for ch in c.company_name)[:60]
@@ -1512,7 +1526,7 @@ async def export_customer_xlsx(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if not can_view_customer(user, c.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    s = await _build_summary(db, c)
+    s = await _build_summary(db, c, user)
     from app.services.tabular_export import render_xlsx
     data = render_xlsx(f"Customer report — {c.company_name}", _customer_export_sections(s))
     safe = "".join(ch if ch.isalnum() else "_" for ch in c.company_name)[:60]

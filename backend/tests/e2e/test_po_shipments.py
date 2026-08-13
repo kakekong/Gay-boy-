@@ -378,15 +378,19 @@ async def main():
     waiting = J(r)
     check("purchasing raising a PO still needs approval too",
           waiting.get("status") == "pending_approval", str(waiting.get("status")))
-    creates = [x for x in J(await c.get("/approvals", headers=d))
-               if x["target_type"] == "supplier_po"
-               and (x.get("payload") or {}).get("action") == "create"]
-    check("...and that request is in the queue", len(creates) >= 1, str(len(creates)))
+    # Scoped to the PO this run just raised: the shared scratch DB carries
+    # other runs' pending requests, and they are none of this check's business.
+    def _mine(rows):
+        return [x for x in rows if x["target_type"] == "supplier_po"
+                and (x.get("payload") or {}).get("action") == "create"
+                and str(x.get("target_id")) == waiting["id"]]
+
+    creates = _mine(J(await c.get("/approvals", headers=d)))
+    check("...and that request is in the queue", len(creates) == 1, str(len(creates)))
     await c.patch(f"/purchasing/po/{waiting['id']}", headers=d, json={"status": "cancelled"})
-    still = [x for x in J(await c.get("/approvals", headers=d))
-             if x["id"] in {y["id"] for y in creates}]
-    check("...and drops out once the PO is decided elsewhere", not still,
-          str(still)[:150])
+    check("...and drops out once the PO is decided elsewhere",
+          not _mine(J(await c.get("/approvals", headers=d))),
+          str(_mine(J(await c.get("/approvals", headers=d))))[:150])
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

@@ -102,14 +102,21 @@ async def main():
     r = await up(s1, proj, "supplier", f"sales try {tag}")
     check("...nor the supplier's", r.status_code == 403, str(r.status_code))
 
+    # Asked for explicitly, and "for right now": the director files the
+    # vendor's sheet. Purchasing still read it — it is their vendor — but they
+    # are not the one putting it on the record.
     r = await up(pur, proj, "supplier", f"vendor sheet {tag}")
-    check("purchasing files the supplier's", r.status_code == 201,
+    check("purchasing no longer files the supplier's", r.status_code == 403,
+          f"{r.status_code} {J(r)}"[:140])
+    r = await up(pur, proj, "customer", f"vendor tries {tag}")
+    check("...nor the customer's", r.status_code == 403, str(r.status_code))
+
+    r = await up(d, proj, "supplier", f"vendor sheet {tag}")
+    check("the director files the supplier's", r.status_code == 201,
           f"{r.status_code} {J(r)}"[:140])
     sup_drw = J(r).get("id")
     check("...and it is recorded as one", J(r).get("kind") == "supplier",
           str(J(r).get("kind")))
-    r = await up(pur, proj, "customer", f"vendor tries {tag}")
-    check("...but not the customer's", r.status_code == 403, str(r.status_code))
 
     r = await up(adm, proj, "supplier", f"admin tries {tag}")
     check("admin cannot file a supplier drawing", r.status_code == 403,
@@ -170,6 +177,38 @@ async def main():
     check("...and sales are offered neither",
           got["may_upload_drawing"] == {"customer": False, "supplier": False},
           str(got.get("may_upload_drawing")))
+
+    # ══ the file behind the drawing ══════════════════════════════════════════
+    # The card can hide a row and still leave the file reachable: a drawing's
+    # PDF is stored as an ordinary project attachment, which every internal
+    # role could list and download. Hiding the row while leaving the file is
+    # not hiding anything.
+    print("\n── the file itself, not just the row ──")
+    sup_att = J(await c.get("/attachments", headers=pur,
+                            params={"owner_type": "project", "owner_id": proj}))
+    sup_file = next((a for a in sup_att if (a.get("filename") or "").startswith("supplier")), None)
+    check("purchasing can list the supplier drawing's file", sup_file is not None,
+          str([a.get("filename") for a in sup_att]))
+
+    for who, label in ((adm, "admin"), (s1, "sales")):
+        listed = J(await c.get("/attachments", headers=who,
+                               params={"owner_type": "project", "owner_id": proj}))
+        names = [a.get("filename") for a in listed]
+        check(f"{label} cannot list it", "supplier.pdf" not in names, str(names))
+        if sup_file:
+            r = await c.get(f"/attachments/{sup_file['id']}/download", headers=who)
+            check(f"...nor download it directly", r.status_code == 403,
+                  str(r.status_code))
+        cus = next((a for a in listed if a.get("filename") == "customer.pdf"), None)
+        check(f"...while the customer's file is still theirs to open",
+              cus is not None, str(names))
+        if cus:
+            r = await c.get(f"/attachments/{cus['id']}/download", headers=who)
+            check("...and downloads", r.status_code == 200, str(r.status_code))
+
+    if sup_file:
+        r = await c.get(f"/attachments/{sup_file['id']}/download", headers=d)
+        check("the director can still open it", r.status_code == 200, str(r.status_code))
 
     # ══ the sign-off, and what it moves ══════════════════════════════════════
     print("\n── approving one is not approving the other ──")
@@ -271,6 +310,66 @@ async def main():
     check("purchasing still see the vendor on theirs",
           pship["shipments"][0]["supplier_name"] == f"PT Rahasia {tag}",
           str(pship["shipments"][0]["supplier_name"]))
+
+    # ══ the neighbours that could undo all of it ═════════════════════════════
+    # Hiding a drawing in one place and leaving it reachable in another is not
+    # hiding it. These are the other doors onto the same document.
+    print("\n── the other doors ──")
+
+    # The customer portal. A vendor's sheet reaching the customer would hand
+    # them the supplier relationship, and approving one advances the job.
+    pemail = f"pu{tag}@demo.local"
+    await c.post("/users", headers=d, json={
+        "email": pemail, "full_name": f"Portal {tag}", "role": "customer",
+        "password": "test-pass-123", "linked_customer_id": cust})
+    cu = await login(pemail)
+    seen_port = J(await c.get("/portal/customer/projects", headers=cu))
+    rows = seen_port if isinstance(seen_port, list) else seen_port.get("items", [])
+    mine_p = next((x for x in rows if x["id"] == proj), None)
+    check("the customer's portal shows their project", mine_p is not None,
+          str([x.get("code") for x in rows])[:150])
+    if mine_p:
+        ids = [x["id"] for x in (mine_p.get("drawings") or [])]
+        check("...listing only the drawings meant for them",
+              cus_drw in ids and sup_drw not in ids, str(ids))
+    r = await c.post(f"/portal/customer/drawings/{sup_drw}/decide", headers=cu,
+                     params={"decision": "approve"})
+    check("a customer cannot approve the vendor's sheet", r.status_code == 403,
+          f"{r.status_code} {J(r)}"[:130])
+
+    # The portal links straight at the attachment, so the file has to open for
+    # the customer — and only the one that is theirs.
+    cus_att = next((a for a in J(await c.get("/attachments", headers=d,
+                                             params={"owner_type": "project",
+                                                     "owner_id": proj}))
+                    if (a.get("filename") or "").startswith("customer")), None)
+    if cus_att:
+        r = await c.get(f"/attachments/{cus_att['id']}/download", headers=cu)
+        check("the customer can still open their own drawing", r.status_code == 200,
+              str(r.status_code))
+    if sup_file:
+        r = await c.get(f"/attachments/{sup_file['id']}/download", headers=cu)
+        check("...and never the vendor's", r.status_code == 403, str(r.status_code))
+
+    # A customer's summary carries a margin per project — and a margin beside
+    # the PO value is the buying cost by subtraction. Reachable by any internal
+    # role over the API, whatever the sidebar shows.
+    summ = J(await c.get(f"/customers/{cust}/summary", headers=adm))
+    proj_rows = summ.get("projects") or []
+    check("the customer summary opens for admin", bool(proj_rows), str(summ)[:120])
+    check("...with no margin on it",
+          all(r.get("margin_estimate") is None and r.get("margin_actual") is None
+              for r in proj_rows), str(proj_rows)[:200])
+    dsumm = J(await c.get(f"/customers/{cust}/summary", headers=d))
+    check("...while the director still gets one",
+          any(r.get("margin_estimate") is not None
+              for r in (dsumm.get("projects") or [])),
+          str(dsumm.get("projects"))[:200])
+
+    # Deleting, and revising, are the same wall.
+    r = await c.delete(f"/operation/drawings/{sup_drw}", headers=adm)
+    check("admin cannot delete a drawing they cannot see", r.status_code == 403,
+          str(r.status_code))
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

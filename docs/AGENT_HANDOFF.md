@@ -572,8 +572,23 @@ different thing: `COMPANY_ADDRESS` in `quotation_pdf.py`, shared by every PDF.
 `'supplier'` is the sheet the vendor sent us; `'customer'` is the one the
 customer approves, drawn up from it (`source_drawing_id` keeps the lineage).
 `_DRAWING_UPLOAD_ROLES` and `_DRAWING_VIEW_ROLES` in `operation.py` are the
-whole matrix — sales read the customer's and file neither, purchasing own the
-supplier's, admin own the customer's, management see both and do the handoff.
+whole matrix — sales read the customer's and file neither, admin own the
+customer's, **the director files the supplier's** (asked for as "for right
+now", so move that line and nothing else when it changes), purchasing read it,
+management see both and do the handoff. The view sets also carry the two portal
+roles, which is not decoration: `attachments.py` consults them when a *file* is
+fetched, and that is the one path a customer or a supplier reaches. Leave
+`Role.CUSTOMER` out of the customer set and the portal stops being able to open
+the drawing it exists to approve.
+
+**A drawing's file is an ordinary project attachment, and that is the door
+people forget.** Hiding the row on the project page left the PDF listed and
+downloadable by every internal role, and by the customer. `_drawing_kind_of()`
+in `attachments.py` classifies a project's files — by the `[drawing:<kind>]`
+stamp on new uploads, then the live drawing's `file_url`, then the uploader's
+role for anything older — and both the list and the download apply
+`_may_see_drawing` to the result. Anything else that serves a project file has
+to do the same.
 Two rules are easy to break by accident: only the **customer** drawing's
 approval calls `advance_project_status(..., "drawing_approved")`, and
 `project_full` serves the two lists separately (`drawings` keeps its old name
@@ -894,6 +909,7 @@ Chat messages and discussion comments both push instantly.
 Recent commits on `claude/enterprise-crm-erp-ai-IMGRg`, newest first:
 
 ```
+Hand the supplier drawing to the director, and shut the doors around it
 Split the drawings in two, and move admin to the customer side
 Show the director what purchasing changed, and stop the toast storm
 Write the supplier PO in English, and say which currency it is in

@@ -710,22 +710,30 @@ DOCS_DUE_WINDOW_DAYS = 14
 #   * **Sales** may see the customer drawing (they are the ones showing it to
 #     the customer) but never file one, and never see the supplier's at all —
 #     that is the vendor relationship, which sales is kept out of.
-#   * **Purchasing** files the supplier drawing and sees only that; the
-#     customer drawing carries the customer, and purchasing stays blind to it.
+#   * **Purchasing** sees the supplier drawing; the customer drawing carries
+#     the customer, and purchasing stays blind to it.
 #   * **Admin** works the customer side — they file the customer drawing and
 #     see only that.
 #   * **Manager / director** see both, which is what makes the handoff
 #     possible: they take the supplier drawing and produce the customer one
-#     from it (`POST /drawings/{id}/redraw`).
+#     from it, and **the director is who files the supplier drawing** — asked
+#     for explicitly, and "for right now", so this is the line to move when
+#     that changes rather than anything downstream of it.
 DRAWING_KINDS = ("customer", "supplier")
 
 _DRAWING_UPLOAD_ROLES: dict[str, set[Role]] = {
     "customer": {Role.ADMIN, Role.MANAGER, Role.DIRECTOR},
-    "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
+    "supplier": {Role.MANAGER, Role.DIRECTOR},
 }
+# The portal roles belong in here too, and not as an afterthought: the whole
+# point of the customer drawing is that the customer opens and approves it, and
+# the supplier drawing is the vendor's own upload. These sets are consulted
+# when a *file* is fetched (`attachments.py`), which is the one path both
+# portals reach — the operation router itself never admits them.
 _DRAWING_VIEW_ROLES: dict[str, set[Role]] = {
-    "customer": {Role.SALES, Role.ADMIN, Role.MANAGER, Role.DIRECTOR, Role.FINANCE},
-    "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
+    "customer": {Role.SALES, Role.ADMIN, Role.MANAGER, Role.DIRECTOR,
+                 Role.FINANCE, Role.CUSTOMER},
+    "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.SUPPLIER},
 }
 _DRAWING_APPROVE_ROLES = {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
 
@@ -774,9 +782,14 @@ def _logistics_payload(p: Project) -> dict:
 
 
 async def _has_approved_drawing(db: AsyncSession, project_id: UUID) -> bool:
+    """Has the *customer* signed off a drawing? Theirs is the only approval
+    that unblocks the job — a signed-off vendor sheet is an internal step, and
+    counting it here would let logistics start on a drawing the customer has
+    never seen."""
     d = await db.scalar(
         select(Drawing).where(
-            Drawing.project_id == project_id, Drawing.status == "approved"
+            Drawing.project_id == project_id, Drawing.status == "approved",
+            Drawing.kind == "customer",
         ).limit(1)
     )
     return d is not None
@@ -838,7 +851,7 @@ async def upload_drawing(
         owner_type="project", owner_id=p.id,
         filename=safe, content_type=file.content_type, size=len(data),
         storage_path=storage_path,
-        description=f"[drawing] {notes or ''}".strip(),
+        description=f"[drawing:{kind}] {notes or ''}".strip(),
         uploaded_by=user.id,
     )
     db.add(a)
@@ -942,6 +955,9 @@ async def reupload_drawing(
     # A rejected drawing may be re-uploaded ONLY by the account that posted it —
     # uploads are tied to their owner. (Legacy rows with no recorded uploader
     # can't be revised; delete them and post a fresh drawing instead.)
+    if not _may_see_drawing(Role(user.role), d.kind):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"A {d.kind} drawing isn't yours to revise")
     if d.uploaded_by != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Only the account that uploaded this drawing can re-upload it")
@@ -964,7 +980,7 @@ async def reupload_drawing(
         owner_type="project", owner_id=p.id,
         filename=safe, content_type=file.content_type, size=len(data),
         storage_path=storage_path,
-        description=f"[drawing] {notes or 'revised'}".strip(),
+        description=f"[drawing:{d.kind}] {notes or 'revised'}".strip(),
         uploaded_by=user.id,
     )
     db.add(a)
@@ -999,6 +1015,11 @@ async def delete_drawing(
     d = await db.get(Drawing, drawing_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Drawing not found")
+    # Management may delete, but not a kind they cannot open — admin deleting
+    # the vendor's sheet they were never shown is worse than leaving it.
+    if not _may_see_drawing(Role(user.role), d.kind):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"A {d.kind} drawing isn't yours to delete")
     is_owner = d.uploaded_by == user.id
     is_mgmt = Role(user.role) in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
     if not (is_owner or is_mgmt):

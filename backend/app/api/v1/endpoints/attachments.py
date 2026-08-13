@@ -194,6 +194,65 @@ async def _external_owns_attachment(db: AsyncSession, me: User,
     return False
 
 
+_DRAWING_ATT_ID = re.compile(r"/attachments/([0-9a-fA-F-]{36})/download")
+
+
+async def _drawing_kind_of(db: AsyncSession, project_id, attachments: list) -> dict:
+    """Which of a project's files are drawings, and whose.
+
+    A drawing's PDF is stored as an ordinary project attachment, so the
+    Drawings card can hide a row and leave the file sitting in the Attachments
+    list for anyone to open — which is not hiding it. This works out, for each
+    file, whether it belongs to a customer drawing, a supplier drawing, or
+    neither, so the same wall applies to both surfaces.
+
+    Three signals, in order of how much they can be trusted:
+
+    1. The description stamped at upload (`[drawing:supplier]`) — exact, and
+       survives the drawing being revised or deleted.
+    2. The `file_url` of a live drawing row — covers files uploaded before
+       that stamp existed, but not ones a revision has since superseded.
+    3. The uploader's role. A project drawing filed by purchasing is the
+       vendor's; this is the same rule the column migration used to classify
+       existing rows, applied to the files those rows left behind.
+    """
+    from app.models.operation import Drawing
+
+    out: dict = {}
+    live: dict = {}
+    rows = (await db.scalars(
+        select(Drawing).where(Drawing.project_id == project_id))).all()
+    for drw in rows:
+        m = _DRAWING_ATT_ID.search(drw.file_url or "")
+        if m:
+            try:
+                live[UUID(m.group(1))] = drw.kind or "customer"
+            except ValueError:
+                pass
+
+    uploader_roles: dict = {}
+    ids = {a.uploaded_by for a in attachments if a.uploaded_by}
+    if ids:
+        for u in (await db.scalars(select(User).where(User.id.in_(ids)))).all():
+            uploader_roles[u.id] = u.role
+
+    for a in attachments:
+        desc = a.description or ""
+        if not desc.startswith("[drawing"):
+            continue
+        if desc.startswith("[drawing:supplier]"):
+            out[a.id] = "supplier"
+        elif desc.startswith("[drawing:customer]"):
+            out[a.id] = "customer"
+        elif a.id in live:
+            out[a.id] = live[a.id]
+        else:
+            out[a.id] = ("supplier"
+                         if uploader_roles.get(a.uploaded_by) == "purchasing"
+                         else "customer")
+    return out
+
+
 async def _daily_log_read_ok(db: AsyncSession, me: User, owner_id) -> bool:
     """Daily-log files: readable by the log's owner or an overseer only.
 
@@ -264,6 +323,13 @@ async def list_attachments(
         .where(Attachment.owner_type == owner_type, Attachment.owner_id == owner_id)
         .order_by(Attachment.created_at.desc())
     )).all()
+    if owner_type == "project":
+        # Drawing files follow the drawing's own audience, not the project's.
+        from app.api.v1.endpoints.operation import _may_see_drawing
+        kinds = await _drawing_kind_of(db, owner_id, rows)
+        rows = [a for a in rows
+                if a.id not in kinds
+                or _may_see_drawing(Role(me.role), kinds[a.id])]
     return [await _to_out(db, a) for a in rows]
 
 
@@ -426,6 +492,13 @@ async def download_attachment(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
     if not await _sales_owns_attachment(db, me, a.owner_type, a.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer's files")
+    if a.owner_type == "project":
+        # A file hidden from the list but downloadable by id is not hidden.
+        from app.api.v1.endpoints.operation import _may_see_drawing
+        kind = (await _drawing_kind_of(db, a.owner_id, [a])).get(a.id)
+        if kind and not _may_see_drawing(Role(me.role), kind):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                f"A {kind} drawing isn't yours to open")
     # Link attachments have no file on disk — send the caller to the URL.
     if a.external_url:
         return RedirectResponse(a.external_url)
