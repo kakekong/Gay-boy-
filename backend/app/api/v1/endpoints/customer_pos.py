@@ -1,10 +1,16 @@
 """Customer Purchase Orders — the PO the customer sends us.
 
-This is the gate to project creation. A non-director files a customer PO
-(usually after a quotation is marked Won), the director approves it from
-/approvals, and on approval a Project is spawned with the PO number,
-date and value flowing in. Direct director submissions short-circuit and
-create the project immediately.
+**Filing or approving one of these does not start a job.** The PO comes
+first and is the evidence Won needs; marking the quotation Won is what
+mints the project. The director's signature here says the paperwork is
+right, not that the work has begun — so on approval this attaches to the
+project the Won already made, and when the deal has not been Won yet the
+PO is simply on file and waits.
+
+The single exception is the **down-payment** flow. A deposit order
+deliberately does not start at Won — not beginning work before the money
+arrives is the entire point of a deposit — so sales confirming the deposit
+landed is its starting gun, and that step mints the project instead.
 """
 
 from uuid import UUID
@@ -322,8 +328,9 @@ async def create_customer_po(
         po.decided_by = user.id
         from datetime import UTC, datetime as _dt
         po.decided_at = _dt.now(UTC)
-        project = await _spawn_project(db, po, user)
-        po.project_id = project.id
+        # Attaches if the deal has already been Won; otherwise the PO is
+        # simply on file and the job waits for the win.
+        await _spawn_project(db, po, user)
         await db.flush()
     else:
         await request_approval(
@@ -664,8 +671,7 @@ async def resubmit_customer_po(
         po.status = "approved"
         po.decided_by = user.id
         po.decided_at = _dt.now(UTC)
-        project = await _spawn_project(db, po, user)
-        po.project_id = project.id
+        await _spawn_project(db, po, user)
     else:
         po.status = "pending_approval"
         await request_approval(
@@ -815,8 +821,10 @@ async def dp_sales_confirm(
     po.decided_at = _dt.now(UTC)
     if payload.notes:
         po.decision_notes = payload.notes
-    project = await _spawn_project(db, po, user)
-    po.project_id = project.id
+    # A deposit order does not start at Won — that is what a deposit is for.
+    # Confirming the money landed is its starting gun, so this is the one
+    # place a customer PO may mint the job.
+    project = await _spawn_project(db, po, user, create_if_missing=True)
     # Re-link DP invoices issued against this PO to the new project so
     # they show up on the project page and its payment tracking.
     from app.models.finance import Invoice
@@ -837,29 +845,25 @@ async def dp_sales_confirm(
 
 
 async def _spawn_project(
-    db: AsyncSession, po: CustomerPO, user: User
-) -> Project:
-    """The project this approved customer PO belongs to.
+    db: AsyncSession, po: CustomerPO, user: User,
+    *, create_if_missing: bool = False,
+) -> Project | None:
+    """Link this customer PO to its project. Does **not** normally make one.
 
-    Not necessarily a new one. The job is minted when the quotation is
-    marked Won — the customer's order is already on file by then, which is
-    what Won means — so by the time the PO is approved the project usually
-    exists and this attaches to it. Approving the PO twice, or approving a
-    second PO against the same quotation, must not mint a second job.
+    Filing or approving a PO is not what starts a job — marking the
+    quotation Won is. The PO comes first and is the evidence Won needs; the
+    director's signature on it says the paperwork is right, not that the
+    work has begun. So this attaches to the project Won already made, and
+    returns None when the deal has not been Won yet: the PO is approved and
+    simply waits, which is the whole point of the order.
 
-    It still creates one when there is nothing to attach to: a PO with no
-    quotation behind it, and the down-payment flow, where the project is
-    deliberately held back until sales confirm the deposit landed.
+    `create_if_missing` is for the one caller that *is* the starting gun:
+    sales confirming a down-payment landed. A deposit order deliberately
+    does not start at Won — not beginning work before the money arrives is
+    what a deposit is for — so that step mints the job instead.
     """
     from app.ai.orchestrator import emit
     from app.services.project_factory import create_project, project_for_quotation
-
-    # Carry the approved price request through to the project (via the linked
-    # quotation) so purchasing knows exactly what order it's sourcing.
-    price_request_id = None
-    if po.quotation_id:
-        quote = await db.get(Quotation, po.quotation_id)
-        price_request_id = quote.price_request_id if quote else None
 
     project = await project_for_quotation(db, po.quotation_id)
     if project is not None:
@@ -871,15 +875,25 @@ async def _spawn_project(
             project.po_date = po.po_date
         if project.po_value is None:
             project.po_value = po.total
+        po.project_id = project.id
         await db.flush()
-    else:
+    elif create_if_missing:
+        # Carry the approved price request through (via the linked quotation)
+        # so purchasing knows exactly what order it's sourcing.
+        price_request_id = None
+        if po.quotation_id:
+            quote = await db.get(Quotation, po.quotation_id)
+            price_request_id = quote.price_request_id if quote else None
         project = await create_project(
             db, user=user, customer_id=po.customer_id,
             quotation_id=po.quotation_id, price_request_id=price_request_id,
             po=po,
         )
+        po.project_id = project.id
     # Fused pipeline: an approved customer PO advances the deal to 'po' —
-    # the PO approval is the sign-off, no separate stage-move request.
+    # the PO approval is the sign-off, no separate stage-move request. This
+    # happens whether or not there is a project yet: the stage is about the
+    # deal, and the deal has its order.
     from app.core.stage_playbook import bump_customer_stage
     from app.core.stage_tasks import ensure_stage_tasks
     cust = await db.get(Customer, po.customer_id) if po.customer_id else None
@@ -890,7 +904,7 @@ async def _spawn_project(
     # which matches the post-drawing logistics flow.
     await emit(db, "customer_po.approved", {
         "customer_po_id": str(po.id),
-        "project_id": str(project.id),
+        "project_id": str(project.id) if project else None,
     })
     return project
 

@@ -170,12 +170,18 @@ async def main():
     # Finish the loop: a resubmitted PO must be approvable like any other,
     # and leaving it pending would park a live approval request in the queue
     # for whatever runs next.
+    # Won is what starts the job, so win the deal first — otherwise the
+    # approval below has nothing to attach to, which is correct but tells us
+    # nothing about whether a resubmitted PO wires up like any other.
+    r = await c.post(f"/quotations/{qa['id']}/won", headers=d)
+    check("the deal behind it is won", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
     r = await c.post(f"/customer-pos/{po['id']}/approve", headers=d, json={"notes": ""})
     done = J(r)
     check("...and the director can approve the resubmitted PO",
           r.status_code == 200 and done.get("status") == "approved",
           f"{r.status_code} {done}"[:150])
-    check("...which spawns the project, as a first-time approval would",
+    check("...which attaches it to the project, as a first-time approval would",
           bool(done.get("project_id")), str(done.get("project_id")))
 
     # ══ a price request, which already worked ════════════════════════════════

@@ -129,6 +129,60 @@ async def main():
     check("...and nothing was minted by the attempt",
           len(await projects_for(quote)) == 1)
 
+    # ══ the PO on its own must not start anything ════════════════════════════
+    # The reported symptom: file the PO and the job appeared, with no Won in
+    # between. It happened on every route into an approved PO — the director
+    # filing one directly (which applies on the spot), the director signing
+    # off someone else's, and a rejected one being resubmitted.
+    print("\n── an approved PO with no Won behind it starts nothing ──")
+    cust4, quote4 = await quoted(4)
+    direct = J(await c.post("/customer-pos", headers=d, json={
+        "customer_id": cust4, "quotation_id": quote4, "number": f"CPO-D{tag}",
+        "items": [{"description": f"CHAIN {tag}", "qty": 2, "unit_price": 1000}],
+        "is_downpayment": False}))
+    check("the director files a PO directly", bool(direct.get("id")),
+          str(direct)[:140])
+    check("...which is approved on the spot", direct.get("status") == "approved",
+          str(direct.get("status")))
+    check("...and still starts no job, because nothing was won yet",
+          not await projects_for(quote4),
+          str([(x.get('project') or {}).get('code')
+               for x in await projects_for(quote4)]))
+    check("...so the PO has no project on it either",
+          J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")
+          is None,
+          str(J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")))
+
+    # Now win it — that is the step that was missing.
+    r = await c.post(f"/quotations/{quote4}/won", headers=d)
+    check("marking it Won afterwards is what starts the job",
+          r.status_code == 200 and len(await projects_for(quote4)) == 1,
+          f"{r.status_code} {len(await projects_for(quote4))}")
+    check("...and the PO now points at it",
+          J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")
+          is not None,
+          str(J(await c.get(f"/customer-pos/{direct['id']}", headers=d))))
+
+    # Same again through the director's approvals queue rather than a direct
+    # filing, since that is a separate code path.
+    cust5, quote5 = await quoted(5)
+    filed = J(await c.post("/customer-pos", headers=s1, json={
+        "customer_id": cust5, "quotation_id": quote5, "number": f"CPO-Q{tag}",
+        "items": [{"description": f"CHAIN {tag}", "qty": 2, "unit_price": 1000}],
+        "is_downpayment": False}))
+    r = await c.post(f"/customer-pos/{filed['id']}/approve", headers=d,
+                     json={"notes": ""})
+    check("the director approves a rep's PO", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+    check("...and that approval starts no job either",
+          not await projects_for(quote5),
+          str([(x.get('project') or {}).get('code')
+               for x in await projects_for(quote5)]))
+    r = await c.post(f"/quotations/{quote5}/won", headers=d)
+    check("...until the quotation is marked Won",
+          r.status_code == 200 and len(await projects_for(quote5)) == 1,
+          f"{r.status_code} {len(await projects_for(quote5))}")
+
     # ══ sales' Won goes through the director, and mints on approval ══════════
     print("\n── when sales ask for the Won, the approval mints it ──")
     cust2, quote2 = await quoted(2)

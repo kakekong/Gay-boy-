@@ -36,10 +36,12 @@ async def build_project(c,H,tag):
     await c.post(f"/price-requests/{pr}/approve",headers=H["d"],json={"items":[{"line_no":1,"sell_price":100000,"basis":"unit"}]})
     q=J(await c.post(f"/quotations/from-price-request/{pr}",headers=H["s"]))["id"]
     await c.post(f"/quotations/{q}/submit",headers=H["s"]); await c.post(f"/quotations/{q}/approve",headers=H["d"],json={"notes":""})
-    await c.post(f"/quotations/{q}/won",headers=H["d"])
+    # PO first (Won is refused without it), then Won — which is what starts
+    # the project — then the PO's own approval, which attaches to it.
     cpo=J(await c.post("/customer-pos",headers=H["s"],json={"customer_id":cust,"quotation_id":q,
         "number":f"PO-PART-{tag}","items":[{"description":"Widget","qty":10,"unit_price":100000}],
         "is_downpayment":False}))["id"]
+    await c.post(f"/quotations/{q}/won",headers=H["d"])
     proj=J(await c.post(f"/customer-pos/{cpo}/approve",headers=H["d"],json={"notes":""}))["project_id"]
     return cust,proj
 
