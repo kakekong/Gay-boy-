@@ -78,6 +78,33 @@ async def next_price_request_number(db: AsyncSession) -> str:
     return f"{prefix}{await _next_suffix(db, PriceRequest.number, prefix):04d}"
 
 
+async def next_project_code(db: AsyncSession) -> str:
+    """Issue the next project code in the form  PRJ-<YYYY>-<NNNN>.
+
+    Projects were the last thing still counting rows, and it bit exactly the
+    way this module was written to prevent: delete one test project and every
+    customer-PO approval afterwards died on `ix_projects_code` with a
+    duplicate key, because the count had walked back onto a code that was
+    still in use. Approving a PO is the step that starts the job, so the
+    whole pipeline stopped at the same place every time.
+    """
+    from app.models.operation import Project
+    year = datetime.utcnow().year
+    prefix = f"PRJ-{year}-"
+    return f"{prefix}{await _next_suffix(db, Project.code, prefix):04d}"
+
+
+async def next_purchase_request_number(db: AsyncSession) -> str:
+    """Issue the next purchase-request number:  PR-<YYMMDD>-<NNN>.
+
+    Numbered per day rather than per year, which is the one difference from
+    the rest — the counter still comes from the highest issued, not a count.
+    """
+    from app.models.purchasing import PurchaseRequest
+    prefix = f"PR-{datetime.utcnow():%y%m%d}-"
+    return f"{prefix}{await _next_suffix(db, PurchaseRequest.number, prefix):03d}"
+
+
 async def next_supplier_price_request_number(db: AsyncSession) -> str:
     """Issue the next supplier price-request number:  SPR-<YYYY>-<NNNN>.
 

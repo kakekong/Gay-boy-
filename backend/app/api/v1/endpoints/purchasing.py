@@ -1444,12 +1444,6 @@ async def update_po(
 # A PR signals demand against a project. It commits no money, so any of the
 # procurement-board roles can raise and close one — no director approval gate.
 
-def _seq_number(db_count: int, prefix: str) -> str:
-    from datetime import date as date_t
-    ts = date_t.today().strftime("%y%m%d")
-    return f"{prefix}-{ts}-{db_count + 1:03d}"
-
-
 class PRIn(BaseModel):
     project_id: UUID | None = None
     items: list[dict] = []
@@ -1519,13 +1513,9 @@ async def create_pr(
     if payload.project_id:
         if not await db.get(Project, payload.project_id):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
-    count = await db.scalar(
-        select(func.count(PurchaseRequest.id)).where(
-            PurchaseRequest.number.like(f"PR-{date_t.today():%y%m%d}-%")
-        )
-    ) or 0
+    from app.services.numbering import next_purchase_request_number
     pr = PurchaseRequest(
-        number=_seq_number(count, "PR"),
+        number=await next_purchase_request_number(db),
         project_id=payload.project_id,
         requested_by=user.id,
         items=payload.items or [],

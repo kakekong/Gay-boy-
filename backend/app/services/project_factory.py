@@ -1,8 +1,5 @@
 """Convert won quotation into project + work order."""
 
-from datetime import datetime
-
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.orchestrator import emit
@@ -14,13 +11,9 @@ from app.models.user import User
 async def create_project_from_quotation(
     db: AsyncSession, q: Quotation, user: User
 ) -> Project:
-    year = datetime.utcnow().year
-    prefix = f"PRJ-{year}-"
-    seq = await db.scalar(
-        select(func.count(Project.id)).where(Project.code.like(f"{prefix}%"))
-    ) or 0
+    from app.services.numbering import next_project_code
     project = Project(
-        code=f"{prefix}{seq + 1:04d}",
+        code=await next_project_code(db),
         customer_id=q.customer_id,
         quotation_id=q.id,
         po_value=q.total,

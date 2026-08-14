@@ -843,15 +843,9 @@ async def _spawn_project(
     project_factory.create_project_from_quotation but reads the PO number
     / date / value off the customer PO instead of generating placeholders
     from the quotation. Quotation linkage is preserved when present."""
-    from datetime import datetime
-    from sqlalchemy import func
     from app.ai.orchestrator import emit
+    from app.services.numbering import next_project_code
 
-    year = datetime.utcnow().year
-    prefix = f"PRJ-{year}-"
-    seq = await db.scalar(
-        select(func.count(Project.id)).where(Project.code.like(f"{prefix}%"))
-    ) or 0
     # Carry the approved price request through to the project (via the linked
     # quotation) so purchasing knows exactly what order it's sourcing.
     price_request_id = None
@@ -859,7 +853,7 @@ async def _spawn_project(
         quote = await db.get(Quotation, po.quotation_id)
         price_request_id = quote.price_request_id if quote else None
     project = Project(
-        code=f"{prefix}{seq + 1:04d}",
+        code=await next_project_code(db),
         customer_id=po.customer_id,
         quotation_id=po.quotation_id,
         price_request_id=price_request_id,
