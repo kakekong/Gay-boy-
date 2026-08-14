@@ -1164,7 +1164,7 @@ function WonNextStepCard({
               ? T("The customer's PO has been approved by the director and the project is now active. Manage it from the Projects section.")
               : pending.length
                 ? T("The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed.")
-                : T("Once you have the signed PO from the customer, file it here. You'll attach the actual PO file, pick the items they ordered out of this quote, and the director will approve it. Approval is what creates the project.")}
+                : T("Once you have the signed PO from the customer, file it here. You'll attach the actual PO file and pick the items they ordered out of this quote. With it on file you can mark the quote Won, which is what starts the project; the director approves the PO alongside.")}
           </p>
           {/* Filing the PO is what unlocks Mark won — say so here rather than
               leaving a greyed-out button on the header to be puzzled over. */}

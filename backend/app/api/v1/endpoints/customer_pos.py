@@ -839,12 +839,20 @@ async def dp_sales_confirm(
 async def _spawn_project(
     db: AsyncSession, po: CustomerPO, user: User
 ) -> Project:
-    """Create a Project from an approved customer PO. Mirrors the old
-    project_factory.create_project_from_quotation but reads the PO number
-    / date / value off the customer PO instead of generating placeholders
-    from the quotation. Quotation linkage is preserved when present."""
+    """The project this approved customer PO belongs to.
+
+    Not necessarily a new one. The job is minted when the quotation is
+    marked Won — the customer's order is already on file by then, which is
+    what Won means — so by the time the PO is approved the project usually
+    exists and this attaches to it. Approving the PO twice, or approving a
+    second PO against the same quotation, must not mint a second job.
+
+    It still creates one when there is nothing to attach to: a PO with no
+    quotation behind it, and the down-payment flow, where the project is
+    deliberately held back until sales confirm the deposit landed.
+    """
     from app.ai.orchestrator import emit
-    from app.services.numbering import next_project_code
+    from app.services.project_factory import create_project, project_for_quotation
 
     # Carry the approved price request through to the project (via the linked
     # quotation) so purchasing knows exactly what order it's sourcing.
@@ -852,19 +860,24 @@ async def _spawn_project(
     if po.quotation_id:
         quote = await db.get(Quotation, po.quotation_id)
         price_request_id = quote.price_request_id if quote else None
-    project = Project(
-        code=await next_project_code(db),
-        customer_id=po.customer_id,
-        quotation_id=po.quotation_id,
-        price_request_id=price_request_id,
-        po_number=po.number,
-        po_date=po.po_date,
-        po_value=po.total,
-        status="new",
-        created_by=user.id, updated_by=user.id,
-    )
-    db.add(project)
-    await db.flush()
+
+    project = await project_for_quotation(db, po.quotation_id)
+    if project is not None:
+        # Made at Won, before this PO was signed off. Give it the paperwork
+        # it could not have had then, without overwriting anything set since.
+        if not project.po_number:
+            project.po_number = po.number
+        if project.po_date is None:
+            project.po_date = po.po_date
+        if project.po_value is None:
+            project.po_value = po.total
+        await db.flush()
+    else:
+        project = await create_project(
+            db, user=user, customer_id=po.customer_id,
+            quotation_id=po.quotation_id, price_request_id=price_request_id,
+            po=po,
+        )
     # Fused pipeline: an approved customer PO advances the deal to 'po' —
     # the PO approval is the sign-off, no separate stage-move request.
     from app.core.stage_playbook import bump_customer_stage

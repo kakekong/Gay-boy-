@@ -371,17 +371,30 @@ no customer↔supplier map can be reconstructed. Preserve this on any new screen
 **Sales sees only their own customers** (`can_view_customer`). Everyone above
 sees all.
 
-**Won comes after the customer's PO, not before it.** This order was inverted
-and is now: quotation approved → **the customer's PO is filed** → mark won →
-the director approves the PO → project. `POST /customer-pos` accepts a
-quotation in `approved` / `sent` / `won`; `POST /quotations/{id}/won` refuses
-unless a `CustomerPO` on that quotation exists in a status other than
-rejected/cancelled. **The rule binds the director too** — it is what the word
-means, not a permission, and Won is what starts a project, posts revenue and
-moves the sales figures. `apply_to_target` re-checks at decision time, so a
-request signed off after its PO was rejected records the decision and does not
-win the deal. Any driver that marks a quotation won must file a PO first (and
-decide it, or the DP flow's "nothing left pending" sweep trips).
+**Won comes after the customer's PO, not before it, and Won is what starts
+the job.** The order is: quotation approved → **the customer's PO is filed** →
+mark won → **project** → the director approves the PO, which attaches to the
+project already there. `POST /customer-pos` accepts a quotation in `approved` /
+`sent` / `won`; `POST /quotations/{id}/won` refuses unless a `CustomerPO` on
+that quotation exists in a status other than rejected/cancelled. **The rule
+binds the director too** — it is what the word means, not a permission, and Won
+is what starts a project, posts revenue and moves the sales figures.
+`apply_to_target` re-checks at decision time, so a request signed off after its
+PO was rejected records the decision and does not win the deal. Any driver that
+marks a quotation won must file a PO first.
+
+**`project_factory.py` owns when a job is minted, and there is exactly one per
+deal.** `ensure_project_for_quotation` runs at both places a quotation actually
+becomes Won — the director's direct path in `quotations.mark_won` and the
+`quotation_won` branch of `apply_to_target` — and is a get-or-create keyed on
+the quotation. `customer_pos._spawn_project` is the same idea from the PO's
+side: it attaches to the project the Won already made and only creates one
+when there is nothing to attach to (a PO with no quotation, and the DP flow).
+Approving a PO twice, or filing a second PO against the same quotation, must
+never mint a second job — that used to happen and had to grow a guard.
+**Down-payment orders keep the old timing on purpose**: the project appears
+when sales confirm the deposit landed, because not starting before the money
+arrives is the entire point of a deposit.
 
 **Delivery dates are not sales'.** Every field in `SHIPPING_FIELDS` plus
 `is_import` / `origin_location` is refused outright for `Role.SALES` in

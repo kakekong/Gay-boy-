@@ -135,7 +135,7 @@ const ROLES: RoleSection[] = [
       "EVERY quotation needs director approval before it leaves draft — there's no more discount-based auto-approve. Submitted by accident? Unsubmit pulls it back while it's pending.",
       "Follow-ups you log — on a customer or a quotation — now go to the director for approval before they're recorded.",
       "Marking a quote Won sends a request to the director; it only flips to Won once they approve in /approvals.",
-      "A project is NOT created when you mark a quote Won. You file the customer's PO — and the approval of that PO is what spawns the project.",
+      "Marking a quote Won is what creates the project — the customer's PO is already on file by then, since Won can't be clicked without it. The director's approval of that PO still matters; it attaches to the project rather than creating it.",
       "Two PO paths: a regular PO goes to the director for approval; a DP PO (tick the 'This PO is a down payment' toggle) goes to finance first, then you get pinged to confirm the deposit landed — your 'Confirm deposit received' click spawns the project.",
       "When the customer only orders some of the quoted items, untick the rest in the Submit-customer-PO modal and edit prices if they negotiated.",
       "Manual stage moves need a manager's or director's approval — but the pipeline now advances AUTOMATICALLY with the deal documents: quotation approved → stage 'quotation'; Mark-Won approved → stage 'negotiation'; customer PO approved → stage 'po'. You no longer file separate stage-move requests along the quote path, and Mark-Won is no longer blocked by the stage.",

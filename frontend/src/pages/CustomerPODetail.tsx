@@ -397,7 +397,7 @@ export default function CustomerPODetailPage() {
           <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 space-y-2">
             <div className="text-xs font-semibold text-amber-900">
               {t(
-                "Decision — approving creates the project; rejecting sends it back to sales.",
+                "Decision — rejecting sends it back to sales. The project is started by marking the quotation Won; approving here attaches this PO to it.",
                 "Keputusan — menyetujui akan membuat proyek; menolak mengembalikannya ke sales.",
               )}
             </div>

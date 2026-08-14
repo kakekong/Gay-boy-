@@ -143,7 +143,7 @@ export default function CustomerPOsPage() {
         </h1>
         <p className="text-sm muted">
           {t(
-            "POs the customer sent us. Submission happens from the quotation page after marking the quote Won. Director approval on a PO is what creates the project.",
+            "POs the customer sent us. Filed from the quotation page before the quote is marked Won — the Won is what starts the project, and it needs this document behind it. The director still approves each PO.",
             "PO yang dikirim pelanggan kepada kita. Pengajuan dilakukan dari halaman penawaran setelah penawaran ditandai Menang. Persetujuan direktur atas PO-lah yang membuat proyek.",
           )}
         </p>

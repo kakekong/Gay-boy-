@@ -479,6 +479,22 @@ async def apply_to_target(
                 )
                 return applied
             q.status = "won"
+            # Won is where the job starts — same rule as the director's direct
+            # path in quotations.mark_won. The requester is the one who won
+            # the deal, but the decider is who signed it off, so authorship
+            # follows the signature.
+            # `_User` is imported at module scope; re-importing it under the
+            # same name here would make it local to this whole function and
+            # break the branches above that already use it.
+            from app.services.project_factory import ensure_project_for_quotation
+            actor = (await db.get(_User, req.decided_by)) if req.decided_by else None
+            if actor is None:
+                actor = await db.get(_User, req.requested_by)
+            if actor is not None:
+                project = await ensure_project_for_quotation(db, q, actor)
+                if project is not None:
+                    applied["project_id"] = str(project.id)
+                    applied["project_code"] = project.code
             # Fused pipeline: the Won approval is also the sign-off that the
             # deal reached negotiation — bump the stage in the same stroke.
             if q.customer_id:

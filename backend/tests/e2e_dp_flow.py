@@ -241,10 +241,14 @@ async def main():
           r.status_code == 200 and body["status"] == "approved" and body.get("project_id"),
           f"{r.status_code} {r.text[:200]}")
 
-    # duplicate-project guard: stale double-approve on po4's request
+    # duplicate-project guard: po4's own request must be closed by the
+    # approval, so a second decision can't fire and spawn a second project.
+    # Scoped to po4 — every other driver's half-finished PO sits in this same
+    # queue, and sweeping the lot made this pass or fail on their business.
     r = await director.get("/approvals")
-    check("no pending customer_po requests remain", not any(
-        a.get("target_type") == "customer_po" for a in r.json()))
+    check("po4's approval request is closed", not any(
+        a.get("target_type") == "customer_po" and a.get("target_id") == po4["id"]
+        for a in r.json()))
 
     for c in (director, sales, finance, manager):
         await c.aclose()

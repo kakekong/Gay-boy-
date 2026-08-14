@@ -1914,7 +1914,7 @@ function IncomingCustomerPOsSection({ customerId }: { customerId: string }) {
           </div>
           <div className="text-xs muted max-w-xl leading-relaxed mt-0.5">
             {t(
-              "The signed POs the customer sent us. Each one needs director approval; approving one creates the project automatically and sets the project's PO number and date.",
+              "The signed POs the customer sent us. Each one needs director approval; the project itself is started by marking the quotation Won, and approving the PO attaches to it.",
               "PO bertanda tangan yang dikirim pelanggan kepada kami. Masing-masing perlu persetujuan direktur; menyetujui satu akan otomatis membuat proyek dan mengisi nomor serta tanggal PO proyeknya."
             )}
           </div>

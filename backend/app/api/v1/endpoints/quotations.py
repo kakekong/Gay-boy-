@@ -964,10 +964,14 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
         req.decided_by = user.id
         req.decided_at = datetime.now(UTC)
         req.decision_notes = "Marked Won directly by the director."
-    # Projects no longer auto-spawn from a Won quotation — a Customer PO
-    # has to be filed and approved by the director first. The Won flag
-    # just means "the customer said yes, we're waiting for paperwork."
-    # See app/api/v1/endpoints/customer_pos.py for the new gate.
+    # Won is where the job starts. The customer has said yes and their PO is
+    # on file — that is checked above, it is what Won means here — so there is
+    # nothing left to wait for before the work has somewhere to live. The
+    # PO's own approval still happens; it just attaches to this project
+    # instead of being what creates it. Down-payment orders are the exception
+    # and keep their deposit gate (see project_factory).
+    from app.services.project_factory import ensure_project_for_quotation
+    await ensure_project_for_quotation(db, q, user)
     #
     # Fused pipeline: Won implies the deal reached negotiation — advance the
     # customer stage in the same stroke (forward-only, no-op if past it).
