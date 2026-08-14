@@ -219,12 +219,15 @@ function MainApp() {
               <SupplierPriceRequestPage /></RequireRole>} />
           {/* Supplier orders are procurement's, and admin work the customer
               side — the backend refuses them too, but a route that renders a
-              permission error is a worse answer than one that never opens. */}
+              permission error is a worse answer than one that never opens.
+              Finance is here for one field: a PO in dollars is a rupiah
+              payment they make, and they own the rate that converts it. The
+              backend refuses every other field from them. */}
           <Route path="/purchase-orders" element={
-            <RequireRole roles={["purchasing", "manager", "director"]}>
+            <RequireRole roles={["purchasing", "manager", "director", "finance"]}>
               <PurchaseOrdersPage /></RequireRole>} />
           <Route path="/purchase-orders/:id" element={
-            <RequireRole roles={["purchasing", "manager", "director"]}>
+            <RequireRole roles={["purchasing", "manager", "director", "finance"]}>
               <PurchaseOrderDetailPage /></RequireRole>} />
           <Route path="/customer-pos" element={<CustomerPOsPage />} />
           <Route path="/customer-pos/:id" element={<CustomerPODetailPage />} />

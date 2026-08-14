@@ -72,7 +72,8 @@ def _drawing_attachment_id(file_url: str | None) -> str | None:
 
 def _drawing_row(d, deciders: dict, atts: dict | None = None) -> dict:
     # Preview needs an attachment id and a filename: the modal infers the MIME
-    # type from the extension when the stored content_type is generic.
+    # type from the extension when the stored content_type is generic. A
+    # drawing filed as a link has no file to preview — the page opens the URL.
     att_id = _drawing_attachment_id(d.file_url)
     att = (atts or {}).get(att_id)
     return {
@@ -80,6 +81,8 @@ def _drawing_row(d, deciders: dict, atts: dict | None = None) -> dict:
         "attachment_id": att_id,
         "file_name": att.filename if att else None,
         "file_content_type": att.content_type if att else None,
+        "external_url": att.external_url if att else None,
+        "is_link": bool(att and att.external_url),
         "kind": d.kind, "status": d.status, "notes": d.notes,
         "source_drawing_id": str(d.source_drawing_id) if d.source_drawing_id else None,
         "customer_decision_at": d.customer_decision_at,
@@ -416,7 +419,10 @@ async def project_full(project_id: UUID,
             "created_at": p.created_at,
         },
         "price_request": price_request,
-        "logistics": _logistics_payload(p),
+        # Null for anyone outside procurement, which is how the page knows to
+        # drop the card rather than render a read-only customs pack at a role
+        # that never chases one.
+        "logistics": _logistics_payload(p) if _role in _LOGISTICS_ROLES else None,
         "invoices": [
             {
                 "id": str(inv.id), "number": inv.number, "status": inv.status,
@@ -724,11 +730,19 @@ DOC_LABELS = {
     "agent": "Agent details",
 }
 REQUIRED_DOCS = {
+    # Goods bought locally, or bought abroad through an agent, only ever come
+    # with the two commercial documents. The customs paperwork — Form E, the
+    # bill of lading, the agent's own details — is the agent's problem in the
+    # one case and doesn't exist in the other, so asking for it here only
+    # blocks a delivery on a document nobody is ever going to produce.
     "local":         ["invoice", "packing_list"],
     "direct_import": ["invoice", "packing_list", "form_e", "bill_of_lading"],
-    "agent":         ["invoice", "packing_list", "agent"],
+    "agent":         ["invoice", "packing_list"],
 }
-_LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR, Role.MANAGER, Role.ADMIN}
+# Import paperwork is procurement's file: purchasing collects it, the director
+# signs it off. It used to be open to admin and manager as well, which put a
+# customs pack on the screen of the two roles that never chase one.
+_LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR}
 DOCS_DUE_WINDOW_DAYS = 14
 
 # ── Drawings, and who they belong to ─────────────────────────────────────────
@@ -750,14 +764,17 @@ DOCS_DUE_WINDOW_DAYS = 14
 #     see only that.
 #   * **Manager / director** see both, which is what makes the handoff
 #     possible: they take the supplier drawing and produce the customer one
-#     from it, and **the director is who files the supplier drawing** — asked
-#     for explicitly, and "for right now", so this is the line to move when
-#     that changes rather than anything downstream of it.
+#     from it.
+#
+# **Purchasing files the supplier's drawing.** It briefly sat with the
+# director instead, "for right now"; it belongs with the people who deal with
+# the vendor, which is where it is now. Management keep the ability so the
+# handoff still works when purchasing is out.
 DRAWING_KINDS = ("customer", "supplier")
 
 _DRAWING_UPLOAD_ROLES: dict[str, set[Role]] = {
     "customer": {Role.ADMIN, Role.MANAGER, Role.DIRECTOR},
-    "supplier": {Role.MANAGER, Role.DIRECTOR},
+    "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
 }
 # The portal roles belong in here too, and not as an afterthought: the whole
 # point of the customer drawing is that the customer opens and approves it, and
@@ -793,6 +810,7 @@ def _logistics_payload(p: Project) -> dict:
             "collected": bool(d.get("collected")),
             "attachment_id": d.get("attachment_id"),
             "filename": d.get("filename"),
+            "external_url": d.get("external_url"),
             "note": d.get("note"),
             "status": d.get("status"),          # None | pending | approved | rejected
             "decided_at": d.get("decided_at"),
@@ -835,7 +853,8 @@ async def upload_drawing(
     notes: str | None = Form(None),
     kind: str = Form("customer"),
     source_drawing_id: UUID | None = Form(None),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    link_url: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -844,6 +863,10 @@ async def upload_drawing(
     It lands as 'submitted', awaiting the director's sign-off. `kind` decides
     who may file it at all (see `_DRAWING_UPLOAD_ROLES`): sales are readers of
     the customer drawing, not its authors, and never touch the supplier's.
+
+    Send a `file`, or a `link_url` pointing at where the drawing already
+    lives — vendors send Drive folders, and a link is a better record than a
+    re-upload that a Space rebuild will wipe.
     """
     kind = (kind or "customer").strip().lower()
     if kind not in DRAWING_KINDS:
@@ -870,26 +893,36 @@ async def upload_drawing(
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 "That drawing isn't yours to work from")
 
-    data = await file.read()
-    if not data:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
-    if len(data) > 20 * 1024 * 1024:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
+    stamp = f"[drawing:{kind}] {notes or ''}".strip()
+    if link_url and (link_url or "").strip():
+        a = await _link_attachment(
+            db, url=link_url, owner_type="project", owner_id=p.id, user=user,
+            description=stamp, label=f"{kind} drawing",
+        )
+    elif file is not None:
+        data = await file.read()
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
 
-    safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
-                   for ch in (file.filename or "file"))[:200]
-    storage_path = await storage.save(data, filename=safe, label="drawing",
-                                      owner_type="project", owner_id=p.id)
+        safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
+                       for ch in (file.filename or "file"))[:200]
+        storage_path = await storage.save(data, filename=safe, label="drawing",
+                                          owner_type="project", owner_id=p.id)
 
-    a = Attachment(
-        owner_type="project", owner_id=p.id,
-        filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=storage_path,
-        description=f"[drawing:{kind}] {notes or ''}".strip(),
-        uploaded_by=user.id,
-    )
-    db.add(a)
-    await db.flush()
+        a = Attachment(
+            owner_type="project", owner_id=p.id,
+            filename=safe, content_type=file.content_type, size=len(data),
+            storage_path=storage_path,
+            description=stamp,
+            uploaded_by=user.id,
+        )
+        db.add(a)
+        await db.flush()
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Attach a file or paste a link")
 
     # Revisions run per kind: the supplier's third sheet and the customer's
     # first are not revisions of each other.
@@ -1146,46 +1179,66 @@ async def upload_import_doc(
     project_id: UUID,
     key: str,
     note: str | None = Form(None),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    link_url: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Purchasing uploads the actual file for a required import document. It
-    lands as 'pending', awaiting the director's approval."""
+    """Purchasing files a required import document. It lands as 'pending',
+    awaiting the director's approval.
+
+    Send a `file`, or a `link_url` — the freight agent normally mails a Drive
+    folder, and linking it beats re-uploading a pack that a Space rebuild
+    would wipe anyway.
+    """
     if Role(user.role) not in _LOGISTICS_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/management only")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/director only")
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if key not in DOC_LABELS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown document '{key}'")
 
-    data = await file.read()
-    if not data:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
-    if len(data) > 20 * 1024 * 1024:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
+    stamp = f"[import-doc:{key}] {note or ''}".strip()
+    if link_url and (link_url or "").strip():
+        a = await _link_attachment(
+            db, url=link_url, owner_type="project", owner_id=p.id, user=user,
+            description=stamp, label=DOC_LABELS.get(key, key),
+        )
+        safe = a.filename
+    elif file is not None:
+        data = await file.read()
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Max 20 MB")
 
-    safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
-                   for ch in (file.filename or "file"))[:200]
-    storage_path = await storage.save(data, filename=safe, label=key,
-                                      owner_type="project", owner_id=p.id)
+        safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
+                       for ch in (file.filename or "file"))[:200]
+        storage_path = await storage.save(data, filename=safe, label=key,
+                                          owner_type="project", owner_id=p.id)
 
-    a = Attachment(
-        owner_type="project", owner_id=p.id,
-        filename=safe, content_type=file.content_type, size=len(data),
-        storage_path=storage_path,
-        description=f"[import-doc:{key}] {note or ''}".strip(),
-        uploaded_by=user.id,
-    )
-    db.add(a)
-    await db.flush()
+        a = Attachment(
+            owner_type="project", owner_id=p.id,
+            filename=safe, content_type=file.content_type, size=len(data),
+            storage_path=storage_path,
+            description=stamp,
+            uploaded_by=user.id,
+        )
+        db.add(a)
+        await db.flush()
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Attach a file or paste a link")
 
     docs = dict(p.import_docs or {})
     docs[key] = {
         "collected": True,
         "attachment_id": str(a.id),
         "filename": safe,
+        # Kept on the entry so the row can offer a plain link-out rather than
+        # a preview it would only fail to render.
+        "external_url": a.external_url,
         "note": note,
         "status": "pending",          # awaiting director approval
         "uploaded_by": str(user.id),
@@ -1210,8 +1263,13 @@ async def decide_import_doc(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Director approves (or rejects) an uploaded import document."""
-    if Role(user.role) not in _DRAWING_APPROVE_ROLES:
+    """Director approves (or rejects) an uploaded import document.
+
+    Signed off by the director alone: the rest of the drawing-approver set is
+    admin and manager, and neither can open this card any more, so leaving
+    them here would let them decide on paperwork they cannot read.
+    """
+    if Role(user.role) != Role.DIRECTOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the director can approve documents")
     p = await db.get(Project, project_id)
     if not p:
@@ -1296,6 +1354,42 @@ async def _next_doc_number(db: AsyncSession, model, prefix: str) -> str:
     from app.services.numbering import _next_suffix
     pre = f"{prefix}-{_dt.utcnow().year}-"
     return f"{pre}{await _next_suffix(db, model.number, pre):04d}"
+
+
+def _clean_link(url: str) -> str:
+    """Normalise a pasted link, or refuse it."""
+    u = (url or "").strip()
+    if not u:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Link cannot be empty")
+    if not (u.startswith("http://") or u.startswith("https://")):
+        u = "https://" + u
+    return u[:1000]
+
+
+async def _link_attachment(
+    db: AsyncSession, *, url: str, owner_type: str, owner_id: UUID,
+    user: User, description: str, label: str | None = None,
+) -> Attachment:
+    """File a URL where a file would otherwise go.
+
+    Drawings and customs paperwork routinely live in the vendor's Drive
+    folder, and re-uploading a 40 MB pack to get it onto the record is work
+    for its own sake. A link also survives a Space rebuild, which wipes
+    uploaded files — so for these two it is often the better record.
+    """
+    u = _clean_link(url)
+    a = Attachment(
+        owner_type=owner_type, owner_id=owner_id,
+        filename=((label or "").strip() or u)[:255],
+        content_type="link", size=0,
+        storage_path="",              # there is no file on disk for a link
+        external_url=u,
+        description=description,
+        uploaded_by=user.id,
+    )
+    db.add(a)
+    await db.flush()
+    return a
 
 
 async def _save_attachment(

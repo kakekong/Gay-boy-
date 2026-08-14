@@ -102,21 +102,22 @@ async def main():
     r = await up(s1, proj, "supplier", f"sales try {tag}")
     check("...nor the supplier's", r.status_code == 403, str(r.status_code))
 
-    # Asked for explicitly, and "for right now": the director files the
-    # vendor's sheet. Purchasing still read it — it is their vendor — but they
-    # are not the one putting it on the record.
-    r = await up(pur, proj, "supplier", f"vendor sheet {tag}")
-    check("purchasing no longer files the supplier's", r.status_code == 403,
-          f"{r.status_code} {J(r)}"[:140])
+    # The vendor's sheet is filed by the people who deal with the vendor. It
+    # briefly sat with the director instead — "for right now" — and has been
+    # handed back to purchasing.
     r = await up(pur, proj, "customer", f"vendor tries {tag}")
-    check("...nor the customer's", r.status_code == 403, str(r.status_code))
+    check("purchasing cannot file the customer's", r.status_code == 403,
+          str(r.status_code))
 
-    r = await up(d, proj, "supplier", f"vendor sheet {tag}")
-    check("the director files the supplier's", r.status_code == 201,
+    r = await up(pur, proj, "supplier", f"vendor sheet {tag}")
+    check("purchasing files the supplier's", r.status_code == 201,
           f"{r.status_code} {J(r)}"[:140])
     sup_drw = J(r).get("id")
     check("...and it is recorded as one", J(r).get("kind") == "supplier",
           str(J(r).get("kind")))
+    r = await up(d, proj, "supplier", f"director can too {tag}")
+    check("...and management can still step in", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:140])
 
     r = await up(adm, proj, "supplier", f"admin tries {tag}")
     check("admin cannot file a supplier drawing", r.status_code == 403,

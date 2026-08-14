@@ -441,6 +441,9 @@ class PoCreate(BaseModel):
     # orders are local; an overseas vendor's PO must say USD or CNY, and the
     # printed order carries it on every money column.
     currency: str = "IDR"
+    # Rupiah per unit of `currency`. Left unset on a foreign order until
+    # somebody knows the rate; a rupiah order is filled in as 1 below.
+    fx_rate: float | None = None
     number: str | None = None  # auto-generated if missing
     price_request_id: UUID | None = None  # source the buying price from this PR
     # Build the lines straight off a supplier's answered quote, keeping every
@@ -453,6 +456,27 @@ class PoCreate(BaseModel):
 # and admin run the customer side. Every PO screen, export and detail hangs off
 # this one dependency, so removing them here closes all of them at once.
 _purchasing_or_director = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR)
+# Finance reads supplier POs — not to run procurement, but because a PO in
+# dollars is a rupiah payment they have to make, and the rate that converts
+# it is theirs to correct once the bank settles. Read plus `fx_rate`, and
+# nothing else: `update_po` refuses any other field from them. Admin stays
+# out of supplier POs entirely, as before.
+_po_readers = require(Role.PURCHASING, Role.MANAGER, Role.DIRECTOR, Role.FINANCE)
+
+
+def _fx(po) -> dict:
+    """The rate on an order, and what it makes the total worth in rupiah."""
+    rate = None if po.fx_rate is None else float(po.fx_rate)
+    cur = (po.currency or "IDR").upper()
+    if rate is None and cur == "IDR":
+        rate = 1.0
+    total = float(po.total or 0)
+    return {
+        "fx_rate": rate,
+        # None rather than 0 when no rate is set: a missing conversion must
+        # read as "we don't know yet", never as "this order is worth nothing".
+        "total_idr": None if rate is None else round(total * rate, 2),
+    }
 
 
 @router.get("/po/prefill")
@@ -749,7 +773,7 @@ async def po_price_request_options(
 @router.get("/po")
 async def list_pos(
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_purchasing_or_director),
+    _u: User = Depends(_po_readers),
     supplier_id: UUID | None = None,
     project_id: UUID | None = None,
     customer_id: UUID | None = None,
@@ -836,6 +860,7 @@ async def list_pos(
             "sales_pic_name": None if hide_customer else (sales.full_name if sales else None),
             "po_date": r.po_date, "eta": r.eta,
             "currency": r.currency or "IDR", "total": float(r.total or 0),
+            **_fx(r),
             "quoted_lead_days": r.quoted_lead_days,
             "items": r.items, "created_at": r.created_at,
         })
@@ -915,6 +940,7 @@ async def create_po(
     project_ids = sorted({it["project_id"] for it in items}) or [str(project.id)]
 
     is_director = Role(user.role) == Role.DIRECTOR
+    _cur = (payload.currency or "IDR").strip().upper()[:8] or "IDR"
     po = SupplierPO(
         number=number,
         supplier_id=payload.supplier_id,
@@ -924,7 +950,11 @@ async def create_po(
         po_date=po_date_parsed,
         eta=eta_parsed,
         quoted_lead_days=payload.quoted_lead_days,
-        currency=(payload.currency or "IDR").strip().upper()[:8] or "IDR",
+        currency=_cur,
+        # A rupiah order converts at 1 by definition — filling it in here
+        # saves every reader downstream a "is it IDR?" special case.
+        fx_rate=(payload.fx_rate if payload.fx_rate is not None
+                 else (1 if _cur == "IDR" else None)),
         total=payload.total,
         items=items,
         status="open" if is_director else "pending_approval",
@@ -963,6 +993,7 @@ async def create_po(
         "currency": po.currency,
         "eta": po.eta,
         "total": float(po.total or 0),
+        **_fx(po),
         "pending_approval": not is_director,
     }
 
@@ -971,7 +1002,7 @@ async def create_po(
 async def get_po(
     po_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_purchasing_or_director),
+    _u: User = Depends(_po_readers),
 ):
     """Full PO detail with supplier and project context for the detail page."""
     from app.models.crm import Customer
@@ -1017,6 +1048,7 @@ async def get_po(
         "po_date": po.po_date,
         "eta": po.eta,
         "currency": po.currency or "IDR",
+        **_fx(po),
         "quoted_lead_days": po.quoted_lead_days,
         "total": float(po.total or 0),
         "items": po.items,
@@ -1229,6 +1261,7 @@ class POPatch(BaseModel):
     eta: str | None = None            # ISO YYYY-MM-DD — when the vendor says it lands
     quoted_lead_days: int | None = None
     currency: str | None = None       # IDR | USD | CNY | …
+    fx_rate: float | None = None      # rupiah per unit of `currency`
     total: float | None = None
     status: str | None = None         # open | received | closed | cancelled
     items: list | None = None
@@ -1239,7 +1272,7 @@ async def update_po(
     po_id: UUID,
     payload: POPatch,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(_purchasing_or_director),
+    user: User = Depends(_po_readers),
 ):
     """Update an existing supplier PO. Every change is gated on director
     approval: when a non-director submits this, the PO is left untouched
@@ -1260,6 +1293,15 @@ async def update_po(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
 
     data = payload.model_dump(exclude_unset=True)
+
+    # Finance is here for the exchange rate and nothing else. They read POs
+    # so they can pay them; what was agreed with the vendor is not theirs to
+    # rewrite.
+    if Role(user.role) == Role.FINANCE and set(data) - {"fx_rate"}:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Finance may set the exchange rate on a PO, nothing else",
+        )
 
     # Validate without mutating — same checks regardless of approval path,
     # so we never queue a doomed approval the director can't apply later.
@@ -1308,6 +1350,25 @@ async def update_po(
             after={"eta": po.eta.isoformat() if po.eta else None},
         )
 
+    # The exchange rate applies straight away too, for the same reason the ETA
+    # does: it changes nothing we agreed with the vendor. The order is still
+    # for the same goods at the same price in the same currency — the rate is
+    # only what those numbers are worth in rupiah, and it moves when the bank
+    # says so, not when a director gets to the approvals queue. Audited, and
+    # refused outright if it would make an order worth nothing.
+    if "fx_rate" in data:
+        raw = data.pop("fx_rate")
+        rate = None if raw in (None, "") else float(raw)
+        if rate is not None and rate <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Exchange rate must be greater than zero")
+        before = None if po.fx_rate is None else float(po.fx_rate)
+        po.fx_rate = rate
+        await audit_record(
+            db, actor=user, action="update", entity="supplier_po", entity_id=po.id,
+            before={"fx_rate": before}, after={"fx_rate": rate},
+        )
+
     is_director = Role(user.role) == Role.DIRECTOR
     # `data` can be empty now if the ETA was the only change — filing an
     # approval for "no fields" would put a meaningless row in the director's
@@ -1337,6 +1398,7 @@ async def update_po(
             "project_id": str(po.project_id) if po.project_id else None,
             "po_date": po.po_date, "eta": po.eta,
             "currency": po.currency or "IDR", "total": float(po.total or 0),
+            **_fx(po),
             "quoted_lead_days": po.quoted_lead_days, "items": po.items,
             "pending_approval": True,
             "detail": "Submitted for director approval; changes will apply once approved.",
@@ -1351,7 +1413,13 @@ async def update_po(
     if "quoted_lead_days" in data:
         po.quoted_lead_days = data["quoted_lead_days"]
     if "currency" in data and data["currency"]:
+        was = (po.currency or "IDR").upper()
         po.currency = data["currency"].strip().upper()[:8]
+        if po.currency != was:
+            # The old rate belonged to the old currency. Carrying it over
+            # would leave a dollar order quietly claiming 1 USD = 1 IDR, so
+            # rupiah goes back to 1 and anything else waits for a real rate.
+            po.fx_rate = 1 if po.currency == "IDR" else None
     if "total" in data and data["total"] is not None:
         po.total = data["total"]
     if "status" in data and data["status"]:
@@ -1365,7 +1433,8 @@ async def update_po(
         "supplier_id": str(po.supplier_id),
         "project_id": str(po.project_id) if po.project_id else None,
         "po_date": po.po_date, "eta": po.eta,
-            "currency": po.currency or "IDR", "total": float(po.total or 0),
+        "currency": po.currency or "IDR", "total": float(po.total or 0),
+        **_fx(po),
         "quoted_lead_days": po.quoted_lead_days,
         "items": po.items,
     }

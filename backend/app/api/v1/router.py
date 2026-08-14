@@ -59,6 +59,8 @@ api_router.include_router(push.router, prefix="/push", tags=["push"])
 api_router.include_router(operation.router, prefix="/operation", tags=["operation"])
 api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 api_router.include_router(finance.router, prefix="/finance", tags=["finance"])
+# Same prefix, wider role gate — see finance.invoice_desk.
+api_router.include_router(finance.invoice_desk, prefix="/finance", tags=["finance"])
 api_router.include_router(financial_reports.router, prefix="/finance/reports", tags=["finance-reports"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 api_router.include_router(ledger.router, prefix="/ledger", tags=["ledger"])

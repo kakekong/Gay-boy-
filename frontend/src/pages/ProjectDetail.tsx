@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
-  Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight,
+  Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight, Link2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -225,7 +225,10 @@ export default function ProjectDetailPage() {
   // Drawing files are viewable by the director only (internal app).
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const userId = useAuthStore((s) => s.user?.id) ?? "";
-  const canLogistics = ["purchasing", "director", "manager", "admin"].includes(role);
+  // Import paperwork is procurement's file — purchasing collects it, the
+  // director signs it off. The backend sends `logistics: null` to everyone
+  // else, so the card drops out rather than rendering read-only.
+  const canLogistics = ["purchasing", "director"].includes(role);
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
   // "Money viewer" — who may see amounts/totals. NOT who may act on finance forms.
@@ -233,6 +236,11 @@ export default function ProjectDetailPage() {
   // Strict finance approval role — only finance (plus director as backstop)
   // gets the "Approve invoice + enter faktur pajak" form on the project page.
   const canFinanceApprove = role === "finance" || role === "director";
+  // The customer-facing close-out: issue the invoice + delivery order, then
+  // put the faktur pajak number on it. Admin shares this with finance — it is
+  // the paperwork end of their own job. What stays finance-only is the money
+  // that follows: recording payments, and deleting an invoice outright.
+  const canInvoiceDesk = canFinanceApprove || role === "admin";
   // Internal staff upload the drawing (on behalf of the supplier); the director
   // signs it off. The drawing file is viewable by either of those.
   const canApproveDrawing = ["director", "manager", "admin"].includes(role);
@@ -275,6 +283,10 @@ export default function ProjectDetailPage() {
     if (defaultWoCode) setNewWoCode(defaultWoCode);
   }, [defaultWoCode]);
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
+  // Link mode is its own flag rather than "is the URL box non-empty", so the
+  // form doesn't snap back to the file picker the moment the box is cleared.
+  const [drawingLinkMode, setDrawingLinkMode] = useState(false);
+  const [drawingLink, setDrawingLink] = useState("");
   const [drawingNotes, setDrawingNotes] = useState("");
   const [revFiles, setRevFiles] = useState<Record<string, File | null>>({});
   // Per-DO proof upload form (file + optional courier/tracking).
@@ -356,10 +368,12 @@ export default function ProjectDetailPage() {
   // Drawings: internal upload + director sign-off.
   const uploadDrawing = useMutation({
     mutationFn: (body: {
-      file: File; notes: string; kind: "customer" | "supplier"; sourceId?: string;
+      file?: File; linkUrl?: string; notes: string;
+      kind: "customer" | "supplier"; sourceId?: string;
     }) => {
       const fd = new FormData();
-      fd.append("file", body.file);
+      if (body.file) fd.append("file", body.file);
+      if (body.linkUrl) fd.append("link_url", body.linkUrl);
       if (body.notes) fd.append("notes", body.notes);
       fd.append("kind", body.kind);
       if (body.sourceId) fd.append("source_drawing_id", body.sourceId);
@@ -394,9 +408,10 @@ export default function ProjectDetailPage() {
     onSuccess: refresh, onError: onErr,
   });
   const uploadDoc = useMutation({
-    mutationFn: (body: { key: string; file: File }) => {
+    mutationFn: (body: { key: string; file?: File; linkUrl?: string }) => {
       const fd = new FormData();
-      fd.append("file", body.file);
+      if (body.file) fd.append("file", body.file);
+      if (body.linkUrl) fd.append("link_url", body.linkUrl);
       return api.post(`/operation/projects/${id}/import-docs/${body.key}/upload`, fd);
     },
     onSuccess: refresh, onError: onErr,
@@ -627,10 +642,34 @@ export default function ProjectDetailPage() {
           {mayUpload[kind] && (
             <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 flex flex-wrap items-end gap-3">
               <div className="flex-1 min-w-[180px]">
-                <label className="block text-[11px] uppercase muted mb-1">{t("Drawing file", "File gambar")}</label>
-                <input type="file"
-                  className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
-                  onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
+                <label className="block text-[11px] uppercase muted mb-1">
+                  {drawingLinkMode
+                    ? t("Link instead of a file", "Tautan sebagai ganti file")
+                    : t("Drawing file", "File gambar")}
+                </label>
+                {drawingLinkMode ? (
+                  // A vendor's sheet usually already lives in a Drive folder,
+                  // and a link survives a rebuild where an upload does not.
+                  <input className="input" value={drawingLink} autoFocus
+                    onChange={(e) => setDrawingLink(e.target.value)}
+                    placeholder="https://drive.google.com/…" />
+                ) : (
+                  <input type="file"
+                    className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
+                    onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
+                )}
+                <button type="button"
+                  className="mt-1 text-[11px] text-brand-700 hover:underline inline-flex items-center gap-1"
+                  onClick={() => {
+                    setDrawingLinkMode((on) => !on);
+                    setDrawingFile(null);
+                    setDrawingLink("");
+                  }}>
+                  <Link2 size={11} />
+                  {drawingLinkMode
+                    ? t("Attach a file instead", "Unggah file saja")
+                    : t("Paste a link instead", "Tempel tautan saja")}
+                </button>
               </div>
               <div className="flex-1 min-w-[180px]">
                 <label className="block text-[11px] uppercase muted mb-1">{t("Notes (optional)", "Catatan (opsional)")}</label>
@@ -640,13 +679,22 @@ export default function ProjectDetailPage() {
                     : t("e.g. redrawn from supplier rev 2", "cth. digambar ulang dari revisi 2 supplier")} />
               </div>
               <button className="btn-primary"
-                disabled={!drawingFile || uploadDrawing.isPending}
-                onClick={() => drawingFile && uploadDrawing.mutate(
-                  { file: drawingFile, notes: drawingNotes, kind },
-                  { onSuccess: () => { setDrawingFile(null); setDrawingNotes(""); } },
+                disabled={(drawingLinkMode ? !drawingLink.trim() : !drawingFile)
+                          || uploadDrawing.isPending}
+                onClick={() => uploadDrawing.mutate(
+                  {
+                    file: drawingLinkMode ? undefined : (drawingFile ?? undefined),
+                    linkUrl: drawingLinkMode ? drawingLink.trim() : undefined,
+                    notes: drawingNotes, kind,
+                  },
+                  { onSuccess: () => {
+                    setDrawingFile(null); setDrawingLink(""); setDrawingNotes("");
+                  } },
                 )}>
                 {uploadDrawing.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                {t("Upload drawing", "Unggah gambar")}
+                {drawingLinkMode
+                  ? t("Save link", "Simpan tautan")
+                  : t("Upload drawing", "Unggah gambar")}
               </button>
             </div>
           )}
@@ -714,7 +762,16 @@ export default function ProjectDetailPage() {
                     </td>
                     <td className="td">
                       {!d.file_url ? "—"
-                        : canViewDrawing ? (
+                        : !canViewDrawing ? (
+                          <span className="muted text-xs">{t("internal only", "hanya internal")}</span>
+                        ) : d.external_url ? (
+                          // Filed as a link — there is nothing of ours to
+                          // preview, so send them where the drawing lives.
+                          <a href={d.external_url} target="_blank" rel="noreferrer"
+                            className="text-brand-700 hover:underline inline-flex items-center gap-1">
+                            <Link2 size={12} /> {t("Open link", "Buka tautan")}
+                          </a>
+                        ) : (
                           <button type="button"
                              onClick={() => openPreview(
                                d.attachment_id ?? d.file_url,
@@ -722,8 +779,6 @@ export default function ProjectDetailPage() {
                                d.file_content_type,
                              )}
                              className="text-brand-700 hover:underline">{t("View", "Lihat")}</button>
-                        ) : (
-                          <span className="muted text-xs">{t("internal only", "hanya internal")}</span>
                         )}
                     </td>
                     <td className="td muted">
@@ -1353,26 +1408,47 @@ export default function ProjectDetailPage() {
                       {d.status ? sl(d.status, DOC_STATUS_LABEL_ID) : t("missing", "belum ada")}
                     </span>
 
-                    {/* File: view if uploaded */}
-                    {d.attachment_id && (
+                    {/* The document itself. A linked one opens where it
+                        lives; an uploaded one previews in the page. */}
+                    {d.attachment_id && (d.external_url ? (
+                      <a href={d.external_url} target="_blank" rel="noreferrer"
+                        className="text-brand-700 hover:underline text-xs inline-flex items-center gap-1">
+                        <Link2 size={11} /> {d.filename || t("Open link", "Buka tautan")}
+                      </a>
+                    ) : (
                       <button type="button"
                         className="text-brand-700 hover:underline text-xs"
                         onClick={() => openPreview(d.attachment_id, d.filename)}>
                         {d.filename ? `${t("View", "Lihat")} (${d.filename})` : t("View", "Lihat")}
                       </button>
-                    )}
+                    ))}
 
-                    {/* Upload / replace (purchasing/management) */}
+                    {/* File it, or point at where it already lives — the
+                        freight agent normally mails a Drive folder. */}
                     {canLogistics && (
-                      <label className="text-xs text-brand-700 hover:underline cursor-pointer">
-                        {d.attachment_id ? t("Replace file", "Ganti file") : t("Upload file", "Unggah file")}
-                        <input type="file" className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) uploadDoc.mutate({ key: d.key, file: f });
-                            e.target.value = "";
-                          }} />
-                      </label>
+                      <>
+                        <label className="text-xs text-brand-700 hover:underline cursor-pointer">
+                          {d.attachment_id ? t("Replace file", "Ganti file") : t("Upload file", "Unggah file")}
+                          <input type="file" className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) uploadDoc.mutate({ key: d.key, file: f });
+                              e.target.value = "";
+                            }} />
+                        </label>
+                        <button type="button"
+                          className="text-xs text-brand-700 hover:underline inline-flex items-center gap-1"
+                          disabled={uploadDoc.isPending}
+                          onClick={() => {
+                            const u = window.prompt(tt(
+                              `Paste the link for ${d.label}`,
+                              `Tempel tautan untuk ${d.label}`,
+                            ));
+                            if (u && u.trim()) uploadDoc.mutate({ key: d.key, linkUrl: u.trim() });
+                          }}>
+                          <Link2 size={11} /> {t("Use a link", "Pakai tautan")}
+                        </button>
+                      </>
                     )}
 
                     {/* Director approve / reject */}
@@ -1538,12 +1614,12 @@ export default function ProjectDetailPage() {
                     ))}
                   </div>
                 )}
-                {canFinanceApprove && iv.status === "pending_finance" && (
+                {canInvoiceDesk && iv.status === "pending_finance" && (
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="text-[11px] uppercase tracking-wider muted">
                       {t(
-                        "Finance approval — enter the faktur pajak yourself (admin doesn't set it)",
-                        "Persetujuan keuangan — masukkan faktur pajak sendiri (admin tidak mengisinya)",
+                        "Sign off — enter the faktur pajak number from the invoice",
+                        "Sahkan — masukkan nomor faktur pajak dari fakturnya",
                       )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1710,7 +1786,7 @@ export default function ProjectDetailPage() {
             );
           })}
 
-          {canFinanceApprove && (
+          {canInvoiceDesk && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider muted">
                 {t("Issue invoice", "Terbitkan faktur")} {invType === "final" ? t("+ delivery order", "+ surat jalan") : t("(down-payment)", "(down payment/DP)")}
@@ -1764,8 +1840,8 @@ export default function ProjectDetailPage() {
               </div>
               <p className="text-[11px] muted">
                 {t(
-                  "Finance uploads the invoice here. Faktur pajak number is entered by finance again during the approval step, not on upload.",
-                  "Keuangan mengunggah faktur di sini. Nomor faktur pajak diisi keuangan lagi pada langkah persetujuan, bukan saat unggah.",
+                  "Admin or finance uploads the invoice here. The faktur pajak number goes on at the sign-off step below, not on upload.",
+                  "Admin atau keuangan mengunggah faktur di sini. Nomor faktur pajak diisi pada langkah pengesahan di bawah, bukan saat unggah.",
                 )}
               </p>
               <button className="btn-primary"

@@ -178,6 +178,13 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # currency is an invoice dispute waiting to happen — read as rupiah it is
     # a hundred and twenty dollars, read as dollars it is a fortune.
     currency: Mapped[str] = mapped_column(String(8), default="IDR", nullable=False)
+    # How many rupiah one unit of `currency` costs us on this order. It rides
+    # on the PO rather than being looked up live, because the rate that
+    # matters is the one the payment actually settled at — a rate fetched
+    # today would silently restate what a March order cost. NULL means "not
+    # set yet", which reads differently from a rate of zero. Always 1 for a
+    # rupiah order, and finance may correct it after the bank confirms.
+    fx_rate: Mapped[float | None] = mapped_column(Numeric(18, 6))
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     # Lines carry `project_id` / `project_code` and their price-request origin,
     # so one order to one vendor can cover several jobs — the shipment is one

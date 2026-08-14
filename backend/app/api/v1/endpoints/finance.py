@@ -27,6 +27,16 @@ router = APIRouter(
     dependencies=[Depends(require(Role.FINANCE, Role.MANAGER, Role.DIRECTOR))]
 )
 
+# Admin runs the customer-facing close-out — issue the invoice + delivery
+# order, then put the faktur pajak number on it. That one act lives at a
+# /finance/* path, so it gets its own router rather than admitting admin to
+# AR aging, tax reports and payment verification along with it. Everything
+# else in this file stays behind the router gate above.
+invoice_desk = APIRouter(
+    dependencies=[Depends(require(Role.FINANCE, Role.MANAGER, Role.DIRECTOR,
+                                  Role.ADMIN))]
+)
+
 
 @router.get("/invoices/pending")
 async def list_pending_invoices(
@@ -96,17 +106,22 @@ async def list_pending_invoices(
     return out
 
 
-@router.post("/invoices/{invoice_id}/approve")
+@invoice_desk.post("/invoices/{invoice_id}/approve")
 async def approve_invoice(
     invoice_id: UUID,
-    faktur_pajak_no: str = Form(..., description="Faktur pajak number (entered by finance)"),
+    faktur_pajak_no: str = Form(..., description="Faktur pajak number"),
     faktur_pajak_file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Finance approves an admin-issued invoice. Finance is the one who enters
-    the faktur pajak number and uploads the FP file — admin doesn't touch it at
-    issue time, so a misclick on admin's part can't corrupt the tax record.
+    """Sign an invoice off with its faktur pajak number.
+
+    Finance or admin: the two of them share the customer-facing close-out,
+    and the number comes off the same document as the invoice it belongs to.
+    It was finance-only on the theory that an admin misclick could corrupt
+    the tax record — but the record is corrected by editing it, and keeping
+    admin out only meant the invoice they issued sat waiting for someone
+    else to type a number they already had in front of them.
 
     This is a document approval only — it does NOT post to the transaction
     journal. Revenue/AR recognition stays driven by the quotation posting and

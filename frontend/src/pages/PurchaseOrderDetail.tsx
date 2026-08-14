@@ -15,7 +15,14 @@ import { UserLink } from "@/components/UserLink";
 import { useAuthStore } from "@/store/auth";
 import { T, locale, t as tt } from "@/store/lang";
 
-interface POItem { description?: string; qty?: number }
+interface POItem {
+  description?: string;
+  qty?: number;
+  uom?: string;
+  /** What we pay per unit. The PO total is the sum of qty × this. */
+  unit_price?: number;
+  amount?: number;
+}
 interface PO {
   id: string;
   number: string;
@@ -38,6 +45,10 @@ interface PO {
   eta: string | null;
   quoted_lead_days: number | null;
   currency: string;
+  /** Rupiah per unit of `currency`; null until someone sets one. */
+  fx_rate: number | null;
+  /** total × fx_rate, or null when no rate is set. */
+  total_idr: number | null;
   total: number;
   items: POItem[];
   created_at: string;
@@ -55,12 +66,30 @@ const STATUSES = ["pending_approval", "open", "received", "closed", "cancelled"]
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
+/** What a line is worth.
+ *
+ *  A line that states a unit price is the authority on its own value, so the
+ *  amount follows from qty × price. Reading the stored `amount` first looked
+ *  tidier and was wrong: re-pricing a line left the old amount sitting there,
+ *  and the PO went on billing the price we had just renegotiated away. Older
+ *  lines that carry only an amount still show it.
+ */
+function lineAmount(it: POItem): number {
+  const unit = Number(it.unit_price ?? NaN);
+  if (!Number.isNaN(unit)) return Number(it.qty ?? 0) * unit;
+  const amt = Number(it.amount ?? NaN);
+  return Number.isNaN(amt) ? 0 : amt;
+}
+
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const isDirector = me?.role === "director";
+  // Finance is here for the exchange rate alone — the backend refuses any
+  // other field from them, so the rest of the page is read-only.
+  const isFinance = me?.role === "finance";
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editingNumber, setEditingNumber] = useState(false);
   const [draftNumber, setDraftNumber] = useState("");
@@ -176,6 +205,8 @@ export default function PurchaseOrderDetailPage() {
   }
 
   const p = q.data;
+  const draftTotal = draftItems.reduce((s, it) => s + lineAmount(it), 0);
+  const foreign = (p.currency ?? "IDR").toUpperCase() !== "IDR";
 
   function startNumberEdit() {
     setDraftNumber(p.number);
@@ -195,8 +226,14 @@ export default function PurchaseOrderDetailPage() {
     setEditingItems(true);
   }
   function commitItems() {
+    // Each line carries its own amount, and the PO total is their sum. Saving
+    // lines without it would leave a PO whose header contradicts its own
+    // lines — and the header is the figure that prints on the vendor's copy.
+    const keep = draftItems
+      .filter((it) => (it.description ?? "").trim() || (it.qty ?? 0) > 0)
+      .map((it) => ({ ...it, amount: lineAmount(it) }));
     patch.mutate(
-      { items: draftItems.filter((it) => (it.description ?? "").trim() || (it.qty ?? 0) > 0) },
+      { items: keep, total: keep.reduce((s, it) => s + lineAmount(it), 0) },
       { onSuccess: () => { refresh(); setEditingItems(false); } },
     );
   }
@@ -438,10 +475,42 @@ export default function PurchaseOrderDetailPage() {
                 const v = Number(e.target.value);
                 if (v !== p.total) patch.mutate({ total: v });
               }}
-              disabled={patch.isPending}
-              className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
+              disabled={patch.isPending || isFinance}
+              className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full disabled:opacity-60"
             />
           </Meta>
+          {/* What the order is worth in rupiah. Kept on the PO rather than
+              looked up live, because the rate that matters is the one the
+              payment settles at — a rate fetched today would restate what a
+              March order cost. Finance corrects it once the bank confirms. */}
+          {foreign && (
+            <Meta label={`${T("Rate")} (Rp / ${p.currency})`}>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                defaultValue={p.fx_rate ?? ""}
+                placeholder={T("not set")}
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  const v = raw === "" ? null : Number(raw);
+                  if (v !== (p.fx_rate ?? null)) patch.mutate({ fx_rate: v });
+                }}
+                disabled={patch.isPending}
+                className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
+              />
+            </Meta>
+          )}
+          {foreign && (
+            <Meta label={T("Total in rupiah")}>
+              {p.total_idr == null ? (
+                <span className="text-amber-700 text-xs">
+                  {T("Set a rate to see this in rupiah")}</span>
+              ) : (
+                <span className="tabular-nums">{idr(p.total_idr)}</span>
+              )}
+            </Meta>
+          )}
           <Meta label={T("Project target delivery")}>
             {p.project_target_delivery ?? "—"}
           </Meta>
@@ -490,7 +559,7 @@ export default function PurchaseOrderDetailPage() {
           <div className="p-4 space-y-2">
             {draftItems.map((it, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-9">
+                <div className="col-span-5">
                   <span className="text-[10px] uppercase muted">{T("Description")}</span>
                   <input
                     className="input"
@@ -519,6 +588,35 @@ export default function PurchaseOrderDetailPage() {
                     }
                   />
                 </div>
+                {/* The price we agreed per unit. Editing only the PO total
+                    meant a renegotiated rate had to be back-solved by hand,
+                    and the lines kept saying the old price. */}
+                <div className="col-span-2">
+                  <span className="text-[10px] uppercase muted">
+                    {T("Unit price")} ({p.currency ?? "IDR"})
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    className="input"
+                    value={it.unit_price ?? 0}
+                    onChange={(e) =>
+                      setDraftItems((cur) =>
+                        cur.map((x, j) =>
+                          j === i ? { ...x, unit_price: Number(e.target.value) } : x
+                        )
+                      )
+                    }
+                  />
+                </div>
+                <div className="col-span-2">
+                  <span className="text-[10px] uppercase muted">{T("Amount")}</span>
+                  <div className="input bg-ink-50/60 text-right tabular-nums truncate"
+                       title={String(lineAmount(it))}>
+                    {money(lineAmount(it), p.currency)}
+                  </div>
+                </div>
                 <button
                   type="button"
                   className="col-span-1 text-red-600 hover:bg-red-50 rounded p-2"
@@ -529,12 +627,24 @@ export default function PurchaseOrderDetailPage() {
                 </button>
               </div>
             ))}
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1 }])}
-            >
-              <Plus size={13} /> {T("Add line")}</button>
+            <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1, unit_price: 0 }])}
+              >
+                <Plus size={13} /> {T("Add line")}</button>
+              <div className="text-sm">
+                <span className="muted">{T("Lines add up to")}{" "}</span>
+                <span className="font-semibold tabular-nums">
+                  {money(draftTotal, p.currency)}
+                </span>
+                {Math.abs(draftTotal - (p.total ?? 0)) > 0.5 && (
+                  <span className="ml-2 text-[11px] text-amber-700">
+                    {T("· saving will set the PO total to this")}</span>
+                )}
+              </div>
+            </div>
           </div>
         ) : !p.items?.length ? (
           <div className="p-8 text-center text-sm muted">
@@ -547,6 +657,8 @@ export default function PurchaseOrderDetailPage() {
                 <th className="th">{T("Description")}</th>
                 {sharedOrder && <th className="th">{T("For project")}</th>}
                 <th className="th text-right">{T("Qty")}</th>
+                <th className="th text-right">{T("Unit price")}</th>
+                <th className="th text-right">{T("Amount")}</th>
               </tr>
             </thead>
             <tbody>
@@ -563,9 +675,23 @@ export default function PurchaseOrderDetailPage() {
                     </td>
                   )}
                   <td className="td text-right tabular-nums">{it.qty ?? 0}</td>
+                  <td className="td text-right tabular-nums">
+                    {it.unit_price == null ? "—" : money(it.unit_price, p.currency)}
+                  </td>
+                  <td className="td text-right tabular-nums">
+                    {money(lineAmount(it), p.currency)}
+                  </td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-ink-200">
+                <td className="td" colSpan={sharedOrder ? 5 : 4} />
+                <td className="td text-right font-semibold tabular-nums">
+                  {money(p.total, p.currency)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </div>

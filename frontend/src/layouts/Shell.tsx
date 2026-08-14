@@ -47,7 +47,7 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/customer-pos", label: "Customer PO", label_id: "PO Pelanggan", icon: Receipt,
         badgeQuery: "dp-pending" },
       { to: "/purchase-orders", label: "Purchasing PO", label_id: "PO Pembelian", icon: Truck,
-        roles: ["director"] },
+        roles: ["director", "finance"] },
       { to: "/po-recap", label: "PO Recap", label_id: "Rekap PO", icon: ClipboardList,
         roles: ["director"] },
       { to: "/calendar", label: "Calendar", label_id: "Kalender", icon: CalendarDays },
@@ -266,6 +266,10 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     // both were unreachable when the allowlist lacked these two.
     "/customer-pos",
     "/projects",
+    // A supplier PO in dollars is a rupiah payment finance has to make, and
+    // the rate that converts it is theirs to correct. Read-only otherwise —
+    // the backend refuses any field but the rate from them.
+    "/purchase-orders",
     "/attendance",
     "/chat",
     "/mentions",

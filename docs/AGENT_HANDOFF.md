@@ -573,9 +573,12 @@ different thing: `COMPANY_ADDRESS` in `quotation_pdf.py`, shared by every PDF.
 customer approves, drawn up from it (`source_drawing_id` keeps the lineage).
 `_DRAWING_UPLOAD_ROLES` and `_DRAWING_VIEW_ROLES` in `operation.py` are the
 whole matrix — sales read the customer's and file neither, admin own the
-customer's, **the director files the supplier's** (asked for as "for right
-now", so move that line and nothing else when it changes), purchasing read it,
-management see both and do the handoff. The view sets also carry the two portal
+customer's, **purchasing file the supplier's** (it sat with the director for a
+spell; move that one line and nothing else when it moves again), management see
+both and do the handoff. A drawing may also be filed as a **link** instead of a
+file: `link_url` on the upload endpoint mints a `content_type="link"`
+attachment, the row comes back `is_link` with an `external_url`, and the page
+links out rather than previewing. The view sets also carry the two portal
 roles, which is not decoration: `attachments.py` consults them when a *file* is
 fetched, and that is the one path a customer or a supplier reaches. Leave
 `Role.CUSTOMER` out of the customer set and the portal stops being able to open

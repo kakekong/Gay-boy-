@@ -404,6 +404,14 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS "
     "currency VARCHAR(8) NOT NULL DEFAULT 'IDR'",
 
+    # What that currency is worth in rupiah on this order. Left NULL rather
+    # than defaulted, so "nobody has set a rate" stays distinguishable from a
+    # rate that happens to be 1 — except on rupiah orders, where 1 is simply
+    # the truth and backfilling it saves every reader a special case.
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(18,6)",
+    "UPDATE supplier_pos SET fx_rate = 1 "
+    "WHERE fx_rate IS NULL AND (currency IS NULL OR currency = 'IDR')",
+
     # A drawing is either the customer's or the supplier's, and that decides
     # who may open it. Existing rows are classified by who uploaded them —
     # purchasing only ever filed the supplier's — because defaulting them all
