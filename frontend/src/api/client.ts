@@ -93,6 +93,27 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshing;
 }
 
+// Axios says "Network Error" for everything it never got a reply to, and
+// every page falls back to that string — so a server that was still waking
+// up, and a server that answered in a way the browser refused to show us,
+// both surfaced to the user as three words that point at their wifi. Say
+// what actually happened instead. (The commonest cause, a 500 arriving
+// without CORS headers, is fixed on the server side; this covers the rest.)
+function explain(err: AxiosError): AxiosError {
+  if (err.response) return err;           // a real reply — the page has more to say
+  if (err.code === "ECONNABORTED" || /timeout/i.test(err.message || "")) {
+    err.message =
+      "The server didn't answer in time. It may still be starting up — " +
+      "wait a few seconds and try again.";
+  } else if (/network error/i.test(err.message || "")) {
+    err.message =
+      "Couldn't reach the server. It may be starting up, or it hit an error " +
+      "the browser wouldn't let this page read. Try again in a moment; if it " +
+      "keeps happening, check the backend logs.";
+  }
+  return err;
+}
+
 api.interceptors.response.use(
   (r) => r,
   async (err: AxiosError) => {
@@ -104,7 +125,7 @@ api.interceptors.response.use(
       // Don't try to refresh the refresh / login calls themselves.
       if (url.includes("/auth/refresh") || url.includes("/auth/login")) {
         useAuthStore.getState().logout(`Auth endpoint ${url} returned 401.`);
-        return Promise.reject(err);
+        return Promise.reject(explain(err));
       }
       original._retry = true;
       const newToken = await refreshAccessToken();
@@ -116,6 +137,6 @@ api.interceptors.response.use(
       // logout (i.e. a network / 5xx error), keep the session intact —
       // the user can retry. Otherwise logout has already fired.
     }
-    return Promise.reject(err);
+    return Promise.reject(explain(err));
   }
 );
