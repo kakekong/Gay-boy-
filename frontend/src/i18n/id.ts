@@ -40,6 +40,7 @@ export const ID_STATIC: Record<string, string> = {
   "; you don't have to wait for the goods to actually arrive.": "; Anda tidak perlu menunggu barangnya benar-benar tiba.",
   "AI Command Center": "Pusat Komando AI",
   "AI Recommendations": "Rekomendasi AI",
+  "already on": "sudah ada di",
   "AR Aging detail": "Rincian umur piutang",
   "Absent": "Tidak hadir",
   "Accepted": "Diterima",
@@ -176,9 +177,13 @@ export const ID_STATIC: Record<string, string> = {
   "Contact": "Kontak",
   "Contact email": "Email kontak",
   // Price requests to suppliers — the buy side of the pricing workflow.
+  "Nothing ticked — pick at least one line for this supplier.": "Belum ada yang dicentang — pilih minimal satu baris untuk supplier ini.",
   "Price requests": "Permintaan harga",
   "Price requests to suppliers": "Permintaan harga ke pemasok",
   "Ask suppliers for a price": "Minta harga ke pemasok",
+  "Tick all": "Centang semua",
+  "Tick the lines this supplier is getting. Leave the rest for another PO.": "Centang baris yang diambil supplier ini. Sisanya biarkan untuk PO lain.",
+  "Untick all": "Hapus semua centang",
   "What you asked each vendor to charge, and what they answered. Apply the one you take as the cost on the price request it is costing.":
     "Harga yang Anda tanyakan ke tiap pemasok, dan jawabannya. Terapkan yang Anda ambil sebagai biaya pada permintaan harga yang dibiayai.",
   "One request per supplier, so you can put their answers side by side.":

@@ -651,6 +651,15 @@ Two endpoints fall out of it:
   `source_pr_id`, so purchasing confirms rather than re-types. Purchasing can
   still override any line's project before saving, which is the manual half of
   the user's "or a more automatic system I suggested in step one".
+* `GET /purchasing/po/prefill` drafts a PO off a *customer* price request and
+  is where one request gets split across vendors. Lines come back with
+  `ordered_on` — the numbers of any non-cancelled PO already covering that
+  line, matched on `line_no` (falling back to the description). The picker
+  (`components/PriceRequestLines.tsx`, shared by both PO modals) brings those
+  up unticked and names the PO holding them, and the order takes only what is
+  ticked. Without that flag the second PO silently re-buys the first one's
+  goods, and nothing downstream notices until two lots arrive. Cancelling an
+  order releases its lines.
 * `GET /purchasing/po/for-project/{project_id}` is the project's view of its
   incoming goods: every PO touching it, **numbered Shipment 1/2/3 by `eta`**
   (nulls last), with `last_eta` — the date the job is actually complete — and

@@ -517,6 +517,26 @@ async def po_prefill(
     if not pr:
         return {"price_request_id": None, "items": [], "total": 0}
 
+    # One request can be split across several vendors — the chain from one
+    # mill, the sprockets from another — so the same request is prefilled more
+    # than once. Say which lines somebody has already ordered, or the second
+    # PO quietly buys the first one's goods a second time.
+    from app.models.purchasing import SupplierPO as _SPO
+    already: dict = {}
+    for other in (await db.scalars(
+        select(_SPO).where(
+            _SPO.price_request_id == pr.id,
+            _SPO.status != "cancelled",
+        )
+    )).all():
+        for line in (other.items or []):
+            key = line.get("line_no")
+            if key is None:
+                key = (line.get("description") or "").strip().lower()
+            if key in (None, ""):
+                continue
+            already.setdefault(key, []).append(other.number)
+
     items, total, uncosted = [], 0.0, 0
     for it in (pr.items or []):
         qty = float(it.get("qty") or 0)
@@ -525,6 +545,9 @@ async def po_prefill(
         total += amount
         if not unit_cost:
             uncosted += 1
+        key = it.get("line_no")
+        if key is None:
+            key = (it.get("description") or "").strip().lower()
         items.append({
             "line_no": it.get("line_no"),
             "description": it.get("description"),
@@ -534,6 +557,8 @@ async def po_prefill(
             "unit_price": unit_cost,   # buying price per unit
             "amount": amount,
             "costed": bool(unit_cost),
+            # Which POs already cover this line. Empty is the ordinary case.
+            "ordered_on": sorted(set(already.get(key, []))),
         })
     return {
         "price_request_id": str(pr.id),
@@ -993,6 +1018,11 @@ async def create_po(
         "currency": po.currency,
         "eta": po.eta,
         "total": float(po.total or 0),
+        # Same reason as the currency: the lines are not stored as sent. Each
+        # one is stamped with the job it belongs to, and an order raised from
+        # a picked subset of a price request needs to show which lines
+        # actually landed on it.
+        "items": po.items,
         **_fx(po),
         "pending_approval": not is_director,
     }

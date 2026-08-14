@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ModalCloseX } from "@/components/ModalCloseX";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -10,7 +10,8 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth";
 import { UserLink } from "@/components/UserLink";
-import { T, t } from "@/store/lang";
+import { T, t, t as tt } from "@/store/lang";
+import { PriceRequestLines, lineAmount } from "@/components/PriceRequestLines";
 import { CURRENCIES, money } from "@/lib/currency";
 
 interface SupplierLite {
@@ -406,13 +407,29 @@ function NewPOModal({
   });
   const linkedPR: string | null = prefill.data?.price_request_id ?? null;
   const prItems: any[] = prefill.data?.items ?? [];
-  const prTotal: number = Number(prefill.data?.total ?? 0);
 
-  // When the price request loads, seed the total from it (unless the user has
-  // already typed their own — purchasing may negotiate a different figure).
-  if (linkedPR && !totalEdited && total === "" && prTotal > 0) {
-    setTotal(String(prTotal));
-  }
+  // Which lines go on THIS order. One request often goes to several vendors,
+  // so the PO takes what is ticked and the rest wait for the next one.
+  // Everything starts ticked except lines another PO already covers.
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const prKey = `${linkedPR ?? ""}:${prItems.length}`;
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!linkedPR || seededFor.current === prKey) return;
+    seededFor.current = prKey;
+    setPicked(new Set(
+      prItems.map((_, i) => i).filter((i) => !(prItems[i].ordered_on ?? []).length),
+    ));
+  }, [prKey, linkedPR, prItems]);
+
+  const pickedItems = prItems.filter((_, i) => picked.has(i));
+  const prTotal: number = pickedItems.reduce((s, it) => s + lineAmount(it), 0);
+
+  // Keep the total in step with what is ticked, until the user types their
+  // own figure — purchasing may negotiate something other than the sum.
+  useEffect(() => {
+    if (linkedPR && !totalEdited) setTotal(prTotal > 0 ? String(prTotal) : "");
+  }, [prTotal, linkedPR, totalEdited]);
 
   const create = useMutation({
     mutationFn: () => api.post("/purchasing/po", {
@@ -426,7 +443,7 @@ function NewPOModal({
       price_request_id: linkedPR,
       // Prefer the price-request lines (with buying prices); fall back to the
       // free-text description if there's no linked price request.
-      items: prItems.length ? prItems : (description ? [{ description, qty: 1 }] : []),
+      items: prItems.length ? pickedItems : (description ? [{ description, qty: 1 }] : []),
     }).then((r) => r.data),
     onSuccess: (r) => onCreated(r.number, !!r.pending_approval),
     onError: (e: any) => {
@@ -450,6 +467,13 @@ function NewPOModal({
     if (!projectId) missing.push("project");
     if (missing.length) {
       setLocalErr(`Please choose a ${missing.join(" and a ")} first.`);
+      return;
+    }
+    if (prItems.length > 0 && pickedItems.length === 0) {
+      setLocalErr(tt(
+        "Tick at least one line for this supplier.",
+        "Centang minimal satu baris untuk supplier ini.",
+      ));
       return;
     }
     create.mutate();
@@ -529,55 +553,14 @@ function NewPOModal({
               <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> {T("Checking the price request…")}</div>
             ) : linkedPR ? (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm">
-                <div className="flex items-center gap-2 text-emerald-800 font-medium">
-                  <Check size={14} className="shrink-0" />
-                  {T("Linked to price request")}{" "}
-                  {/* Same tab — see the twin of this panel in Purchasing.tsx:
-                      a new tab loses the session for anyone who did not tick
-                      "keep me signed in". */}
-                  <Link to={`/price-requests?open=${linkedPR}`}
-                    className="font-mono underline underline-offset-2 hover:text-emerald-900"
-                    title={T("Open this price request")}>
-                    {prefill.data?.price_request_number ?? ""}
-                  </Link>
-                </div>
-                <p className="text-[11px] text-emerald-700/90 mt-0.5">
-                  {(prefill.data?.uncosted ?? 0) > 0
-                    ? t(`${prefill.data.uncosted} of ${prItems.length} line${prItems.length === 1 ? "" : "s"} on this request has no buying price yet — those show Rp 0. Cost them on the price request, or type the total in below.`,
-                        `${prefill.data.uncosted} dari ${prItems.length} baris pada permintaan ini belum ada harga beli — yang itu tampil Rp 0. Isi biayanya di permintaan harga, atau ketik totalnya di bawah.`)
-                    : T("Buying prices below are pulled from purchasing's costing — no need to retype.")}</p>
-                {prItems.length > 0 && (
-                  <table className="w-full text-xs mt-2">
-                    <thead className="text-ink-500">
-                      <tr>
-                        <th className="text-left font-medium py-1">{T("Item")}</th>
-                        <th className="text-right font-medium py-1">{T("Qty")}</th>
-                        <th className="text-right font-medium py-1">{T("Unit cost")}</th>
-                        <th className="text-right font-medium py-1">{T("Amount")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prItems.map((it, i) => (
-                        <tr key={i} className="border-t border-emerald-100">
-                          <td className="py-1 pr-2">{it.description || "—"}</td>
-                          <td className="py-1 text-right tabular-nums">
-                            {it.qty}{it.uom ? ` ${it.uom}` : ""}
-                          </td>
-                          <td className="py-1 text-right tabular-nums">{idr(it.unit_price)}</td>
-                          <td className="py-1 text-right tabular-nums">{idr(it.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t border-emerald-200 font-medium">
-                        <td className="py-1" colSpan={3}>{T("Total buying price")}</td>
-                        <td className="py-1 text-right tabular-nums">{idr(prTotal)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                )}
-              </div>
+              <PriceRequestLines
+                priceRequestId={linkedPR}
+                priceRequestNumber={prefill.data?.price_request_number ?? ""}
+                items={prItems}
+                uncosted={prefill.data?.uncosted ?? 0}
+                picked={picked}
+                onPicked={setPicked}
+              />
             ) : (
               <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2.5 space-y-1.5">
                 <p className="text-[11px] muted">
