@@ -406,21 +406,35 @@ function NewPOModal({
     enabled: !!projectId,
   });
   const linkedPR: string | null = prefill.data?.price_request_id ?? null;
-  const prItems: any[] = prefill.data?.items ?? [];
+  const prefillItems: any[] = prefill.data?.items ?? [];
+  // A local copy, because the qty and the unit cost are editable here: what
+  // purchasing costed and what this vendor actually quoted are not always the
+  // same number. Seeded from the price request and reset when it changes.
+  const [prItems, setPrItems] = useState<any[]>([]);
+  const editLine = (i: number, patch: Record<string, any>) =>
+    setPrItems((cur) => cur.map((it, j) => {
+      if (j !== i) return it;
+      const next = { ...it, ...patch };
+      // Keep the line's own amount honest — it is what gets POSTed.
+      next.amount = Number(next.qty ?? 0) * Number(next.unit_price ?? 0);
+      return next;
+    }));
 
   // Which lines go on THIS order. One request often goes to several vendors,
   // so the PO takes what is ticked and the rest wait for the next one.
   // Everything starts ticked except lines another PO already covers.
   const [picked, setPicked] = useState<Set<number>>(new Set());
-  const prKey = `${linkedPR ?? ""}:${prItems.length}`;
+  const prKey = `${linkedPR ?? ""}:${prefillItems.length}`;
   const seededFor = useRef<string | null>(null);
   useEffect(() => {
     if (!linkedPR || seededFor.current === prKey) return;
     seededFor.current = prKey;
+    setPrItems(prefillItems.map((it) => ({ ...it })));
     setPicked(new Set(
-      prItems.map((_, i) => i).filter((i) => !(prItems[i].ordered_on ?? []).length),
+      prefillItems.map((_, i) => i)
+        .filter((i) => !(prefillItems[i].ordered_on ?? []).length),
     ));
-  }, [prKey, linkedPR, prItems]);
+  }, [prKey, linkedPR, prefillItems]);
 
   const pickedItems = prItems.filter((_, i) => picked.has(i));
   const prTotal: number = pickedItems.reduce((s, it) => s + lineAmount(it), 0);
@@ -560,6 +574,7 @@ function NewPOModal({
                 uncosted={prefill.data?.uncosted ?? 0}
                 picked={picked}
                 onPicked={setPicked}
+                onEdit={editLine}
               />
             ) : (
               <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2.5 space-y-1.5">

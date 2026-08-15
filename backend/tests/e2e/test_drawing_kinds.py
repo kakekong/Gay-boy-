@@ -219,21 +219,42 @@ async def main():
     check("purchasing can list the supplier drawing's file", sup_file is not None,
           str([a.get("filename") for a in sup_att]))
 
-    for who, label in ((adm, "admin"), (s1, "sales")):
-        listed = J(await c.get("/attachments", headers=who,
-                               params={"owner_type": "project", "owner_id": proj}))
-        names = [a.get("filename") for a in listed]
-        check(f"{label} cannot list it", "supplier.pdf" not in names, str(names))
-        if sup_file:
-            r = await c.get(f"/attachments/{sup_file['id']}/download", headers=who)
-            check(f"...nor download it directly", r.status_code == 403,
-                  str(r.status_code))
-        cus = next((a for a in listed if a.get("filename") == "customer.pdf"), None)
-        check(f"...while the customer's file is still theirs to open",
-              cus is not None, str(names))
-        if cus:
-            r = await c.get(f"/attachments/{cus['id']}/download", headers=who)
-            check("...and downloads", r.status_code == 200, str(r.status_code))
+    listed = J(await c.get("/attachments", headers=s1,
+                           params={"owner_type": "project", "owner_id": proj}))
+    names = [a.get("filename") for a in listed]
+    check("sales cannot list it", "supplier.pdf" not in names, str(names))
+    if sup_file:
+        r = await c.get(f"/attachments/{sup_file['id']}/download", headers=s1)
+        check("...nor download it directly", r.status_code == 403, str(r.status_code))
+    cus = next((a for a in listed if a.get("filename") == "customer.pdf"), None)
+    check("...while the customer's file is still theirs to open",
+          cus is not None, str(names))
+    if cus:
+        r = await c.get(f"/attachments/{cus['id']}/download", headers=s1)
+        check("...and downloads", r.status_code == 200, str(r.status_code))
+
+    # Admin does not browse the shelf at all — it is where purchasing puts
+    # the packing list and the freight invoice, which is the pack admin was
+    # taken off. Downloading by id still works, because that is how the
+    # customer drawing they DO own gets fetched.
+    r = await c.get("/attachments", headers=adm,
+                    params={"owner_type": "project", "owner_id": proj})
+    check("admin cannot browse the project's file shelf", r.status_code == 403,
+          f"{r.status_code} {str(J(r))[:120]}")
+    if sup_file:
+        r = await c.get(f"/attachments/{sup_file['id']}/download", headers=adm)
+        check("...and still cannot open the vendor's sheet", r.status_code == 403,
+              str(r.status_code))
+    if cus:
+        r = await c.get(f"/attachments/{cus['id']}/download", headers=adm)
+        check("...while the customer's drawing still opens for them",
+              r.status_code == 200, str(r.status_code))
+    r = await c.post("/attachments", headers=adm,
+                     data={"owner_type": "project", "owner_id": proj},
+                     files={"file": ("sneak.pdf", io.BytesIO(pdf("x")),
+                                     "application/pdf")})
+    check("...and cannot put anything on the shelf either", r.status_code == 403,
+          str(r.status_code))
 
     if sup_file:
         r = await c.get(f"/attachments/{sup_file['id']}/download", headers=d)

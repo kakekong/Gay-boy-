@@ -30,6 +30,10 @@ interface Props {
     | "customer_po" | "invoice" | "delivery_order" | "price_request"
     | "daily_log" | "supplier" | "supplier_price_request";
   ownerId: string;
+  /** Override the card heading. Some pages show two of these — a project
+   *  shows its own shelf and the customer PO's documents — and "Attachments"
+   *  twice tells the reader nothing about which is which. */
+  title?: string;
 }
 
 function iconFor(ct: string | null) {
@@ -50,7 +54,7 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
-export function AttachmentsSection({ ownerType, ownerId }: Props) {
+export function AttachmentsSection({ ownerType, ownerId, title }: Props) {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -165,7 +169,7 @@ export function AttachmentsSection({ ownerType, ownerId }: Props) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Paperclip size={15} className="text-brand-600" /> {T("Attachments")}</div>
+            <Paperclip size={15} className="text-brand-600" /> {title ?? T("Attachments")}</div>
           <div className="text-xs muted">
             {T("Upload a file (max 20 MB), or paste a link (Drive, Dropbox…) — links stay even after a restart.")}</div>
         </div>

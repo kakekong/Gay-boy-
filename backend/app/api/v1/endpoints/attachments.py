@@ -301,6 +301,24 @@ async def _to_out(db: AsyncSession, a: Attachment) -> dict:
     }
 
 
+def _project_shelf_barred(role: Role) -> bool:
+    """Whether this role may browse or add to a project's general file shelf.
+
+    A project's shelf is a free-for-all: anyone who can open the job drops
+    anything on it, and in practice that is where purchasing puts the packing
+    list and the freight invoice — the customs pack admin was taken off. So
+    browsing it walks straight around the walls the project page's own cards
+    draw. Admin gets the customer PO's documents instead, which is the
+    paperwork they actually invoice and ship against.
+
+    Reading and writing are the same question, so this gates both. What it
+    does NOT gate is downloading by id: that is how the customer drawing
+    admin *is* entitled to gets fetched, and `download_attachment` applies
+    the drawing-kind wall on its own.
+    """
+    return role == Role.ADMIN
+
+
 @router.get("")
 async def list_attachments(
     owner_type: str = Query(...),
@@ -312,6 +330,12 @@ async def list_attachments(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
     if not _attachment_visible_to(owner_type, Role(me.role)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view these files")
+    if owner_type == "project" and _project_shelf_barred(Role(me.role)):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "The project's file shelf isn't admin's — the customer PO's "
+            "documents are on the project page instead.",
+        )
     if owner_type == "daily_log" and not await _daily_log_read_ok(db, me, owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
     if not await _external_owns_attachment(db, me, owner_type, owner_id):
@@ -382,6 +406,9 @@ async def upload_attachment(
     if not _attachment_visible_to(owner_type, Role(me.role)):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Not allowed to attach files here")
+    if owner_type == "project" and _project_shelf_barred(Role(me.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "The project's file shelf isn't admin's")
     if not await _external_owns_attachment(db, me, owner_type, owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Not allowed to attach files here")

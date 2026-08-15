@@ -23,14 +23,27 @@ interface Props {
   /** Indices of the lines going onto this PO. */
   picked: Set<number>;
   onPicked: (next: Set<number>) => void;
+  /** Correct a line for this order — the vendor quoted differently, or only
+   *  part of the quantity is coming from them. */
+  onEdit: (i: number, patch: Partial<PrLine>) => void;
 }
 
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
+/** What a line is worth.
+ *
+ *  A line that states a unit price is the authority on its own value, so the
+ *  amount follows from qty × price. Prefill sends an `amount` on every line,
+ *  so reading that first would mean editing the qty or the price changed
+ *  nothing — the panel would show the old figure and the PO would be raised
+ *  at it.
+ */
 export function lineAmount(it: PrLine): number {
-  if (it.amount != null && !Number.isNaN(Number(it.amount))) return Number(it.amount);
-  return Number(it.qty ?? 0) * Number(it.unit_price ?? 0);
+  const unit = Number(it.unit_price ?? NaN);
+  if (!Number.isNaN(unit)) return Number(it.qty ?? 0) * unit;
+  const amt = Number(it.amount ?? NaN);
+  return Number.isNaN(amt) ? 0 : amt;
 }
 
 /**
@@ -49,7 +62,7 @@ export function lineAmount(it: PrLine): number {
  * the two copies had already started drifting apart.
  */
 export function PriceRequestLines({
-  priceRequestId, priceRequestNumber, items, uncosted, picked, onPicked,
+  priceRequestId, priceRequestNumber, items, uncosted, picked, onPicked, onEdit,
 }: Props) {
   const total = items.reduce(
     (s, it, i) => (picked.has(i) ? s + lineAmount(it) : s), 0,
@@ -131,11 +144,29 @@ export function PriceRequestLines({
                       </span>
                     )}
                   </td>
-                  <td className="py-1 text-right tabular-nums align-top">
-                    {it.qty}{it.uom ? ` ${it.uom}` : ""}
+                  {/* Editable, because what the price request costed and what
+                      this vendor actually quoted are not always the same
+                      number — and when an order is split, one supplier may
+                      only be taking part of the quantity. Untouched lines
+                      keep purchasing's costing, which is the common case. */}
+                  <td className="py-1 text-right align-top whitespace-nowrap">
+                    <input
+                      type="number" min={0} step="any" disabled={!on}
+                      value={it.qty ?? 0}
+                      onChange={(e) => onEdit(i, { qty: Number(e.target.value) })}
+                      aria-label={`${T("Qty")} — ${it.description || i + 1}`}
+                      className="w-16 text-right tabular-nums bg-transparent border-0 border-b border-dashed border-emerald-300 hover:border-emerald-500 focus:border-emerald-600 focus:outline-none disabled:border-transparent disabled:opacity-60"
+                    />
+                    {it.uom ? <span className="ml-1">{it.uom}</span> : null}
                   </td>
-                  <td className="py-1 text-right tabular-nums align-top">
-                    {idr(it.unit_price ?? 0)}
+                  <td className="py-1 text-right align-top">
+                    <input
+                      type="number" min={0} step="any" disabled={!on}
+                      value={it.unit_price ?? 0}
+                      onChange={(e) => onEdit(i, { unit_price: Number(e.target.value) })}
+                      aria-label={`${T("Unit cost")} — ${it.description || i + 1}`}
+                      className="w-24 text-right tabular-nums bg-transparent border-0 border-b border-dashed border-emerald-300 hover:border-emerald-500 focus:border-emerald-600 focus:outline-none disabled:border-transparent disabled:opacity-60"
+                    />
                   </td>
                   <td className="py-1 text-right tabular-nums align-top">
                     {idr(lineAmount(it))}

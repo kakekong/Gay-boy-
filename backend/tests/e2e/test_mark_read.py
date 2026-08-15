@@ -71,9 +71,25 @@ async def main():
     items = before.get("items", [])
     check("the director has alerts to work with", len(items) >= 3, str(len(items)))
 
-    att = under(items, "/attendance")
-    check("some of them sit under one section (attendance)", len(att) >= 1,
+    # Attendance is the section this was written against, but that alert is
+    # weekdays-only by design — so on a Saturday the driver was asserting
+    # against a rule the product deliberately does not apply. What is being
+    # tested is "one request clears a section", not which section, so pick one
+    # that has something in it.
+    section = next((p for p in ("/attendance", "/approvals", "/price-requests",
+                                "/projects", "/quotations", "/chat")
+                    if under(items, p)), None)
+    check("some of them sit under one section", section is not None,
           str([i.get("link") for i in items])[:200])
+    att = under(items, section) if section else []
+
+    # What the other manager sees BEFORE the director clears anything. Read
+    # here rather than compared against the director's own list: the two do
+    # not see the same approvals (a manager only gets the ones routed to
+    # them), so "same length" was only ever true by luck of which section
+    # came up.
+    theirs_before = under(J(await c.get("/notifications", headers=m)).get("items", []),
+                          section)
 
     # ── 1. one request clears the whole section ──────────────────────────────
     r = await c.post("/notifications/dismiss", headers=d, json={"item_ids": att})
@@ -83,8 +99,8 @@ async def main():
 
     after = J(await c.get("/notifications", headers=d))
     left = after.get("items", [])
-    check("the section's badge is now empty", under(left, "/attendance") == [],
-          str(under(left, "/attendance")))
+    check("the section's badge is now empty", under(left, section) == [],
+          str(under(left, section)))
     check("...and nothing else was taken with it",
           len(left) == len(items) - len(att), f"{len(items)} - {len(att)} != {len(left)}")
     check("the total count agrees with the list",
@@ -92,9 +108,9 @@ async def main():
 
     # ── 2. it is per person ──────────────────────────────────────────────────
     theirs = J(await c.get("/notifications", headers=m))
-    check("the other manager still sees the attendance alerts",
-          len(under(theirs.get("items", []), "/attendance")) == len(att),
-          str(len(under(theirs.get("items", []), "/attendance"))))
+    check("the other manager's own list is untouched by it",
+          under(theirs.get("items", []), section) == theirs_before,
+          f"{under(theirs.get('items', []), section)} vs {theirs_before}")
 
     # ── 3. stale and repeat input ────────────────────────────────────────────
     r = await c.post("/notifications/dismiss", headers=d, json={"item_ids": att})

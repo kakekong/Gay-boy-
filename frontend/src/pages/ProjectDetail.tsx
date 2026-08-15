@@ -231,6 +231,9 @@ export default function ProjectDetailPage() {
   const canLogistics = ["purchasing", "director"].includes(role);
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
+  // Admin specifically — `isAdmin` above also admits the director, who has
+  // no walls to walk around.
+  const isAdminDesk = role === "admin";
   // "Money viewer" — who may see amounts/totals. NOT who may act on finance forms.
   const isFinance = ["finance", "admin", "manager", "director"].includes(role);
   // Strict finance approval role — only finance (plus director as backstop)
@@ -2141,8 +2144,26 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Attachments */}
-      <AttachmentsSection ownerType="project" ownerId={p.id} />
+      {/* The project's own attachment shelf is a free-for-all: anyone who can
+          open the job drops anything on it — packing lists, vendor invoices,
+          drawings — which walks straight around the walls the cards above
+          draw. Admin is the role those walls are drawn around most tightly
+          (no cost, no supplier PO, no supplier drawing, no customs pack), so
+          the shelf is not theirs to browse. */}
+      {!isAdminDesk && (
+        <AttachmentsSection ownerType="project" ownerId={p.id} />
+      )}
+
+      {/* What admin does need off this job is the customer's own PO document —
+          the thing they invoice and ship against. It lives on the customer PO,
+          so it comes here rather than through the shelf above. */}
+      {data.data.customer_po?.id && (
+        <AttachmentsSection
+          ownerType="customer_po"
+          ownerId={data.data.customer_po.id}
+          title={t("Customer PO files", "Berkas PO pelanggan")}
+        />
+      )}
 
       {/* Discussion — @mention pulls in anyone, including staff who can't
           open this project. */}
