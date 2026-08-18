@@ -113,6 +113,10 @@ class CreateIn(BaseModel):
 
 
 class UpdateIn(BaseModel):
+    # The number is purchasing's own reference on the sheet they send out —
+    # editable until it has gone, after which changing it means the vendor
+    # is holding a document that no longer matches ours.
+    number: str | None = None
     items: list[ItemIn] | None = None
     notes: str | None = None
     valid_until: date | None = None
@@ -493,22 +497,86 @@ async def update_request(
             f"A '{spr.status}' request can't be edited — it already has an answer.",
         )
     data = payload.model_dump(exclude_unset=True)
+
+    if "number" in data:
+        new_num = (data["number"] or "").strip()
+        if not new_num:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "The request number can't be empty")
+        if spr.status != "draft":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This has already gone to the supplier — renumbering it now "
+                "would leave them holding a different document.",
+            )
+        if new_num != spr.number:
+            clash = await db.scalar(
+                select(SupplierPriceRequest).where(
+                    SupplierPriceRequest.number == new_num,
+                    SupplierPriceRequest.id != spr.id,
+                )
+            )
+            if clash:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"'{new_num}' is already used by another request",
+                )
+            spr.number = new_num
+
     if "items" in data and data["items"] is not None:
         if not data["items"]:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "A request needs at least one line")
-        if spr.price_request_id:
+        # Once it has gone out, the vendor is quoting against the list they
+        # were sent. Correcting the list underneath them would mean their
+        # answer no longer says what it looks like it says.
+        if spr.status != "draft":
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "The lines come from the price request this is costing — "
-                "changing them here would compare two different things.",
+                "This has already gone to the supplier — they are quoting "
+                "against the list they were sent.",
             )
-        spr.items = [{"line_no": i["line_no"], "description": i["description"],
-                      "qty": float(i.get("qty") or 0), "uom": i.get("uom"),
-                      "note": i.get("note")} for i in data["items"]]
+        # A request that costs a customer's price request is measured against
+        # it: the comparison across vendors, and the "which lines are covered"
+        # accounting, both work off `line_no`. So the *wording* of a line is
+        # purchasing's to fix — a typo, a missing UOM, a quantity the customer
+        # revised — but the set of lines is not theirs to add to or drop from
+        # here. That is what would compare two different things.
+        old = {int(i.get("line_no")): dict(i) for i in (spr.items or [])}
+        # A joint request has no `price_request_id` — the sources live per
+        # line — so ask the lines themselves whether they came from anywhere.
+        borrowed = bool(spr.price_request_id) or any(
+            i.get("source_pr_id") for i in old.values())
+        if borrowed:
+            now_ = {int(i["line_no"]) for i in data["items"]}
+            if set(old) != now_:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "The lines come from the price request this is costing — "
+                    "reword them here, but adding or removing one would "
+                    "compare two different things.",
+                )
+        # Merge rather than replace: a line also carries where it came from
+        # and, on a draft priced off a vendor's list, what they charge. This
+        # call is about the wording, and must not quietly drop the rest.
+        items = []
+        for i in data["items"]:
+            row = old.get(int(i["line_no"]), {})
+            row.update({
+                "line_no": i["line_no"],
+                "description": i["description"],
+                "qty": float(i.get("qty") or 0),
+                "uom": i.get("uom"),
+                "note": i.get("note") if i.get("note") is not None else row.get("note"),
+            })
+            items.append(row)
+        spr.items = items
     for field in ("notes", "valid_until", "currency"):
         if field in data:
             setattr(spr, field, data[field])
+    await audit_record(db, actor=user, action="update",
+                       entity="supplier_price_request", entity_id=spr.id,
+                       after={"number": spr.number, "fields": sorted(data)})
     await db.flush()
     return (await _decorate(db, [spr]))[0]
 

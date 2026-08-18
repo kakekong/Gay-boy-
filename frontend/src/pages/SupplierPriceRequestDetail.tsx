@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, ClipboardList, Loader2, AlertCircle, Send, Save, CheckCircle2,
-  Archive, Trash2, Truck, Building2, CalendarDays,
+  Archive, Trash2, Truck, Building2, CalendarDays, Pencil, X,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -92,6 +92,11 @@ export default function SupplierPriceRequestDetailPage() {
   const [basis, setBasis] = useState<"unit" | "total">("unit");
   const [leadDays, setLeadDays] = useState("");
   const [quoteNote, setQuoteNote] = useState("");
+  // Correcting the sheet itself — the number on it and what it asks for —
+  // which is only allowed while it is still a draft nobody has sent.
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<{ number: string; items: Line[] }>(
+    { number: "", items: [] });
 
   const q = useQuery({
     queryKey: ["supplier-price-request", id],
@@ -130,6 +135,23 @@ export default function SupplierPriceRequestDetailPage() {
       ?? t("Something went wrong.", "Terjadi kesalahan."),
   });
 
+  const save = useMutation({
+    mutationFn: () => api.patch(`/purchasing/price-requests/${id}`, {
+      number: form.number.trim(),
+      items: form.items.map((it) => ({
+        line_no: it.line_no,
+        description: it.description,
+        qty: Number(it.qty) || 0,
+        uom: it.uom?.trim() ? it.uom.trim() : null,
+      })),
+    }),
+    onSuccess: () => {
+      setEditing(false);
+      refresh();
+      setFlash({ kind: "ok", text: t("Request updated.", "Permintaan diperbarui.") });
+    },
+    onError: onErr,
+  });
   const send = useMutation({
     mutationFn: () => api.post(`/purchasing/price-requests/${id}/send`),
     onSuccess: () => { refresh(); setFlash({ kind: "ok", text: t("Marked as sent.", "Ditandai terkirim.") }); },
@@ -184,6 +206,12 @@ export default function SupplierPriceRequestDetailPage() {
     onError: onErr,
   });
 
+  const editLine = (lineNo: number, patch: Partial<Line>) =>
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((it) => (it.line_no === lineNo ? { ...it, ...patch } : it)),
+    }));
+
   const typedTotal = useMemo(() => {
     if (!q.data) return 0;
     return q.data.items.reduce((sum, it) => {
@@ -216,6 +244,10 @@ export default function SupplierPriceRequestDetailPage() {
 
   const r = q.data;
   const editable = !["closed", "cancelled"].includes(r.status);
+  // While the sheet itself is being corrected, the quote form stands down:
+  // two Save buttons on one screen is an invitation to press the wrong one,
+  // and a price typed against a line that is being reworded is a half-thought.
+  const quoting = editable && !editing;
   const everyLineAnswered = r.lines_total > 0 && r.lines_quoted === r.lines_total;
 
   return (
@@ -244,7 +276,19 @@ export default function SupplierPriceRequestDetailPage() {
               <ClipboardList size={13} className="text-brand-600" />
               {t("Price request to supplier", "Permintaan harga ke pemasok")}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight mt-0.5">{r.number}</h1>
+            {editing ? (
+              <label className="block mt-0.5">
+                <span className="sr-only">{t("Request number", "Nomor permintaan")}</span>
+                <input
+                  className="input text-2xl font-semibold tracking-tight w-64"
+                  aria-label={t("Request number", "Nomor permintaan")}
+                  value={form.number}
+                  onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))}
+                />
+              </label>
+            ) : (
+              <h1 className="text-2xl font-semibold tracking-tight mt-0.5">{r.number}</h1>
+            )}
             <div className="mt-1 flex items-center gap-2 flex-wrap text-sm">
               <Link to={`/suppliers/${r.supplier_id}`}
                 className="inline-flex items-center gap-1 text-brand-700 hover:underline">
@@ -261,8 +305,22 @@ export default function SupplierPriceRequestDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {r.status === "draft" && (
+            {/* A draft has not gone anywhere yet, so the sheet itself is
+                still purchasing's to correct: its number, the wording of a
+                line, a quantity, a missing unit. Once it is sent the vendor
+                is holding a copy, and the server refuses. */}
+            {r.status === "draft" && !editing && (
               <>
+                <button className="btn-ghost"
+                  onClick={() => {
+                    setForm({
+                      number: r.number,
+                      items: r.items.map((it) => ({ ...it })),
+                    });
+                    setEditing(true);
+                  }}>
+                  <Pencil size={14} /> {t("Edit request", "Ubah permintaan")}
+                </button>
                 <button className="btn-primary" disabled={send.isPending}
                   onClick={() => send.mutate()}>
                   {send.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
@@ -273,6 +331,19 @@ export default function SupplierPriceRequestDetailPage() {
                     if (window.confirm(t("Delete this draft?", "Hapus draf ini?"))) drop.mutate();
                   }}>
                   <Trash2 size={14} /> {t("Delete draft", "Hapus draf")}
+                </button>
+              </>
+            )}
+            {r.status === "draft" && editing && (
+              <>
+                <button className="btn-primary" disabled={save.isPending}
+                  onClick={() => save.mutate()}>
+                  {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {t("Save changes", "Simpan perubahan")}
+                </button>
+                <button className="btn-ghost" disabled={save.isPending}
+                  onClick={() => setEditing(false)}>
+                  <X size={14} /> {t("Cancel", "Batal")}
                 </button>
               </>
             )}
@@ -341,11 +412,14 @@ export default function SupplierPriceRequestDetailPage() {
           <div>
             <div className="font-semibold">{t("What they quoted", "Harga yang mereka berikan")}</div>
             <div className="text-xs muted">
-              {t("Type what the supplier said. Nothing leaves this page until you save it.",
-                 "Ketik yang disampaikan pemasok. Tidak ada yang tersimpan sampai Anda menyimpannya.")}
+              {editing
+                ? t("Fix the wording, the quantity or the unit, then press Save changes above.",
+                     "Perbaiki uraian, jumlah, atau satuannya, lalu tekan Simpan perubahan di atas.")
+                : t("Type what the supplier said. Nothing leaves this page until you save it.",
+                     "Ketik yang disampaikan pemasok. Tidak ada yang tersimpan sampai Anda menyimpannya.")}
             </div>
           </div>
-          {editable && (
+          {quoting && (
             <label className="text-xs flex items-center gap-2">
               {t("They quoted per", "Mereka memberi harga per")}
               <select className="input py-1" value={basis}
@@ -370,13 +444,22 @@ export default function SupplierPriceRequestDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {r.items.map((it) => {
+            {(editing ? form.items : r.items).map((it) => {
               const raw = Number(draft[it.line_no]?.price || 0);
               const perUnit = basis === "total" && it.qty ? raw / it.qty : raw;
               return (
                 <tr key={it.line_no} className="border-t border-ink-100">
                   <td className="td font-mono text-xs muted">{it.line_no}</td>
-                  <td className="td">{it.description}</td>
+                  <td className="td">
+                    {editing ? (
+                      <input
+                        className="input w-full min-w-[12rem]"
+                        aria-label={`${t("Description", "Deskripsi")} ${it.line_no}`}
+                        value={it.description}
+                        onChange={(e) => editLine(it.line_no, { description: e.target.value })}
+                      />
+                    ) : it.description}
+                  </td>
                   {r.is_joint && (
                     <td className="td font-mono text-[11px] muted">
                       {it.source_pr_number
@@ -384,10 +467,29 @@ export default function SupplierPriceRequestDetailPage() {
                         : "—"}
                     </td>
                   )}
-                  <td className="td text-right tabular-nums">{it.qty}</td>
-                  <td className="td muted">{it.uom ?? "—"}</td>
+                  <td className="td text-right tabular-nums">
+                    {editing ? (
+                      <input
+                        className="input text-right tabular-nums w-20 ml-auto"
+                        type="number" min={0} step="any"
+                        aria-label={`${t("Qty", "Jml")} ${it.line_no}`}
+                        value={it.qty}
+                        onChange={(e) => editLine(it.line_no, { qty: Number(e.target.value) })}
+                      />
+                    ) : it.qty}
+                  </td>
+                  <td className="td muted">
+                    {editing ? (
+                      <input
+                        className="input w-24"
+                        aria-label={`${t("UoM", "Satuan")} ${it.line_no}`}
+                        value={it.uom ?? ""}
+                        onChange={(e) => editLine(it.line_no, { uom: e.target.value })}
+                      />
+                    ) : (it.uom ?? "—")}
+                  </td>
                   <td className="td text-right">
-                    {editable ? (
+                    {quoting ? (
                       <input
                         className="input text-right tabular-nums w-36 ml-auto"
                         inputMode="numeric"
@@ -404,7 +506,7 @@ export default function SupplierPriceRequestDetailPage() {
                     )}
                   </td>
                   <td className="td text-right">
-                    {editable ? (
+                    {quoting ? (
                       <input
                         className="input text-right tabular-nums w-20 ml-auto"
                         inputMode="numeric"
@@ -427,7 +529,7 @@ export default function SupplierPriceRequestDetailPage() {
           </tbody>
         </table>
 
-        {editable && (
+        {quoting && (
           <div className="px-5 py-4 border-t border-ink-100 space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <label className="block">
