@@ -56,6 +56,18 @@ async def main():
     r=await c.post("/attachments/link",headers=s2,json={"owner_type":"daily_log","owner_id":logid,"url":"docs.com/evil"})
     check("peer cannot add link to others' log", r.status_code==403, str(r.status_code))
 
+    # 6b. the link route is not a way around the upload route's walls. It
+    # used to check the owner type was legal and, for a daily log, that the
+    # log was yours — and nothing else, so pasting a link reached owners and
+    # rows that choosing a file never would.
+    other=J(await c.post("/customers",headers=s2,json={"company_name":"PT Not Yours","industry":"mining"}))["id"]
+    r=await c.post("/attachments/link",headers=s,json={"owner_type":"customer","owner_id":other,"url":"drive.google.com/theirs"})
+    check("a rep cannot link onto another rep's customer", r.status_code==403, f"{r.status_code} {J(r)}")
+    r=await c.post("/attachments/link",headers=s,json={"owner_type":"supplier_po","owner_id":cust,"url":"drive.google.com/po"})
+    check("sales cannot link onto a supplier PO", r.status_code==403, f"{r.status_code} {J(r)}")
+    r=await c.post("/attachments/link",headers=s,json={"owner_type":"employee","owner_id":cust,"url":"drive.google.com/ktp"})
+    check("...nor onto an employee's personnel file", r.status_code==403, f"{r.status_code} {J(r)}")
+
     # 7. delete a link (no file on disk) works
     r=await c.delete(f"/attachments/{lid}",headers=d)
     check("delete link ok", r.status_code in (200,204), str(r.status_code))

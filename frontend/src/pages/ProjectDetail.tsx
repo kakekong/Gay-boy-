@@ -2374,8 +2374,12 @@ export default function ProjectDetailPage() {
           drawings — which walks straight around the walls the cards above
           draw. Admin is the role those walls are drawn around most tightly
           (no cost, no supplier PO, no supplier drawing, no customs pack), so
-          the shelf is not theirs to browse. */}
-      {!isAdminDesk && (
+          the shelf is not theirs to browse. Sales for the same reason: every
+          internal card on this page is already hidden from them, and a shelf
+          holding the drawings and the freight paperwork would hand back what
+          those cards withhold. The customer's own PO document, below, is
+          theirs and stays. */}
+      {!isAdminDesk && !isSales && (
         <AttachmentsSection ownerType="project" ownerId={p.id} />
       )}
 

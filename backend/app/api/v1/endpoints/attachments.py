@@ -311,12 +311,18 @@ def _project_shelf_barred(role: Role) -> bool:
     draw. Admin gets the customer PO's documents instead, which is the
     paperwork they actually invoice and ship against.
 
+    Sales is barred for the same reason and more so: the project page shows
+    them the customer-facing shell only — no work orders, no drawings, no
+    deliveries, no invoices, no supplier POs — and a shelf carrying exactly
+    those documents hands all of it back through one card. Their own
+    customer's PO document sits on the customer PO, where they filed it.
+
     Reading and writing are the same question, so this gates both. What it
     does NOT gate is downloading by id: that is how the customer drawing
-    admin *is* entitled to gets fetched, and `download_attachment` applies
-    the drawing-kind wall on its own.
+    these roles *are* entitled to gets fetched, and `download_attachment`
+    applies the drawing-kind wall on its own.
     """
-    return role == Role.ADMIN
+    return role in (Role.ADMIN, Role.SALES)
 
 
 @router.get("")
@@ -333,8 +339,8 @@ async def list_attachments(
     if owner_type == "project" and _project_shelf_barred(Role(me.role)):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "The project's file shelf isn't admin's — the customer PO's "
-            "documents are on the project page instead.",
+            "The project's file shelf isn't yours to browse — the customer "
+            "PO's documents are on the project page instead.",
         )
     if owner_type == "daily_log" and not await _daily_log_read_ok(db, me, owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
@@ -408,7 +414,7 @@ async def upload_attachment(
                             "Not allowed to attach files here")
     if owner_type == "project" and _project_shelf_barred(Role(me.role)):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "The project's file shelf isn't admin's")
+                            "The project's file shelf isn't yours to add to")
     if not await _external_owns_attachment(db, me, owner_type, owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Not allowed to attach files here")
@@ -470,9 +476,30 @@ async def add_link(
     Same owner types and permissions as file upload — the difference is the
     'attachment' is a URL, so it survives Space rebuilds that wipe uploaded
     files.
+
+    "Same permissions" was a claim this route did not keep: it checked the
+    owner type was legal and, for a daily log, that the log was yours, and
+    nothing else. Every wall the upload route draws — who may file against
+    this owner type at all, the project shelf, a rep's own customers, an
+    external portal's own rows — could be walked around by pasting a link
+    instead of choosing a file. They are applied here now, in the same order.
     """
     if payload.owner_type not in ALLOWED_OWNERS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid owner_type")
+    if not _attachment_visible_to(payload.owner_type, Role(me.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not allowed to attach files here")
+    if payload.owner_type == "project" and _project_shelf_barred(Role(me.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "The project's file shelf isn't yours to add to")
+    if not await _external_owns_attachment(db, me, payload.owner_type,
+                                           payload.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not allowed to attach files here")
+    if not await _sales_owns_attachment(db, me, payload.owner_type,
+                                        payload.owner_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not your customer's record")
     if payload.owner_type == "daily_log":
         from app.models.daily_log import DailyLog
         log = await db.get(DailyLog, payload.owner_id)

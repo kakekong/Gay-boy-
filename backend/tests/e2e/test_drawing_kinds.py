@@ -219,19 +219,39 @@ async def main():
     check("purchasing can list the supplier drawing's file", sup_file is not None,
           str([a.get("filename") for a in sup_att]))
 
-    listed = J(await c.get("/attachments", headers=s1,
-                           params={"owner_type": "project", "owner_id": proj}))
-    names = [a.get("filename") for a in listed]
-    check("sales cannot list it", "supplier.pdf" not in names, str(names))
+    # Sales no longer browses the shelf at all — every internal card on the
+    # project page is hidden from them, and a shelf holding the drawings and
+    # the freight paperwork hands all of it back through one card. Their
+    # entitlement to the customer's own drawing is unchanged: that is a
+    # download by id, which this gate deliberately does not touch.
+    r = await c.get("/attachments", headers=s1,
+                    params={"owner_type": "project", "owner_id": proj})
+    check("sales cannot browse the project's file shelf", r.status_code == 403,
+          f"{r.status_code} {str(J(r))[:120]}")
     if sup_file:
         r = await c.get(f"/attachments/{sup_file['id']}/download", headers=s1)
-        check("...nor download it directly", r.status_code == 403, str(r.status_code))
+        check("...nor download the vendor's sheet directly",
+              r.status_code == 403, str(r.status_code))
+    listed = J(await c.get("/attachments", headers=d,
+                           params={"owner_type": "project", "owner_id": proj}))
     cus = next((a for a in listed if a.get("filename") == "customer.pdf"), None)
-    check("...while the customer's file is still theirs to open",
-          cus is not None, str(names))
+    check("the customer's drawing is on the shelf for those who may browse it",
+          cus is not None, str([a.get("filename") for a in listed]))
     if cus:
         r = await c.get(f"/attachments/{cus['id']}/download", headers=s1)
-        check("...and downloads", r.status_code == 200, str(r.status_code))
+        check("...and still opens for sales, by id", r.status_code == 200,
+              str(r.status_code))
+    r = await c.post("/attachments", headers=s1,
+                     data={"owner_type": "project", "owner_id": proj},
+                     files={"file": ("sales-sneak.pdf", io.BytesIO(pdf("s")),
+                                     "application/pdf")})
+    check("...and sales cannot put anything on the shelf either",
+          r.status_code == 403, str(r.status_code))
+    r = await c.post("/attachments/link", headers=s1, json={
+        "owner_type": "project", "owner_id": str(proj),
+        "url": "drive.google.com/sneak", "label": "sneak"})
+    check("...not even as a pasted link", r.status_code == 403,
+          f"{r.status_code} {str(J(r))[:120]}")
 
     # Admin does not browse the shelf at all — it is where purchasing puts
     # the packing list and the freight invoice, which is the pack admin was
