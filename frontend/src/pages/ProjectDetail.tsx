@@ -5,6 +5,7 @@ import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
   Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight, Link2,
+  Pencil, Save,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -244,6 +245,9 @@ export default function ProjectDetailPage() {
   // the paperwork end of their own job. What stays finance-only is the money
   // that follows: recording payments, and deleting an invoice outright.
   const canInvoiceDesk = canFinanceApprove || role === "admin";
+  // The desk that issues delivery orders, and so the desk that fixes a
+  // wrong one or withdraws a duplicate — while nobody has signed off on it.
+  const canEditDelivery = ["admin", "director", "manager"].includes(role);
   // Internal staff upload the drawing (on behalf of the supplier); the director
   // signs it off. The drawing file is viewable by either of those.
   const canApproveDrawing = ["director", "manager", "admin"].includes(role);
@@ -295,6 +299,14 @@ export default function ProjectDetailPage() {
   // Per-DO proof upload form (file + optional courier/tracking).
   const [doProof, setDoProof] = useState<Record<string, {
     file?: File | null; courier?: string; tracking?: string;
+  }>>({});
+  // The delivery order / invoice currently being corrected, if any. One row
+  // at a time on each table — an edit is a small, deliberate act.
+  const [doEdit, setDoEdit] = useState<Record<string, {
+    number: string; split_index: string; courier: string; tracking_no: string;
+  }>>({});
+  const [invEdit, setInvEdit] = useState<Record<string, {
+    number: string; due_date: string; amount: string; tax_amount: string;
   }>>({});
 
   const onErr = (e: any) => alert(
@@ -366,6 +378,20 @@ export default function ProjectDetailPage() {
     mutationFn: (doId: string) => api.patch(`/operation/deliveries/${doId}/delivered`),
     onSuccess: refresh,
     onError: onErr,
+  });
+  // Correcting or withdrawing a delivery order before anyone signs off on
+  // it. Issuing an invoice raises a DO alongside it, so a double-press
+  // leaves a duplicate shipment that would otherwise sit there forever
+  // asking for proof.
+  const editDelivery = useMutation({
+    mutationFn: (body: { doId: string; patch: Record<string, any> }) =>
+      api.patch(`/operation/deliveries/${body.doId}`, body.patch),
+    onSuccess: () => { setDoEdit({}); refresh(); },
+    onError: onErr,
+  });
+  const deleteDelivery = useMutation({
+    mutationFn: (doId: string) => api.delete(`/operation/deliveries/${doId}`),
+    onSuccess: refresh, onError: onErr,
   });
 
   // Drawings: internal upload + director sign-off.
@@ -466,13 +492,20 @@ export default function ProjectDetailPage() {
     onSuccess: refresh, onError: onErr,
   });
   const deleteInvoice = useMutation({
-    // Finance-only escape hatch — used for duplicates and re-tests. The
-    // backend refuses if the invoice has any verified payments (would
-    // orphan a ledger entry). Pending claims + file rows are cleaned up
-    // alongside the invoice.
+    // For duplicates and re-tests. The backend refuses if the invoice has
+    // any verified payments (would orphan a ledger entry), and admin may
+    // only withdraw one finance has not approved yet. Pending claims + file
+    // rows are cleaned up alongside the invoice.
     mutationFn: (invoiceId: string) =>
       api.delete(`/finance/invoices/${invoiceId}`),
     onSuccess: refresh, onError: onErr,
+  });
+  // Fixing what an invoice asks for, before finance signs it off.
+  const editInvoice = useMutation({
+    mutationFn: (body: { invoiceId: string; patch: Record<string, any> }) =>
+      api.patch(`/finance/invoices/${body.invoiceId}`, body.patch),
+    onSuccess: () => { setInvEdit({}); refresh(); },
+    onError: onErr,
   });
   const customerReceived = useMutation({
     mutationFn: () => api.post(`/operation/projects/${id}/customer-received`),
@@ -1574,30 +1607,6 @@ export default function ProjectDetailPage() {
                       : iv.status === "pending_finance" ? "bg-amber-50 text-amber-700"
                       : iv.status === "rejected" ? "bg-red-50 text-red-700"
                       : "bg-ink-50 text-ink-600")}>{sl(iv.status, INVOICE_STATUS_LABEL_ID)}</span>
-                    {canFinanceApprove && (iv.paid_amount ?? 0) === 0 && (
-                      <button
-                        type="button"
-                        className="btn-ghost text-red-600 text-[11px] px-2 py-0.5"
-                        title={t(
-                          "Delete this invoice + its faktur pajak record. Blocked if a payment has been verified.",
-                          "Hapus faktur ini + catatan faktur pajaknya. Diblokir jika ada pembayaran yang sudah diverifikasi.",
-                        )}
-                        disabled={deleteInvoice.isPending}
-                        onClick={() => {
-                          const label = iv.faktur_pajak_no
-                            ? `${iv.number} (FP ${iv.faktur_pajak_no})`
-                            : iv.number;
-                          if (window.confirm(tt(
-                            `Delete ${label}? This also drops any pending payment claims and file rows tied to it. Verified payments block deletion. This can't be undone.`,
-                            `Hapus ${label}? Ini juga menghapus klaim pembayaran yang menunggu dan baris file yang terkait. Pembayaran terverifikasi memblokir penghapusan. Tindakan ini tidak bisa dibatalkan.`,
-                          ))) {
-                            deleteInvoice.mutate(iv.id);
-                          }
-                        }}
-                      >
-                        <Trash2 size={12} /> {t("Delete", "Hapus")}
-                      </button>
-                    )}
                   </div>
                 </div>
                 {iv.status === "rejected" && iv.notes && (
@@ -1906,12 +1915,46 @@ export default function ProjectDetailPage() {
                 const isDirector = role === "director";
                 const isVerified = !!d.verified_at;
                 const isDelivered = d.status === "delivered";
+                // Settled = the director verified the proof, or it has gone
+                // out as delivered. Before that the document is still ours.
+                const settled = isVerified || isDelivered;
+                const ed = doEdit[d.id];
+                const setEd = (patch: Partial<NonNullable<typeof ed>>) =>
+                  setDoEdit((m) => ({ ...m, [d.id]: { ...m[d.id], ...patch } as any }));
                 return (
                   <tr key={d.id} className="border-t border-ink-100 align-top">
-                    <td className="td font-mono text-xs">{d.number}</td>
-                    <td className="td muted">#{d.split_index}</td>
-                    <td className="td">{d.courier ?? "—"}</td>
-                    <td className="td font-mono text-xs">{d.tracking_no ?? "—"}</td>
+                    <td className="td font-mono text-xs">
+                      {ed ? (
+                        <input className="input text-xs py-1 w-32"
+                          aria-label={`DO number ${d.number}`}
+                          value={ed.number}
+                          onChange={(e) => setEd({ number: e.target.value })} />
+                      ) : d.number}
+                    </td>
+                    <td className="td muted">
+                      {ed ? (
+                        <input className="input text-xs py-1 w-14" type="number" min={1}
+                          aria-label={`Split ${d.number}`}
+                          value={ed.split_index}
+                          onChange={(e) => setEd({ split_index: e.target.value })} />
+                      ) : `#${d.split_index}`}
+                    </td>
+                    <td className="td">
+                      {ed ? (
+                        <input className="input text-xs py-1 w-28"
+                          aria-label={`Courier ${d.number}`}
+                          value={ed.courier}
+                          onChange={(e) => setEd({ courier: e.target.value })} />
+                      ) : (d.courier ?? "—")}
+                    </td>
+                    <td className="td font-mono text-xs">
+                      {ed ? (
+                        <input className="input text-xs py-1 w-28"
+                          aria-label={`Tracking ${d.number}`}
+                          value={ed.tracking_no}
+                          onChange={(e) => setEd({ tracking_no: e.target.value })} />
+                      ) : (d.tracking_no ?? "—")}
+                    </td>
                     <td className="td space-y-1">
                       <span className={clsx("chip capitalize",
                         isDelivered ? "bg-emerald-50 text-emerald-700"
@@ -1977,7 +2020,60 @@ export default function ProjectDetailPage() {
                         </details>
                       )}
                     </td>
-                    <td className="td text-right">
+                    <td className="td text-right space-y-1">
+                      {/* Correcting or withdrawing the document itself.
+                          Only until somebody has signed off on it. */}
+                      {canEditDelivery && !settled && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {ed ? (
+                            <>
+                              <button className="btn-primary py-0.5 px-2 text-[11px]"
+                                disabled={editDelivery.isPending}
+                                onClick={() => editDelivery.mutate({
+                                  doId: d.id,
+                                  patch: {
+                                    number: ed.number,
+                                    split_index: Number(ed.split_index) || 1,
+                                    courier: ed.courier,
+                                    tracking_no: ed.tracking_no,
+                                  },
+                                })}>
+                                <Save size={11} /> {t("Save", "Simpan")}
+                              </button>
+                              <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                                onClick={() => setDoEdit((m) => {
+                                  const n = { ...m }; delete n[d.id]; return n;
+                                })}>
+                                {t("Cancel", "Batal")}
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                                onClick={() => setDoEdit({
+                                  [d.id]: {
+                                    number: d.number ?? "",
+                                    split_index: String(d.split_index ?? 1),
+                                    courier: d.courier ?? "",
+                                    tracking_no: d.tracking_no ?? "",
+                                  },
+                                })}>
+                                <Pencil size={11} /> {t("Edit", "Ubah")}
+                              </button>
+                              <button className="btn-ghost text-red-600 py-0.5 px-2 text-[11px]"
+                                disabled={deleteDelivery.isPending}
+                                onClick={() => {
+                                  if (window.confirm(tt(
+                                    `Delete ${d.number}? Any proof filed against it goes too. This can't be undone.`,
+                                    `Hapus ${d.number}? Bukti yang sudah diunggah untuknya ikut terhapus. Tindakan ini tidak bisa dibatalkan.`,
+                                  ))) deleteDelivery.mutate(d.id);
+                                }}>
+                                <Trash2 size={11} /> {t("Delete", "Hapus")}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                       {isDelivered ? null
                         : isDirector ? (
                           // Director can both verify and mark delivered. Their
@@ -2034,20 +2130,149 @@ export default function ProjectDetailPage() {
                 <th className="th">{t("Due", "Jatuh tempo")}</th>
                 <th className="th">{T("Status")}</th>
                 {showMoney && <th className="th text-right">{T("Total")}</th>}
+                {canInvoiceDesk && <th className="th text-right">{t("Actions", "Aksi")}</th>}
               </tr>
             </thead>
             <tbody>
-              {inv.map((i: any) => (
-                <tr key={i.id} className="border-t border-ink-100">
-                  <td className="td font-mono text-xs">{i.number}</td>
+              {inv.map((i: any) => {
+                // Before finance signs it off, the invoice is still ours to
+                // fix — and a duplicate is still ours to withdraw. After,
+                // it carries a faktur pajak number and belongs to the tax
+                // record; the server refuses either way.
+                const unsigned = ["draft", "pending_finance", "rejected"].includes(i.status);
+                const unpaid = (i.paid_amount ?? 0) === 0;
+                const mayEdit = canInvoiceDesk && unsigned && unpaid;
+                const mayDelete = unpaid && (canFinanceApprove || (role === "admin" && unsigned));
+                const ie = invEdit[i.id];
+                const setIe = (patch: Partial<NonNullable<typeof ie>>) =>
+                  setInvEdit((m) => ({ ...m, [i.id]: { ...m[i.id], ...patch } as any }));
+                return (
+                <tr key={i.id} className="border-t border-ink-100 align-top">
+                  <td className="td font-mono text-xs">
+                    {ie ? (
+                      <input className="input text-xs py-1 w-32"
+                        aria-label={`Invoice number ${i.number}`}
+                        value={ie.number}
+                        onChange={(e) => setIe({ number: e.target.value })} />
+                    ) : i.number}
+                  </td>
                   <td className="td capitalize">{i.type}{i.termin_index ? ` #${i.termin_index}` : ""}</td>
-                  <td className="td muted">{i.due_date ?? "—"}</td>
+                  <td className="td muted">
+                    {ie ? (
+                      <input className="input text-xs py-1 w-36" type="date"
+                        aria-label={`Due date ${i.number}`}
+                        value={ie.due_date}
+                        onChange={(e) => setIe({ due_date: e.target.value })} />
+                    ) : (i.due_date ?? "—")}
+                  </td>
                   <td className="td"><span className="chip bg-ink-100 text-ink-700">{sl(i.status, INVOICE_STATUS_LABEL_ID)}</span></td>
                   {showMoney && (
-                    <td className="td text-right font-medium tabular-nums">{idr(i.total)}</td>
+                    <td className="td text-right font-medium tabular-nums">
+                      {ie ? (
+                        // The two halves of the money, because the e-Faktur
+                        // export files them separately — a typed total that
+                        // isn't their sum would file a return that doesn't
+                        // add up. The total below follows from them.
+                        <div className="space-y-1">
+                          <label className="flex items-center justify-end gap-1 text-[10px] muted">
+                            {t("DPP", "DPP")}
+                            <input className="input text-xs py-1 w-28 text-right tabular-nums"
+                              type="number" min={0} step="any"
+                              aria-label={`Amount ${i.number}`}
+                              value={ie.amount}
+                              onChange={(e) => setIe({ amount: e.target.value })} />
+                          </label>
+                          <label className="flex items-center justify-end gap-1 text-[10px] muted">
+                            {t("PPN", "PPN")}
+                            <input className="input text-xs py-1 w-28 text-right tabular-nums"
+                              type="number" min={0} step="any"
+                              aria-label={`Tax ${i.number}`}
+                              value={ie.tax_amount}
+                              onChange={(e) => setIe({ tax_amount: e.target.value })} />
+                          </label>
+                          <div className="text-[11px]">
+                            {idr((Number(ie.amount) || 0) + (Number(ie.tax_amount) || 0))}
+                          </div>
+                        </div>
+                      ) : idr(i.total)}
+                    </td>
+                  )}
+                  {canInvoiceDesk && (
+                    <td className="td text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {ie ? (
+                          <>
+                            <button className="btn-primary py-0.5 px-2 text-[11px]"
+                              disabled={editInvoice.isPending}
+                              onClick={() => editInvoice.mutate({
+                                invoiceId: i.id,
+                                patch: {
+                                  number: ie.number,
+                                  due_date: ie.due_date || null,
+                                  ...(showMoney ? {
+                                    amount: Number(ie.amount) || 0,
+                                    tax_amount: Number(ie.tax_amount) || 0,
+                                  } : {}),
+                                },
+                              })}>
+                              <Save size={11} /> {t("Save", "Simpan")}
+                            </button>
+                            <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                              onClick={() => setInvEdit((m) => {
+                                const n = { ...m }; delete n[i.id]; return n;
+                              })}>
+                              {t("Cancel", "Batal")}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {mayEdit && (
+                              <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                                onClick={() => setInvEdit({
+                                  [i.id]: {
+                                    number: i.number ?? "",
+                                    due_date: i.due_date ?? "",
+                                    amount: String(i.amount ?? 0),
+                                    tax_amount: String(i.tax_amount ?? 0),
+                                  },
+                                })}>
+                                <Pencil size={11} /> {t("Edit", "Ubah")}
+                              </button>
+                            )}
+                            {mayDelete && (
+                              <button className="btn-ghost text-red-600 py-0.5 px-2 text-[11px]"
+                                title={t(
+                                  "Delete this invoice + its faktur pajak record. Blocked once a payment has been verified.",
+                                  "Hapus faktur ini + catatan faktur pajaknya. Diblokir jika ada pembayaran yang sudah diverifikasi.",
+                                )}
+                                disabled={deleteInvoice.isPending}
+                                onClick={() => {
+                                  const label = i.faktur_pajak_no
+                                    ? `${i.number} (FP ${i.faktur_pajak_no})`
+                                    : i.number;
+                                  if (window.confirm(tt(
+                                    `Delete ${label}? This also drops any pending payment claims and file rows tied to it. Verified payments block deletion. This can't be undone.`,
+                                    `Hapus ${label}? Ini juga menghapus klaim pembayaran yang menunggu dan baris file yang terkait. Pembayaran terverifikasi memblokir penghapusan. Tindakan ini tidak bisa dibatalkan.`,
+                                  ))) deleteInvoice.mutate(i.id);
+                                }}>
+                                <Trash2 size={11} /> {t("Delete", "Hapus")}
+                              </button>
+                            )}
+                            {!mayEdit && !mayDelete && (
+                              <span className="muted text-[11px]">
+                                {(i.paid_amount ?? 0) > 0
+                                  ? t("paid", "sudah dibayar")
+                                  : t("approved", "disetujui")}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}

@@ -1869,6 +1869,124 @@ async def create_delivery(project_id: UUID, payload: DeliveryIn,
     return {"id": str(d.id), "number": d.number}
 
 
+class DeliveryEdit(BaseModel):
+    number: str | None = None
+    split_index: int | None = None
+    courier: str | None = None
+    tracking_no: str | None = None
+
+
+# Who may correct or withdraw a delivery order. Admin issue them, and the
+# director/manager oversee the desk that does.
+_DO_DESK = {Role.ADMIN, Role.DIRECTOR, Role.MANAGER}
+
+
+def _do_settled(d: DeliveryOrder) -> str | None:
+    """Why this DO can no longer be touched, if it can't.
+
+    A delivery order stops being ours to change the moment somebody has
+    signed off on it: the director verified the shipping proof, or the goods
+    are marked delivered. Before that it is a piece of paper issued a minute
+    ago, and a duplicate or a typo in the courier's name should not need a
+    director to unpick.
+    """
+    if d.status == "delivered":
+        return ("This delivery is already marked delivered — the goods have "
+                "gone out under this document.")
+    if d.verified_at:
+        return ("The director has already verified the shipping proof on "
+                "this delivery order. Upload new proof if the shipment "
+                "changed; that withdraws the verification.")
+    return None
+
+
+@router.patch("/deliveries/{do_id}")
+async def update_delivery(do_id: UUID, payload: DeliveryEdit,
+                          db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """Correct a delivery order before anyone has signed off on it."""
+    if Role(user.role) not in _DO_DESK:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the admin desk or management can edit a "
+                            "delivery order.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+    if (why := _do_settled(d)):
+        raise HTTPException(status.HTTP_409_CONFLICT, why)
+
+    data = payload.model_dump(exclude_unset=True)
+    if "number" in data:
+        new_num = (data["number"] or "").strip()
+        if not new_num:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "The DO number can't be empty")
+        if new_num != d.number:
+            clash = await db.scalar(select(DeliveryOrder).where(
+                DeliveryOrder.number == new_num, DeliveryOrder.id != d.id))
+            if clash:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"'{new_num}' is already used by another delivery order")
+            d.number = new_num
+    if "split_index" in data and data["split_index"] is not None:
+        if int(data["split_index"]) < 1:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "The split number starts at 1")
+        d.split_index = int(data["split_index"])
+    if "courier" in data:
+        d.courier = (data["courier"] or "").strip() or None
+    if "tracking_no" in data:
+        d.tracking_no = (data["tracking_no"] or "").strip() or None
+
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="update", entity="delivery_order",
+                       entity_id=d.id,
+                       after={"number": d.number, "split_index": d.split_index,
+                              "courier": d.courier, "tracking_no": d.tracking_no})
+    await db.flush()
+    return {"ok": True, "id": str(d.id), "number": d.number,
+            "split_index": d.split_index, "courier": d.courier,
+            "tracking_no": d.tracking_no}
+
+
+@router.delete("/deliveries/{do_id}", status_code=204)
+async def delete_delivery(do_id: UUID,
+                          db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """Withdraw a delivery order nobody has signed off on.
+
+    Issuing the invoice raises a DO alongside it, so pressing that button
+    twice leaves a duplicate shipment on the project — one that would go on
+    asking for proof and blocking the project from reading as delivered.
+    """
+    if Role(user.role) not in _DO_DESK:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the admin desk or management can delete a "
+                            "delivery order.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+    if (why := _do_settled(d)):
+        raise HTTPException(status.HTTP_409_CONFLICT, why)
+
+    before = {"number": d.number, "project_id": str(d.project_id),
+              "split_index": d.split_index, "status": d.status}
+    # The proof rows go with it. Blobs stay on disk — the /attachments
+    # endpoint is what clears those, same as deleting an invoice.
+    for a in (await db.scalars(
+        select(Attachment).where(Attachment.owner_type == "delivery_order",
+                                 Attachment.owner_id == do_id)
+    )).all():
+        await db.delete(a)
+    await db.delete(d)
+    await db.flush()
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="delete", entity="delivery_order",
+                       entity_id=do_id, before=before)
+    return None
+
+
 @router.patch("/deliveries/{do_id}/delivered")
 async def mark_delivered(do_id: UUID,
                          db: AsyncSession = Depends(get_db),

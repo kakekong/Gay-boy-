@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -189,7 +190,107 @@ async def reject_invoice(
     return {"ok": True, "status": inv.status, "reason": reason}
 
 
-@router.delete("/invoices/{invoice_id}", status_code=204)
+class InvoiceEdit(BaseModel):
+    number: str | None = None
+    due_date: date | None = None
+    amount: float | None = None
+    tax_amount: float | None = None
+    notes: str | None = None
+
+
+# An invoice finance has signed off is the customer's document: it carries a
+# faktur pajak number, it has been sent, and the tax record refers to it.
+# Everything before that is still a draft in all but name.
+_UNSIGNED = ("draft", "pending_finance", "rejected")
+
+
+@invoice_desk.patch("/invoices/{invoice_id}")
+async def update_invoice(
+    invoice_id: UUID,
+    payload: InvoiceEdit,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Correct an invoice before finance has signed it off.
+
+    Admin issue the invoice from the project page, straight off the
+    quotation, and the figure it defaults to is not always the figure that
+    should go out — a revised quantity, a due date agreed on the phone, tax
+    the customer is exempt from. Until now the only fix was to delete it and
+    issue a new one, which burns an invoice number and, if the delivery
+    order went out with it, leaves a shipment behind.
+
+    Both halves of the money are editable and the total is recomputed from
+    them: the DPP is what the e-Faktur export files as JUMLAH_DPP and the
+    PPN as JUMLAH_PPN, so letting someone type a total that is not the sum
+    of the two would file a return that does not add up.
+    """
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    if inv.status not in _UNSIGNED:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"An invoice in status '{inv.status}' can't be edited — finance "
+            "has signed it off and it carries a faktur pajak number. Issue a "
+            "credit note or a corrected invoice instead.",
+        )
+    paid = await db.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id == invoice_id)
+    ) or 0
+    if float(paid) > 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This invoice already has verified payments against it — "
+            "changing what it asks for would leave the ledger unbalanced.",
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    if "number" in data:
+        new_num = (data["number"] or "").strip()
+        if not new_num:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "The invoice number can't be empty")
+        if new_num != inv.number:
+            clash = await db.scalar(select(Invoice).where(
+                Invoice.number == new_num, Invoice.id != inv.id))
+            if clash:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"'{new_num}' is already used by another invoice")
+            inv.number = new_num
+    if "due_date" in data:
+        inv.due_date = data["due_date"]
+    if "notes" in data:
+        inv.notes = (data["notes"] or "").strip() or None
+    money_changed = False
+    for field in ("amount", "tax_amount"):
+        if field in data and data[field] is not None:
+            if float(data[field]) < 0:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"{field} can't be negative")
+            setattr(inv, field, float(data[field]))
+            money_changed = True
+    if money_changed:
+        inv.total = float(inv.amount or 0) + float(inv.tax_amount or 0)
+
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="update", entity="invoice",
+                       entity_id=inv.id,
+                       after={"number": inv.number, "due_date": str(inv.due_date),
+                              "amount": float(inv.amount or 0),
+                              "tax_amount": float(inv.tax_amount or 0),
+                              "total": float(inv.total or 0)})
+    await db.flush()
+    return {"ok": True, "id": str(inv.id), "number": inv.number,
+            "status": inv.status, "due_date": inv.due_date,
+            "amount": float(inv.amount or 0),
+            "tax_amount": float(inv.tax_amount or 0),
+            "total": float(inv.total or 0)}
+
+
+@invoice_desk.delete("/invoices/{invoice_id}", status_code=204)
 async def delete_invoice(
     invoice_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -197,19 +298,27 @@ async def delete_invoice(
 ):
     """Delete an invoice + its faktur-pajak record entirely.
 
-    Finance's escape hatch for duplicates and test data — the button lives
-    on the project page. Blocked when the invoice already has verified
-    payments (would corrupt the ledger). Attachments and pending payment
-    claims tied to the invoice are cleaned up alongside it.
+    The escape hatch for duplicates and test data — the button lives on the
+    project page. Blocked when the invoice already has verified payments
+    (would corrupt the ledger). Attachments and pending payment claims tied
+    to the invoice are cleaned up alongside it.
+
+    Admin issue invoices, so admin can withdraw one *they have not got
+    approved yet* — pressing Issue twice is the way this happens, and making
+    them wait for finance to delete a duplicate that finance never wanted
+    was a queue for nothing. Once finance has signed it off it is out of
+    admin's hands, and only finance or the director can remove it.
     """
-    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Only finance or the director can delete an invoice.",
-        )
     inv = await db.get(Invoice, invoice_id)
     if not inv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        if Role(user.role) != Role.ADMIN or inv.status not in _UNSIGNED:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Only finance or the director can delete an invoice finance "
+                "has already approved.",
+            )
 
     # Guard rail: refuse if there's any actual verified payment on it —
     # otherwise deleting the invoice orphans a ledger entry.
