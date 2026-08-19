@@ -18,6 +18,7 @@ import { CommentThread } from "@/components/CommentThread";
 import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { NewDeliveryOrderModal } from "@/components/NewDeliveryOrderModal";
 
 const STATUS_CHIP: Record<string, string> = {
   new:              "bg-ink-100 text-ink-700",
@@ -314,6 +315,10 @@ export default function ProjectDetailPage() {
   }>>({});
   // The faktur pajak number for the director's one-press sign-off.
   const [bothFp, setBothFp] = useState("");
+  // The delivery order is filled in, not generated — same as a quotation or
+  // a PO, and for the same reason: what goes on the truck today is a
+  // decision, not a copy of the order.
+  const [newDoOpen, setNewDoOpen] = useState(false);
   const [invEdit, setInvEdit] = useState<Record<string, {
     number: string; due_date: string; amount: string; tax_amount: string;
   }>>({});
@@ -1926,11 +1931,11 @@ export default function ProjectDetailPage() {
               <div className="flex flex-wrap items-center gap-2">
                 {invType === "final" && (
                   <button className="btn-ghost"
-                    disabled={issueDeliveryOrder.isPending || !p.qc_passed_at}
-                    title={t("Raise the delivery order on its own. The invoice can follow once it exists.",
-                             "Terbitkan surat jalan saja. Faktur menyusul setelah surat jalan ada.")}
-                    onClick={() => issueDeliveryOrder.mutate(undefined)}>
-                    <Truck size={14} /> {t("1. Issue delivery order", "1. Terbitkan surat jalan")}
+                    disabled={!p.qc_passed_at}
+                    title={t("Fill in the delivery order — its number, and what is on the truck today. The invoice follows once it exists.",
+                             "Isi surat jalannya — nomornya, dan apa yang dikirim hari ini. Faktur menyusul setelah surat jalan ada.")}
+                    onClick={() => setNewDoOpen(true)}>
+                    <Truck size={14} /> {t("1. New delivery order", "1. Surat jalan baru")}
                   </button>
                 )}
                 <button className={invType === "final" && dos.length === 0
@@ -1994,7 +1999,15 @@ export default function ProjectDetailPage() {
           <div className="font-semibold flex items-center gap-2">
             <Truck size={15} className="text-brand-600" /> {t("Deliveries", "Pengiriman")}
           </div>
-          <div className="text-xs muted">{dos.length} {t("shipment(s)", "kiriman")}</div>
+          <div className="flex items-end justify-between gap-3 flex-wrap">
+            <div className="text-xs muted">{dos.length} {t("shipment(s)", "kiriman")}</div>
+            {canInvoiceDesk && p.qc_passed_at && (
+              <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                onClick={() => setNewDoOpen(true)}>
+                <Plus size={12} /> {t("New delivery order", "Surat jalan baru")}
+              </button>
+            )}
+          </div>
         </div>
         {dos.length === 0 ? (
           <div className="p-8 text-center muted text-sm">{t("No deliveries yet.", "Belum ada pengiriman.")}</div>
@@ -2553,6 +2566,13 @@ export default function ProjectDetailPage() {
         ownerType="project"
         ownerId={p.id}
         title={t("Discussion", "Diskusi")}
+      />
+
+      <NewDeliveryOrderModal
+        open={newDoOpen}
+        projectId={p.id}
+        onClose={() => setNewDoOpen(false)}
+        onDone={refresh}
       />
 
       {preview && (

@@ -1486,20 +1486,39 @@ async def _ship_to_note(db: AsyncSession, p: Project) -> str | None:
     return f"BARANG DI KIRIM KE:\n{addr}" if addr else None
 
 
+class DeliveryLineIn(BaseModel):
+    description: str
+    qty: float = 0
+    uom: str | None = None
+
+
 async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
                                 courier: str | None = None,
-                                file: UploadFile | None = None) -> DeliveryOrder:
-    """File a delivery order for this project, with the goods already on it."""
+                                file: UploadFile | None = None,
+                                tracking_no: str | None = None,
+                                number: str | None = None,
+                                items: list[dict] | None = None,
+                                remarks: str | None = None,
+                                split_index: int | None = None) -> DeliveryOrder:
+    """File a delivery order for this project.
+
+    Everything is optional and everything has an answer: the caller states
+    the lines this shipment carries, or the whole order goes on it; the
+    caller names it, or it takes the next number off the counter.
+    """
     do = DeliveryOrder(
         project_id=p.id,
-        number=await _next_doc_number(db, DeliveryOrder, "DO"),
+        number=number or await _next_doc_number(db, DeliveryOrder, "DO"),
+        split_index=max(1, int(split_index or 1)),
         courier=courier, status="pending",
+        tracking_no=(tracking_no or "").strip() or None,
         # The goods, and where they go. A delivery order with no lines can't
         # be printed and can't be signed for, and both are already known
         # here — the customer said what they ordered on their PO, and their
         # record says where deliveries go.
-        items=await _do_lines(db, p),
-        remarks=await _ship_to_note(db, p),
+        items=items if items is not None else await _do_lines(db, p),
+        remarks=(remarks.strip() if (remarks or "").strip()
+                 else await _ship_to_note(db, p)),
     )
     db.add(do)
     await db.flush()
@@ -1516,21 +1535,93 @@ async def _open_delivery_orders(db: AsyncSession, project_id: UUID) -> list[Deli
     )).all())
 
 
-@router.post("/projects/{project_id}/delivery-order", status_code=201)
-async def issue_delivery_order(
+@router.get("/projects/{project_id}/delivery-order/prefill")
+async def delivery_order_prefill(
     project_id: UUID,
-    courier: str | None = Form(None),
-    delivery_order_file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Raise the delivery order on its own, before anything is billed.
+    """What is left to send, ready to be made into a delivery order.
 
-    This is the first of the two documents: the goods go out under it, the
-    customer signs it, and the invoice that follows bills for what it says.
-    Splitting it out is what lets the two be raised — and signed off — by the
-    people who own each: the director releases this one, finance signs the
-    invoice.
+    The same idea as the purchase order's prefill: the lines come from the
+    customer's own order, and each says how much of it has already gone out
+    on an earlier delivery order. An order rarely ships in one go — two of
+    the four now, the rest when the mill delivers — and without the running
+    count the second sheet quietly ships the first one's goods again.
+    """
+    if Role(user.role) not in (_INVOICE_ISSUER_ROLES | _DO_DESK):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not yours to raise.")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+    ordered = await _billing_lines(db, p)
+    sent: dict[str, float] = {}
+    covered_by: dict[str, list[str]] = {}
+    for d in await _open_delivery_orders(db, project_id):
+        for it in (d.items or []):
+            key = str(it.get("description") or "").strip().lower()
+            sent[key] = sent.get(key, 0.0) + float(it.get("qty") or 0)
+            covered_by.setdefault(key, []).append(d.number)
+
+    items = []
+    for i, it in enumerate(ordered, 1):
+        key = str(it.get("description") or "").strip().lower()
+        qty = float(it.get("qty") or 0)
+        done = sent.get(key, 0.0)
+        items.append({
+            "line_no": i,
+            "description": it.get("description"),
+            "uom": it.get("uom") or "EA",
+            "qty_ordered": qty,
+            "qty_sent": done,
+            # What this sheet would send if nobody touches it: the remainder,
+            # or nothing at all when the line is already covered.
+            "qty": max(0.0, qty - done),
+            "sent_on": covered_by.get(key, []),
+        })
+    return {
+        "project_id": str(p.id), "project_code": p.code,
+        "suggested_number": await _next_doc_number(db, DeliveryOrder, "DO"),
+        "suggested_split": len(await _open_delivery_orders(db, project_id)) + 1,
+        "remarks": await _ship_to_note(db, p),
+        "items": items,
+        "qc_passed": bool(p.qc_passed_at),
+    }
+
+
+class DeliveryOrderIn(BaseModel):
+    """A delivery order as somebody fills it in, not as a copy of an order."""
+    number: str | None = None
+    split_index: int | None = None
+    courier: str | None = None
+    tracking_no: str | None = None
+    remarks: str | None = None
+    items: list[DeliveryLineIn] | None = None
+
+
+@router.post("/projects/{project_id}/delivery-order", status_code=201)
+async def issue_delivery_order(
+    project_id: UUID,
+    payload: DeliveryOrderIn | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Make a delivery order, the way a quotation or a purchase order is made.
+
+    It is a document somebody fills in, not a copy of the customer's order:
+    its own number, its own date, the lines *this* shipment carries and the
+    quantities on the truck today. Half an order going now and half in three
+    weeks is two delivery orders, each true about itself — which is the whole
+    reason the lines are editable rather than copied.
+
+    Sent with no body it still does the obvious thing: everything not yet
+    delivered, numbered off the counter, addressed where the customer's
+    record says deliveries go.
+
+    This is the first of the two close-out documents. The goods go out under
+    it, the customer signs it, and the invoice that follows bills for what it
+    says.
     """
     if Role(user.role) not in _INVOICE_ISSUER_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Finance/admin/director only")
@@ -1543,10 +1634,37 @@ async def issue_delivery_order(
             "The delivery order can only be issued after QC has passed — "
             "it says the goods left in this condition.",
         )
-    do = await _raise_delivery_order(db, p, user=user, courier=courier,
-                                     file=delivery_order_file)
-    return {"delivery_order": {"id": str(do.id), "number": do.number,
-                               "items": do.items, "remarks": do.remarks}}
+    payload = payload or DeliveryOrderIn()
+
+    items = None
+    if payload.items is not None:
+        rows = [i for i in payload.items if float(i.qty or 0) > 0]
+        if not rows:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "A delivery order needs at least one line with a quantity on "
+                "it — an empty sheet is nothing for the customer to sign.",
+            )
+        items = [{"description": i.description, "qty": float(i.qty or 0),
+                  "uom": (i.uom or "EA")} for i in rows]
+
+    number = (payload.number or "").strip() or None
+    if number:
+        clash = await db.scalar(select(DeliveryOrder).where(
+            DeliveryOrder.number == number))
+        if clash:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"'{number}' is already used by another delivery order")
+
+    do = await _raise_delivery_order(
+        db, p, user=user, courier=payload.courier,
+        tracking_no=payload.tracking_no, number=number, items=items,
+        remarks=payload.remarks, split_index=payload.split_index)
+    return {"delivery_order": {
+        "id": str(do.id), "number": do.number, "split_index": do.split_index,
+        "courier": do.courier, "tracking_no": do.tracking_no,
+        "items": do.items, "remarks": do.remarks}}
 
 
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)
@@ -2096,12 +2214,6 @@ async def create_delivery(project_id: UUID, payload: DeliveryIn,
     db.add(d)
     await db.flush()
     return {"id": str(d.id), "number": d.number}
-
-
-class DeliveryLineIn(BaseModel):
-    description: str
-    qty: float = 0
-    uom: str | None = None
 
 
 class DeliveryEdit(BaseModel):

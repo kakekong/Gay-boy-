@@ -241,6 +241,83 @@ async def main():
           inv4["faktur_pajak_no"] == f"010.000-26.D{tag}",
           str(inv4["faktur_pajak_no"]))
 
+    # ══ the delivery order as a document somebody fills in ═══════════════════
+    print("\n── making one, the way a quotation or a PO is made ──")
+    p6 = await a_project("F")
+    r = await c.get(f"/operation/projects/{p6}/delivery-order/prefill", headers=adm)
+    check("the form arrives prefilled from the customer's order",
+          r.status_code == 200 and len(J(r)["items"]) == 1,
+          f"{r.status_code} {J(r)}"[:200])
+    pre = J(r)
+    line = pre["items"][0]
+    check("...with what was ordered and what is left to send",
+          line["qty_ordered"] == 4.0 and line["qty_sent"] == 0.0
+          and line["qty"] == 4.0, str(line))
+    check("...a number off the counter, ready to be overtyped",
+          pre["suggested_number"].startswith("DO-"), pre["suggested_number"])
+    check("...and where the customer takes deliveries",
+          "KALIMANTAN" in (pre["remarks"] or ""), str(pre["remarks"]))
+
+    # Half now — the reason the lines are editable at all.
+    r = await c.post(f"/operation/projects/{p6}/delivery-order", headers=adm, json={
+        "number": f"SJ-MANUAL-{tag}", "split_index": 1,
+        "courier": "JNE Trucking", "tracking_no": f"JNE{tag}",
+        "remarks": "BARANG DI KIRIM KE: GUDANG SITE",
+        "items": [{"description": line["description"], "qty": 2,
+                   "uom": line["uom"]}]})
+    check("a part shipment can be written down as one", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:200])
+    made = J(r)["delivery_order"]
+    check("...under the number that was typed", made["number"] == f"SJ-MANUAL-{tag}",
+          made["number"])
+    check("...carrying two of the four", float(made["items"][0]["qty"]) == 2.0,
+          str(made["items"]))
+    check("...with the courier and resi on it",
+          made["courier"] == "JNE Trucking" and made["tracking_no"] == f"JNE{tag}",
+          str(made))
+    check("...and the site it is going to", "GUDANG SITE" in (made["remarks"] or ""),
+          str(made["remarks"]))
+
+    r = await c.get(f"/operation/projects/{p6}/delivery-order/prefill", headers=adm)
+    line2 = J(r)["items"][0]
+    check("the next sheet knows two already went",
+          line2["qty_sent"] == 2.0 and line2["qty"] == 2.0, str(line2))
+    check("...and says which sheet took them",
+          line2["sent_on"] == [f"SJ-MANUAL-{tag}"], str(line2["sent_on"]))
+    check("...and offers the next split number",
+          J(r)["suggested_split"] == 2, str(J(r)["suggested_split"]))
+
+    r = await c.post(f"/operation/projects/{p6}/delivery-order", headers=adm, json={
+        "number": f"SJ-MANUAL-{tag}", "items": [
+            {"description": line["description"], "qty": 2, "uom": line["uom"]}]})
+    check("a number another sheet holds is refused", r.status_code == 409,
+          f"{r.status_code} {J(r)}"[:170])
+    r = await c.post(f"/operation/projects/{p6}/delivery-order", headers=adm,
+                     json={"items": []})
+    check("...and a sheet with nothing on it", r.status_code == 400,
+          f"{r.status_code} {J(r)}"[:170])
+    r = await c.post(f"/operation/projects/{p6}/delivery-order", headers=adm,
+                     json={"items": [{"description": "X", "qty": 0, "uom": "EA"}]})
+    check("...as is one whose only line ships nothing", r.status_code == 400,
+          f"{r.status_code} {J(r)}"[:170])
+
+    r = await c.post(f"/operation/projects/{p6}/delivery-order", headers=adm, json={
+        "split_index": 2,
+        "items": [{"description": line["description"], "qty": 2,
+                   "uom": line["uom"]}]})
+    check("the rest goes out on a second sheet", r.status_code == 201,
+          f"{r.status_code} {J(r)}"[:170])
+    check("...numbered off the counter when nobody types one",
+          J(r)["delivery_order"]["number"].startswith("DO-"),
+          J(r)["delivery_order"]["number"])
+    f6 = await full(p6)
+    check("...leaving the project with two shipments", len(f6["deliveries"]) == 2,
+          str([x["number"] for x in f6["deliveries"]]))
+    check("...and nothing left to send",
+          J(await c.get(f"/operation/projects/{p6}/delivery-order/prefill",
+                        headers=adm))["items"][0]["qty"] == 0.0,
+          "still says there is more")
+
     # ══ QC still gates the delivery order ════════════════════════════════════
     print("\n── before QC ──")
     p5 = await a_project("E", qc=False)
