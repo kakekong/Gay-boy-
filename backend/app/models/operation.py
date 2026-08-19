@@ -172,3 +172,14 @@ class DeliveryOrder(Base, UUIDPK, TimestampMixin):
     # verifies it. Marking a DO delivered requires verification first.
     verified_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Director's release of the document itself, which is a different act from
+    # verifying the proof that comes back afterwards. Nothing is printed until
+    # this is set: the DO the driver carries and the customer stamps is
+    # generated from this row, so it must be a document somebody signed off,
+    # not whatever the row happened to say when a page was refreshed.
+    approved_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Free text for the Remarks column on the printed sheet — where the goods
+    # are actually going, which is routinely a site address and not the
+    # customer's office on the letterhead.
+    remarks: Mapped[str | None] = mapped_column(Text)

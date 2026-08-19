@@ -269,6 +269,12 @@ COLUMN_MIGRATIONS: list[str] = [
     # Director-side proof verification on a delivery order.
     'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS verified_by UUID',
     'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ',
+    # The director's release of the DO itself (not of the proof that comes
+    # back after delivery) — nothing prints until it is set — plus the
+    # ship-to note that goes in the printed Remarks column.
+    'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS approved_by UUID',
+    'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ',
+    'ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS remarks TEXT',
 
     # One-off: for projects whose every delivery order is already delivered but
     # the project's own status is still upstream (someone marked DOs delivered

@@ -264,6 +264,8 @@ async def project_full(project_id: UUID,
         d.uploaded_by for d in drawings if d.uploaded_by
     } | {
         do.verified_by for do in deliveries if do.verified_by
+    } | {
+        do.approved_by for do in deliveries if do.approved_by
     }
     deciders: dict[UUID, str] = {}
     if drawing_user_ids:
@@ -492,6 +494,13 @@ async def project_full(project_id: UUID,
                 "verified_at": do.verified_at,
                 "verified_by": str(do.verified_by) if do.verified_by else None,
                 "verified_by_name": deciders.get(do.verified_by) if do.verified_by else None,
+                # The director's release of the sheet itself — what the page
+                # keys "print this" off, and what freezes the row.
+                "approved_at": do.approved_at,
+                "approved_by": str(do.approved_by) if do.approved_by else None,
+                "approved_by_name": (deciders.get(do.approved_by)
+                                     if do.approved_by else None),
+                "remarks": do.remarks,
             } for do in deliveries
         ],
         "purchase_requests": [
@@ -1424,6 +1433,59 @@ async def _save_attachment(
 _INVOICE_ISSUER_ROLES = {Role.FINANCE, Role.DIRECTOR, Role.ADMIN}
 
 
+async def _billing_lines(db: AsyncSession, p: Project) -> list[dict]:
+    """What this job is, line by line, for a document the customer receives.
+
+    The customer's own PO first — that is what they ordered, in their words,
+    and it is what they will check the delivery against. The quotation is the
+    fallback for a job that reached a project another way, and the approved
+    price request the last resort, since its lines are where both of the
+    others came from.
+    """
+    from app.models.customer_po import CustomerPO
+    po = (await db.scalars(
+        select(CustomerPO).where(CustomerPO.project_id == p.id)
+        .order_by(CustomerPO.created_at.desc()).limit(1)
+    )).first()
+    if po and (po.items or []):
+        return [dict(i) for i in po.items]
+    if p.quotation_id:
+        q = await db.get(Quotation, p.quotation_id)
+        if q and (q.items or []):
+            return [dict(i) for i in q.items]
+    if p.price_request_id:
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, p.price_request_id)
+        if pr and (pr.items or []):
+            return [{"description": i.get("description"), "qty": i.get("qty"),
+                     "uom": i.get("uom"),
+                     "unit_price": i.get("sell_price")} for i in (pr.items or [])]
+    return []
+
+
+async def _do_lines(db: AsyncSession, p: Project) -> list[dict]:
+    """The billing lines as a delivery order states them: goods and counts.
+
+    Money comes off deliberately. A delivery order is handed to a driver and
+    signed by whoever is on the gate at the site — it says what arrived, and
+    it is not the place to publish what the customer is paying for it.
+    """
+    return [{"description": i.get("description"), "qty": float(i.get("qty") or 0),
+             "uom": i.get("uom") or "EA"}
+            for i in await _billing_lines(db, p)]
+
+
+async def _ship_to_note(db: AsyncSession, p: Project) -> str | None:
+    """Where the goods actually go, for the printed Remarks column."""
+    if not p.customer_id:
+        return None
+    cust = await db.get(Customer, p.customer_id)
+    if not cust:
+        return None
+    addr = (cust.delivery_address or "").strip()
+    return f"BARANG DI KIRIM KE:\n{addr}" if addr else None
+
+
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)
 async def issue_invoice(
     project_id: UUID,
@@ -1536,6 +1598,12 @@ async def issue_invoice(
             project_id=project_id,
             number=await _next_doc_number(db, DeliveryOrder, "DO"),
             courier=courier, status="pending",
+            # The goods, and where they go. A delivery order with no lines
+            # can't be printed and can't be signed for, and both of these are
+            # already known here — the customer said what they ordered on
+            # their PO, and their record says where deliveries go.
+            items=await _do_lines(db, p),
+            remarks=await _ship_to_note(db, p),
         )
         db.add(do)
         await db.flush()
@@ -1869,11 +1937,23 @@ async def create_delivery(project_id: UUID, payload: DeliveryIn,
     return {"id": str(d.id), "number": d.number}
 
 
+class DeliveryLineIn(BaseModel):
+    description: str
+    qty: float = 0
+    uom: str | None = None
+
+
 class DeliveryEdit(BaseModel):
     number: str | None = None
     split_index: int | None = None
     courier: str | None = None
     tracking_no: str | None = None
+    # What is on the truck, and where it is going — both printed, so both
+    # correctable while the sheet is still unapproved. A DO raised before the
+    # lines were copied automatically has none at all, and this is how it
+    # gets them.
+    items: list[DeliveryLineIn] | None = None
+    remarks: str | None = None
 
 
 # Who may correct or withdraw a delivery order. Admin issue them, and the
@@ -1885,10 +1965,15 @@ def _do_settled(d: DeliveryOrder) -> str | None:
     """Why this DO can no longer be touched, if it can't.
 
     A delivery order stops being ours to change the moment somebody has
-    signed off on it: the director verified the shipping proof, or the goods
-    are marked delivered. Before that it is a piece of paper issued a minute
-    ago, and a duplicate or a typo in the courier's name should not need a
-    director to unpick.
+    signed off on it: the director approved it for issue, the director
+    verified the shipping proof, or the goods are marked delivered. Before
+    any of that it is a piece of paper issued a minute ago, and a duplicate
+    or a typo in the courier's name should not need a director to unpick.
+
+    Approval is the important one now that the sheet is generated from this
+    row: once it is approved the printed document exists, a driver may
+    already be carrying it, and the row it was printed from has to keep
+    saying what the paper says.
     """
     if d.status == "delivered":
         return ("This delivery is already marked delivered — the goods have "
@@ -1897,6 +1982,10 @@ def _do_settled(d: DeliveryOrder) -> str | None:
         return ("The director has already verified the shipping proof on "
                 "this delivery order. Upload new proof if the shipment "
                 "changed; that withdraws the verification.")
+    if d.approved_at:
+        return ("This delivery order has been approved and its sheet issued "
+                "— the printed copy has to keep saying what this one says. "
+                "Withdraw the approval first if it really has to change.")
     return None
 
 
@@ -1938,6 +2027,15 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
         d.courier = (data["courier"] or "").strip() or None
     if "tracking_no" in data:
         d.tracking_no = (data["tracking_no"] or "").strip() or None
+    if "remarks" in data:
+        d.remarks = (data["remarks"] or "").strip() or None
+    if "items" in data and data["items"] is not None:
+        if not data["items"]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "A delivery order needs at least one line")
+        d.items = [{"description": i["description"],
+                    "qty": float(i.get("qty") or 0),
+                    "uom": (i.get("uom") or "EA")} for i in data["items"]]
 
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="update", entity="delivery_order",
@@ -1948,6 +2046,141 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
     return {"ok": True, "id": str(d.id), "number": d.number,
             "split_index": d.split_index, "courier": d.courier,
             "tracking_no": d.tracking_no}
+
+
+# Who releases a delivery order for issue. The director signs the company's
+# outgoing paperwork; the manager stands in when they are not there.
+_DO_APPROVERS = {Role.DIRECTOR, Role.MANAGER}
+
+
+@router.get("/deliveries/{do_id}/pdf")
+async def delivery_order_pdf(do_id: UUID,
+                             db: AsyncSession = Depends(get_db),
+                             user: User = Depends(get_current_user)):
+    """The printable delivery order — generated, not uploaded.
+
+    Only after the director has approved it. A delivery order is a document
+    the customer signs and keeps, so handing one out before anybody released
+    it would put a company document in a customer's hands that nobody agreed
+    to send.
+    """
+    if Role(user.role) not in (_DO_DESK | _DO_APPROVERS):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Not yours to print.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+    if not d.approved_at:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This delivery order hasn't been approved yet — the director "
+            "releases it, and the sheet is generated from what they approved.",
+        )
+    p = await db.get(Project, d.project_id) if d.project_id else None
+    cust = await db.get(Customer, p.customer_id) if (p and p.customer_id) else None
+
+    po_number = p.po_number if p else None
+    from app.models.customer_po import CustomerPO
+    if p:
+        cpo = (await db.scalars(
+            select(CustomerPO).where(CustomerPO.project_id == p.id)
+            .order_by(CustomerPO.created_at.desc()).limit(1)
+        )).first()
+        if cpo:
+            po_number = cpo.number
+
+    approver = await db.get(User, d.approved_by) if d.approved_by else None
+    from app.services.delivery_order_pdf import build_delivery_order_pdf
+    from app.services.signature import load_for as _load_signature
+    pdf = build_delivery_order_pdf(
+        number=d.number,
+        do_date=(d.approved_at.date().strftime("%d %B %Y")
+                 if d.approved_at else date.today().strftime("%d %B %Y")),
+        customer_name=cust.company_name if cust else "—",
+        customer_address=(cust.company_address or "") if cust else "",
+        customer_phone=(cust.phone or None) if cust else None,
+        customer_fax=None,
+        po_number=po_number,
+        project_code=p.code if p else None,
+        rows=list(d.items or []),
+        remarks=d.remarks,
+        courier=d.courier, tracking_no=d.tracking_no,
+        prepared_by=(approver.full_name if approver else (user.full_name or "")),
+        preparer_signature=await _load_signature(approver or user),
+    )
+    from fastapi.responses import Response
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'inline; filename="SuratJalan-{d.number}.pdf"'},
+    )
+
+
+@router.post("/deliveries/{do_id}/approve")
+async def approve_delivery(do_id: UUID,
+                           db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """Release a delivery order — after which its sheet can be printed.
+
+    This is not the same act as verifying the proof that comes back: this
+    one says "yes, send the goods out under this document", and the sheet
+    the driver carries is generated from the row at that moment.
+    """
+    if Role(user.role) not in _DO_APPROVERS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director (or a manager) can approve a "
+                            "delivery order for issue.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+    if d.approved_at:
+        return {"ok": True, "already": True, "approved_at": d.approved_at}
+    if not (d.items or []):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This delivery order has no lines — there is nothing for the "
+            "customer to sign for. Add what is being delivered first.",
+        )
+    d.approved_by = user.id
+    d.approved_at = datetime.now(UTC)
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="approve", entity="delivery_order",
+                       entity_id=d.id, after={"number": d.number})
+    await db.flush()
+    return {"ok": True, "approved_at": d.approved_at,
+            "approved_by": str(d.approved_by)}
+
+
+@router.post("/deliveries/{do_id}/unapprove")
+async def unapprove_delivery(do_id: UUID,
+                             db: AsyncSession = Depends(get_db),
+                             user: User = Depends(get_current_user)):
+    """Withdraw the approval, so a wrong sheet can be corrected and reissued.
+
+    Refused once the proof is verified or the goods are delivered: by then
+    the document has done its job and the customer has a signed copy.
+    """
+    if Role(user.role) not in _DO_APPROVERS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director (or a manager) can withdraw a "
+                            "delivery order's approval.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+    if d.status == "delivered" or d.verified_at:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This shipment has already gone out and been signed for — its "
+            "delivery order can't be pulled back now.",
+        )
+    d.approved_by = None
+    d.approved_at = None
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="unapprove",
+                       entity="delivery_order", entity_id=d.id,
+                       after={"number": d.number})
+    await db.flush()
+    return {"ok": True, "approved_at": None}
 
 
 @router.delete("/deliveries/{do_id}", status_code=204)

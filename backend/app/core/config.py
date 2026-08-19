@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     COMPANY_WAREHOUSE_ADDRESS: str = ""
     COMPANY_WAREHOUSE_LABEL: str = "PT. Transmisi Enjinering Warehouse"
 
+    # Where a customer pays. This prints on every invoice the system
+    # generates, so — like the warehouse address — it is configuration and
+    # not a literal buried in a template. The defaults are the account
+    # already printed on the invoices the company sends out; override them in
+    # the environment if the account ever changes, and the sheet says the
+    # account is unset rather than printing a stale one if they are cleared.
+    COMPANY_BANK_NAME: str = "Bank BCA"
+    COMPANY_BANK_BRANCH: str = "KCP Niaga Grisenda, Jakarta"
+    COMPANY_BANK_ACCOUNT_NO: str = "578-5523889"
+    COMPANY_BANK_ACCOUNT_NAME: str = "PT. TRANSMISI ENJINERING"
+
 
 @lru_cache
 def get_settings() -> Settings:

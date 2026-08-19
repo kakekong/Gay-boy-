@@ -5,10 +5,11 @@ import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
   Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight, Link2,
-  Pencil, Save,
+  Pencil, Save, FileDown, Stamp,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { downloadFile } from "@/lib/download";
 import { useAuthStore } from "@/store/auth";
 import { useT, t as tt, T, locale } from "@/store/lang";
 import { UserLink } from "@/components/UserLink";
@@ -248,6 +249,12 @@ export default function ProjectDetailPage() {
   // The desk that issues delivery orders, and so the desk that fixes a
   // wrong one or withdraws a duplicate — while nobody has signed off on it.
   const canEditDelivery = ["admin", "director", "manager"].includes(role);
+  // Releasing the document itself is the director's signature on company
+  // paperwork; the manager stands in.
+  const canApproveDelivery = ["director", "manager"].includes(role);
+  // Who the server lets browse the project's file shelf — mirrors
+  // `_attachment_visible_to("project")` minus the roles barred from it.
+  const canSeeProjectShelf = ["director", "manager", "purchasing"].includes(role);
   // Internal staff upload the drawing (on behalf of the supplier); the director
   // signs it off. The drawing file is viewable by either of those.
   const canApproveDrawing = ["director", "manager", "admin"].includes(role);
@@ -391,6 +398,16 @@ export default function ProjectDetailPage() {
   });
   const deleteDelivery = useMutation({
     mutationFn: (doId: string) => api.delete(`/operation/deliveries/${doId}`),
+    onSuccess: refresh, onError: onErr,
+  });
+  // The director releasing the sheet for issue — after which the system
+  // generates it and the row is frozen to match the paper.
+  const approveDelivery = useMutation({
+    mutationFn: (doId: string) => api.post(`/operation/deliveries/${doId}/approve`),
+    onSuccess: refresh, onError: onErr,
+  });
+  const unapproveDelivery = useMutation({
+    mutationFn: (doId: string) => api.post(`/operation/deliveries/${doId}/unapprove`),
     onSuccess: refresh, onError: onErr,
   });
 
@@ -569,8 +586,6 @@ export default function ProjectDetailPage() {
   }>>({});
   const [qcFindings, setQcFindings] = useState("");
   const [invAmount, setInvAmount] = useState("");
-  const [invFile, setInvFile] = useState<File | null>(null);
-  const [doFile, setDoFile] = useState<File | null>(null);
   const [invType, setInvType] = useState<"dp" | "final">("final");
   // Per-invoice finance-approval form state (FP number + FP file).
   const [fpForm, setFpForm] = useState<Record<string, { no: string; file?: File | null }>>({});
@@ -1829,31 +1844,19 @@ export default function ProjectDetailPage() {
                   )}
                 </div>
               )}
-              <div className={clsx(
-                "grid grid-cols-1 gap-2",
-                invType === "final" ? "sm:grid-cols-3" : "sm:grid-cols-2",
-              )}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input className="input" placeholder={t("Amount (blank = quotation total)", "Jumlah (kosong = total penawaran)")}
                   value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
-                <label className="block">
-                  <span className="block text-[10px] muted mb-1">{t("Invoice file", "File faktur")}</span>
-                  <input type="file"
-                    className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
-                    onChange={(e) => setInvFile(e.target.files?.[0] ?? null)} />
-                </label>
-                {invType === "final" && (
-                  <label className="block">
-                    <span className="block text-[10px] muted mb-1">{t("Delivery-order file", "File surat jalan")}</span>
-                    <input type="file"
-                      className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-ink-700 file:text-xs hover:file:bg-ink-200"
-                      onChange={(e) => setDoFile(e.target.files?.[0] ?? null)} />
-                  </label>
-                )}
               </div>
+              {/* No file to upload any more: both sheets are generated from
+                  the record, the way the PO and the price request already
+                  are. Each is produced once the document has been signed off
+                  — the invoice when finance enters the faktur pajak number,
+                  the delivery order when the director approves it. */}
               <p className="text-[11px] muted">
                 {t(
-                  "Admin or finance uploads the invoice here. The faktur pajak number goes on at the sign-off step below, not on upload.",
-                  "Admin atau keuangan mengunggah faktur di sini. Nomor faktur pajak diisi pada langkah pengesahan di bawah, bukan saat unggah.",
+                  "Admin or finance issues these. The system generates both sheets — the invoice once finance signs it off with the faktur pajak number, the delivery order once the director approves it. Nothing to upload.",
+                  "Admin atau keuangan yang menerbitkan. Sistem membuat kedua lembarnya — faktur setelah keuangan mengesahkan dengan nomor faktur pajak, surat jalan setelah direktur menyetujui. Tidak perlu mengunggah apa pun.",
                 )}
               </p>
               <button className="btn-primary"
@@ -1864,11 +1867,9 @@ export default function ProjectDetailPage() {
                 onClick={() => issueInvoice.mutate(
                   {
                     amount: invAmount ? Number(invAmount) : undefined,
-                    invoiceFile: invFile,
-                    doFile: invType === "final" ? doFile : null,
                     invoiceType: invType,
                   },
-                  { onSuccess: () => { setInvAmount(""); setInvFile(null); setDoFile(null); } },
+                  { onSuccess: () => setInvAmount("") },
                 )}>
                 <FileText size={14} />
                 {invType === "dp" ? t("Issue DP invoice", "Terbitkan faktur DP") : t("Issue invoice + DO", "Terbitkan faktur + DO")}
@@ -1917,7 +1918,8 @@ export default function ProjectDetailPage() {
                 const isDelivered = d.status === "delivered";
                 // Settled = the director verified the proof, or it has gone
                 // out as delivered. Before that the document is still ours.
-                const settled = isVerified || isDelivered;
+                const isApproved = !!d.approved_at;
+                const settled = isVerified || isDelivered || isApproved;
                 const ed = doEdit[d.id];
                 const setEd = (patch: Partial<NonNullable<typeof ed>>) =>
                   setDoEdit((m) => ({ ...m, [d.id]: { ...m[d.id], ...patch } as any }));
@@ -1960,13 +1962,22 @@ export default function ProjectDetailPage() {
                         isDelivered ? "bg-emerald-50 text-emerald-700"
                         : isVerified ? "bg-cyan-50 text-cyan-700"
                         : (d.files ?? []).length > 0 ? "bg-amber-50 text-amber-700"
+                        : isApproved ? "bg-blue-50 text-blue-700"
                         : "bg-ink-100 text-ink-700"
                       )}>
                         {isDelivered ? t("delivered", "terkirim")
                           : isVerified ? t("verified", "terverifikasi")
                           : (d.files ?? []).length > 0 ? t("awaiting verify", "menunggu verifikasi")
-                          : t("pending", "menunggu")}
+                          : isApproved ? t("approved — sheet issued", "disetujui — surat jalan terbit")
+                          : t("waiting for approval", "menunggu persetujuan")}
                       </span>
+                      {isApproved && (
+                        <div className="text-[10px] muted">
+                          {t("approved", "disetujui")}{" "}
+                          {new Date(d.approved_at).toLocaleDateString(locale())}
+                          {d.approved_by_name && <> {t("by", "oleh")} {d.approved_by_name}</>}
+                        </div>
+                      )}
                       {isVerified && (
                         <div className="text-[10px] muted">
                           {t("verified", "diverifikasi")} {new Date(d.verified_at).toLocaleDateString(locale())}
@@ -2023,6 +2034,35 @@ export default function ProjectDetailPage() {
                     <td className="td text-right space-y-1">
                       {/* Correcting or withdrawing the document itself.
                           Only until somebody has signed off on it. */}
+                      {/* Releasing the sheet, and printing what was released. */}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {canApproveDelivery && !isApproved && !isDelivered && (
+                          <button className="btn-primary py-0.5 px-2 text-[11px]"
+                            disabled={approveDelivery.isPending}
+                            title={t("Approve this delivery order — the system then generates the sheet to print.",
+                                     "Setujui surat jalan ini — sistem lalu membuat lembarnya untuk dicetak.")}
+                            onClick={() => approveDelivery.mutate(d.id)}>
+                            <Stamp size={11} /> {t("Approve DO", "Setujui SJ")}
+                          </button>
+                        )}
+                        {isApproved && (
+                          <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                            onClick={() => downloadFile(
+                              `/operation/deliveries/${d.id}/pdf`,
+                              `SuratJalan-${d.number}.pdf`)}>
+                            <FileDown size={11} /> {t("Delivery order", "Surat jalan")}
+                          </button>
+                        )}
+                        {canApproveDelivery && isApproved && !isVerified && !isDelivered && (
+                          <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                            disabled={unapproveDelivery.isPending}
+                            title={t("Withdraw the approval so this can be corrected and reissued.",
+                                     "Tarik persetujuan agar bisa diperbaiki dan diterbitkan ulang.")}
+                            onClick={() => unapproveDelivery.mutate(d.id)}>
+                            {t("Withdraw", "Tarik")}
+                          </button>
+                        )}
+                      </div>
                       {canEditDelivery && !settled && (
                         <div className="flex items-center justify-end gap-1.5">
                           {ed ? (
@@ -2258,11 +2298,19 @@ export default function ProjectDetailPage() {
                                 <Trash2 size={11} /> {t("Delete", "Hapus")}
                               </button>
                             )}
-                            {!mayEdit && !mayDelete && (
+                            {i.status === "approved" && (
+                              <button className="btn-ghost py-0.5 px-2 text-[11px]"
+                                onClick={() => downloadFile(
+                                  `/finance/invoices/${i.id}/pdf`,
+                                  `Invoice-${i.number}.pdf`)}>
+                                <FileDown size={11} /> {t("Invoice", "Faktur")}
+                              </button>
+                            )}
+                            {!mayEdit && !mayDelete && i.status !== "approved" && (
                               <span className="muted text-[11px]">
                                 {(i.paid_amount ?? 0) > 0
                                   ? t("paid", "sudah dibayar")
-                                  : t("approved", "disetujui")}
+                                  : t("issued", "terbit")}
                               </span>
                             )}
                           </>
@@ -2378,8 +2426,13 @@ export default function ProjectDetailPage() {
           internal card on this page is already hidden from them, and a shelf
           holding the drawings and the freight paperwork would hand back what
           those cards withhold. The customer's own PO document, below, is
-          theirs and stays. */}
-      {!isAdminDesk && !isSales && (
+          theirs and stays.
+
+          Named as who MAY browse rather than who may not, because the server
+          answers the same question and the two lists have to agree: finance
+          was never in its list either, so the card rendered for them and
+          then 403'd on every load. */}
+      {canSeeProjectShelf && (
         <AttachmentsSection ownerType="project" ownerId={p.id} />
       )}
 
