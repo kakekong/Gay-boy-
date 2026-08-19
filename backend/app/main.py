@@ -56,11 +56,23 @@ async def lifespan(_app: FastAPI):
     # devices even when no tab is open. Safe under multiple workers (a PG
     # advisory lock elects a single runner) and fully optional — with no
     # subscriptions it wakes, finds nothing, and sleeps.
+    #
+    # Its cadence is a database bill: every tick keeps a serverless Postgres
+    # compute awake, so the interval is configurable and prints here — a
+    # sweeper quietly running every 90 seconds is what emptied a month of
+    # compute allowance and took the login screen down with it.
     sweeper_task = None
     try:
         from app.services.webpush import sweeper_loop
         sweeper_task = asyncio.create_task(sweeper_loop())
-        print("[boot] web-push sweeper started.", flush=True)
+        if settings.WEBPUSH_SWEEP_SECONDS > 0:
+            print(f"[boot] web-push sweeper started "
+                  f"(every {settings.WEBPUSH_SWEEP_SECONDS}s, "
+                  f"{settings.WEBPUSH_IDLE_SECONDS}s while nothing is "
+                  f"subscribed).", flush=True)
+        else:
+            print("[boot] web-push sweeper off (WEBPUSH_SWEEP_SECONDS=0); "
+                  "event-driven pushes still send.", flush=True)
     except Exception:
         logging.getLogger(__name__).exception("web-push sweeper failed to start")
 

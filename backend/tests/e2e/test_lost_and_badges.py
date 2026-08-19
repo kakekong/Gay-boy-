@@ -82,17 +82,21 @@ async def main():
     notif = J(await c.get("/notifications", headers=d))
     items = notif.get("items", []) if isinstance(notif, dict) else []
     att = [i for i in items if i.get("kind") == "attendance"]
-    # "Who has not clocked in" is a weekday question — the product does not
-    # ask it at a weekend, so neither does this. Asserting the alert exists on
-    # a Saturday was testing a rule nobody wrote.
+    # "Who has not clocked in" is a weekday question, and not one worth asking
+    # before the office is expected to be working — the product stays silent
+    # at a weekend and until 08:30 WIB (see test_attendance_alert_window).
+    # Asserting the alert exists on a Saturday, or at seven in the morning,
+    # was testing a rule nobody wrote.
     import datetime as _dt
-    weekday = _dt.date.today().weekday() < 5
-    if weekday:
+    _wib = _dt.timezone(_dt.timedelta(hours=7))
+    _now = _dt.datetime.now(_dt.UTC).astimezone(_wib)
+    open_hours = _now.date().weekday() < 5 and _now.time() >= _dt.time(8, 30)
+    if open_hours:
         check("the director has an attendance alert to dismiss", len(att) >= 1,
               str([i.get("kind") for i in items])[:160])
     else:
-        check("no attendance nag at the weekend — that is the rule", not att,
-              str([i.get("id") for i in att]))
+        check("no attendance nag outside working hours — that is the rule",
+              not att, f"{_now:%a %H:%M} WIB: " + str([i.get("id") for i in att]))
 
     if att:
         target = next((i for i in att if i["id"].startswith("attendance-missing")), att[0])

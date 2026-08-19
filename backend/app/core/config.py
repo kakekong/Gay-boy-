@@ -59,6 +59,25 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY_ID: str | None = None
     S3_SECRET_ACCESS_KEY: str | None = None
 
+    # How often the background web-push sweeper wakes up.
+    #
+    # This is a database cost before it is anything else. Every tick opens a
+    # session, takes an advisory lock and runs queries, and a serverless
+    # Postgres (Neon) only suspends its compute after a few minutes idle — so
+    # a sweeper on a 90-second timer kept the database awake 24 hours a day
+    # and billed for it whether or not a single person was using the app. It
+    # ran through a month's compute allowance on its own.
+    #
+    # 15 minutes is well inside "a notification that nobody has a tab open
+    # for", and lets the compute sleep between ticks. When nothing is
+    # subscribed there is nothing to deliver at all, so it backs off to the
+    # idle interval and stops touching the database almost entirely.
+    #
+    # Set WEBPUSH_SWEEP_SECONDS=0 to switch the sweeper off; pushes raised
+    # inline by an event (a mention, a new discussion message) still go out.
+    WEBPUSH_SWEEP_SECONDS: int = 900
+    WEBPUSH_IDLE_SECONDS: int = 3600
+
     # Misc
     DEFAULT_CURRENCY: str = "IDR"
     TIMEZONE: str = "Asia/Jakarta"

@@ -14,8 +14,9 @@ import asyncio
 import base64
 import json
 import logging
+import time
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.push import PushDelivered, PushSubscription, VapidKeypair
@@ -29,6 +30,8 @@ VAPID_SUBJECT = "mailto:admin@transmisisuplindo.com"
 _PUSH_SEVERITIES = {"high", "medium"}
 # Advisory lock key so only ONE worker/process runs the sweeper.
 _SWEEP_LOCK_KEY = 774_421_001
+# How often the 30-day ledgers get swept, in seconds.
+_PRUNE_EVERY = 86_400
 
 
 # Hold strong references to in-flight fire-and-forget pushes. asyncio keeps
@@ -354,16 +357,45 @@ async def sweep_once(db: AsyncSession) -> int:
     return total
 
 
-async def sweeper_loop(interval: int = 90) -> None:
+async def sweeper_loop(interval: int | None = None,
+                       idle_interval: int | None = None) -> None:
     """Background task: run sweep_once forever, one runner per deployment.
 
     A Postgres advisory lock makes this safe under multiple workers — only
     the first process to grab the lock sweeps; the rest idle.
+
+    The cadence is a database bill, not just a latency knob. Every tick opens
+    a session and queries, and a serverless Postgres keeps its compute awake
+    for some minutes after each one — so the old 90-second timer meant the
+    database never suspended and was charged around the clock, on an app used
+    during office hours by a handful of people. It emptied a month's compute
+    allowance by itself and locked everyone out of the login screen.
+
+    So: a slow default cadence, a much slower one when nobody is subscribed
+    (nothing to deliver — don't even run the aggregator), pruning once a day
+    rather than every tick, and an off switch. Pushes raised inline by an
+    event are untouched by any of this.
     """
+    from app.core.config import settings
     from app.core.db import SessionLocal
 
+    interval = settings.WEBPUSH_SWEEP_SECONDS if interval is None else interval
+    idle_interval = (settings.WEBPUSH_IDLE_SECONDS
+                     if idle_interval is None else idle_interval)
+    if interval <= 0:
+        log.info("web-push sweeper disabled (WEBPUSH_SWEEP_SECONDS=0)")
+        return
+    # Backing off to something *shorter* than the working cadence would be a
+    # misconfiguration that costs money silently.
+    idle_interval = max(idle_interval, interval)
+
     await asyncio.sleep(15)  # let boot finish first
+    # None = "not pruned in this process yet". Counting from zero instead
+    # would tie the first prune to how long the machine had been up, so on a
+    # container that restarts daily the ledgers would never be swept at all.
+    last_prune: float | None = None
     while True:
+        nap = interval
         try:
             async with SessionLocal() as db:
                 got = (await db.execute(
@@ -371,20 +403,34 @@ async def sweeper_loop(interval: int = 90) -> None:
                 )).scalar()
                 if got:
                     try:
-                        n = await sweep_once(db)
-                        await db.commit()
-                        if n:
-                            log.info("webpush sweep: %s push(es) sent", n)
-                        # prune delivery + dismissal ledgers so they don't
-                        # grow forever
-                        from app.models.push import NotificationDismissed
-                        await db.execute(delete(PushDelivered).where(
-                            text("sent_at < now() - interval '30 days'")
-                        ))
-                        await db.execute(delete(NotificationDismissed).where(
-                            text("created_at < now() - interval '30 days'")
-                        ))
-                        await db.commit()
+                        subscribed = await db.scalar(
+                            select(func.count()).select_from(PushSubscription)
+                        ) or 0
+                        if not subscribed:
+                            # No device is listening. The aggregator would run
+                            # every role's notification query to deliver to
+                            # nobody, so skip it and come back much later.
+                            nap = idle_interval
+                        else:
+                            n = await sweep_once(db)
+                            await db.commit()
+                            if n:
+                                log.info("webpush sweep: %s push(es) sent", n)
+                        # Prune the delivery + dismissal ledgers so they don't
+                        # grow forever. Daily is plenty for rows that expire
+                        # after 30 days, and it kept three writes on every
+                        # single tick.
+                        now = time.monotonic()
+                        if last_prune is None or now - last_prune >= _PRUNE_EVERY:
+                            from app.models.push import NotificationDismissed
+                            await db.execute(delete(PushDelivered).where(
+                                text("sent_at < now() - interval '30 days'")
+                            ))
+                            await db.execute(delete(NotificationDismissed).where(
+                                text("created_at < now() - interval '30 days'")
+                            ))
+                            await db.commit()
+                            last_prune = now
                     finally:
                         await db.execute(
                             text("SELECT pg_advisory_unlock(:k)"),
@@ -392,4 +438,4 @@ async def sweeper_loop(interval: int = 90) -> None:
                         )
         except Exception as e:
             log.warning("webpush sweeper iteration failed: %s", e)
-        await asyncio.sleep(interval)
+        await asyncio.sleep(nap)
