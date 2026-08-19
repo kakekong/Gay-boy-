@@ -113,15 +113,24 @@ async def main():
     f0 = await full(proj)
     check("the project now carries two invoices", len(f0["invoices"]) == 2,
           str(len(f0["invoices"])))
-    check("...and two delivery orders", len(f0["deliveries"]) == 2,
-          str(len(f0["deliveries"])))
+    # The shipment is no longer duplicated by a second press: the invoice now
+    # bills against the delivery order already on the project rather than
+    # raising another one. A real second shipment is raised deliberately.
+    check("...but only one shipment — the second bill went on the first DO",
+          len(f0["deliveries"]) == 1, str(len(f0["deliveries"])))
     check("...asking for the same money twice",
           f0["invoices"][0]["total"] == f0["invoices"][1]["total"],
           str([i["total"] for i in f0["invoices"]]))
     dupe_inv = second["invoice"]["id"]
-    dupe_do = second["delivery_order"]["id"]
     keep_inv = first["invoice"]["id"]
     keep_do = first["delivery_order"]["id"]
+    # A genuine second shipment, raised on purpose — this is the duplicate
+    # the rest of the checks withdraw.
+    dupe_do = J(await c.post(f"/operation/projects/{proj}/delivery-order",
+                             headers=adm))["delivery_order"]["id"]
+    check("a second shipment can still be raised deliberately",
+          len((await full(proj))["deliveries"]) == 2,
+          str(len((await full(proj))["deliveries"])))
 
     # ══ correcting the delivery order ════════════════════════════════════════
     print("\n── correcting the delivery order that stays ──")

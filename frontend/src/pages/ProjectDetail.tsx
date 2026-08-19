@@ -312,6 +312,8 @@ export default function ProjectDetailPage() {
   const [doEdit, setDoEdit] = useState<Record<string, {
     number: string; split_index: string; courier: string; tracking_no: string;
   }>>({});
+  // The faktur pajak number for the director's one-press sign-off.
+  const [bothFp, setBothFp] = useState("");
   const [invEdit, setInvEdit] = useState<Record<string, {
     number: string; due_date: string; amount: string; tax_amount: string;
   }>>({});
@@ -484,18 +486,43 @@ export default function ProjectDetailPage() {
     mutationFn: (body: {
       amount?: number; invoiceFile?: File | null; doFile?: File | null;
       invoiceType?: "dp" | "final" | "single";
+      /** Raise the delivery order in the same press when none exists yet.
+       *  False means "bill against the DO already on the project", which is
+       *  the two-step path and what the server insists on otherwise. */
+      createDeliveryOrder?: boolean;
     }) => {
       const fd = new FormData();
       if (body.amount != null) fd.append("amount", String(body.amount));
       if (body.invoiceFile) fd.append("invoice_file", body.invoiceFile);
       if (body.doFile) fd.append("delivery_order_file", body.doFile);
       fd.append("invoice_type", body.invoiceType ?? "final");
-      // A DP invoice is billed BEFORE delivery so no DO is filed with it —
-      // the backend also skips DO creation when type == 'dp'.
-      if ((body.invoiceType ?? "final") === "dp") {
-        fd.append("create_delivery_order", "false");
-      }
+      // A DP invoice is billed BEFORE delivery, so it never carries a DO.
+      const withDo = (body.invoiceType ?? "final") !== "dp"
+        && body.createDeliveryOrder === true;
+      fd.append("create_delivery_order", withDo ? "true" : "false");
       return api.post(`/operation/projects/${id}/issue-invoice`, fd);
+    },
+    onSuccess: refresh, onError: onErr,
+  });
+  // The delivery order on its own — the first of the two documents.
+  const issueDeliveryOrder = useMutation({
+    mutationFn: (courier?: string) => {
+      const fd = new FormData();
+      // A field, even an empty one: the endpoint takes a multipart body, and
+      // an empty FormData is a multipart body with no parts, which the
+      // server rejects as malformed rather than as "nothing to read".
+      fd.append("courier", courier ?? "");
+      return api.post(`/operation/projects/${id}/delivery-order`, fd);
+    },
+    onSuccess: refresh, onError: onErr,
+  });
+  // The director signing both at once, for a small order where waiting for
+  // two people is the only thing left to do.
+  const approveBoth = useMutation({
+    mutationFn: (fpNo: string) => {
+      const fd = new FormData();
+      fd.append("faktur_pajak_no", fpNo);
+      return api.post(`/operation/projects/${id}/approve-documents`, fd);
     },
     onSuccess: refresh, onError: onErr,
   });
@@ -1813,10 +1840,43 @@ export default function ProjectDetailPage() {
             );
           })}
 
+          {/* Two documents, two signatures — the director's on the delivery
+              order, finance's on the invoice. On a small order that is two
+              people waiting on each other, so the director (who outranks
+              both) can give both at once. Only shown when something is
+              actually waiting. */}
+          {role === "director"
+            && (inv.some((iv: any) => iv.status === "pending_finance")
+                || dos.some((x: any) => !x.approved_at && x.status !== "delivered")) && (
+            <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3 space-y-2">
+              <div className="text-[11px] uppercase tracking-wider text-brand-800">
+                {t("Sign both at once", "Sahkan keduanya sekaligus")}
+              </div>
+              <p className="text-[11px] muted">
+                {t("Approves every delivery order waiting for release and signs every invoice waiting for finance, with this faktur pajak number. Each can still be signed on its own below.",
+                   "Menyetujui semua surat jalan yang menunggu rilis dan mengesahkan semua faktur yang menunggu keuangan, dengan nomor faktur pajak ini. Keduanya tetap bisa disahkan sendiri-sendiri di bawah.")}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input className="input max-w-xs"
+                  placeholder={t("Faktur pajak no. *", "No. faktur pajak *")}
+                  aria-label={t("Faktur pajak number for both", "Nomor faktur pajak untuk keduanya")}
+                  value={bothFp} onChange={(e) => setBothFp(e.target.value)} />
+                <button className="btn-primary"
+                  disabled={!bothFp.trim() || approveBoth.isPending}
+                  onClick={() => approveBoth.mutate(bothFp.trim(), {
+                    onSuccess: () => setBothFp(""),
+                  })}>
+                  <Stamp size={14} />
+                  {t("Approve DO + invoice", "Setujui SJ + faktur")}
+                </button>
+              </div>
+            </div>
+          )}
+
           {canInvoiceDesk && (
             <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider muted">
-                {t("Issue invoice", "Terbitkan faktur")} {invType === "final" ? t("+ delivery order", "+ surat jalan") : t("(down-payment)", "(down payment/DP)")}
+                {t("Issue documents", "Terbitkan dokumen")}
               </div>
               <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5">
                 {([
@@ -1859,21 +1919,61 @@ export default function ProjectDetailPage() {
                   "Admin atau keuangan yang menerbitkan. Sistem membuat kedua lembarnya — faktur setelah keuangan mengesahkan dengan nomor faktur pajak, surat jalan setelah direktur menyetujui. Tidak perlu mengunggah apa pun.",
                 )}
               </p>
-              <button className="btn-primary"
-                disabled={
-                  issueInvoice.isPending
-                  || (invType === "final" && !p.qc_passed_at)
-                }
-                onClick={() => issueInvoice.mutate(
-                  {
-                    amount: invAmount ? Number(invAmount) : undefined,
-                    invoiceType: invType,
-                  },
-                  { onSuccess: () => setInvAmount("") },
-                )}>
-                <FileText size={14} />
-                {invType === "dp" ? t("Issue DP invoice", "Terbitkan faktur DP") : t("Issue invoice + DO", "Terbitkan faktur + DO")}
-              </button>
+              {/* The delivery order goes first: the goods leave under it and
+                  the invoice bills for what it says. Both can still be
+                  raised in one press for a job small enough not to want two
+                  steps — the DO is still created first either way. */}
+              <div className="flex flex-wrap items-center gap-2">
+                {invType === "final" && (
+                  <button className="btn-ghost"
+                    disabled={issueDeliveryOrder.isPending || !p.qc_passed_at}
+                    title={t("Raise the delivery order on its own. The invoice can follow once it exists.",
+                             "Terbitkan surat jalan saja. Faktur menyusul setelah surat jalan ada.")}
+                    onClick={() => issueDeliveryOrder.mutate(undefined)}>
+                    <Truck size={14} /> {t("1. Issue delivery order", "1. Terbitkan surat jalan")}
+                  </button>
+                )}
+                <button className={invType === "final" && dos.length === 0
+                  ? "btn-ghost" : "btn-primary"}
+                  disabled={
+                    issueInvoice.isPending
+                    || (invType === "final" && !p.qc_passed_at)
+                    || (invType === "final" && dos.length === 0)
+                  }
+                  title={invType === "final" && dos.length === 0
+                    ? t("Issue the delivery order first — the invoice bills for what it says went out.",
+                        "Terbitkan surat jalan dulu — faktur menagih barang yang tertulis di sana.")
+                    : undefined}
+                  onClick={() => issueInvoice.mutate(
+                    {
+                      amount: invAmount ? Number(invAmount) : undefined,
+                      invoiceType: invType,
+                      createDeliveryOrder: false,
+                    },
+                    { onSuccess: () => setInvAmount("") },
+                  )}>
+                  <FileText size={14} />
+                  {invType === "dp"
+                    ? t("Issue DP invoice", "Terbitkan faktur DP")
+                    : t("2. Issue invoice", "2. Terbitkan faktur")}
+                </button>
+                {invType === "final" && dos.length === 0 && (
+                  <button className="btn-primary"
+                    disabled={issueInvoice.isPending || !p.qc_passed_at}
+                    title={t("Raise both now — the delivery order is still filed first.",
+                             "Terbitkan keduanya sekaligus — surat jalan tetap dibuat lebih dulu.")}
+                    onClick={() => issueInvoice.mutate(
+                      {
+                        amount: invAmount ? Number(invAmount) : undefined,
+                        invoiceType: invType,
+                        createDeliveryOrder: true,
+                      },
+                      { onSuccess: () => setInvAmount("") },
+                    )}>
+                    <FileText size={14} /> {t("Issue both at once", "Terbitkan keduanya sekaligus")}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

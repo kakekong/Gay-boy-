@@ -1486,6 +1486,69 @@ async def _ship_to_note(db: AsyncSession, p: Project) -> str | None:
     return f"BARANG DI KIRIM KE:\n{addr}" if addr else None
 
 
+async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
+                                courier: str | None = None,
+                                file: UploadFile | None = None) -> DeliveryOrder:
+    """File a delivery order for this project, with the goods already on it."""
+    do = DeliveryOrder(
+        project_id=p.id,
+        number=await _next_doc_number(db, DeliveryOrder, "DO"),
+        courier=courier, status="pending",
+        # The goods, and where they go. A delivery order with no lines can't
+        # be printed and can't be signed for, and both are already known
+        # here — the customer said what they ordered on their PO, and their
+        # record says where deliveries go.
+        items=await _do_lines(db, p),
+        remarks=await _ship_to_note(db, p),
+    )
+    db.add(do)
+    await db.flush()
+    if file is not None:
+        await _save_attachment(db, file=file, owner_type="delivery_order",
+                               owner_id=do.id, user=user, label="delivery_order")
+    return do
+
+
+async def _open_delivery_orders(db: AsyncSession, project_id: UUID) -> list[DeliveryOrder]:
+    return list((await db.scalars(
+        select(DeliveryOrder).where(DeliveryOrder.project_id == project_id)
+        .order_by(DeliveryOrder.created_at.asc())
+    )).all())
+
+
+@router.post("/projects/{project_id}/delivery-order", status_code=201)
+async def issue_delivery_order(
+    project_id: UUID,
+    courier: str | None = Form(None),
+    delivery_order_file: UploadFile | None = File(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Raise the delivery order on its own, before anything is billed.
+
+    This is the first of the two documents: the goods go out under it, the
+    customer signs it, and the invoice that follows bills for what it says.
+    Splitting it out is what lets the two be raised — and signed off — by the
+    people who own each: the director releases this one, finance signs the
+    invoice.
+    """
+    if Role(user.role) not in _INVOICE_ISSUER_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Finance/admin/director only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not p.qc_passed_at:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The delivery order can only be issued after QC has passed — "
+            "it says the goods left in this condition.",
+        )
+    do = await _raise_delivery_order(db, p, user=user, courier=courier,
+                                     file=delivery_order_file)
+    return {"delivery_order": {"id": str(do.id), "number": do.number,
+                               "items": do.items, "remarks": do.remarks}}
+
+
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)
 async def issue_invoice(
     project_id: UUID,
@@ -1507,7 +1570,7 @@ async def issue_invoice(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Finance issues the delivery order + invoice.
+    """Issue the invoice — after the delivery order it bills for.
 
     Two flavours: a **down-payment ('dp')** invoice can be filed anytime after
     the customer PO is approved — the customer pays a deposit before we start
@@ -1515,12 +1578,20 @@ async def issue_invoice(
     passes to bill the remaining balance. 'single' is the legacy one-shot mode
     (whole amount in a single invoice, issued post-QC).
 
-    Finance is the one who uploads the invoice file so the tax record can't be
-    corrupted by an admin misclick at issue time. The faktur pajak number is
-    still entered by finance during the approve step so the number is committed
-    at the moment finance signs off, not at upload time.
+    **The delivery order comes first.** You bill for goods you have sent, so a
+    final invoice on a project with no delivery order is a bill for nothing
+    identifiable — and when the customer queries it, the DO number is the
+    thing that answers them. A down-payment invoice is the exception by
+    definition: it is billed *before* delivery, so it has no DO to follow.
 
-    The invoice parks at `pending_finance` regardless of type.
+    `create_delivery_order` keeps the one-press path: with no DO on the
+    project it raises one first and then bills against it, so the two
+    documents are still created in that order. Pass it false to bill against
+    a delivery order that already exists.
+
+    The invoice parks at `pending_finance` regardless of type: finance signs
+    it off with its faktur pajak number, which is a different signature from
+    the director's on the delivery order.
     """
     if Role(user.role) not in _INVOICE_ISSUER_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Finance/admin/director only")
@@ -1541,6 +1612,32 @@ async def issue_invoice(
         )
     if not p.customer_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project has no customer.")
+
+    # The delivery order comes first. A down-payment invoice is billed before
+    # delivery by definition, so it is the one exception.
+    do = None
+    if itype != "dp":
+        existing = await _open_delivery_orders(db, project_id)
+        if not existing:
+            if not create_delivery_order:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Issue the delivery order first — the invoice bills for "
+                    "what it says went out, and its number is what answers "
+                    "the customer when they query the bill.",
+                )
+            do = await _raise_delivery_order(db, p, user=user, courier=courier,
+                                             file=delivery_order_file)
+        elif create_delivery_order and delivery_order_file is not None:
+            # Nothing to raise, but a sheet was handed in for the one that
+            # already exists.
+            await _save_attachment(db, file=delivery_order_file,
+                                   owner_type="delivery_order",
+                                   owner_id=existing[-1].id, user=user,
+                                   label="delivery_order")
+            do = existing[-1]
+        else:
+            do = existing[-1]
 
     parsed_due: date | None = None
     if due_date:
@@ -1590,34 +1687,98 @@ async def issue_invoice(
         await _save_attachment(db, file=invoice_file, owner_type="invoice",
                                owner_id=inv.id, user=user, label="invoice")
 
-    # A DP invoice comes before the DO, so don't auto-create a delivery order
-    # when the type is 'dp' — the DO is filed on the final invoice.
-    do = None
-    if create_delivery_order and itype != "dp":
-        do = DeliveryOrder(
-            project_id=project_id,
-            number=await _next_doc_number(db, DeliveryOrder, "DO"),
-            courier=courier, status="pending",
-            # The goods, and where they go. A delivery order with no lines
-            # can't be printed and can't be signed for, and both of these are
-            # already known here — the customer said what they ordered on
-            # their PO, and their record says where deliveries go.
-            items=await _do_lines(db, p),
-            remarks=await _ship_to_note(db, p),
-        )
-        db.add(do)
-        await db.flush()
-        if delivery_order_file is not None:
-            await _save_attachment(db, file=delivery_order_file,
-                                   owner_type="delivery_order",
-                                   owner_id=do.id, user=user,
-                                   label="delivery_order")
     return {
         "invoice": {"id": str(inv.id), "number": inv.number, "status": inv.status,
                     "type": inv.type, "total": float(inv.total or 0),
                     "faktur_pajak_no": inv.faktur_pajak_no},
         "delivery_order": {"id": str(do.id), "number": do.number} if do else None,
     }
+
+
+@router.post("/projects/{project_id}/approve-documents")
+async def approve_documents(
+    project_id: UUID,
+    faktur_pajak_no: str = Form(..., description="Faktur pajak number for the invoice"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Sign off the delivery order and the invoice in one action.
+
+    The two documents normally take two signatures from two people — the
+    director releases the delivery order, finance signs the invoice with its
+    faktur pajak number — and for a job of any size that separation is the
+    point of having both.
+
+    But the same pair, on the same small order, on the same afternoon, is two
+    people waiting on each other for a decision neither of them disagrees
+    with. The director outranks both signatures, so this lets them give both
+    at once. It is deliberately director-only: finance signing the delivery
+    order, or admin signing either, would be a person approving their own
+    paperwork.
+
+    Everything still pending on the project is signed. Anything already
+    signed is left exactly as it is rather than re-stamped with today's date
+    and this person's name.
+    """
+    if Role(user.role) is not Role.DIRECTOR:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only the director can sign both documents at once — otherwise "
+            "the delivery order is the director's and the invoice is "
+            "finance's, each signed on its own.",
+        )
+    fp_no = (faktur_pajak_no or "").strip()
+    if not fp_no:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Faktur pajak number is required to approve.")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+    from app.core.audit import record as audit_record
+
+    dos_done: list[str] = []
+    for d in await _open_delivery_orders(db, project_id):
+        if d.approved_at or d.status == "delivered":
+            continue
+        if not (d.items or []):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"{d.number} has no lines — there is nothing for the customer "
+                "to sign for. Add what is being delivered first.",
+            )
+        d.approved_by = user.id
+        d.approved_at = datetime.now(UTC)
+        dos_done.append(d.number)
+        await audit_record(db, actor=user, action="approve",
+                           entity="delivery_order", entity_id=d.id,
+                           after={"number": d.number, "with_invoice": True})
+
+    invs_done: list[str] = []
+    invoices = (await db.scalars(
+        select(Invoice).where(Invoice.project_id == project_id,
+                              Invoice.status == "pending_finance")
+        .order_by(Invoice.created_at.asc())
+    )).all()
+    for inv in invoices:
+        inv.faktur_pajak_no = fp_no
+        inv.faktur_pajak_status = "issued"
+        inv.status = "approved"
+        inv.approved_by = user.id
+        inv.approved_at = datetime.now(UTC)
+        invs_done.append(inv.number)
+        await audit_record(db, actor=user, action="approve", entity="invoice",
+                           entity_id=inv.id,
+                           after={"number": inv.number, "faktur_pajak_no": fp_no,
+                                  "with_delivery_order": True})
+    if invs_done:
+        advance_project_status(p, "invoiced")
+    if not dos_done and not invs_done:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Nothing on this project is waiting for a signature.")
+    await db.flush()
+    return {"ok": True, "delivery_orders": dos_done, "invoices": invs_done,
+            "faktur_pajak_no": fp_no}
 
 
 @router.post("/projects/{project_id}/customer-received")
