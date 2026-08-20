@@ -110,6 +110,22 @@ async def _next_pr_number(db: AsyncSession) -> str:
     return f"{prefix}{seq + 1:04d}"
 
 
+def _may_see_cost(user: User) -> bool:
+    """Whether this user may see what stock cost us.
+
+    The same wall the project page draws, in the one place it had not been
+    drawn: admin runs the customer side — drawings, logistics, delivery,
+    invoicing — and what we paid a vendor for a part is not part of any of
+    that. It is also the figure that maps a customer's job to a supplier's
+    price, which is exactly what admin is kept away from everywhere else.
+
+    Sales are out for the same reason they are out of the cost column on a
+    price request: they quote the sell price, and knowing the buy price is
+    how a discount gets given away.
+    """
+    return Role(user.role) not in (Role.ADMIN, Role.SALES)
+
+
 def _status(item: InventoryItem) -> str:
     stock = float(item.current_stock or 0)
     rp = float(item.reorder_point or 0)
@@ -125,7 +141,7 @@ def _status(item: InventoryItem) -> str:
 @router.get("")
 async def list_items(
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    _u: User = Depends(get_current_user),  # noqa: ARG001 — read for the cost gate
     q: str | None = None,
     category: str | None = None,
     only_low: bool = False,
@@ -140,6 +156,7 @@ async def list_items(
     if category:
         stmt = stmt.where(InventoryItem.category == category)
     rows = (await db.scalars(stmt)).all()
+    show_cost = _may_see_cost(_u)
     out = []
     for r in rows:
         st = _status(r)
@@ -148,7 +165,10 @@ async def list_items(
         out.append({
             "id": str(r.id),
             "sku": r.sku, "name": r.name, "category": r.category,
-            "uom": r.uom, "unit_cost": float(r.unit_cost or 0),
+            "uom": r.uom,
+            # None, not zero: a nought in a money column reads as "this cost
+            # nothing", which is a different lie from "not yours to see".
+            "unit_cost": float(r.unit_cost or 0) if show_cost else None,
             "current_stock": float(r.current_stock or 0),
             "reorder_point": float(r.reorder_point or 0),
             "reorder_qty": float(r.reorder_qty or 0),
@@ -179,7 +199,8 @@ async def get_item(item_id: UUID,
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     return {
         "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
-        "uom": r.uom, "unit_cost": float(r.unit_cost or 0),
+        "uom": r.uom,
+        "unit_cost": float(r.unit_cost or 0) if _may_see_cost(_u) else None,
         "current_stock": float(r.current_stock or 0),
         "reorder_point": float(r.reorder_point or 0),
         "reorder_qty": float(r.reorder_qty or 0),

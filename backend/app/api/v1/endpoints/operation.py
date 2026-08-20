@@ -1525,6 +1525,11 @@ async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
     if file is not None:
         await _save_attachment(db, file=file, owner_type="delivery_order",
                                owner_id=do.id, user=user, label="delivery_order")
+    # Goods leaving under this sheet leave the shelf with it. Parts the
+    # catalogue doesn't know are skipped rather than invented — a delivery
+    # order is not where an item is introduced.
+    from app.services.stock_sync import issue_delivery_order as _stock_out
+    await _stock_out(db, do, user)
     return do
 
 
@@ -2138,6 +2143,15 @@ async def list_work_orders(
         .where(Project.is_deleted.is_(False))
         .order_by(WorkOrder.created_at.desc())
     )
+    # Sales sees their own customers' work and nobody else's — the same
+    # boundary the projects list draws. The operation board was the one
+    # surface that skipped it, so a rep opening a stage read the whole
+    # company's order book: every other rep's customers, by name, with what
+    # each is waiting for and when it is promised.
+    if Role(_user.role) == Role.SALES:
+        stmt = stmt.join(Customer, Project.customer_id == Customer.id).where(
+            Customer.sales_pic_id == _user.id
+        )
     if completed is False:
         stmt = stmt.where(Project.status.not_in(("delivered", "paid", "closed")))
     if stage:
@@ -2485,6 +2499,10 @@ async def delete_delivery(do_id: UUID,
                                  Attachment.owner_id == do_id)
     )).all():
         await db.delete(a)
+    # The goods never went, so put them back — exactly what this sheet took,
+    # written down as its own movement rather than as a silent correction.
+    from app.services.stock_sync import reverse as _stock_reverse
+    await _stock_reverse(db, d.number, "do_out", user)
     await db.delete(d)
     await db.flush()
     from app.core.audit import record as audit_record

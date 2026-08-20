@@ -1006,6 +1006,14 @@ async def create_po(
     # already past purchasing.
     from app.models.operation import advance_project_status
     advance_project_status(project, "purchasing")
+    # An open PO is goods on their way, so the shelf count follows it — and
+    # each line becomes a catalogue item, with a generated SKU, the first
+    # time that part is ordered. A PO still waiting for the director does
+    # nothing to stock: it may yet be cancelled, and counting goods nobody
+    # was told to send is how an inventory stops being believed.
+    if po.status == "open":
+        from app.services.stock_sync import receive_purchase_order
+        await receive_purchase_order(db, po, user)
     await db.flush()
 
     return {
@@ -1453,7 +1461,18 @@ async def update_po(
     if "total" in data and data["total"] is not None:
         po.total = data["total"]
     if "status" in data and data["status"]:
+        was_status = po.status
         po.status = data["status"]
+        # Stock follows the order's life: cancelling one takes its goods back
+        # off the shelf, and reopening a cancelled one puts them back. Each is
+        # written as its own movement against the PO number, so the ledger
+        # reads as what happened rather than as a number that shifted.
+        from app.services.stock_sync import receive_purchase_order
+        from app.services.stock_sync import reverse as _stock_reverse
+        if po.status == "cancelled" and was_status != "cancelled":
+            await _stock_reverse(db, po.number, "po_in", user)
+        elif po.status == "open" and was_status in ("cancelled", "pending_approval"):
+            await receive_purchase_order(db, po, user)
     if "items" in data and data["items"] is not None:
         po.items = data["items"]
 

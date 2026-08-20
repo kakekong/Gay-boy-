@@ -18,7 +18,7 @@ interface Item {
   name: string;
   category: string | null;
   uom: string;
-  unit_cost: number;
+  unit_cost: number | null;
   current_stock: number;
   reorder_point: number;
   reorder_qty: number;
@@ -42,6 +42,11 @@ export default function InventoryPage() {
   const canEdit = user && (user.role === "admin" || user.role === "director");
   const canAdd = user && ["purchasing", "admin", "manager", "director"].includes(user.role);
   const isDirector = user?.role === "director";
+  // What stock cost us is procurement's figure. Admin run the customer side
+  // and sales quote the sell price — neither is shown the buy price
+  // anywhere else in the app, and the server sends them null for it, so the
+  // column comes out rather than rendering "Rp 0" over a hidden number.
+  const showCost = !!user && !["admin", "sales"].includes(user.role);
 
   const [q, setQ] = useState("");
   const [onlyLow, setOnlyLow] = useState(false);
@@ -100,7 +105,9 @@ export default function InventoryPage() {
         <Card label={T("Items tracked")} value={String((items.data ?? []).length)} Icon={Boxes} tone="brand" />
         <Card label={T("Low / out of stock")} value={String(lowCount)} Icon={AlertTriangle}
               tone={lowCount > 0 ? "amber" : "emerald"} />
-        <Card label={T("Total stock value")} value={`Rp ${idr(totalValue)}`} Icon={Wrench} tone="violet" />
+        {showCost && (
+          <Card label={T("Total stock value")} value={`Rp ${idr(totalValue)}`} Icon={Wrench} tone="violet" />
+        )}
       </div>
 
       {/* Toolbar */}
@@ -126,7 +133,7 @@ export default function InventoryPage() {
                 <th className="th">{T("Category")}</th>
                 <th className="th text-right">{T("Stock")}</th>
                 <th className="th text-right">{T("Reorder at")}</th>
-                <th className="th text-right">{T("Unit cost")}</th>
+                {showCost && <th className="th text-right">{T("Unit cost")}</th>}
                 <th className="th">{T("Status")}</th>
                 <th className="th text-right">{T("Actions")}</th>
               </tr>
@@ -148,7 +155,9 @@ export default function InventoryPage() {
                     <td className="td text-right tabular-nums muted">
                       {i.reorder_point} {i.uom}
                     </td>
-                    <td className="td text-right tabular-nums">{T("Rp")}{" "}{idr(i.unit_cost)}</td>
+                    {showCost && (
+                      <td className="td text-right tabular-nums">{T("Rp")}{" "}{idr(i.unit_cost ?? 0)}</td>
+                    )}
                     <td className="td">
                       <span className={clsx("chip ring-1", M.tone)}>
                         <M.Icon size={11} /> {T(M.label)}

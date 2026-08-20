@@ -331,6 +331,14 @@ async def apply_to_target(
             if action == "create":
                 po.status = "open" if approve else "cancelled"
                 applied["new_status"] = po.status
+                # Releasing the PO is what puts its goods on the shelf — the
+                # same act that told the supplier to send them.
+                if approve:
+                    from app.services.stock_sync import receive_purchase_order
+                    # No actor here — apply_to_target takes the request, not
+                    # the person; the movement's own reference names the PO,
+                    # and the approval row records who decided it.
+                    applied["stock_in"] = await receive_purchase_order(db, po)
                 # An approved supplier PO is the trigger that moves the project
                 # to the purchasing stage (matches the direct-director path in
                 # purchasing.create_po). Forward-only.
