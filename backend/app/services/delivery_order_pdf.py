@@ -42,6 +42,28 @@ class _Doc(BaseDocTemplate):
     footer_label = "SURAT JALAN"
 
 
+def _draw_draft(canvas, doc) -> None:
+    """The letterhead, plus DRAFT struck across the page.
+
+    Drawn for the director deciding whether to release the sheet. It is the
+    real document — same lines, same address, same numbers — so the decision
+    is made on what would actually print; and it is unmistakably not the
+    printed copy, so nobody can hand it to a driver.
+    """
+    _draw_frame_and_chrome(canvas, doc)
+    w, h = A4
+    canvas.saveState()
+    canvas.translate(w / 2, h / 2)
+    canvas.rotate(38)
+    canvas.setFont("Helvetica-Bold", 96)
+    canvas.setFillColor(colors.Color(0.85, 0.30, 0.10, alpha=0.14))
+    canvas.drawCentredString(0, -30, "DRAFT")
+    canvas.setFont("Helvetica-Bold", 14)
+    canvas.setFillColor(colors.Color(0.85, 0.30, 0.10, alpha=0.30))
+    canvas.drawCentredString(0, -56, "BELUM DISETUJUI — NOT YET APPROVED")
+    canvas.restoreState()
+
+
 def build_delivery_order_pdf(
     *, number: str, do_date: str, customer_name: str, customer_address: str,
     customer_phone: str | None, customer_fax: str | None,
@@ -49,13 +71,14 @@ def build_delivery_order_pdf(
     rows: list[dict], remarks: str | None,
     courier: str | None, tracking_no: str | None,
     prepared_by: str, preparer_signature: bytes | None = None,
+    draft: bool = False,
 ) -> bytes:
     buf = BytesIO()
     doc = _Doc(
         buf, pagesize=A4,
         leftMargin=MARGIN_X, rightMargin=MARGIN_X,
         topMargin=18 * mm + HEADER_H - 18 * mm, bottomMargin=FOOTER_H + 14 * mm,
-        title=f"Surat Jalan {number}",
+        title=("DRAFT — " if draft else "") + f"Surat Jalan {number}",
     )
     content_w = A4[0] - 2 * MARGIN_X
     frame = Frame(
@@ -64,7 +87,8 @@ def build_delivery_order_pdf(
         leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
     )
     doc.addPageTemplates([
-        PageTemplate(id="sheet", frames=[frame], onPage=_draw_frame_and_chrome),
+        PageTemplate(id="sheet", frames=[frame],
+                     onPage=(_draw_draft if draft else _draw_frame_and_chrome)),
     ])
 
     title = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=21,

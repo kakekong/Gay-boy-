@@ -40,7 +40,7 @@ router = APIRouter(
 
 ALLOWED_OWNERS = {
     "quotation", "customer_po", "supplier_po", "price_request",
-    "project", "invoice", "supplier_price_request",
+    "project", "invoice", "supplier_price_request", "delivery_order",
 }
 
 # Which roles have any business in a given thread, before row-level scoping.
@@ -60,6 +60,11 @@ _THREAD_ROLES: dict[str, set[Role]] = {
     "project":       {Role.SALES, Role.PURCHASING, Role.ADMIN, Role.FINANCE,
                       Role.MANAGER, Role.DIRECTOR},
     "invoice":       {Role.SALES, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},
+    # The delivery order's own screen. Narrower than the invoice beside it:
+    # the sheet is raised by the admin desk, released by the director and
+    # billed against by finance, and sales never sees the deliveries table
+    # on the project page either.
+    "delivery_order": {Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},
 }
 
 
@@ -369,6 +374,10 @@ async def _document_label(db: AsyncSession, owner_type: str, owner_id: UUID) -> 
             from app.models.finance import Invoice
             row = await db.get(Invoice, owner_id)
             return row.number if row else "invoice"
+        if owner_type == "delivery_order":
+            from app.models.operation import DeliveryOrder
+            row = await db.get(DeliveryOrder, owner_id)
+            return row.number if row else "delivery order"
     except Exception:  # noqa: BLE001 — a label is never worth a 500
         pass
     return owner_type.replace("_", " ")

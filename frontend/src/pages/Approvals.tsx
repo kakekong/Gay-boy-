@@ -4,11 +4,12 @@ import { Link } from "react-router-dom";
 import {
   Check, X, ShieldCheck, AlertCircle, Loader2, CheckCircle2,
   Download, ChevronRight, FileText, Building2, Eye, History,
-  MessageSquare, Trophy,
+  MessageSquare, Trophy, Truck,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { GeneratedSheetModal } from "@/components/GeneratedSheetModal";
 import { T, locale } from "@/store/lang";
 
 interface ApprovalAttachment {
@@ -160,11 +161,13 @@ export default function ApprovalsPage() {
                     d.kind === "drawing" ? "bg-cyan-50 text-cyan-700"
                     : d.kind === "import_doc" ? "bg-teal-50 text-teal-700"
                     : d.kind === "delivery_proof" ? "bg-lime-50 text-lime-700"
+                    : d.kind === "delivery_order" ? "bg-amber-50 text-amber-700"
                     : "bg-violet-50 text-violet-700",
                   )}>
                     {d.kind === "drawing" ? T("DRW")
                      : d.kind === "import_doc" ? T("DOC")
                      : d.kind === "delivery_proof" ? T("POD")
+                     : d.kind === "delivery_order" ? T("DO")
                      : T("PR")}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -213,6 +216,9 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
   const isWon = r.target_type === "quotation_won";
   const isProjectUpdate =
     r.target_type === "project" && r.payload?.action === "update";
+  // Releasing a delivery order: the goods leave under it, and the sheet the
+  // driver carries is generated the moment this is approved.
+  const isDeliveryOrder = r.target_type === "delivery_order";
   const fmtIdr = (n: number) =>
     "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -281,6 +287,9 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             ) : isProjectUpdate ? (
               <span className="chip bg-indigo-50 text-indigo-700 inline-flex items-center gap-1">
                 <FileText size={11} /> {T("Shipping update")}</span>
+            ) : isDeliveryOrder ? (
+              <span className="chip bg-lime-50 text-lime-700 inline-flex items-center gap-1">
+                <Truck size={11} /> {T("Delivery order")}</span>
             ) : (
               <span className="chip bg-brand-50 text-brand-700 capitalize">
                 {r.target_type}
@@ -410,6 +419,19 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                 </tbody>
               </table>
             </div>
+          ) : isDeliveryOrder ? (
+            <div className="mt-3 space-y-2">
+              <Link
+                to={`/deliveries/${r.target_id}`}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-900 hover:text-brand-700 font-mono"
+              >
+                <Truck size={14} />
+                {r.target_label ?? T("Delivery order")}
+              </Link>
+              <div className="text-sm">
+                {T("Release this delivery order. The goods go out under it, and its sheet is generated from what you approve.")}</div>
+              {r.reason && <div className="text-xs muted italic">{r.reason}</div>}
+            </div>
           ) : (
             <div className="mt-2 text-sm font-medium text-ink-900">{r.reason}</div>
           )}
@@ -523,6 +545,9 @@ interface PreviewShape {
   notes: string | null;
   attachments: ApprovalAttachment[];
   link: string | null;
+  /** Set for documents the system prints — the sheet as it would come out,
+   *  stamped DRAFT while it is still waiting to be released. */
+  pdf_url?: string | null;
 }
 
 const rp = (n: number | null | undefined) =>
@@ -538,6 +563,7 @@ const rp = (n: number | null | undefined) =>
  */
 function DocumentPreview({ requestId }: { requestId: string }) {
   const [open, setOpen] = useState(true);
+  const [sheet, setSheet] = useState(false);
   const q = useQuery({
     queryKey: ["approval-preview", requestId],
     queryFn: () => api.get(`/approvals/${requestId}/preview`)
@@ -566,8 +592,18 @@ function DocumentPreview({ requestId }: { requestId: string }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold">{p.title}</span>
                 {p.subtitle && <span className="text-sm muted">· {p.subtitle}</span>}
+                {/* The document itself, not a summary of it. On a delivery
+                    order this is the decision: what the customer will be
+                    handed to sign. */}
+                {p.pdf_url && (
+                  <button onClick={() => setSheet(true)}
+                    className="btn-ghost py-1 px-2 text-xs ml-auto">
+                    <Eye size={12} /> {T("See the sheet")}</button>
+                )}
                 {p.link && (
-                  <Link to={p.link} className="ml-auto text-xs text-brand-700 hover:underline">
+                  <Link to={p.link}
+                    className={clsx("text-xs text-brand-700 hover:underline",
+                                    !p.pdf_url && "ml-auto")}>
                     {T("Open the document →")}</Link>
                 )}
               </div>
@@ -675,6 +711,14 @@ function DocumentPreview({ requestId }: { requestId: string }) {
             </>
           )}
         </div>
+      )}
+      {sheet && p?.pdf_url && (
+        <GeneratedSheetModal
+          url={p.pdf_url}
+          filename={`${p.title ?? "document"}.pdf`}
+          title={`${p.title ?? ""} — ${T("draft")}`}
+          onClose={() => setSheet(false)}
+        />
       )}
     </div>
   );

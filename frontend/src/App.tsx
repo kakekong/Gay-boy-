@@ -38,6 +38,7 @@ const PaymentVerificationPage = lazy(() => import("@/pages/PaymentVerification")
 const PurchasingPage       = lazy(() => import("@/pages/Purchasing"));
 const PurchaseOrdersPage      = lazy(() => import("@/pages/PurchaseOrders"));
 const PurchaseOrderDetailPage = lazy(() => import("@/pages/PurchaseOrderDetail"));
+const DeliveryOrderDetailPage = lazy(() => import("@/pages/DeliveryOrderDetail"));
 const CustomerPOsPage         = lazy(() => import("@/pages/CustomerPOs"));
 const CustomerPODetailPage    = lazy(() => import("@/pages/CustomerPODetail"));
 const PORecapPage             = lazy(() => import("@/pages/PORecap"));
@@ -229,6 +230,12 @@ function MainApp() {
           <Route path="/purchase-orders/:id" element={
             <RequireRole roles={["purchasing", "manager", "director", "finance"]}>
               <PurchaseOrderDetailPage /></RequireRole>} />
+          {/* A delivery order's own screen. The desk that raises them, the
+              two who release them, and finance who bills against them —
+              sales never sees the deliveries table on the project either. */}
+          <Route path="/deliveries/:id" element={
+            <RequireRole roles={["admin", "finance", "manager", "director"]}>
+              <DeliveryOrderDetailPage /></RequireRole>} />
           <Route path="/customer-pos" element={<CustomerPOsPage />} />
           <Route path="/customer-pos/:id" element={<CustomerPODetailPage />} />
           <Route path="/po-recap" element={<PORecapPage />} />

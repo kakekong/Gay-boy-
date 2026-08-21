@@ -266,6 +266,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     // both were unreachable when the allowlist lacked these two.
     "/customer-pos",
     "/projects",
+    "/deliveries",      // the DO screen for a sheet they bill against
     // A supplier PO in dollars is a rupiah payment finance has to make, and
     // the rate that converts it is theirs to correct. Read-only otherwise —
     // the backend refuses any field but the rate from them.
@@ -305,6 +306,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
   // admin can clock in and read their own playbook.
   admin: [
     "/projects",
+    "/deliveries",      // the delivery orders this desk raises
     "/operation",
     "/inventory",
     "/attendance",

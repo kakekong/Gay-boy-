@@ -35,7 +35,7 @@ interface Candidate {
 
 type OwnerType =
   | "quotation" | "customer_po" | "supplier_po" | "price_request"
-  | "project" | "invoice" | "supplier_price_request";
+  | "project" | "invoice" | "supplier_price_request" | "delivery_order";
 
 /** Render @Name in bold so a mention is visible in the message body. */
 function withMentions(body: string, mentions: Mentioned[] | undefined) {

@@ -117,6 +117,43 @@ async def pending_documents(
                 "at": d.created_at,
             })
 
+    # 3b. Delivery orders raised but never released. Every new one files an
+    # approval request and shows as a full card above — this catches the ones
+    # raised before that existed, which would otherwise sit on their project
+    # page forever waiting for somebody to notice the grey chip.
+    unreleased = (await db.execute(
+        select(DeliveryOrder, Project)
+        .join(Project, DeliveryOrder.project_id == Project.id)
+        .where(DeliveryOrder.approved_at.is_(None),
+               DeliveryOrder.status != "delivered",
+               Project.is_deleted.is_(False),
+               Project.status.not_in(DONE_PROJECT))
+        .order_by(DeliveryOrder.created_at.asc())
+        .limit(50)
+    )).all()
+    if unreleased:
+        # Any request at all, not only a pending one: a sheet the director
+        # sent back is with the desk now, and listing it here would nag them
+        # about their own decision. Correcting it re-files the request, and
+        # then it shows as a card above.
+        queued = set((await db.scalars(
+            select(ApprovalRequest.target_id).where(
+                ApprovalRequest.target_type == "delivery_order",
+                ApprovalRequest.target_id.in_([d.id for d, _ in unreleased]),
+            )
+        )).all())
+        for d, p in unreleased:
+            if d.id in queued:
+                continue
+            items.append({
+                "kind": "delivery_order",
+                "title": f"Delivery order {d.number} — {p.code}",
+                "body": "Raised but not released. Nothing prints until you "
+                        "approve it.",
+                "link": f"/deliveries/{d.id}",
+                "at": d.created_at,
+            })
+
     # 4. Price requests waiting on the director's sell price (director only).
     if Role(user.role) == Role.DIRECTOR:
         prows = (await db.scalars(
@@ -196,6 +233,17 @@ async def inbox(
         )).all()
         projects = {p.id: p for p in projrows}
 
+    # Delivery-order releases: the number is the label, and the project code
+    # goes in the reason the requester wrote.
+    from app.models.operation import DeliveryOrder
+    do_ids = {r.target_id for r in rows if r.target_type == "delivery_order"}
+    dos: dict[UUID, DeliveryOrder] = {}
+    if do_ids:
+        dorows = (await db.scalars(
+            select(DeliveryOrder).where(DeliveryOrder.id.in_(do_ids))
+        )).all()
+        dos = {d.id: d for d in dorows}
+
     # Supplier-PO approvals (create/update): resolve the PO number for the label.
     from app.models.purchasing import SupplierPO
     spo_ids = {r.target_id for r in rows if r.target_type == "supplier_po"}
@@ -263,6 +311,12 @@ async def inbox(
         if t == "purchase_request":
             pr = prs.get(r.target_id)
             return bool(pr and pr.status != "pending_approval")
+        if t == "delivery_order":
+            d = dos.get(r.target_id)
+            if d is None:
+                # Deleted while it sat here — the desk withdrew the sheet.
+                return True
+            return bool(d.approved_at) or d.status == "delivered"
         if t == "project":
             p = projects.get(r.target_id)
             return bool(p and p.is_deleted)
@@ -332,6 +386,9 @@ async def inbox(
         elif r.target_type == "supplier_po":
             sp = supplier_pos.get(r.target_id)
             target_label = sp.number if sp else None
+        elif r.target_type == "delivery_order":
+            dd = dos.get(r.target_id)
+            target_label = dd.number if dd else None
         elif r.target_type in ("customer", "followup"):
             c = customers.get(r.target_id)
             target_label = c.company_name if c else None
@@ -454,6 +511,10 @@ async def preview_request(
         "fields": [], "items": [], "total": None, "notes": None,
         "attachments": await _attachments_for(db, "approval_request", req.id),
         "link": None,
+        # For documents the system prints: the sheet as it would come out,
+        # stamped DRAFT until somebody releases it. A line of text and two
+        # buttons is not enough to sign a delivery order off on.
+        "pdf_url": None,
     }
     t, tid = req.target_type, req.target_id
     # Who asked. On an edit request this is half the decision — the director is
@@ -580,6 +641,48 @@ async def preview_request(
                 fields=fields,
             )
             out["attachments"] += await _attachments_for(db, "supplier_po", sp.id)
+
+    elif t == "delivery_order":
+        # The sheet a driver carries and a customer stamps. No money on it by
+        # design, so the decision is about the goods, the count and where they
+        # are going — and about the sheet itself, which is why the draft PDF
+        # hangs off this preview.
+        from app.models.operation import DeliveryOrder, Project
+        d = await db.get(DeliveryOrder, tid)
+        if d:
+            p = await db.get(Project, d.project_id) if d.project_id else None
+            cust = (await db.get(Customer, p.customer_id)
+                    if (p and p.customer_id) else None)
+            po_number = p.po_number if p else None
+            if p:
+                from app.models.customer_po import CustomerPO
+                cpo = (await db.scalars(
+                    select(CustomerPO).where(CustomerPO.project_id == p.id)
+                    .order_by(CustomerPO.created_at.desc()).limit(1)
+                )).first()
+                if cpo:
+                    po_number = cpo.number
+            out.update(
+                title=d.number,
+                subtitle=cust.company_name if cust else (p.code if p else None),
+                link=f"/deliveries/{d.id}",
+                notes=d.remarks,
+                items=[{"description": i.get("description"),
+                        "qty": _money(i.get("qty")),
+                        "uom": i.get("uom"),
+                        "unit_price": None, "line_total": None}
+                       for i in (d.items or [])],
+                fields=[
+                    {"label": "Raised by", "value": requester_name},
+                    {"label": "Project", "value": (p.code if p else "—")},
+                    {"label": "Customer PO", "value": po_number or "—"},
+                    {"label": "Shipment", "value": f"#{d.split_index}"},
+                    {"label": "Courier", "value": d.courier or "—"},
+                    {"label": "Tracking", "value": d.tracking_no or "—"},
+                ],
+                pdf_url=f"/operation/deliveries/{d.id}/pdf?draft=1",
+            )
+            out["attachments"] += await _attachments_for(db, "delivery_order", d.id)
 
     elif t == "price_request_revision":
         from app.models.price_request import PriceRequest

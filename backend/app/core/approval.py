@@ -357,6 +357,34 @@ async def apply_to_target(
                     elif hasattr(po, k):
                         setattr(po, k, v)
                 applied["applied_changes"] = list(changes.keys())
+    elif req.target_type == "delivery_order":
+        # The director's release of a delivery order, taken from the inbox
+        # instead of the project page. Approving it is the same act as the
+        # Approve DO button: the sheet the driver carries is generated from
+        # this row at this moment, so the signature is stamped on the row.
+        #
+        # Rejecting deliberately changes nothing on the delivery order. It is
+        # still unapproved, still editable, still deletable — which is exactly
+        # what the desk needs in order to fix whatever the director sent it
+        # back for. The reason lives on this request, and the project page
+        # reads it off there.
+        from app.models.operation import DeliveryOrder
+        d = await db.get(DeliveryOrder, req.target_id)
+        if d:
+            applied["number"] = d.number
+            if d.approved_at:
+                applied["skipped"] = (
+                    f"{d.number} was already released — decision recorded "
+                    "but not re-applied"
+                )
+                return applied
+            if approve:
+                d.approved_by = req.decided_by
+                d.approved_at = req.decided_at or datetime.now(UTC)
+                applied["new_status"] = "approved"
+                applied["approved_at"] = d.approved_at.isoformat()
+            else:
+                applied["new_status"] = "sent back for correction"
     elif req.target_type == "purchase_request":
         # A PR sits at pending_approval until the director opens it; rejecting
         # cancels it so purchasing knows not to source against it.

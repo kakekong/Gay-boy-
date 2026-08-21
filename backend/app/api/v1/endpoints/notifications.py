@@ -73,6 +73,21 @@ _DISCUSSION_LINK = {
     "invoice": "/finance",
 }
 
+# What a pending request is, in the words people use for it. The bell used to
+# print the raw target_type — "Approval needed: delivery_order" — which reads
+# like a database column rather than a document somebody is waiting on.
+_APPROVAL_LABEL = {
+    "delivery_order": "delivery order",
+    "supplier_po": "purchase order",
+    "purchase_request": "purchase request",
+    "customer_po": "customer PO",
+    "quotation_won": "mark won",
+    "quotation_edit": "quotation edit",
+    "price_request_revision": "price revision",
+    "cross_dept_chat": "cross-department chat",
+    "inventory_item": "new inventory items",
+}
+
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
     # supplier, hierarchy tier 0) must never reach the CRM, pricing,
@@ -105,7 +120,7 @@ async def list_notifications(
                 "id": f"approval:{a.id}",
                 "kind": "approval",
                 "severity": "high" if a.required_role == Role.DIRECTOR.value else "medium",
-                "title": f"Approval needed: {a.target_type}",
+                "title": f"Approval needed: {_APPROVAL_LABEL.get(a.target_type, a.target_type.replace('_', ' '))}",
                 "body": a.reason or "",
                 "link": "/approvals",
                 "at": a.created_at,

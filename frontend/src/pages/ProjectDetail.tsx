@@ -2086,7 +2086,15 @@ export default function ProjectDetailPage() {
                           aria-label={`DO number ${d.number}`}
                           value={ed.number}
                           onChange={(e) => setEd({ number: e.target.value })} />
-                      ) : d.number}
+                      ) : (
+                        // The document has its own screen now — the lines it
+                        // carries, the destination, the files and the sheet
+                        // itself, none of which fit in five columns.
+                        <Link to={`/deliveries/${d.id}`}
+                          className="text-brand-700 hover:underline">
+                          {d.number}
+                        </Link>
+                      )}
                     </td>
                     <td className="td muted">
                       {ed ? (
@@ -2118,14 +2126,28 @@ export default function ProjectDetailPage() {
                         : isVerified ? "bg-cyan-50 text-cyan-700"
                         : (d.files ?? []).length > 0 ? "bg-amber-50 text-amber-700"
                         : isApproved ? "bg-blue-50 text-blue-700"
-                        : "bg-ink-100 text-ink-700"
+                        : d.approval?.status === "rejected" ? "bg-red-50 text-red-700"
+                        // Unreleased is the state somebody has to act on, so it
+                        // stops reading as grey furniture.
+                        : "bg-amber-50 text-amber-700"
                       )}>
                         {isDelivered ? t("delivered", "terkirim")
                           : isVerified ? t("verified", "terverifikasi")
                           : (d.files ?? []).length > 0 ? t("awaiting verify", "menunggu verifikasi")
                           : isApproved ? t("approved — sheet issued", "disetujui — surat jalan terbit")
-                          : t("waiting for approval", "menunggu persetujuan")}
+                          : d.approval?.status === "rejected"
+                            ? t("sent back by the director", "dikembalikan direktur")
+                            : d.approval?.status === "pending"
+                              ? t("with the director", "di meja direktur")
+                              : t("waiting for approval", "menunggu persetujuan")}
                       </span>
+                      {/* Why it came back. Without it the desk sees a red chip
+                          and has to go and ask. */}
+                      {!isApproved && d.approval?.status === "rejected" && d.approval?.notes && (
+                        <div className="text-[10px] text-red-700 whitespace-pre-wrap">
+                          {d.approval.notes}
+                        </div>
+                      )}
                       {isApproved && (
                         <div className="text-[10px] muted">
                           {t("approved", "disetujui")}{" "}

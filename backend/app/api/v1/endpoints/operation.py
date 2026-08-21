@@ -324,6 +324,7 @@ async def project_full(project_id: UUID,
                 "content_type": a.content_type,
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
+    do_approvals = await _do_approval_state(db, do_ids)
 
     if inv_ids:
         for c in (await db.scalars(
@@ -500,6 +501,10 @@ async def project_full(project_id: UUID,
                 "approved_by": str(do.approved_by) if do.approved_by else None,
                 "approved_by_name": (deciders.get(do.approved_by)
                                      if do.approved_by else None),
+                # Where the release stands with the director: pending in their
+                # inbox, or sent back with a reason the desk has to read
+                # before it corrects the sheet and asks again.
+                "approval": do_approvals.get(do.id),
                 "remarks": do.remarks,
             } for do in deliveries
         ],
@@ -1492,6 +1497,91 @@ class DeliveryLineIn(BaseModel):
     uom: str | None = None
 
 
+async def _file_do_approval(db: AsyncSession, do: DeliveryOrder, *,
+                            requester: User, project: Project | None = None):
+    """Put this delivery order in front of the director for release.
+
+    Filed for everybody, the director included: the signature and the sheet
+    are the same event, so a delivery order that nobody signed is a delivery
+    order that does not exist on paper. One pending request per document —
+    withdrawing an approval files a new one, and issuing twice never queues
+    the same sheet twice.
+    """
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+    already = await db.scalar(select(ApprovalRequest).where(
+        ApprovalRequest.target_type == "delivery_order",
+        ApprovalRequest.target_id == do.id,
+        ApprovalRequest.status == ApprovalStatus.PENDING.value,
+    ))
+    if already:
+        return already
+    n = len(do.items or [])
+    where = f" — {project.code}" if project is not None else ""
+    return await request_approval(
+        db,
+        target_type="delivery_order",
+        target_id=do.id,
+        requested_by=requester.id,
+        required_role=Role.DIRECTOR,
+        reason=(f"Delivery order {do.number}{where}"
+                + (f" ({n} line(s))" if n else "")),
+        payload={"action": "issue", "number": do.number,
+                 "project_id": str(do.project_id) if do.project_id else None},
+    )
+
+
+async def _settle_do_approval(db: AsyncSession, do_id: UUID, *,
+                              approve: bool, decider: User | None = None,
+                              drop: bool = False) -> int:
+    """Close any request still waiting on this delivery order.
+
+    The director can release a delivery order from the project page or from
+    the inbox, and either way the other one must stop asking. Deleting the
+    document drops the request outright — there is nothing left to decide.
+    """
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+    rows = (await db.scalars(select(ApprovalRequest).where(
+        ApprovalRequest.target_type == "delivery_order",
+        ApprovalRequest.target_id == do_id,
+        ApprovalRequest.status == ApprovalStatus.PENDING.value,
+    ))).all()
+    for r in rows:
+        if drop:
+            await db.delete(r)
+            continue
+        r.status = (ApprovalStatus.APPROVED if approve
+                    else ApprovalStatus.REJECTED).value
+        r.decided_by = decider.id if decider else None
+        r.decided_at = datetime.now(UTC)
+        r.decision_notes = ("Released on the project page"
+                            if approve else "Withdrawn on the project page")
+    await db.flush()
+    return len(rows)
+
+
+async def _do_approval_state(db: AsyncSession,
+                             do_ids: list[UUID]) -> dict[UUID, dict]:
+    """The latest approval request per delivery order, for the tables.
+
+    A pending one says "with the director"; a rejected one carries the reason
+    they sent it back, which is the thing the desk actually needs to read.
+    """
+    from app.models.approval import ApprovalRequest
+    if not do_ids:
+        return {}
+    rows = (await db.scalars(select(ApprovalRequest).where(
+        ApprovalRequest.target_type == "delivery_order",
+        ApprovalRequest.target_id.in_(do_ids),
+    ).order_by(ApprovalRequest.created_at.asc()))).all()
+    out: dict[UUID, dict] = {}
+    for r in rows:
+        out[r.target_id] = {
+            "id": str(r.id), "status": r.status,
+            "notes": r.decision_notes, "decided_at": r.decided_at,
+        }
+    return out
+
+
 async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
                                 courier: str | None = None,
                                 file: UploadFile | None = None,
@@ -1525,6 +1615,11 @@ async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
     if file is not None:
         await _save_attachment(db, file=file, owner_type="delivery_order",
                                owner_id=do.id, user=user, label="delivery_order")
+    # The director has to release it before it prints, and until now the only
+    # way they learned a delivery order was waiting was somebody opening the
+    # project and seeing the grey chip. File it as an approval request so it
+    # lands in the inbox with everything else that needs their signature.
+    await _file_do_approval(db, do, requester=user, project=p)
     # Goods leaving under this sheet leave the shelf with it. Parts the
     # catalogue doesn't know are skipped rather than invented — a delivery
     # order is not where an item is introduced.
@@ -1873,6 +1968,7 @@ async def approve_documents(
             )
         d.approved_by = user.id
         d.approved_at = datetime.now(UTC)
+        await _settle_do_approval(db, d.id, approve=True, decider=user)
         dos_done.append(d.number)
         await audit_record(db, actor=user, action="approve",
                            entity="delivery_order", entity_id=d.id,
@@ -2281,6 +2377,101 @@ def _do_settled(d: DeliveryOrder) -> str | None:
     return None
 
 
+# Who may open a delivery order's own screen. The desk that raises them, the
+# people who release them, and finance — who bills against them.
+_DO_READERS = _DO_DESK | {Role.DIRECTOR, Role.MANAGER, Role.FINANCE}
+
+
+@router.get("/deliveries/{do_id}")
+async def delivery_order_detail(do_id: UUID,
+                                db: AsyncSession = Depends(get_db),
+                                user: User = Depends(get_current_user)):
+    """One delivery order, on its own, the way a quotation or a PO has one.
+
+    A delivery order used to exist only as a row in a table on the project
+    page: five columns, an edit that swapped four of them for inputs, and no
+    way to see the lines it carries at all. It is a document — it has a
+    number, a date, a customer, lines, a destination and a signature — so it
+    gets a document's screen, with the same header, the same actions and the
+    same edit as the two documents either side of it in the flow.
+    """
+    if Role(user.role) not in _DO_READERS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Delivery orders belong to the admin desk, "
+                            "finance and management.")
+    d = await db.get(DeliveryOrder, do_id)
+    if not d:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
+    p = await db.get(Project, d.project_id) if d.project_id else None
+    cust = await db.get(Customer, p.customer_id) if (p and p.customer_id) else None
+
+    po_number = p.po_number if p else None
+    if p:
+        from app.models.customer_po import CustomerPO
+        cpo = (await db.scalars(
+            select(CustomerPO).where(CustomerPO.project_id == p.id)
+            .order_by(CustomerPO.created_at.desc()).limit(1)
+        )).first()
+        if cpo:
+            po_number = cpo.number
+
+    names: dict[UUID, str] = {}
+    ids = {x for x in (d.approved_by, d.verified_by) if x}
+    if ids:
+        for u in (await db.scalars(select(User).where(User.id.in_(ids)))).all():
+            names[u.id] = u.full_name
+
+    files = [{
+        "id": str(a.id), "filename": a.filename, "content_type": a.content_type,
+        "size": a.size,
+        "kind": (a.description or "").strip("[]").split("]")[0] or None,
+        "download_url": f"/api/v1/attachments/{a.id}/download",
+    } for a in (await db.scalars(
+        select(Attachment).where(Attachment.owner_type == "delivery_order",
+                                 Attachment.owner_id == d.id)
+        .order_by(Attachment.created_at.asc())
+    )).all()]
+
+    role = Role(user.role)
+    locked = _do_settled(d)
+    approval = (await _do_approval_state(db, [d.id])).get(d.id)
+    return {
+        "id": str(d.id), "number": d.number, "split_index": d.split_index,
+        "courier": d.courier, "tracking_no": d.tracking_no,
+        "status": d.status, "items": list(d.items or []), "remarks": d.remarks,
+        "created_at": d.created_at,
+        "delivered_at": d.delivered_at,
+        "approved_at": d.approved_at,
+        "approved_by": str(d.approved_by) if d.approved_by else None,
+        "approved_by_name": names.get(d.approved_by) if d.approved_by else None,
+        "verified_at": d.verified_at,
+        "verified_by": str(d.verified_by) if d.verified_by else None,
+        "verified_by_name": names.get(d.verified_by) if d.verified_by else None,
+        "project_id": str(d.project_id) if d.project_id else None,
+        "project_code": p.code if p else None,
+        "project_status": p.status if p else None,
+        "customer_id": str(cust.id) if cust else None,
+        "customer_name": cust.company_name if cust else None,
+        "ship_to": (cust.delivery_address or None) if cust else None,
+        "po_number": po_number,
+        "files": files,
+        # Where it stands with the director, and — when it came back — why.
+        "approval": approval,
+        # What this person may do with it, decided once here rather than
+        # re-derived from the role in the page.
+        "may": {
+            "edit": role in _DO_DESK and not locked,
+            "delete": role in _DO_DESK and not locked,
+            "approve": role in _DO_APPROVERS and not d.approved_at
+                       and d.status != "delivered",
+            "unapprove": (role in _DO_APPROVERS and bool(d.approved_at)
+                          and not d.verified_at and d.status != "delivered"),
+            "upload_proof": role in (_DO_DESK | {Role.FINANCE}),
+        },
+        "locked_because": locked,
+    }
+
+
 @router.patch("/deliveries/{do_id}")
 async def update_delivery(do_id: UUID, payload: DeliveryEdit,
                           db: AsyncSession = Depends(get_db),
@@ -2329,6 +2520,11 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
                     "qty": float(i.get("qty") or 0),
                     "uom": (i.get("uom") or "EA")} for i in data["items"]]
 
+    # A sheet the director sent back is corrected here, and correcting it is
+    # how it asks again — otherwise a rejection would be a dead end with no
+    # way back into the inbox. Idempotent: one pending request per document.
+    p = await db.get(Project, d.project_id) if d.project_id else None
+    await _file_do_approval(db, d, requester=user, project=p)
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="update", entity="delivery_order",
                        entity_id=d.id,
@@ -2347,6 +2543,7 @@ _DO_APPROVERS = {Role.DIRECTOR, Role.MANAGER}
 
 @router.get("/deliveries/{do_id}/pdf")
 async def delivery_order_pdf(do_id: UUID,
+                             draft: bool = False,
                              db: AsyncSession = Depends(get_db),
                              user: User = Depends(get_current_user)):
     """The printable delivery order — generated, not uploaded.
@@ -2355,19 +2552,30 @@ async def delivery_order_pdf(do_id: UUID,
     the customer signs and keeps, so handing one out before anybody released
     it would put a company document in a customer's hands that nobody agreed
     to send.
+
+    `draft=1` is the exception, and the reason it is safe: it renders the
+    same sheet with DRAFT struck across every page, for the person deciding
+    whether to release it. Approving a document you cannot look at is not
+    approving anything — the queue used to show a line of text and two
+    buttons — and a page stamped DRAFT is not a document anybody can pass
+    off as the real one.
     """
-    if Role(user.role) not in (_DO_DESK | _DO_APPROVERS):
+    if Role(user.role) not in (_DO_DESK | _DO_APPROVERS | {Role.FINANCE}):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Not yours to print.")
     d = await db.get(DeliveryOrder, do_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
-    if not d.approved_at:
+    if not d.approved_at and not draft:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This delivery order hasn't been approved yet — the director "
-            "releases it, and the sheet is generated from what they approved.",
+            "releases it, and the sheet is generated from what they approved. "
+            "Add ?draft=1 to see what is waiting to be released.",
         )
+    # Once it is released the draft stamp would be a lie, so the flag only
+    # means anything while the document is still unapproved.
+    draft = bool(draft and not d.approved_at)
     p = await db.get(Project, d.project_id) if d.project_id else None
     cust = await db.get(Customer, p.customer_id) if (p and p.customer_id) else None
 
@@ -2397,14 +2605,21 @@ async def delivery_order_pdf(do_id: UUID,
         rows=list(d.items or []),
         remarks=d.remarks,
         courier=d.courier, tracking_no=d.tracking_no,
-        prepared_by=(approver.full_name if approver else (user.full_name or "")),
-        preparer_signature=await _load_signature(approver or user),
+        # An unreleased sheet carries nobody's name and nobody's signature —
+        # that is the whole thing being decided. Printing the name of whoever
+        # happens to be looking at the draft would put a person on a document
+        # they have not signed.
+        prepared_by=("" if draft
+                     else (approver.full_name if approver else (user.full_name or ""))),
+        preparer_signature=(None if draft
+                            else await _load_signature(approver or user)),
+        draft=draft,
     )
     from fastapi.responses import Response
+    name = ("DRAFT-" if draft else "") + f"SuratJalan-{d.number}.pdf"
     return Response(
         content=pdf, media_type="application/pdf",
-        headers={"Content-Disposition":
-                 f'inline; filename="SuratJalan-{d.number}.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="{name}"'},
     )
 
 
@@ -2435,6 +2650,9 @@ async def approve_delivery(do_id: UUID,
         )
     d.approved_by = user.id
     d.approved_at = datetime.now(UTC)
+    # Whoever signs first wins: the inbox must stop asking for a signature
+    # that has already been given here.
+    await _settle_do_approval(db, d.id, approve=True, decider=user)
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="approve", entity="delivery_order",
                        entity_id=d.id, after={"number": d.number})
@@ -2467,6 +2685,10 @@ async def unapprove_delivery(do_id: UUID,
         )
     d.approved_by = None
     d.approved_at = None
+    # It needs releasing again, so it goes back in front of the director
+    # rather than sitting on the project page hoping to be noticed.
+    p = await db.get(Project, d.project_id) if d.project_id else None
+    await _file_do_approval(db, d, requester=user, project=p)
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="unapprove",
                        entity="delivery_order", entity_id=d.id,
@@ -2508,6 +2730,17 @@ async def delete_delivery(do_id: UUID,
     # written down as its own movement rather than as a silent correction.
     from app.services.stock_sync import reverse as _stock_reverse
     await _stock_reverse(db, d.number, "do_out", user)
+    # Nothing left to decide: the request goes with the document rather than
+    # sitting in the director's inbox pointing at a row that isn't there.
+    await _settle_do_approval(db, d.id, approve=False, drop=True)
+    # The conversation about it goes too — a thread whose document is gone
+    # is unreachable, and the purge would leave it orphaned.
+    from app.models.comment import EntityComment
+    for cm in (await db.scalars(
+        select(EntityComment).where(EntityComment.owner_type == "delivery_order",
+                                    EntityComment.owner_id == do_id)
+    )).all():
+        await db.delete(cm)
     await db.delete(d)
     await db.flush()
     from app.core.audit import record as audit_record
