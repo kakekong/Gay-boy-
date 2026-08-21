@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { EmployeeAttendanceModal } from "@/components/EmployeeAttendanceModal";
 import { useAuthStore } from "@/store/auth";
 import {
   DailyLogSection, DailyLogHistory, TeamDailyLogs,
@@ -62,6 +63,11 @@ export default function AttendancePage() {
     enabled: !!canManage,
   });
 
+  // Whose record is open, if anyone. The summary answers "how many days";
+  // this is the "which days" behind it.
+  const [whose, setWhose] = useState<
+    { id: string; name: string; role?: string } | null
+  >(null);
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const summary = useQuery({
     queryKey: ["attendance-summary-all", period],
@@ -307,7 +313,19 @@ export default function AttendancePage() {
               <tbody>
                 {(summary.data?.rows ?? []).map((r: any) => (
                   <tr key={r.user_id} className="border-t border-ink-100">
-                    <td className="td font-medium">{r.user_name}</td>
+                    <td className="td font-medium">
+                      <button
+                        type="button"
+                        className="text-brand-700 hover:underline text-left"
+                        title={tt(`See ${r.user_name}'s attendance day by day`,
+                                  `Lihat kehadiran ${r.user_name} hari per hari`)}
+                        onClick={() => setWhose({
+                          id: r.user_id, name: r.user_name, role: r.role,
+                        })}
+                      >
+                        {r.user_name}
+                      </button>
+                    </td>
                     <td className="td muted capitalize">{r.role}</td>
                     <td className="td text-right tabular-nums text-emerald-700">{r.present_like_days}</td>
                     <td className="td text-right tabular-nums text-red-700">{r.absent_days}</td>
@@ -371,6 +389,17 @@ export default function AttendancePage() {
             </table>
           </div>
         </div>
+      )}
+
+      {whose && (
+        <EmployeeAttendanceModal
+          open
+          userId={whose.id}
+          name={whose.name}
+          role={whose.role}
+          period={period}
+          onClose={() => setWhose(null)}
+        />
       )}
     </div>
   );
