@@ -193,10 +193,8 @@ async def main():
     r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=mgr,
                      data={"faktur_pajak_no": fp3})
     check("...nor a manager", r.status_code == 403, str(r.status_code))
-    r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=d,
-                     data={"faktur_pajak_no": ""})
-    check("the director still needs the faktur pajak number",
-          r.status_code == 400, f"{r.status_code} {J(r)}"[:150])
+    # The faktur pajak number is finance's, entered when e-Faktur produces it
+    # (see test_faktur_pajak_manual), so it does not hold up this signature.
     r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=d,
                      data={"faktur_pajak_no": fp3})
     check("the director signs both in one action", r.status_code == 200,

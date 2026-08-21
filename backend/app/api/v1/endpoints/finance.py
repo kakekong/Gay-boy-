@@ -110,28 +110,32 @@ async def list_pending_invoices(
 @invoice_desk.post("/invoices/{invoice_id}/approve")
 async def approve_invoice(
     invoice_id: UUID,
-    faktur_pajak_no: str = Form(..., description="Faktur pajak number"),
+    faktur_pajak_no: str | None = Form(
+        None, description="Faktur pajak number, if it exists yet"),
     faktur_pajak_file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Sign an invoice off with its faktur pajak number.
+    """Sign an invoice off.
 
-    Finance or admin: the two of them share the customer-facing close-out,
-    and the number comes off the same document as the invoice it belongs to.
-    It was finance-only on the theory that an admin misclick could corrupt
-    the tax record — but the record is corrected by editing it, and keeping
-    admin out only meant the invoice they issued sat waiting for someone
-    else to type a number they already had in front of them.
+    The faktur pajak number is **optional here and entered by finance when
+    they have it**. It used to be mandatory, which put the invoice's whole
+    life behind a number that comes from a different system on a different
+    schedule: the goods are delivered, the customer wants the bill, and the
+    invoice sits unapproved because e-Faktur has not been run yet. Approval
+    is a decision about the invoice; the tax number is a fact about the tax
+    record, and the two do not arrive together.
+
+    So an invoice can be approved with the number, or approved now and
+    numbered later through `POST /invoices/{id}/faktur-pajak` — which is
+    finance's, because the tax record is. Until then it reads `pending`,
+    which is visible on the invoice list and on the sheet.
 
     This is a document approval only — it does NOT post to the transaction
     journal. Revenue/AR recognition stays driven by the quotation posting and
     payment flows, so invoicing and the ledger remain decoupled.
     """
     fp_no = (faktur_pajak_no or "").strip()
-    if not fp_no:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Faktur pajak number is required to approve.")
 
     inv = await db.get(Invoice, invoice_id)
     if not inv:
@@ -142,8 +146,14 @@ async def approve_invoice(
     from app.api.v1.endpoints.operation import _save_attachment
     from app.models.operation import Project, advance_project_status
 
-    inv.faktur_pajak_no = fp_no
-    inv.faktur_pajak_status = "issued"
+    if fp_no:
+        inv.faktur_pajak_no = fp_no
+        inv.faktur_pajak_status = "issued"
+    else:
+        # Approved, waiting for a number. Not "none" — that reads as "this
+        # invoice never needed one", which is a different thing from "it is
+        # coming".
+        inv.faktur_pajak_status = "pending"
     inv.status = "approved"
     inv.approved_by = user.id
     inv.approved_at = datetime.now(UTC)
@@ -159,6 +169,66 @@ async def approve_invoice(
         advance_project_status(project, "invoiced")
     await db.flush()
     return {"ok": True, "status": inv.status,
+            "faktur_pajak_no": inv.faktur_pajak_no,
+            "faktur_pajak_status": inv.faktur_pajak_status}
+
+
+class FakturPajakIn(BaseModel):
+    faktur_pajak_no: str | None = None
+
+
+@router.post("/invoices/{invoice_id}/faktur-pajak")
+async def set_faktur_pajak(
+    invoice_id: UUID,
+    payload: FakturPajakIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Put the faktur pajak number on an invoice — finance's, by hand.
+
+    The number is produced in e-Faktur, on its own schedule, and typed here
+    when it exists. That is why it no longer blocks approval: an invoice can
+    be signed off and sent while the tax number is still being run, and this
+    is where it lands afterwards.
+
+    Finance's alone. Admin issue the invoice and may approve it, but the tax
+    record is not theirs to write — a wrong number here is a wrong return,
+    and the correction is made with the tax office rather than in this app.
+
+    Sending an empty value clears it back to pending, which is what a number
+    typed onto the wrong invoice needs.
+    """
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only finance (or the director) enters the faktur pajak number.",
+        )
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+
+    fp_no = (payload.faktur_pajak_no or "").strip()
+    if fp_no:
+        clash = await db.scalar(select(Invoice).where(
+            Invoice.faktur_pajak_no == fp_no, Invoice.id != inv.id))
+        if clash:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"'{fp_no}' is already on invoice {clash.number} — one faktur "
+                "pajak number belongs to one invoice.",
+            )
+    inv.faktur_pajak_no = fp_no or None
+    # An invoice still waiting for finance has no faktur pajak state to be in
+    # yet; one that is approved is either numbered or waiting for a number.
+    inv.faktur_pajak_status = (
+        "issued" if fp_no else ("pending" if inv.status == "approved" else "none")
+    )
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="faktur_pajak", entity="invoice",
+                       entity_id=inv.id,
+                       after={"number": inv.number, "faktur_pajak_no": fp_no})
+    await db.flush()
+    return {"ok": True, "id": str(inv.id), "number": inv.number,
             "faktur_pajak_no": inv.faktur_pajak_no,
             "faktur_pajak_status": inv.faktur_pajak_status}
 

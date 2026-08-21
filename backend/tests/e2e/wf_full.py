@@ -241,9 +241,18 @@ async def main():
     ok(f"HTTP{r.status_code} invoice status={b.get('status')} faktur={b.get('faktur_pajak_no')}") \
         if r.status_code==200 and b.get("status")=="approved" else bad(f"HTTP{r.status_code} {b}")
 
-    step("H2b faktur required: approve without faktur should fail")
-    r=await c.post(f"/finance/invoices/{inv}/approve",headers=H["finance"],data={});
-    ok(f"blocked without faktur (HTTP {r.status_code})") if r.status_code>=400 else bad("approved with no faktur")
+    step("H2b the faktur pajak number is finance's, typed in when e-Faktur produces it")
+    # It used to be mandatory at approval, which parked the invoice behind a
+    # number that arrives on the tax office's schedule, not the customer's.
+    r=await c.post(f"/finance/invoices/{inv}/faktur-pajak",headers=H["finance"],
+                   json={"faktur_pajak_no":"010.000-26.00000009"}); b=J(r)
+    ok(f"finance set it manually: {b.get('faktur_pajak_no')} ({b.get('faktur_pajak_status')})") \
+        if r.status_code==200 and b.get("faktur_pajak_status")=="issued" \
+        else bad(f"HTTP{r.status_code} {b}")
+    r=await c.post(f"/finance/invoices/{inv}/faktur-pajak",headers=H["admin"],
+                   json={"faktur_pajak_no":"010.000-26.00000010"})
+    ok("admin cannot write the tax record") if r.status_code==403 \
+        else bad(f"admin set a faktur pajak number (HTTP {r.status_code})")
 
     step("H3 finance records full manual payment -> project paid->closed")
     r=await c.post("/payments/manual",headers=H["finance"],json={"invoice_id":inv,"amount":3000000,"method":"transfer","reference":"TRX1"}); b=J(r)

@@ -540,6 +540,14 @@ export default function ProjectDetailPage() {
     },
     onSuccess: refresh, onError: onErr,
   });
+  // Finance putting the faktur pajak number on afterwards — the tax record
+  // arrives from e-Faktur on its own schedule, not at sign-off.
+  const setFakturPajak = useMutation({
+    mutationFn: (body: { invoiceId: string; fpNo: string }) =>
+      api.post(`/finance/invoices/${body.invoiceId}/faktur-pajak`,
+               { faktur_pajak_no: body.fpNo || null }),
+    onSuccess: refresh, onError: onErr,
+  });
   const deleteInvoice = useMutation({
     // For duplicates and re-tests. The backend refuses if the invoice has
     // any verified payments (would orphan a ledger entry), and admin may
@@ -621,6 +629,8 @@ export default function ProjectDetailPage() {
   const [invType, setInvType] = useState<"dp" | "final">("final");
   // Per-invoice finance-approval form state (FP number + FP file).
   const [fpForm, setFpForm] = useState<Record<string, { no: string; file?: File | null }>>({});
+  // The number typed in after approval, per invoice.
+  const [fpLate, setFpLate] = useState<Record<string, string>>({});
 
   // Inline edit for target / actual delivery dates.
   const patchProject = useMutation({
@@ -1676,13 +1686,16 @@ export default function ProjectDetailPage() {
                 {canInvoiceDesk && iv.status === "pending_finance" && (
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="text-[11px] uppercase tracking-wider muted">
-                      {t(
-                        "Sign off — enter the faktur pajak number from the invoice",
-                        "Sahkan — masukkan nomor faktur pajak dari fakturnya",
-                      )}
+                      {t("Sign off", "Sahkan")}
                     </div>
+                    <p className="text-[11px] muted">
+                      {t("The faktur pajak number is optional here — it comes out of e-Faktur on its own schedule. Approve now and finance types it in below when they have it.",
+                         "Nomor faktur pajak opsional di sini — nomornya keluar dari e-Faktur sesuai jadwalnya sendiri. Sahkan sekarang, keuangan mengisinya di bawah setelah ada.")}
+                    </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input className="input" placeholder={t("Faktur pajak no. *", "No. faktur pajak *")}
+                      <input className="input"
+                        placeholder={t("Faktur pajak no. (optional)", "No. faktur pajak (opsional)")}
+                        aria-label={t("Faktur pajak number", "Nomor faktur pajak")}
                         value={fp.no}
                         onChange={(e) => setFpForm((m) => ({
                           ...m, [iv.id]: { ...fp, no: e.target.value },
@@ -1694,12 +1707,41 @@ export default function ProjectDetailPage() {
                         }))} />
                     </div>
                     <button className="btn-primary"
-                      disabled={!fp.no.trim() || approveInvoice.isPending}
+                      disabled={approveInvoice.isPending}
                       onClick={() => approveInvoice.mutate({
                         invoiceId: iv.id, fpNo: fp.no.trim(), fpFile: fp.file,
                       })}>
                       <CheckCircle size={14} /> {t("Approve (finance)", "Setujui (keuangan)")}
                     </button>
+                  </div>
+                )}
+
+                {/* The number afterwards. Finance's alone: admin issue the
+                    invoice and may approve it, but the tax record is not
+                    theirs to write. */}
+                {canFinanceApprove && iv.status === "approved" && (
+                  <div className="rounded-lg border border-ink-200 p-3 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider muted">
+                      {iv.faktur_pajak_no
+                        ? t("Faktur pajak", "Faktur pajak")
+                        : t("Faktur pajak — waiting for a number",
+                            "Faktur pajak — menunggu nomor")}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input className="input max-w-xs"
+                        aria-label={`${t("Faktur pajak number for", "Nomor faktur pajak untuk")} ${iv.number}`}
+                        placeholder={t("e.g. 010.000-26.00000123", "cth. 010.000-26.00000123")}
+                        value={fpLate[iv.id] ?? iv.faktur_pajak_no ?? ""}
+                        onChange={(e) => setFpLate((m) => ({ ...m, [iv.id]: e.target.value }))} />
+                      <button className="btn-ghost"
+                        disabled={setFakturPajak.isPending}
+                        onClick={() => setFakturPajak.mutate({
+                          invoiceId: iv.id,
+                          fpNo: (fpLate[iv.id] ?? iv.faktur_pajak_no ?? "").trim(),
+                        })}>
+                        <Save size={14} /> {t("Save number", "Simpan nomor")}
+                      </button>
+                    </div>
                   </div>
                 )}
 

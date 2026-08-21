@@ -13,7 +13,6 @@ import { UserLink } from "@/components/UserLink";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
-import { LinkedAccountsPanel } from "@/components/quotation/LinkedAccountsPanel";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { ExportAddressDialog } from "@/components/ExportAddressDialog";
 import { CommentThread } from "@/components/CommentThread";
@@ -582,8 +581,22 @@ export default function QuotationDetailPage() {
         </div>
       </div>
 
-      {/* Linked Accounts (CoA) — back-office only, hidden from sales */}
-      {user?.role !== "sales" && <LinkedAccountsPanel quotationId={Q.id} />}
+      {/* The Linked Accounts (CoA) card used to sit here, showing the ledger
+          mapping and a manual "Post to ledger" button to every back-office
+          role that could open a quotation.
+
+          It is finance's business, and it is off this page: the accounts a
+          sale posts to are a finance decision, the posting happens by itself
+          when the quotation is marked Won, and putting the manual control in
+          front of the people who write and approve the quote only offered
+          them a way to get it wrong. Finance read the ledger on their own
+          pages — Recent ledgers, Chart of Accounts, Financial reports.
+
+          Gating it to finance rather than removing it would have been a card
+          nobody ever saw: finance cannot open a quotation at all, the route
+          sends them to Recent ledgers. The /quotations/{id}/post-ledger
+          endpoint is untouched if a manual re-post is ever wanted from a
+          finance screen. */}
 
       {/* The customer's PO. Shown from the moment the quotation is in the
           customer's hands, because that is when their order can arrive — and

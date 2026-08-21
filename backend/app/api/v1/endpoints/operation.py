@@ -1821,7 +1821,8 @@ async def issue_invoice(
 @router.post("/projects/{project_id}/approve-documents")
 async def approve_documents(
     project_id: UUID,
-    faktur_pajak_no: str = Form(..., description="Faktur pajak number for the invoice"),
+    faktur_pajak_no: str | None = Form(
+        None, description="Faktur pajak number, if finance has it yet"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1850,10 +1851,10 @@ async def approve_documents(
             "the delivery order is the director's and the invoice is "
             "finance's, each signed on its own.",
         )
+    # Optional, like everywhere else now: the number comes out of e-Faktur on
+    # its own schedule, and finance types it in afterwards. Signing both
+    # documents is a decision that should not wait on it.
     fp_no = (faktur_pajak_no or "").strip()
-    if not fp_no:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Faktur pajak number is required to approve.")
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
@@ -1884,15 +1885,19 @@ async def approve_documents(
         .order_by(Invoice.created_at.asc())
     )).all()
     for inv in invoices:
-        inv.faktur_pajak_no = fp_no
-        inv.faktur_pajak_status = "issued"
+        if fp_no:
+            inv.faktur_pajak_no = fp_no
+            inv.faktur_pajak_status = "issued"
+        else:
+            inv.faktur_pajak_status = "pending"
         inv.status = "approved"
         inv.approved_by = user.id
         inv.approved_at = datetime.now(UTC)
         invs_done.append(inv.number)
         await audit_record(db, actor=user, action="approve", entity="invoice",
                            entity_id=inv.id,
-                           after={"number": inv.number, "faktur_pajak_no": fp_no,
+                           after={"number": inv.number,
+                                  "faktur_pajak_no": fp_no or None,
                                   "with_delivery_order": True})
     if invs_done:
         advance_project_status(p, "invoiced")
@@ -1901,7 +1906,7 @@ async def approve_documents(
                             "Nothing on this project is waiting for a signature.")
     await db.flush()
     return {"ok": True, "delivery_orders": dos_done, "invoices": invs_done,
-            "faktur_pajak_no": fp_no}
+            "faktur_pajak_no": fp_no or None}
 
 
 @router.post("/projects/{project_id}/customer-received")
