@@ -2467,6 +2467,11 @@ async def delivery_order_detail(do_id: UUID,
             "unapprove": (role in _DO_APPROVERS and bool(d.approved_at)
                           and not d.verified_at and d.status != "delivered"),
             "upload_proof": role in (_DO_DESK | {Role.FINANCE}),
+            # Sending it back is the other half of the decision, and it only
+            # existed in the inbox. The director looking at the document
+            # itself is exactly the person who wants it.
+            "send_back": (role is Role.DIRECTOR and not d.approved_at
+                          and (approval or {}).get("status") == "pending"),
         },
         "locked_because": locked,
     }

@@ -317,6 +317,19 @@ async def main():
     vd = J(await c.get(f"/operation/deliveries/{do2['id']}", headers=d))
     check("...and it is the director's to release", vd["may"]["approve"] is True,
           str(vd.get("may")))
+    # Sending it back is the other half of the decision, and it used to exist
+    # only in the inbox — the director reading the document is exactly the
+    # person who wants it.
+    check("...theirs to send back from the document too, with the request to "
+          "reject named on it",
+          vd["may"]["send_back"] is True
+          and (vd.get("approval") or {}).get("status") == "pending",
+          f"{vd.get('may')} / {vd.get('approval')}")
+    check("...which the admin desk is not offered",
+          v2["may"]["send_back"] is False, str(v2.get("may")))
+    check("a released one cannot be sent back — withdraw the approval instead",
+          J(await c.get(f"/operation/deliveries/{do_id}", headers=d))
+          ["may"]["send_back"] is False, "offered on a released sheet")
 
     print("\n── who may open it ──")
     for label, hdr, ok in (("finance", fin, True), ("manager", mgr, True),

@@ -69,7 +69,7 @@ interface DO {
   } | null;
   may: {
     edit: boolean; delete: boolean; approve: boolean;
-    unapprove: boolean; upload_proof: boolean;
+    unapprove: boolean; upload_proof: boolean; send_back: boolean;
   };
   locked_because: string | null;
 }
@@ -137,6 +137,22 @@ export default function DeliveryOrderDetailPage() {
         kind: "ok",
         text: t("Approval withdrawn — it is editable again and back with the director.",
                 "Persetujuan ditarik — bisa diubah lagi dan kembali ke direktur."),
+      });
+    },
+    onError: onErr,
+  });
+  // Sending it back, from the document rather than only from the inbox. The
+  // reason is required — the desk has to know what to correct.
+  const sendBack = useMutation({
+    mutationFn: (notes: string) =>
+      api.post(`/approvals/${q.data?.approval?.id}/reject`, null,
+               { params: { notes } }),
+    onSuccess: () => {
+      refresh();
+      setFlash({
+        kind: "ok",
+        text: t("Sent back to the desk with your reason.",
+                "Dikembalikan ke admin beserta alasannya."),
       });
     },
     onError: onErr,
@@ -341,6 +357,18 @@ export default function DeliveryOrderDetailPage() {
                   ? <Loader2 size={14} className="animate-spin" />
                   : <Stamp size={14} />}
                 {t("Approve & issue", "Setujui & terbitkan")}
+              </button>
+            )}
+            {d.may.send_back && (
+              <button className="btn-ghost text-red-600" disabled={sendBack.isPending}
+                onClick={() => {
+                  const why = window.prompt(t(
+                    "Why is this going back? The desk sees this.",
+                    "Kenapa dikembalikan? Admin akan melihat alasan ini.",
+                  ));
+                  if (why && why.trim()) sendBack.mutate(why.trim());
+                }}>
+                <X size={14} /> {t("Send back", "Kembalikan")}
               </button>
             )}
             {d.may.unapprove && (
