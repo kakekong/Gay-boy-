@@ -82,6 +82,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
         roles: ["admin", "director", "finance", "manager"] },
+      { to: "/journals", label: "General journal", label_id: "Jurnal umum", icon: BookOpen,
+        roles: ["finance", "director", "manager"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
         roles: ["finance", "director"] },
     ],
@@ -257,6 +259,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
   finance: [
     "/recent-ledgers",
     "/accounts",
+    "/journals",       // Jurnal Umum — finance keeps the books
     "/finance/payment-verification",
     "/finance/estimated",
     "/finance/reports",

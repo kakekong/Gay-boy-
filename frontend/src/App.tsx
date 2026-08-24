@@ -17,6 +17,8 @@ const CustomerDetailPage   = lazy(() => import("@/pages/CustomerDetail"));
 const QuotationDetailPage  = lazy(() => import("@/pages/QuotationDetail"));
 const CalendarPage         = lazy(() => import("@/pages/Calendar"));
 const ChartOfAccountsPage  = lazy(() => import("@/pages/ChartOfAccounts"));
+const GeneralJournalPage   = lazy(() => import("@/pages/GeneralJournal"));
+const AccountLedgerPage    = lazy(() => import("@/pages/AccountLedger"));
 const RecentLedgersPage    = lazy(() => import("@/pages/RecentLedgers"));
 const EmployeesPage        = lazy(() => import("@/pages/Employees"));
 const EmployeeDetailPage   = lazy(() => import("@/pages/EmployeeDetail"));
@@ -190,6 +192,15 @@ function MainApp() {
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/accounts" element={<ChartOfAccountsPage />} />
+          {/* Buku Besar: one account walked, and the journal that writes it.
+              Finance keeps the books; the director signs off on the company's
+              numbers; a manager reads without writing. */}
+          <Route path="/accounts/:accountNo/ledger" element={
+            <RequireRole roles={["finance", "director", "manager"]}>
+              <AccountLedgerPage /></RequireRole>} />
+          <Route path="/journals" element={
+            <RequireRole roles={["finance", "director", "manager"]}>
+              <GeneralJournalPage /></RequireRole>} />
           <Route path="/recent-ledgers" element={<RequireRole roles={["finance", "director"]}><RecentLedgersPage /></RequireRole>} />
           <Route path="/employees" element={<EmployeesPage />} />
           <Route path="/employees/:id" element={<EmployeeDetailPage />} />

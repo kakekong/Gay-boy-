@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     financial_reports,
     inventory,
     kpi,
+    journals,
     ledger,
     maintenance,
     notifications,
@@ -64,6 +65,7 @@ api_router.include_router(finance.invoice_desk, prefix="/finance", tags=["financ
 api_router.include_router(financial_reports.router, prefix="/finance/reports", tags=["finance-reports"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 api_router.include_router(ledger.router, prefix="/ledger", tags=["ledger"])
+api_router.include_router(journals.router, prefix="/journals", tags=["journals"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(salaries.router, prefix="/salaries", tags=["salaries"])
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"])

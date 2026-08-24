@@ -861,6 +861,9 @@ export const ID_STATIC: Record<string, string> = {
   "Shipping dates (visible to the customer)": "Tanggal pengiriman (terlihat oleh pelanggan)",
   "Shipping timeline": "Linimasa pengiriman",
   "Shipping update": "Pembaruan pengiriman",
+  "Debit": "Debit",
+  "Credit": "Kredit",
+  "Open this account's ledger": "Buka buku besar akun ini",
   "Delivery order": "Surat jalan",
   "Release this delivery order. The goods go out under it, and its sheet is generated from what you approve.":
     "Terbitkan surat jalan ini. Barang keluar dengan surat ini, dan lembarnya dibuat dari yang Anda setujui.",

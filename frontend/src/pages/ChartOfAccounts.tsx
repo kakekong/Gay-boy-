@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus, RefreshCw, Filter, Download, Share2, Printer, Settings2, Search,
@@ -275,7 +276,18 @@ export default function ChartOfAccountsPage() {
                     )}
                   >
                     <td className="td font-mono text-xs">
-                      {a.account_no}
+                      {/* A balance is a number until you can see what moved
+                          it. The account number is the way into its ledger.
+                          Headings have no postings of their own — they are
+                          the sum of what sits under them — so they stay
+                          plain text. */}
+                      {a.is_parent ? a.account_no : (
+                        <Link to={`/accounts/${encodeURIComponent(a.account_no)}/ledger`}
+                          className="text-brand-700 hover:underline"
+                          title={T("Open this account's ledger")}>
+                          {a.account_no}
+                        </Link>
+                      )}
                       {a.is_tax && (
                         <span className="ml-2 chip bg-violet-50 text-violet-700">{T("Tax")}</span>
                       )}
