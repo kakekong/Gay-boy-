@@ -300,6 +300,48 @@ async def list_notifications(
                 "link": f"/price-requests?open={pr.id}",
                 "at": pr.updated_at or pr.created_at,
             })
+    # 1c2. A new job to source. A project appears the moment a deal is won,
+    # and until now nothing told purchasing — they found out when somebody
+    # mentioned it, or when they happened to scroll the Projects list. This
+    # is the one signal that starts their half of the work.
+    #
+    # It clears itself: raising a purchase request or a supplier PO against
+    # the project is purchasing picking it up, and the row goes. A job that
+    # needs nothing bought (stock already on the shelf) ages out after a
+    # month rather than nagging forever. And it stays customer-blind — the
+    # code and the price request number, never the company.
+    if role is Role.PURCHASING:
+        from app.models.purchasing import PurchaseRequest as _PR, SupplierPO as _SPO
+        from app.models.price_request import PriceRequest as _PriceReq
+        untouched = (await db.scalars(
+            select(Project).where(
+                Project.is_deleted.is_(False),
+                Project.status.not_in(("delivered", "paid", "closed")),
+                Project.created_at >= now - timedelta(days=30),
+                ~select(_SPO.id).where(_SPO.project_id == Project.id).exists(),
+                ~select(_PR.id).where(_PR.project_id == Project.id).exists(),
+            ).order_by(Project.created_at.desc()).limit(20)
+        )).all()
+        pr_numbers: dict = {}
+        _pr_ids = {p.price_request_id for p in untouched if p.price_request_id}
+        if _pr_ids:
+            for _pr in (await db.scalars(
+                select(_PriceReq).where(_PriceReq.id.in_(_pr_ids))
+            )).all():
+                pr_numbers[_pr.id] = _pr.number
+        for pj in untouched:
+            src = pr_numbers.get(pj.price_request_id)
+            items.append({
+                "id": f"project-new:{pj.id}",
+                "kind": "project_new",
+                "severity": "high",
+                "title": f"New job to source: {pj.code}",
+                "body": ("Nothing ordered against it yet"
+                         + (f" · from price request {src}" if src else "")),
+                "link": f"/projects/{pj.id}",
+                "at": pj.created_at,
+            })
+
     if role in (Role.MANAGER, Role.DIRECTOR):
         pr_price = (await db.execute(
             select(PriceRequest, Customer)

@@ -188,7 +188,11 @@ async def get_project(project_id: UUID,
     show_customer = _can_see_project_customer(user)
     return {
         "id": str(p.id), "code": p.code, "status": p.status,
-        "po_number": p.po_number, "po_date": p.po_date,
+        # The customer's own PO number, copied onto the job. It names the
+        # customer as surely as the company field does — half of them read
+        # "PO/ADARO/2026/…" — so it goes wherever the name goes.
+        "po_number": p.po_number if show_customer else None,
+        "po_date": p.po_date,
         "po_value": float(p.po_value or 0) if show_money else None,
         "start_date": p.start_date,
         "target_delivery": p.target_delivery,
@@ -376,6 +380,14 @@ async def project_full(project_id: UUID,
     show_margin = show_money and _can_see_project_cost(user)
     show_cost = _can_see_project_cost(user)
     _role = Role(user.role)
+    # The customer side of the job: the customer's own PO, the invoice raised
+    # against it, the delivery order that ships it. Purchasing buys — they do
+    # not bill and they do not deliver to the customer — and a customer PO
+    # number or a faktur pajak number names the customer in all but words,
+    # which is the one thing this role is deliberately kept away from. Their
+    # half of the job is untouched: the price request, the supplier orders and
+    # their shipments, the drawings, the work orders, the dates.
+    show_customer_docs = _can_see_project_customer(user)
     # The approved price request behind this project — so purchasing can see
     # exactly what to source. The selling price is gated to money-viewers
     # (hidden from purchasing); the buying cost to cost-viewers (hidden from
@@ -408,7 +420,9 @@ async def project_full(project_id: UUID,
     return {
         "project": {
             "id": str(p.id), "code": p.code, "status": p.status,
-            "po_number": p.po_number, "po_date": p.po_date,
+            # Same rule as the list: the customer's PO number is the customer.
+            "po_number": p.po_number if show_customer_docs else None,
+            "po_date": p.po_date,
             "po_value": float(p.po_value or 0) if show_money else None,
             "start_date": p.start_date,
             "target_delivery": p.target_delivery,
@@ -426,7 +440,7 @@ async def project_full(project_id: UUID,
         # drop the card rather than render a read-only customs pack at a role
         # that never chases one.
         "logistics": _logistics_payload(p) if _role in _LOGISTICS_ROLES else None,
-        "invoices": [
+        "invoices": [] if not show_customer_docs else [
             {
                 "id": str(inv.id), "number": inv.number, "status": inv.status,
                 "type": inv.type, "termin_index": inv.termin_index,
@@ -466,7 +480,7 @@ async def project_full(project_id: UUID,
             "id": str(customer_po.id), "number": customer_po.number,
             "status": customer_po.status,
             "po_date": customer_po.po_date,
-        } if customer_po else None,
+        } if (customer_po and show_customer_docs) else None,
         "work_orders": [
             {
                 "id": str(w.id), "code": w.code, "stage": w.stage, "notes": w.notes,
@@ -485,7 +499,7 @@ async def project_full(project_id: UUID,
         "may_upload_drawing": {
             k: _may_upload_drawing(_role, k) for k in DRAWING_KINDS
         },
-        "deliveries": [
+        "deliveries": [] if not show_customer_docs else [
             {
                 "id": str(do.id), "number": do.number, "split_index": do.split_index,
                 "courier": do.courier, "tracking_no": do.tracking_no,

@@ -270,6 +270,15 @@ export default function ProjectDetailPage() {
   // portal; this is the internal page.
   const isSales = role === "sales";
   const canSeeOpsDetails = !isSales;
+  // Purchasing buys; they do not bill and they do not ship to the customer.
+  // The customer's own PO, the invoice raised against it, the delivery order
+  // and the faktur pajak number are the customer side of the job — and a PO
+  // number or a tax-invoice number names the customer in all but words,
+  // which is the one thing this role is deliberately kept away from. The
+  // sourcing half stays: price request, supplier orders and their shipments,
+  // drawings, work orders, dates. The server sends none of it either, so
+  // these cards would otherwise render empty or 403.
+  const canSeeCustomerDocs = canSeeOpsDetails && role !== "purchasing";
 
   const data = useQuery({
     queryKey: ["project-full", id],
@@ -1053,10 +1062,19 @@ export default function ProjectDetailPage() {
                     <dt className="muted shrink-0">{t("Who", "Siapa")}:</dt>
                     <dd>{t(guide.who[0], guide.who[1])}</dd>
                   </div>
-                  <div className="flex gap-1.5">
-                    <dt className="muted shrink-0">{t("Where", "Di mana")}:</dt>
-                    <dd>{t(guide.where[0], guide.where[1])}</dd>
-                  </div>
+                  {/* "Where" points at a card on this page. The close-out
+                      steps point at the Invoice and Delivery cards, which
+                      purchasing no longer has — telling them to go to a card
+                      that isn't there is worse than not telling them. The
+                      step itself still reads, and "Who" already says whose
+                      it is. */}
+                  {(canSeeCustomerDocs
+                    || !/deliver|invoice|faktur/i.test(guide.where[0])) && (
+                    <div className="flex gap-1.5">
+                      <dt className="muted shrink-0">{t("Where", "Di mana")}:</dt>
+                      <dd>{t(guide.where[0], guide.where[1])}</dd>
+                    </div>
+                  )}
                 </dl>
                 {guide.needs && (
                   <p className="mt-2 text-xs text-amber-700 flex gap-1.5">
@@ -1630,7 +1648,7 @@ export default function ProjectDetailPage() {
 
       {/* Finance close-out: invoice + faktur pajak. Sales doesn't see
           money detail so this whole card is hidden from them. */}
-      {canSeeOpsDetails && (
+      {canSeeCustomerDocs && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div className="font-semibold flex items-center gap-2">
@@ -2034,8 +2052,9 @@ export default function ProjectDetailPage() {
       </div>
       )}
 
-      {/* Deliveries — ops-internal, hidden from sales */}
-      {canSeeOpsDetails && (
+      {/* Deliveries — the sheet the customer signs, so purchasing is out
+          along with sales. */}
+      {canSeeCustomerDocs && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -2326,9 +2345,9 @@ export default function ProjectDetailPage() {
       </div>
       )}
 
-      {/* Invoices list — same audience as the finance close-out card,
-          hidden from sales. */}
-      {canSeeOpsDetails && (
+      {/* Invoices list — same audience as the finance close-out card:
+          hidden from sales, and from purchasing, who never bills. */}
+      {canSeeCustomerDocs && (
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100">
           <div className="font-semibold flex items-center gap-2">
@@ -2616,7 +2635,7 @@ export default function ProjectDetailPage() {
       {/* What admin does need off this job is the customer's own PO document —
           the thing they invoice and ship against. It lives on the customer PO,
           so it comes here rather than through the shelf above. */}
-      {data.data.customer_po?.id && (
+      {canSeeCustomerDocs && data.data.customer_po?.id && (
         <AttachmentsSection
           ownerType="customer_po"
           ownerId={data.data.customer_po.id}

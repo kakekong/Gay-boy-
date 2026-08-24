@@ -43,10 +43,15 @@ router = APIRouter(
 )
 
 _any_internal = require(
-    Role.SALES, Role.PURCHASING, Role.MANAGER, Role.ADMIN, Role.HR, Role.DIRECTOR,
+    Role.SALES, Role.MANAGER, Role.ADMIN, Role.HR, Role.DIRECTOR,
     # Finance approves DP POs and issues the DP invoice — they need read
     # access to the PO list/detail like every other internal role.
     Role.FINANCE,
+    # Purchasing is NOT here. The customer's own order is the customer side
+    # of the job, and its number is customer identity in all but words —
+    # the same reason they never see a company name on a price request.
+    # They source against the price request and the project; what the
+    # customer ordered under their own paperwork is not theirs to read.
 )
 _director_only = require(Role.DIRECTOR)
 
