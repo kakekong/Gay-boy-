@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Mail, Phone, Briefcase, FileText, Users, Trophy, Frown,
   Wallet, TrendingUp, Activity as ActivityIcon, Tags, CalendarCheck, Clock,
-  CalendarX,
+  CalendarX, Pencil, Save, X, Landmark, CalendarDays, Loader2,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -14,7 +14,7 @@ import { StageBadge } from "@/components/StageBadge";
 import { TagChip } from "@/components/TagChip";
 import { TagPicker } from "@/components/TagPicker";
 import { useAuthStore } from "@/store/auth";
-import { T, locale } from "@/store/lang";
+import { useT, T, locale } from "@/store/lang";
 
 const ROLE_CHIP: Record<string, string> = {
   sales:    "bg-brand-50 text-brand-700",
@@ -47,6 +47,7 @@ const QSTATUS: Record<string, string> = {
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
 export default function EmployeeDetailPage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -86,6 +87,30 @@ export default function EmployeeDetailPage() {
         ?? "Failed to remove tag"
     ),
   });
+  // HR keeps the employment record — the name, the start date, and where
+  // payroll sends the money. Everything else on a person (their role, their
+  // pages, their password) stays the director's.
+  const canEditEmployment = me && (me.role === "hr" || me.role === "director");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    full_name: "", join_date: "", bank_name: "",
+    bank_account_no: "", bank_account_name: "",
+  });
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const saveEmployment = useMutation({
+    mutationFn: (body: Record<string, any>) => api.patch(`/users/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["employee", id] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      setEditing(false);
+      setSaveErr(null);
+    },
+    onError: (err: any) => setSaveErr(
+      err?.response?.data?.errors?.[0]?.message
+        ?? err?.response?.data?.detail
+        ?? "That didn't save."),
+  });
+
   const stats = useQuery({
     queryKey: ["employee-stats", id],
     queryFn: () => api.get(`/users/${id}/stats`).then((r) => r.data),
@@ -192,6 +217,141 @@ export default function EmployeeDetailPage() {
                   {T("No tags yet — click \"+ Add tag\" to label this employee.")}</span>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* The employment record. Separate from the header on purpose: the
+          header is who this person is in the app, this is who they are on
+          the payroll — the day they started, and the account their salary
+          is transferred to. Three bank fields because a transfer needs all
+          three, and the name the account is held under is often not spelled
+          the way the employee record spells it. */}
+      <div className="card p-5 lg:p-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-semibold flex items-center gap-2">
+              <Landmark size={15} className="text-brand-600" />
+              {t("Employment record", "Data kepegawaian")}
+            </div>
+            <div className="text-xs muted">
+              {t("Start date and the account payroll pays into.",
+                 "Tanggal masuk dan rekening tujuan penggajian.")}
+            </div>
+          </div>
+          {canEditEmployment && (editing ? (
+            <div className="flex gap-2">
+              <button className="btn-ghost" onClick={() => {
+                setEditing(false); setSaveErr(null);
+              }}>{t("Cancel", "Batal")}</button>
+              <button className="btn-primary" disabled={saveEmployment.isPending}
+                onClick={() => saveEmployment.mutate({
+                  full_name: draft.full_name.trim() || e.full_name,
+                  join_date: draft.join_date || null,
+                  bank_name: draft.bank_name.trim() || null,
+                  bank_account_no: draft.bank_account_no.trim() || null,
+                  bank_account_name: draft.bank_account_name.trim() || null,
+                })}>
+                {saveEmployment.isPending
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <Save size={13} />}
+                {t("Save", "Simpan")}
+              </button>
+            </div>
+          ) : (
+            <button className="btn-ghost" onClick={() => {
+              setDraft({
+                full_name: e.full_name ?? "",
+                join_date: e.join_date ?? "",
+                bank_name: e.bank_name ?? "",
+                bank_account_no: e.bank_account_no ?? "",
+                bank_account_name: e.bank_account_name ?? "",
+              });
+              setEditing(true);
+            }}>
+              <Pencil size={13} /> {t("Edit", "Ubah")}
+            </button>
+          ))}
+        </div>
+
+        {saveErr && (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+            <span className="flex-1">{saveErr}</span>
+            <button onClick={() => setSaveErr(null)} className="opacity-60 hover:opacity-100">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {editing ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5 text-sm">
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-wider muted">
+                {t("Name", "Nama")}
+              </span>
+              <input className="input mt-1" value={draft.full_name}
+                aria-label={t("Name", "Nama")}
+                onChange={(ev) => setDraft((x) => ({ ...x, full_name: ev.target.value }))} />
+            </label>
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-wider muted">
+                {t("Start date", "Tanggal masuk")}
+              </span>
+              <input type="date" className="input mt-1" value={draft.join_date}
+                aria-label={t("Start date", "Tanggal masuk")}
+                onChange={(ev) => setDraft((x) => ({ ...x, join_date: ev.target.value }))} />
+            </label>
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-wider muted">
+                {t("Bank", "Bank")}
+              </span>
+              <input className="input mt-1" value={draft.bank_name}
+                aria-label={t("Bank", "Bank")}
+                placeholder={t("e.g. BCA", "mis. BCA")}
+                onChange={(ev) => setDraft((x) => ({ ...x, bank_name: ev.target.value }))} />
+            </label>
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-wider muted">
+                {t("Account number", "Nomor rekening")}
+              </span>
+              <input className="input mt-1 font-mono" value={draft.bank_account_no}
+                aria-label={t("Account number", "Nomor rekening")}
+                onChange={(ev) => setDraft((x) => ({ ...x, bank_account_no: ev.target.value }))} />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="text-[11px] uppercase tracking-wider muted">
+                {t("Account holder", "Atas nama")}
+              </span>
+              <input className="input mt-1" value={draft.bank_account_name}
+                aria-label={t("Account holder", "Atas nama")}
+                placeholder={t("Exactly as the bank has it",
+                               "Persis seperti tercatat di bank")}
+                onChange={(ev) => setDraft((x) => ({ ...x, bank_account_name: ev.target.value }))} />
+              <span className="text-[11px] muted">
+                {t("A mismatch here is what bounces the transfer.",
+                   "Ketidakcocokan di sini yang membuat transfer gagal.")}
+              </span>
+            </label>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-5 text-sm">
+            <Field icon={<CalendarDays size={14} />} label={t("Start date", "Tanggal masuk")}>
+              {e.join_date
+                ? new Date(e.join_date).toLocaleDateString(locale(),
+                    { day: "2-digit", month: "long", year: "numeric" })
+                : <span className="muted">{t("not set", "belum diisi")}</span>}
+            </Field>
+            <Field icon={<Landmark size={14} />} label={t("Bank", "Bank")}>
+              {e.bank_name || <span className="muted">—</span>}
+            </Field>
+            <Field icon={<Wallet size={14} />} label={t("Account number", "Nomor rekening")}>
+              {e.bank_account_no
+                ? <span className="font-mono">{e.bank_account_no}</span>
+                : <span className="muted">—</span>}
+            </Field>
+            <Field icon={<Users size={14} />} label={t("Account holder", "Atas nama")}>
+              {e.bank_account_name || <span className="muted">—</span>}
+            </Field>
           </div>
         )}
       </div>

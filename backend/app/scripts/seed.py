@@ -36,6 +36,12 @@ _USERS = [
 COLUMN_MIGRATIONS: list[str] = [
     # Users gained an optional per-user sidebar page override
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pages JSONB",
+    # …and an employment record: the day they started, and where payroll
+    # sends their salary.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS join_date DATE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_name VARCHAR(80)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_account_no VARCHAR(60)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_account_name VARCHAR(255)",
     # Quotation gained CoA linkage + ledger-posting state
     'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_revenue_no    VARCHAR(40)',
     'ALTER TABLE quotations ADD COLUMN IF NOT EXISTS account_receivable_no VARCHAR(40)',

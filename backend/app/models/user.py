@@ -1,6 +1,7 @@
+from datetime import date
 from uuid import UUID
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, Date, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,6 +31,17 @@ class User(Base, UUIDPK, TimestampMixin):
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # sales|admin|hr|manager|director|customer|supplier
     phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
     whatsapp_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # ── Employment record ────────────────────────────────────────────────
+    # The day they started. HR's, not the login's: it drives length of
+    # service, and payroll reads it for a first partial month.
+    join_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Where their salary goes. Three fields because a transfer needs all
+    # three — the bank, the number, and the name the account is held under,
+    # which is often not spelled the way the employee's record spells it
+    # ("atas nama"), and a mismatch is what bounces a payment.
+    bank_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    bank_account_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    bank_account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Portal scopes — only set for customer / supplier accounts
     linked_customer_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)

@@ -46,6 +46,11 @@ class UserPatch(BaseModel):
     phone: str | None = None
     whatsapp_id: str | None = None
     is_active: bool | None = None
+    # The employment record. A date as YYYY-MM-DD, or null to clear it.
+    join_date: date_t | None = None
+    bank_name: str | None = None
+    bank_account_no: str | None = None
+    bank_account_name: str | None = None
     password: str | None = None
     linked_customer_id: UUID | None = None
     linked_supplier_id: UUID | None = None
@@ -180,6 +185,13 @@ async def list_employees(
             "custom_role_name": cr_names.get(r.custom_role_id) if r.custom_role_id else None,
             "pages": r.pages or [],
             "phone": None if hide_contact else r.phone,
+            # The employment record. Not contact details — this is the
+            # payroll side of the person, which is HR's whole job, so it
+            # stays visible to them when email and phone do not.
+            "join_date": r.join_date,
+            "bank_name": r.bank_name,
+            "bank_account_no": r.bank_account_no,
+            "bank_account_name": r.bank_account_name,
             "is_active": r.is_active,
             "tags": tag_map.get(str(r.id), []),
             "missed_days_this_month": round(missed_map.get(str(r.id), 0.0), 1),
@@ -493,17 +505,45 @@ async def create_user(
     return {"id": str(u.id), "email": u.email, "role": u.role}
 
 
+# What HR may correct on somebody's record. The employment side of the
+# person — who they are, when they started, where their salary goes — which
+# is the job HR actually does and the reason this page exists for them.
+#
+# Everything else stays the director's: the role (that is the security
+# tier), the pages, the password, the login address, and whether the account
+# is active at all. Phone and contact email are absent for a different
+# reason — HR cannot even read those, so being able to set them would be
+# writing blind into a field they are not allowed to see.
+_HR_EDITABLE = {
+    "full_name", "join_date", "bank_name", "bank_account_no",
+    "bank_account_name",
+}
+
+
 @router.patch("/{user_id}")
 async def update_user(
     user_id: UUID,
     payload: UserPatch,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(_director),
+    _u: User = Depends(_hr_or_director),
 ):
     u = await db.get(User, user_id)
     if not u:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     data = payload.model_dump(exclude_unset=True)
+    if Role(_u.role) is Role.HR:
+        beyond = sorted(set(data) - _HR_EDITABLE)
+        if beyond:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "HR keeps the employment record — the name, the start date "
+                "and the bank details. "
+                f"{', '.join(beyond)} is the director's to change.",
+            )
+    # Where the salary goes is money-routing data, so a change to it is
+    # written down: who changed whose, and to what. Same for the start date,
+    # which decides a first month's pay.
+    before = {k: getattr(u, k) for k in data if k in _HR_EDITABLE}
     if "role" in data and data["role"] not in VALID_ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid role")
     if "pages" in data:
@@ -526,6 +566,16 @@ async def update_user(
         data["role"] = cr.base_role
     for k, v in data.items():
         setattr(u, k, v)
+    touched = {k: v for k, v in data.items() if k in _HR_EDITABLE}
+    if touched:
+        from app.core.audit import record as audit_record
+        await audit_record(
+            db, actor=_u, action="update", entity="employee", entity_id=u.id,
+            before={k: str(v) if v is not None else None
+                    for k, v in before.items()},
+            after={k: str(v) if v is not None else None
+                   for k, v in touched.items()},
+        )
     return {"id": str(u.id), "ok": True}
 
 
