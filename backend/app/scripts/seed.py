@@ -34,6 +34,13 @@ _USERS = [
 # Every statement here is idempotent (`ADD COLUMN IF NOT EXISTS`). Add new
 # entries below as the model evolves. Postgres-only.
 COLUMN_MIGRATIONS: list[str] = [
+    # Cash & bank: the statement is read per account and per date, and
+    # reconciliation asks "what has not cleared yet".
+    "CREATE INDEX IF NOT EXISTS ix_cash_tx_account_date "
+    "ON cash_transactions (bank_account_no, tx_date)",
+    "CREATE INDEX IF NOT EXISTS ix_cash_tx_uncleared "
+    "ON cash_transactions (bank_account_no) WHERE cleared_on IS NULL",
+
     # ── Indexes for lookups the app makes on every page ──────────────────
     # Attachments are read by (owner_type, owner_id) everywhere — every
     # detail screen, the approval preview, the invoice queue — and the two

@@ -105,6 +105,11 @@ async def main():
     # case), nothing to write down (a chart at zero), or refused because a
     # previous run already started the journal on this database.
     ob = J(r)
+    # Whether the ledger can reconcile to its account later depends on this:
+    # opening balances written (or nothing to write) means the journal
+    # explains the whole balance; refused means it explains only the part
+    # posted since, which is the honest state of a book already in progress.
+    explained = r.status_code == 201
     check("the opening balances are dealt with, one way or another",
           r.status_code in (201, 409), f"{r.status_code} {str(ob)[:170]}")
     if r.status_code == 409:
@@ -232,10 +237,16 @@ async def main():
           all("balance" in x for x in led["items"]), str(led["items"][:1]))
     # With the opening balances written down first, the ledger explains the
     # whole of the account rather than the part posted since — which is the
-    # first thing anybody checks.
-    check("...that reconciles to the account it describes",
-          abs(led["closing_balance"] - await balance(bank["account_no"])) < 0.01,
-          f"{led['closing_balance']} vs {await balance(bank['account_no'])}")
+    # first thing anybody checks. On a book that was already in progress
+    # when this ran, the gap is real and the page says so instead.
+    if explained:
+        check("...that reconciles to the account it describes",
+              abs(led["closing_balance"] - await balance(bank["account_no"])) < 0.01,
+              f"{led['closing_balance']} vs {await balance(bank['account_no'])}")
+    else:
+        check("...that explains what has been posted since the journal started",
+              led["closing_balance"] != 0 or not led["items"],
+              f"{led['closing_balance']} over {len(led['items'])} line(s)")
     check("...and adds the two columns up",
           led["total_credit"] >= amount, str(led["total_credit"]))
 

@@ -17,6 +17,7 @@ from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.models.crm import Customer
 from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
+from app.models.payment_claim import PaymentClaim
 from app.models.user import User
 
 # Finance data (AR aging, tax, payments) is confidential — restrict the whole
@@ -272,6 +273,120 @@ class InvoiceEdit(BaseModel):
 # faktur pajak number, it has been sent, and the tax record refers to it.
 # Everything before that is still a draft in all but name.
 _UNSIGNED = ("draft", "pending_finance", "rejected")
+
+
+@invoice_desk.get("/invoices/{invoice_id}")
+async def invoice_detail(invoice_id: UUID,
+                         db: AsyncSession = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """One invoice, on its own — the way the delivery order beside it has.
+
+    An invoice existed only as a row in a table on the project page: a
+    number, a status, a total, and buttons. Everything else about it — what
+    it bills against, what has been paid, the tax number on it, the files
+    filed with it, the conversation about it — was either somewhere else or
+    nowhere. It is a document, so it gets a document's screen.
+    """
+    from app.models.attachment import Attachment
+    from app.models.crm import Customer
+    from app.models.customer_po import CustomerPO
+    from app.models.operation import Project
+
+    inv = await db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
+    cust = await db.get(Customer, inv.customer_id) if inv.customer_id else None
+    proj = await db.get(Project, inv.project_id) if inv.project_id else None
+    cpo = (await db.get(CustomerPO, inv.customer_po_id)
+           if inv.customer_po_id else None)
+    if cpo is None and proj is not None:
+        cpo = (await db.scalars(
+            select(CustomerPO).where(CustomerPO.project_id == proj.id)
+            .order_by(CustomerPO.created_at.desc()).limit(1)
+        )).first()
+
+    paid = float(await db.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id == inv.id)
+    ) or 0)
+    payments = [{
+        "id": str(p.id), "amount": float(p.amount or 0), "paid_at": p.paid_at,
+        "method": p.method, "reference": p.reference, "notes": p.notes,
+    } for p in (await db.scalars(
+        select(Payment).where(Payment.invoice_id == inv.id)
+        .order_by(Payment.paid_at.asc().nullslast())
+    )).all()]
+    claims = [{
+        "id": str(cl.id), "amount": float(cl.amount or 0), "paid_at": cl.paid_at,
+        "method": cl.method, "reference": cl.reference, "notes": cl.notes,
+        "status": cl.status,
+    } for cl in (await db.scalars(
+        select(PaymentClaim).where(PaymentClaim.invoice_id == inv.id)
+        .order_by(PaymentClaim.created_at.asc())
+    )).all()]
+
+    files = [{
+        "id": str(a.id), "filename": a.filename, "content_type": a.content_type,
+        "size": a.size,
+        "kind": (a.description or "").strip("[]").split("]")[0] or None,
+        "download_url": f"/api/v1/attachments/{a.id}/download",
+    } for a in (await db.scalars(
+        select(Attachment).where(Attachment.owner_type == "invoice",
+                                 Attachment.owner_id == inv.id)
+        .order_by(Attachment.created_at.asc())
+    )).all()]
+
+    role = Role(user.role)
+    unsigned = inv.status in _UNSIGNED
+    unpaid = paid <= 0
+    total = float(inv.total or 0)
+    return {
+        "id": str(inv.id), "number": inv.number, "status": inv.status,
+        "type": inv.type, "termin_index": inv.termin_index,
+        "issue_date": inv.issue_date, "due_date": inv.due_date,
+        "amount": float(inv.amount or 0),
+        "tax_amount": float(inv.tax_amount or 0),
+        "total": total,
+        "paid_amount": paid,
+        "outstanding": max(0.0, total - paid),
+        "faktur_pajak_no": inv.faktur_pajak_no,
+        "faktur_pajak_status": inv.faktur_pajak_status,
+        "approved_at": inv.approved_at,
+        "notes": inv.notes,
+        "created_at": inv.created_at,
+        "customer_id": str(cust.id) if cust else None,
+        "customer_name": cust.company_name if cust else None,
+        "project_id": str(proj.id) if proj else None,
+        "project_code": proj.code if proj else None,
+        "project_status": proj.status if proj else None,
+        "customer_po_id": str(cpo.id) if cpo else None,
+        "po_number": cpo.number if cpo else None,
+        "payments": payments,
+        "claims": claims,
+        "files": files,
+        # Decided once, here, rather than re-derived from the role in the
+        # page — the same shape the delivery order's screen uses.
+        "may": {
+            "edit": role in (Role.FINANCE, Role.DIRECTOR, Role.ADMIN)
+                    and unsigned and unpaid,
+            "approve": role in (Role.FINANCE, Role.DIRECTOR)
+                       and inv.status == "pending_finance",
+            "reject": role in (Role.FINANCE, Role.DIRECTOR)
+                      and inv.status == "pending_finance",
+            "set_faktur_pajak": role in (Role.FINANCE, Role.DIRECTOR)
+                                and not unsigned,
+            "delete": unpaid and (role in (Role.FINANCE, Role.DIRECTOR)
+                                  or (role is Role.ADMIN and unsigned)),
+            "download": not unsigned,
+        },
+        "locked_because": (
+            "Finance has signed this invoice off — it carries a tax number "
+            "and belongs to the tax record now."
+            if not unsigned else
+            ("This invoice has been paid against, so its figures are fixed."
+             if not unpaid else None)
+        ),
+    }
 
 
 @invoice_desk.patch("/invoices/{invoice_id}")

@@ -19,6 +19,8 @@ const CalendarPage         = lazy(() => import("@/pages/Calendar"));
 const ChartOfAccountsPage  = lazy(() => import("@/pages/ChartOfAccounts"));
 const GeneralJournalPage   = lazy(() => import("@/pages/GeneralJournal"));
 const AccountLedgerPage    = lazy(() => import("@/pages/AccountLedger"));
+const InvoiceDetailPage    = lazy(() => import("@/pages/InvoiceDetail"));
+const CashBankPage         = lazy(() => import("@/pages/CashBank"));
 const RecentLedgersPage    = lazy(() => import("@/pages/RecentLedgers"));
 const EmployeesPage        = lazy(() => import("@/pages/Employees"));
 const EmployeeDetailPage   = lazy(() => import("@/pages/EmployeeDetail"));
@@ -198,6 +200,9 @@ function MainApp() {
           <Route path="/accounts/:accountNo/ledger" element={
             <RequireRole roles={["finance", "director", "manager"]}>
               <AccountLedgerPage /></RequireRole>} />
+          <Route path="/cash-bank" element={
+            <RequireRole roles={["finance", "director", "manager"]}>
+              <CashBankPage /></RequireRole>} />
           <Route path="/journals" element={
             <RequireRole roles={["finance", "director", "manager"]}>
               <GeneralJournalPage /></RequireRole>} />
@@ -247,6 +252,12 @@ function MainApp() {
           <Route path="/deliveries/:id" element={
             <RequireRole roles={["admin", "finance", "manager", "director"]}>
               <DeliveryOrderDetailPage /></RequireRole>} />
+          {/* An invoice's own screen — same audience as the desk that
+              issues and signs one: admin raise them, finance sign them,
+              management oversee. */}
+          <Route path="/invoices/:id" element={
+            <RequireRole roles={["admin", "finance", "manager", "director"]}>
+              <InvoiceDetailPage /></RequireRole>} />
           <Route path="/customer-pos" element={<CustomerPOsPage />} />
           <Route path="/customer-pos/:id" element={<CustomerPODetailPage />} />
           <Route path="/po-recap" element={<PORecapPage />} />

@@ -9,7 +9,7 @@ import {
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
   Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, CheckCheck,
-  Upload,
+  Upload, Landmark,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -82,6 +82,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["purchasing", "admin", "manager", "director"] },
       { to: "/accounts", label: "Chart of Accounts", label_id: "Bagan akun", icon: BookOpen,
         roles: ["admin", "director", "finance", "manager"] },
+      { to: "/cash-bank", label: "Cash & bank", label_id: "Kas & bank", icon: Landmark,
+        roles: ["finance", "director", "manager"] },
       { to: "/journals", label: "General journal", label_id: "Jurnal umum", icon: BookOpen,
         roles: ["finance", "director", "manager"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
@@ -260,6 +262,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/recent-ledgers",
     "/accounts",
     "/journals",       // Jurnal Umum — finance keeps the books
+    "/cash-bank",      // Kas & Bank — the money desk itself
     "/finance/payment-verification",
     "/finance/estimated",
     "/finance/reports",
@@ -270,6 +273,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/customer-pos",
     "/projects",
     "/deliveries",      // the DO screen for a sheet they bill against
+    "/invoices",        // an invoice on its own screen
     // A supplier PO in dollars is a rupiah payment finance has to make, and
     // the rate that converts it is theirs to correct. Read-only otherwise —
     // the backend refuses any field but the rate from them.
@@ -310,6 +314,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
   admin: [
     "/projects",
     "/deliveries",      // the delivery orders this desk raises
+    "/invoices",        // and the invoices they raise beside them
     "/operation",
     "/inventory",
     "/attendance",

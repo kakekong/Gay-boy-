@@ -2390,7 +2390,15 @@ export default function ProjectDetailPage() {
                         aria-label={`Invoice number ${i.number}`}
                         value={ie.number}
                         onChange={(e) => setIe({ number: e.target.value })} />
-                    ) : i.number}
+                    ) : (
+                      // The invoice has its own screen now — the money, what
+                      // has been paid against it, the tax number, the files
+                      // and the discussion, none of which fit in a row.
+                      <Link to={`/invoices/${i.id}`}
+                        className="text-brand-700 hover:underline">
+                        {i.number}
+                      </Link>
+                    )}
                   </td>
                   <td className="td capitalize">{i.type}{i.termin_index ? ` #${i.termin_index}` : ""}</td>
                   <td className="td muted">
