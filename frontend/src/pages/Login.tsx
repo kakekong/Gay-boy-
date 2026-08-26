@@ -10,7 +10,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   // Default OFF so the session is wiped when the tab closes. Opting in
   // re-enables localStorage persistence across restarts.
-  const [rememberMe, setRememberMe] = useState(false);
+  // On by default. Off meant the session lived in sessionStorage, which is
+  // per-tab: restoring a tab, opening a link in a new one, or a browser that
+  // drops a background tab all read as "signed out", and on a screen being
+  // presented from that happened over and over. The refresh token is good
+  // for thirty days either way, so the box was choosing where to keep a
+  // long-lived credential, not whether to have one. Unticking it still gives
+  // the shared-computer behaviour.
+  const [rememberMe, setRememberMe] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const setTokens = useAuthStore((s) => s.setTokens);
@@ -155,8 +162,8 @@ export default function LoginPage() {
                 </span>
                 <span className="block text-[11px] text-ink-400 mt-0.5">
                   {t(
-                    "Leave this off on a shared computer — closing the tab signs you out automatically.",
-                    "Biarkan tidak dicentang di komputer bersama — menutup tab akan otomatis keluar."
+                    "Untick this on a shared computer — then closing the tab signs you out automatically.",
+                    "Hapus centang di komputer bersama — menutup tab akan otomatis keluar."
                   )}
                 </span>
               </span>

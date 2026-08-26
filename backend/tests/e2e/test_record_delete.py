@@ -348,8 +348,9 @@ async def main():
         "confirm": PHRASE, "allow_financial": True}))
     check("both are deleted", r5.get("deleted", {}).get("inventory_items") == 1
           and r5.get("deleted", {}).get("accounts") == 1, str(r5)[:180])
+    # /inventory answers a page — {"items": [...], "total": n}.
     inv = J(await c.get("/inventory", headers=d, params={"q": f"SKU-{tag}"}))
-    inv = inv.get("data") if isinstance(inv, dict) else inv
+    inv = inv.get("items") if isinstance(inv, dict) else inv
     check("...the part is really gone", not (inv or []), str(inv)[:120])
     acc = J(await c.get("/accounts", headers=d, params={"q": f"99{tag}"}))
     acc = acc.get("data") if isinstance(acc, dict) else acc

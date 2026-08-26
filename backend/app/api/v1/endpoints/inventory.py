@@ -146,8 +146,19 @@ async def list_items(
     category: str | None = None,
     only_low: bool = False,
     only_active: bool = True,
+    limit: int = 200,
+    offset: int = 0,
 ):
-    stmt = select(InventoryItem).order_by(InventoryItem.name.asc())
+    """The catalogue, a page at a time.
+
+    It used to return every row and then drop the ones the caller did not
+    want in Python. That was fine at fifteen items; the catalogue now gains
+    a SKU for every purchase-order line, so it will not stay small, and both
+    halves of that — the unbounded read and the filter-after-the-fact — get
+    slower in step with it. The filters are the database's job now, and the
+    answer is a page.
+    """
+    stmt = select(InventoryItem)
     if only_active:
         stmt = stmt.where(InventoryItem.is_active.is_(True))
     if q:
@@ -155,13 +166,25 @@ async def list_items(
         stmt = stmt.where((InventoryItem.name.ilike(like)) | (InventoryItem.sku.ilike(like)))
     if category:
         stmt = stmt.where(InventoryItem.category == category)
-    rows = (await db.scalars(stmt)).all()
+    if only_low:
+        # "Needs attention" is out-of-stock or under its reorder point —
+        # the same rule `_status` applies, said in SQL so the rows that
+        # don't qualify are never read.
+        stmt = stmt.where(
+            (InventoryItem.current_stock <= 0)
+            | (InventoryItem.current_stock < InventoryItem.reorder_point)
+        )
+    total = await db.scalar(
+        select(func.count()).select_from(stmt.subquery())
+    ) or 0
+    rows = (await db.scalars(
+        stmt.order_by(InventoryItem.name.asc())
+        .limit(max(1, min(limit, 1000))).offset(max(0, offset))
+    )).all()
     show_cost = _may_see_cost(_u)
     out = []
     for r in rows:
         st = _status(r)
-        if only_low and st == "ok":
-            continue
         out.append({
             "id": str(r.id),
             "sku": r.sku, "name": r.name, "category": r.category,
@@ -176,7 +199,36 @@ async def list_items(
             "notes": r.notes, "is_active": r.is_active,
             "stock_status": st,
         })
-    return out
+    return {"items": out, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/summary")
+async def summary(db: AsyncSession = Depends(get_db),
+                  _u: User = Depends(get_current_user)):
+    """The three figures at the top of the page, counted by the database.
+
+    The page used to work them out by loading the whole catalogue and
+    reducing it in the browser — three numbers at the cost of every row.
+    They are one query each here, and they describe the catalogue rather
+    than whichever page happens to be on screen.
+    """
+    active = InventoryItem.is_active.is_(True)
+    tracked = await db.scalar(
+        select(func.count(InventoryItem.id)).where(active)) or 0
+    out_of = await db.scalar(select(func.count(InventoryItem.id)).where(
+        active, InventoryItem.current_stock <= 0)) or 0
+    low = await db.scalar(select(func.count(InventoryItem.id)).where(
+        active, InventoryItem.current_stock > 0,
+        InventoryItem.current_stock < InventoryItem.reorder_point)) or 0
+    value = None
+    if _may_see_cost(_u):
+        value = float(await db.scalar(
+            select(func.coalesce(
+                func.sum(InventoryItem.current_stock * InventoryItem.unit_cost), 0)
+            ).where(active)
+        ) or 0)
+    return {"tracked": tracked, "low": low, "out": out_of,
+            "needs_attention": low + out_of, "stock_value": value}
 
 
 @router.get("/categories")

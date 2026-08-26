@@ -34,6 +34,40 @@ _USERS = [
 # Every statement here is idempotent (`ADD COLUMN IF NOT EXISTS`). Add new
 # entries below as the model evolves. Postgres-only.
 COLUMN_MIGRATIONS: list[str] = [
+    # ── Indexes for lookups the app makes on every page ──────────────────
+    # Attachments are read by (owner_type, owner_id) everywhere — every
+    # detail screen, the approval preview, the invoice queue — and the two
+    # columns were indexed separately, so Postgres had to pick one and
+    # filter the rest by hand. One composite index answers the actual query.
+    "CREATE INDEX IF NOT EXISTS ix_attachments_owner "
+    "ON attachments (owner_type, owner_id)",
+    # Stock movements are looked up by the document that caused them, on
+    # every PO release and every delivery order, twice each. `reference`
+    # had no index at all, so both were a full scan of the table that grows
+    # fastest in the whole system.
+    "CREATE INDEX IF NOT EXISTS ix_inventory_movements_ref "
+    "ON inventory_movements (reference, reason)",
+    # Finance types a faktur pajak number and the server checks nobody else
+    # has it — a scan of every invoice ever issued, on every keystroke-sized
+    # save.
+    "CREATE INDEX IF NOT EXISTS ix_invoices_faktur_pajak_no "
+    "ON invoices (faktur_pajak_no) WHERE faktur_pajak_no IS NOT NULL",
+    # The inventory list sorts by name and filters on is_active; the
+    # catalogue now grows a SKU per purchase-order line, so it will not stay
+    # small.
+    "CREATE INDEX IF NOT EXISTS ix_inventory_items_active_name "
+    "ON inventory_items (is_active, name)",
+    # Comments and mentions are read per document, same shape as attachments.
+    "CREATE INDEX IF NOT EXISTS ix_entity_comments_owner "
+    "ON entity_comments (owner_type, owner_id)",
+    # Approval requests are looked up by what they point at — the delivery
+    # order desk does this for every row of the deliveries table.
+    "CREATE INDEX IF NOT EXISTS ix_approval_requests_target "
+    "ON approval_requests (target_type, target_id)",
+    # The journal walks one account over a date range.
+    "CREATE INDEX IF NOT EXISTS ix_journal_lines_account "
+    "ON journal_lines (account_no, journal_id)",
+
     # Users gained an optional per-user sidebar page override
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pages JSONB",
     # …and an employment record: the day they started, and where payroll

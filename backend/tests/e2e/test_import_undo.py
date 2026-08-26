@@ -85,7 +85,7 @@ async def main():
                 "quotation": "/quotations", "inventory_item": None}[kind]
         if kind == "inventory_item":
             r = J(await c.get("/inventory", headers=d, params={"q": oid}))
-            rows = r.get("data") if isinstance(r, dict) else r
+            rows = r.get("items") if isinstance(r, dict) else r
             return bool(rows)
         return (await c.get(f"{path}/{oid}", headers=d)).status_code == 200
 

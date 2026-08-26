@@ -886,7 +886,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         })()}
 
         <main className="flex-1 overflow-auto">
-          <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
+          {/* 1280px was the whole width the app ever used. On a laptop that
+              reads as a comfortable measure; on the 4K screen in the meeting
+              room it reads as broken — a column of cards marooned in the
+              middle with empty grey either side. Step it up on the big
+              screens and leave everything below untouched. */}
+          <div className="max-w-7xl 2xl:max-w-[100rem] min-[2000px]:max-w-[120rem] mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
             {children}
           </div>
         </main>

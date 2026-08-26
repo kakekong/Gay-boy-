@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package, Plus, Search, AlertTriangle, CheckCircle2, ShoppingCart, Loader2,
@@ -28,6 +28,10 @@ interface Item {
   stock_status: "ok" | "low" | "out";
 }
 
+// How many rows to fetch at a time. Comfortably more than this company's
+// catalogue today, so nobody meets the pager until it earns its keep.
+const PAGE = 200;
+
 const idr = (n: number) => new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
 const STATUS_META: Record<Item["stock_status"], { label: string; tone: string; Icon: any }> = {
@@ -56,11 +60,27 @@ export default function InventoryPage() {
   const [editing, setEditing] = useState<Item | null>(null);
   const [adjusting, setAdjusting] = useState<Item | null>(null);
 
+  // A page at a time. The catalogue gains a SKU for every purchase-order
+  // line, so "load them all and filter in the browser" stops being free.
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => { setShown(PAGE); }, [q, onlyLow]);
   const items = useQuery({
-    queryKey: ["inventory", q, onlyLow],
+    queryKey: ["inventory", q, onlyLow, shown],
     queryFn: () => api.get("/inventory", {
-      params: { q: q || undefined, only_low: onlyLow || undefined },
-    }).then((r) => r.data as Item[]),
+      params: { q: q || undefined, only_low: onlyLow || undefined, limit: shown },
+    }).then((r) => r.data as { items: Item[]; total: number }),
+  });
+  const rows = items.data?.items ?? [];
+  const total = items.data?.total ?? 0;
+
+  // The three figures at the top describe the whole catalogue, so they come
+  // from the database rather than from whatever is on screen.
+  const stats = useQuery({
+    queryKey: ["inventory-summary"],
+    queryFn: () => api.get("/inventory/summary").then((r) => r.data as {
+      tracked: number; low: number; out: number;
+      needs_attention: number; stock_value: number | null;
+    }),
   });
 
   const order = useMutation({
@@ -76,10 +96,8 @@ export default function InventoryPage() {
     },
   });
 
-  const lowCount = (items.data ?? []).filter((i) => i.stock_status !== "ok").length;
-  const totalValue = (items.data ?? []).reduce(
-    (acc, i) => acc + (i.current_stock || 0) * (i.unit_cost || 0), 0
-  );
+  const lowCount = stats.data?.needs_attention ?? 0;
+  const totalValue = stats.data?.stock_value ?? 0;
 
   return (
     <div className="space-y-5">
@@ -102,7 +120,7 @@ export default function InventoryPage() {
 
       {/* Stat strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Card label={T("Items tracked")} value={String((items.data ?? []).length)} Icon={Boxes} tone="brand" />
+        <Card label={T("Items tracked")} value={String(stats.data?.tracked ?? 0)} Icon={Boxes} tone="brand" />
         <Card label={T("Low / out of stock")} value={String(lowCount)} Icon={AlertTriangle}
               tone={lowCount > 0 ? "amber" : "emerald"} />
         {showCost && (
@@ -139,7 +157,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {(items.data ?? []).map((i) => {
+              {rows.map((i) => {
                 const M = STATUS_META[i.stock_status];
                 return (
                   <tr key={i.id} className="tr-hover border-t border-ink-100">
@@ -201,7 +219,7 @@ export default function InventoryPage() {
                   </tr>
                 );
               })}
-              {!items.data?.length && (
+              {!rows.length && (
                 <tr>
                   <td colSpan={8} className="td text-center muted py-12">
                     {items.isLoading
@@ -216,6 +234,17 @@ export default function InventoryPage() {
             </tbody>
           </table>
         </div>
+        {total > rows.length && (
+          <div className="px-5 py-3 border-t border-ink-100 flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-xs muted">
+              {T("Showing")} {rows.length} {T("of")} {total}
+            </span>
+            <button className="btn-ghost" disabled={items.isFetching}
+              onClick={() => setShown((n) => n + PAGE)}>
+              {items.isFetching ? T("Loading…") : T("Load more")}
+            </button>
+          </div>
+        )}
       </div>
 
       <Modal

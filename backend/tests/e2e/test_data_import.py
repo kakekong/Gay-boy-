@@ -40,6 +40,13 @@ def J(r):
     try: return r.json()
     except Exception: return {"_": r.text[:200]}
 
+
+def _inv_items(payload):
+    """/inventory answers a page — {"items": [...], "total": n} — not a list."""
+    if isinstance(payload, dict):
+        return payload.get("items") or []
+    return payload or []
+
 XL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -183,7 +190,7 @@ async def main():
           f"{r2.get('created')} / {r2.get('skipped_existing')}")
 
     inv = J(await c.get("/inventory", headers=d, params={"q": tag}))
-    inv_rows = inv.get("data") if isinstance(inv, dict) else inv
+    inv_rows = _inv_items(inv)
     check("the parts show up in Inventory", len(inv_rows or []) == 3, str(len(inv_rows or [])))
     one = next((x for x in (inv_rows or []) if x["sku"] == f"9{tag}02"), None)
     check("...with their category, unit and supplier",
@@ -205,7 +212,7 @@ async def main():
     J(await c.post("/imports/items/commit", headers=d, files=up(stocked),
                    data={"limit": 5, "confirm": "IMPORT"}))
     inv2 = J(await c.get("/inventory", headers=d, params={"q": f"8{tag}01"}))
-    inv2 = inv2.get("data") if isinstance(inv2, dict) else inv2
+    inv2 = _inv_items(inv2)
     it = (inv2 or [None])[0]
     check("opening stock lands on the item", it and float(it["current_stock"]) == 40, str(it))
     if it:

@@ -85,6 +85,20 @@ async def lifespan(_app: FastAPI):
 def _enforce_prod_safety() -> None:
     """Refuse to boot in prod with foot-gun defaults still in place."""
     if settings.APP_ENV.lower() != "prod":
+        # The hard check below only runs for APP_ENV=prod, which means a
+        # deployment left on the default env skips it silently — and the
+        # default JWT secret is a string published in this repository, so
+        # anyone who knows it can mint a director token. Say so on every
+        # boot, loudly enough to be seen in the deployment's own log.
+        if settings.JWT_SECRET in {"change-me-in-prod", "please-change-me-in-prod", ""}:
+            logging.getLogger(__name__).warning(
+                "SECURITY: JWT_SECRET is still the built-in default, and this "
+                "process is running as APP_ENV=%s so the production check is "
+                "skipped. Anyone with the source can forge a login. Set "
+                "JWT_SECRET (openssl rand -hex 48) and restart; every existing "
+                "session will be signed out once, which is the intended cost.",
+                settings.APP_ENV,
+            )
         return
     bad: list[str] = []
     if settings.JWT_SECRET in {"change-me-in-prod", "please-change-me-in-prod", ""}:

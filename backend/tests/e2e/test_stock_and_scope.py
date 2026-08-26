@@ -48,6 +48,13 @@ def J(r):
     except Exception: return {"_": r.text[:200]}
 
 
+def _inv_items(payload):
+    """/inventory answers a page — {"items": [...], "total": n} — not a list."""
+    if isinstance(payload, dict):
+        return payload.get("items") or []
+    return payload or []
+
+
 async def main():
     from app.scripts.seed import ensure_schema; await ensure_schema()
     from app.main import app
@@ -95,8 +102,8 @@ async def main():
         return proj
 
     async def stock_of(name, headers=None):
-        rows = J(await c.get("/inventory", headers=headers or d,
-                             params={"q": name}))
+        rows = _inv_items(J(await c.get("/inventory", headers=headers or d,
+                                        params={"q": name})))
         rows = [r for r in rows if r["name"] == name]
         return (rows[0]["current_stock"], rows[0]["sku"]) if rows else (None, None)
 
@@ -131,7 +138,8 @@ async def main():
     check("...with a generated SKU in the company's own series",
           bool(sku) and sku.isdigit() and int(sku) > 100_000, str(sku))
     check("...and the ordered quantity on the shelf", have == 10.0, str(have))
-    row = [x for x in J(await c.get("/inventory", headers=d, params={"q": part}))
+    row = [x for x in _inv_items(J(await c.get("/inventory", headers=d,
+                                              params={"q": part})))
            if x["name"] == part][0]
     check("...costed at what we are paying for it",
           float(row["unit_cost"]) == 250_000.0, str(row["unit_cost"]))
@@ -182,8 +190,8 @@ async def main():
     for who, hdr, may in (("the director", d, True), ("purchasing", pur, True),
                           ("finance", fin, True), ("admin", adm, False),
                           ("sales", s1, False)):
-        rows = [x for x in J(await c.get("/inventory", headers=hdr,
-                                         params={"q": part}))
+        rows = [x for x in _inv_items(J(await c.get("/inventory", headers=hdr,
+                                                    params={"q": part})))
                 if x["name"] == part]
         got = rows[0]["unit_cost"] if rows else "missing"
         check(f"{who} {'sees' if may else 'does not see'} what it cost",

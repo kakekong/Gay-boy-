@@ -123,18 +123,18 @@ async def _already_moved(db: AsyncSession, reference: str, reason: str) -> bool:
     the goods are back on order. Counting only the originals would refuse to
     put them back on the shelf and leave the count permanently short.
     """
-    done = await db.scalar(
-        select(func.count(InventoryMovement.id)).where(
-            InventoryMovement.reference == reference,
-            InventoryMovement.reason == reason,
-        )
-    ) or 0
-    undone = await db.scalar(
-        select(func.count(InventoryMovement.id)).where(
-            InventoryMovement.reference == reference,
-            InventoryMovement.reason == f"{reason}_reversed",
-        )
-    ) or 0
+    # One pass over the document's own movements rather than two counts of
+    # the whole table. Both halves are the same narrow index lookup, so
+    # asking for them together is a single seek instead of two scans.
+    row = (await db.execute(
+        select(
+            func.count(func.nullif(InventoryMovement.reason != reason, True)),
+            func.count(func.nullif(
+                InventoryMovement.reason != f"{reason}_reversed", True)),
+        ).where(InventoryMovement.reference == reference,
+                InventoryMovement.reason.in_((reason, f"{reason}_reversed")))
+    )).first()
+    done, undone = (row[0] or 0, row[1] or 0) if row else (0, 0)
     return done > undone
 
 

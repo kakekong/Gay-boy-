@@ -862,6 +862,7 @@ export const ID_STATIC: Record<string, string> = {
   "Shipping timeline": "Linimasa pengiriman",
   "Shipping update": "Pembaruan pengiriman",
   "Debit": "Debit",
+  "Load more": "Muat lagi",
   "Credit": "Kredit",
   "Open this account's ledger": "Buka buku besar akun ini",
   "Delivery order": "Surat jalan",
