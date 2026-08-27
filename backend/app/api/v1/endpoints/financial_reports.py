@@ -129,11 +129,18 @@ def _sections_cash(p: dict) -> list[dict]:
 
 
 # ─── Profit & Loss ───────────────────────────────────────────────────────────
-async def _r_pnl(db: AsyncSession, start: date, end: date, period: str | None) -> dict:
-    # A specific period reads the dated journal; the default (no period) and
-    # "all" show the all-time picture from balances so it's never empty on
-    # day one, before the journal has accumulated history.
-    if period and period != "all":
+async def _r_pnl(db: AsyncSession, start: date, end: date, period: str | None,
+                 *, dated: bool = False) -> dict:
+    # A specific period reads the dated journal; the bare default and "all"
+    # show the all-time picture from balances so it's never empty on day
+    # one, before the journal has accumulated history.
+    #
+    # `dated` is set when the caller gave an explicit from/to. Without it,
+    # an explicit window with no `period` fell through to the all-time
+    # figures while the response still carried the requested dates — a
+    # report that said "January" and showed every January there had ever
+    # been.
+    if dated or (period and period != "all"):
         return await fin.pnl_from_journal(db, start, end)
     return await fin.pnl_from_balances(db)
 
@@ -384,7 +391,7 @@ async def profit_loss(
     db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
 ):
     start, end, label = _window(period, frm, to)
-    d = await _r_pnl(db, start, end, period)
+    d = await _r_pnl(db, start, end, period, dated=bool(frm or to))
     return {"period": label if d["source"] == "journal" else "All time",
             "start": start, "end": end, **d}
 
@@ -446,14 +453,15 @@ _LABELS = {
 
 async def _build_sections(
     report: str, db: AsyncSession, start: date, end: date,
-    period: str | None, user_id: UUID | None,
+    period: str | None, user_id: UUID | None, dated: bool = False,
 ) -> tuple[str, list[dict]]:
     if report == "transactions":
         return _LABELS[report], _sections_transactions(await _r_transactions(db, start, end))
     if report == "cash":
         return _LABELS[report], _sections_cash(await _r_cash(db, start, end))
     if report == "profit-loss":
-        return _LABELS[report], _sections_pnl(await _r_pnl(db, start, end, period))
+        return _LABELS[report], _sections_pnl(
+            await _r_pnl(db, start, end, period, dated=dated))
     if report == "balance-sheet":
         return _LABELS[report], _sections_balance_sheet(await _r_balance_sheet(db))
     if report == "assets":
@@ -470,9 +478,12 @@ async def _build_sections(
 
 async def _export(
     ext: str, report: str, db: AsyncSession, start: date, end: date,
-    label: str, period: str | None, user_id: UUID | None,
+    label: str, period: str | None, user_id: UUID | None, dated: bool = False,
 ) -> Response:
-    title, sections = await _build_sections(report, db, start, end, period, user_id)
+    # `dated` travels with the window so a printed report shows the same
+    # figures the screen did — see _r_pnl.
+    title, sections = await _build_sections(report, db, start, end, period,
+                                            user_id, dated)
     full_title = f"{title} · {label}"
     from app.services.tabular_export import render_pdf, render_xlsx
     if ext == "pdf":
@@ -495,7 +506,8 @@ async def export_pdf(
     db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
 ):
     start, end, label = _window(period, frm, to)
-    return await _export("pdf", report, db, start, end, label, period, user_id)
+    return await _export("pdf", report, db, start, end, label, period,
+                         user_id, bool(frm or to))
 
 
 @router.get("/export/{report}.xlsx")
@@ -506,4 +518,178 @@ async def export_xlsx(
     db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
 ):
     start, end, label = _window(period, frm, to)
-    return await _export("xlsx", report, db, start, end, label, period, user_id)
+    return await _export("xlsx", report, db, start, end, label, period,
+                         user_id, bool(frm or to))
+
+
+# ─── Daftar Laporan ──────────────────────────────────────────────────────────
+# The catalogue itself, and the six variants of the profit report that all
+# come off one engine. Building them separately would mean six chances for
+# the same account to be classified two different ways — and the first time
+# the quarterly report disagreed with the monthly one, nobody would know
+# which was right.
+
+from app.services import reports_multi as multi  # noqa: E402
+
+CATALOGUE = [
+    {"key": "pnl", "group": "Laba Rugi",
+     "name": "Laba Rugi (Standar)", "name_en": "Profit & Loss (standard)",
+     "path": "/finance/reports/profit-loss", "params": ["period", "from", "to"],
+     "about": "One period, account by account."},
+    {"key": "pnl-monthly", "group": "Laba Rugi",
+     "name": "Laba Rugi Multi Periode", "name_en": "P&L, month by month",
+     "path": "/finance/reports/pnl-columns?basis=monthly",
+     "params": ["year", "months"],
+     "about": "Every month of a year side by side, so a trend is visible "
+              "rather than inferred."},
+    {"key": "pnl-quarterly", "group": "Laba Rugi",
+     "name": "Laba Rugi per Kuartal", "name_en": "P&L by quarter",
+     "path": "/finance/reports/pnl-columns?basis=quarterly", "params": ["year"],
+     "about": "Four columns, one year."},
+    {"key": "pnl-yearly", "group": "Laba Rugi",
+     "name": "Laba Rugi Multi Tahun", "name_en": "P&L, year on year",
+     "path": "/finance/reports/pnl-columns?basis=yearly",
+     "params": ["year", "years"],
+     "about": "Several years side by side."},
+    {"key": "pnl-compare", "group": "Laba Rugi",
+     "name": "Laba Rugi Perbandingan Periode",
+     "name_en": "P&L, period against period",
+     "path": "/finance/reports/pnl-columns?basis=compare",
+     "params": ["year", "month"],
+     "about": "This period against the one before it, with the difference."},
+    {"key": "pnl-budget", "group": "Laba Rugi",
+     "name": "Laba Rugi Perbandingan Anggaran",
+     "name_en": "P&L against budget",
+     "path": "/finance/reports/pnl-budget", "params": ["year", "month"],
+     "about": "Actual against what was planned, on the same basis Monitor "
+              "Anggaran uses."},
+    {"key": "balance-sheet", "group": "Neraca",
+     "name": "Neraca (Standar)", "name_en": "Balance sheet (standard)",
+     "path": "/finance/reports/balance-sheet", "params": [],
+     "about": "Where we stand right now."},
+    {"key": "balance-sheet-at", "group": "Neraca",
+     "name": "Neraca per Tanggal", "name_en": "Balance sheet as at a date",
+     "path": "/finance/reports/balance-sheet-at", "params": ["on", "compare_to"],
+     "about": "As at any date, or two dates side by side — walked from the "
+              "journal, because a running balance cannot answer 'as at March'."},
+    {"key": "cash-flow", "group": "Arus Kas",
+     "name": "Arus Kas (Tidak Langsung)",
+     "name_en": "Cash flow (indirect)",
+     "path": "/finance/reports/cash-flow-indirect", "params": ["year", "month"],
+     "about": "From net income to the change in the bank, and whether the "
+              "two agree."},
+    {"key": "cash-projection", "group": "Arus Kas",
+     "name": "Proyeksi Arus Kas (Komitmen)",
+     "name_en": "Cash projection (from commitments)",
+     "path": "/finance/reports/cash-projection?basis=commitments",
+     "params": ["months"],
+     "about": "From invoices already issued and not yet paid. Conservative: "
+              "it projects nothing that has not been agreed."},
+    {"key": "cash-projection-budget", "group": "Arus Kas",
+     "name": "Proyeksi Arus Kas (Anggaran)",
+     "name_en": "Cash projection (from budget)",
+     "path": "/finance/reports/cash-projection?basis=budget",
+     "params": ["months"],
+     "about": "From the plan rather than from obligations — it covers months "
+              "no invoice exists for yet."},
+]
+
+
+@router.get("/catalogue")
+async def catalogue(_u: User = Depends(get_current_user)):
+    """Daftar Laporan — what can be run, and what each one is for."""
+    return {"reports": CATALOGUE,
+            "groups": list(dict.fromkeys(r["group"] for r in CATALOGUE))}
+
+
+@router.get("/pnl-columns")
+async def pnl_columns(
+    basis: str = "monthly",
+    year: int | None = None,
+    month: int | None = None,
+    months: int = 12,
+    years: int = 3,
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """The profit report over several spans at once.
+
+    Four shapes, one engine: by month, by quarter, by year, and this period
+    against the one before it.
+    """
+    year = year or _today().year
+    if basis == "quarterly":
+        spans = multi.quarter_spans(year)
+    elif basis == "yearly":
+        span_years = list(range(year - max(1, min(years, 10)) + 1, year + 1))
+        spans = multi.year_spans(span_years)
+    elif basis == "compare":
+        month = month or _today().month
+        prev_year, prev_month = (year, month - 1) if month > 1 else (year - 1, 12)
+        spans = (multi.month_spans(prev_year, [prev_month])
+                 + multi.month_spans(year, [month]))
+    else:
+        basis = "monthly"
+        spans = multi.month_spans(year, list(range(1, max(1, min(months, 12)) + 1)))
+
+    data = await multi.pnl_columns(db, spans)
+    if basis == "compare" and len(data["columns"]) == 2:
+        # The reason to run this rather than two reports: the difference,
+        # worked out once rather than by eye.
+        for section in data["sections"]:
+            for row in section["accounts"]:
+                row["change"] = round(row["values"][1] - row["values"][0], 2)
+            section["change"] = round(section["totals"][1] - section["totals"][0], 2)
+        data["change"] = {
+            k: round(data["column_totals"][1][k] - data["column_totals"][0][k], 2)
+            for k in data["column_totals"][0]
+        }
+    return {"basis": basis, "year": year, **data}
+
+
+@router.get("/pnl-budget")
+async def pnl_budget(
+    year: int | None = None, month: int | None = None,
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """Laba Rugi Perbandingan Anggaran."""
+    return await multi.pnl_vs_budget(db, year=year or _today().year, month=month)
+
+
+@router.get("/balance-sheet-at")
+async def balance_sheet_at(
+    on: date | None = None, compare_to: date | None = None,
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """Neraca per Tanggal, optionally beside a second date."""
+    return await multi.balance_sheet_at(db, on or _today(), compare_to)
+
+
+@router.get("/cash-flow-indirect")
+async def cash_flow_indirect(
+    year: int | None = None, month: int | None = None,
+    frm: date | None = Query(None, alias="from"), to: date | None = None,
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """Arus Kas (tidak langsung), with its own reconciliation."""
+    today = _today()
+    if frm and to:
+        start, end = frm, to
+    elif month:
+        year = year or today.year
+        start, end = date(year, month, 1), multi.month_end(year, month)
+    else:
+        year = year or today.year
+        start, end = date(year, 1, 1), date(year, 12, 31)
+    return await multi.cash_flow_indirect(db, start, end)
+
+
+@router.get("/cash-projection")
+async def cash_projection(
+    basis: str = "commitments", months: int = 6,
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """Proyeksi Arus Kas, from obligations or from the plan."""
+    if basis not in ("commitments", "budget"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "basis is 'commitments' or 'budget'.")
+    return await multi.cash_projection(db, months=months, basis=basis)

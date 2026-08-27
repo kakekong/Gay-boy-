@@ -191,6 +191,14 @@ async def pnl_from_journal(db: AsyncSession, start: date, end: date) -> dict:
 
 
 # ─── Balance Sheet / Assets / Liabilities (point-in-time from balances) ──────
+# Accumulated depreciation is an asset account that reduces assets. Its
+# balance is credit-normal, so it is stored positive and has to be carried
+# into the balance sheet negative — added instead, it overstates assets by
+# twice itself and the sheet stops balancing the moment anything is
+# depreciated.
+CONTRA_ASSET_TYPES = {"Accumulated Depreciation"}
+
+
 async def _balances_by_type(db: AsyncSession) -> tuple[dict[str, list[dict]], dict[str, float]]:
     rows = (await db.scalars(select(Account))).all()
     accounts: dict[str, list[dict]] = defaultdict(list)
@@ -199,6 +207,8 @@ async def _balances_by_type(db: AsyncSession) -> tuple[dict[str, list[dict]], di
         bal = float(a.balance or 0)
         if a.is_parent or not bal:
             continue
+        if a.account_type in CONTRA_ASSET_TYPES:
+            bal = -bal
         accounts[a.account_type].append(
             {"account_no": a.account_no, "name": a.name, "amount": bal}
         )

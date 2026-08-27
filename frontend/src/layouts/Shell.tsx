@@ -92,6 +92,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["finance", "director", "manager"] },
       { to: "/budgets", label: "Budget", label_id: "Anggaran", icon: Target,
         roles: ["finance", "director", "manager"] },
+      { to: "/report-catalogue", label: "Report catalogue", label_id: "Daftar laporan", icon: BookOpen,
+        roles: ["finance", "admin", "director", "manager"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
         roles: ["finance", "director"] },
     ],
@@ -272,6 +274,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/master-data",    // Pajak + Gaji/Tunjangan — finance's own two lists
     "/assets",         // Aset Tetap — the register and its monthly run
     "/budgets",        // Anggaran — the plan the ledger is measured against
+    "/report-catalogue",  // Daftar Laporan — the catalogue and its reports
     "/finance/payment-verification",
     "/finance/estimated",
     "/finance/reports",
