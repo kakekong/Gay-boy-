@@ -22,6 +22,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min, sales_may_see, sales_scope
 from app.models.crm import Customer
+from app.models.inventory import UNITS, normalise_uom
 from app.models.price_request import PriceRequest
 from app.models.user import User
 from app.services.numbering import next_price_request_number
@@ -83,10 +84,21 @@ def strip_internal_notes(text: str | None, keep: set[str] | None = None) -> str 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 class ItemIn(BaseModel):
+    # The product name. Kept as `description` because that is what every
+    # document downstream already reads — the quotation, the customer PO,
+    # the delivery order — and renaming the key would orphan every line
+    # written before today.
     description: str
     qty: float = 1
     uom: str | None = None
     spec: str | None = None
+    # What sales fills in so the part can become a catalogue row on submit.
+    # A SKU is optional: leave it blank and one is issued from the same
+    # series the purchase orders use, rather than making sales invent a
+    # numbering scheme.
+    sku: str | None = None
+    category: str | None = None
+    link: str | None = None
 
 
 class PRCreate(BaseModel):
@@ -199,6 +211,13 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             "qty": it.get("qty"),
             "uom": it.get("uom"),
             "spec": it.get("spec"),
+            # The catalogue side of the line. Visible to everyone who can see
+            # the request at all: purchasing needs the SKU to order against
+            # the right row and the link to find the part, and neither says
+            # anything about price.
+            "sku": it.get("sku"),
+            "category": it.get("category"),
+            "link": it.get("link"),
         }
         if see_cost:
             row["cost_price"] = it.get("cost_price")
@@ -274,6 +293,63 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
     return out
 
 
+def _clean_unit(value: str | None) -> str | None:
+    """One of the four units, or a refusal that lists them.
+
+    Spellings already in the data ("EA", "pc", "buah", "m") are mapped
+    rather than rejected — the point is that one part means one thing, not
+    that anybody retypes history. Anything genuinely unrecognised is
+    refused, because silently defaulting it to pcs would turn 30 metres of
+    cable into 30 pieces.
+
+    Blank survives a draft. Half-written requests are the normal state of a
+    request somebody is still assembling, and refusing to save one until
+    every field is filled is how people end up keeping the real list in a
+    spreadsheet. Submit is where it becomes required — see
+    `submit_price_request`, which is also where the catalogue row is created
+    and the unit is baked into it.
+    """
+    if not (value or "").strip():
+        return None
+    resolved = normalise_uom(value)
+    if resolved:
+        return resolved
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        f"“{value}” is not a unit we count in. Use one of: {', '.join(UNITS)}.")
+
+
+def _clean_link(value: str | None) -> str | None:
+    """A link that a browser will actually open, or nothing.
+
+    Only http and https. A `javascript:` or `data:` URL in a field that gets
+    rendered as an anchor is a way to run something in the next person's
+    browser, and no supplier's product page needs either.
+    """
+    link = (value or "").strip()
+    if not link:
+        return None
+    if not _re.match(r"^https?://\S+$", link, _re.I):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"“{link[:60]}” is not a web address. Paste the full link, "
+            "starting with http:// or https://.")
+    return link[:1000]
+
+
+def _carried(incoming: ItemIn, old: dict | None, field: str, clean):
+    """What a rebuilt line should hold for a field the caller may not have sent.
+
+    `model_fields_set` is the distinction that matters: a field sent as blank
+    is somebody clearing it, and a field not sent at all is a client that
+    does not know about it. Treating those the same is how an edit from an
+    older form silently erases work.
+    """
+    if field in incoming.model_fields_set:
+        return clean(getattr(incoming, field))
+    return old.get(field) if old else None
+
+
 def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list[dict]:
     """Renumber the lines, carrying pricing across an edit.
 
@@ -300,8 +376,21 @@ def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list
             "line_no": i + 1,
             "description": it.description,
             "qty": float(it.qty or 0),
-            "uom": it.uom,
+            "uom": _clean_unit(it.uom),
             "spec": it.spec,
+            # Carried across an edit unless the caller actually said
+            # otherwise. This rebuilds every row from scratch, so a client
+            # that does not render a field would erase it — which is how an
+            # old edit form quietly wiped the supplier a cost came from. A
+            # field explicitly sent as blank still clears it; one simply not
+            # mentioned is left alone.
+            "category": _carried(it, old, "category",
+                                 lambda v: (v or "").strip()[:120] or None),
+            "link": _carried(it, old, "link", _clean_link),
+            # Blank until submit issues one. Losing the SKU here would let
+            # the same part be introduced twice under two numbers.
+            "sku": ((it.sku or "").strip()
+                    or (old.get("sku") if old else None) or None),
             "cost_price": old.get("cost_price") if old else None,
             "sell_price": old.get("sell_price") if old else None,
         }
@@ -482,9 +571,28 @@ async def submit_price_request(
         raise HTTPException(status.HTTP_409_CONFLICT, "Already submitted")
     if not (pr.items or []):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Add at least one line item")
+    # Every line needs a unit before it leaves sales, because the next thing
+    # that happens is a catalogue row being created with that unit on it,
+    # and everything downstream counts against it. A default here would turn
+    # 30 metres of cable into 30 pieces without anybody typing a wrong
+    # character.
+    missing = [str(i.get("line_no") or "?") for i in (pr.items or [])
+               if not (i.get("uom") or "").strip()]
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Line {', '.join(missing)}: say what it is counted in — "
+            f"{', '.join(UNITS)}.")
     pr.status = "pending_purchasing"
+    # The products join the catalogue here, and only the products. Quantity
+    # is not touched: a price request says a customer wants something, not
+    # that we have any. Stock arrives when purchasing opens a supplier PO
+    # for it, and leaves again on a delivery order.
+    from app.services.stock_sync import catalogue_from_price_request
+    skus = await catalogue_from_price_request(db, pr, user)
     await audit_record(db, actor=user, action="submit", entity="price_request",
-                       entity_id=pr.id, after={"status": pr.status})
+                       entity_id=pr.id,
+                       after={"status": pr.status, "catalogued": skus})
     await db.flush()
     return await _serialize(db, pr, Role(user.role))
 

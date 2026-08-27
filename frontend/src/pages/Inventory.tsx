@@ -24,6 +24,7 @@ interface Item {
   reorder_qty: number;
   location: string | null;
   supplier_hint: string | null;
+  link: string | null;
   is_active: boolean;
   stock_status: "ok" | "low" | "out";
 }
@@ -163,7 +164,15 @@ export default function InventoryPage() {
                   <tr key={i.id} className="tr-hover border-t border-ink-100">
                     <td className="td font-mono text-xs">{i.sku}</td>
                     <td className="td">
-                      <div className="font-medium">{i.name}</div>
+                      <div className="font-medium">
+                        {i.name}
+                        {i.link && (
+                          <a href={i.link} target="_blank" rel="noreferrer noopener"
+                            className="ml-1.5 text-brand-700 hover:underline text-xs font-normal">
+                            {T("link")}
+                          </a>
+                        )}
+                      </div>
                       {i.location && <div className="text-[11px] muted">📍 {i.location}</div>}
                     </td>
                     <td className="td muted">{i.category ?? "—"}</td>

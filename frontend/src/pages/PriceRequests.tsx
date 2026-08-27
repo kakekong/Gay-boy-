@@ -16,6 +16,16 @@ import { Modal } from "@/components/Modal";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
+// The four units goods are counted in. A dropdown rather than a text box on
+// purpose: this is the field that quietly corrupts a quantity, because 30
+// metres of cable recorded as 30 pieces looks entirely plausible. The server
+// keeps the same list and maps the older spellings ("EA", "m") onto it.
+const UNITS = ["pcs", "meter", "set", "roll"] as const;
+
+const emptyLine = () => ({
+  sku: "", description: "", category: "", qty: 1, uom: "", link: "", spec: "",
+});
+
 const STATUS_CHIP: Record<string, string> = {
   draft: "bg-ink-100 text-ink-700",
   pending_purchasing: "bg-amber-50 text-amber-700",
@@ -181,7 +191,7 @@ function CreateForm({
   const t = useT();
   const [customerId, setCustomerId] = useState(initialCustomerId);
   const [notes, setNotes] = useState("");
-  const [items, setItems] = useState<any[]>([{ description: "", qty: 1, uom: "", spec: "" }]);
+  const [items, setItems] = useState<any[]>([emptyLine()]);
   // Attach the customer's RFQ / spec sheets right at creation — they're
   // uploaded against the new PR as soon as it exists, so purchasing can
   // cost from the source documents.
@@ -256,29 +266,63 @@ function CreateForm({
       </div>
 
       <div>
-        <div className="text-[11px] uppercase muted mb-1">{t("Goods needed (no prices)", "Barang yang dibutuhkan (tanpa harga)")}</div>
-        <div className="space-y-2">
+        <div className="text-[11px] uppercase muted mb-1">
+          {t("Goods needed (no prices)", "Barang yang dibutuhkan (tanpa harga)")}
+        </div>
+        <p className="text-[11px] muted mb-2">
+          {t("Each line becomes a catalogue item when this is submitted — the product only, never the quantity. Stock arrives on a purchase order and leaves on a delivery order.",
+             "Setiap baris menjadi item inventaris saat permintaan ini dikirim — produknya saja, bukan jumlahnya. Stok masuk lewat PO pembelian dan keluar lewat surat jalan.")}
+        </p>
+        <div className="space-y-3">
           {items.map((it, i) => (
-            <div key={i} className="flex gap-2 items-center">
-              <input className="input flex-1" placeholder={t("Description", "Deskripsi")} value={it.description}
-                onChange={(e) => setItem(i, "description", e.target.value)} />
-              <input className="input w-20" type="number" placeholder={t("Qty", "Jml")} value={it.qty}
-                onChange={(e) => setItem(i, "qty", Number(e.target.value))} />
-              <input className="input w-24" placeholder={t("UoM", "Satuan")} value={it.uom}
-                onChange={(e) => setItem(i, "uom", e.target.value)} />
-              <input className="input flex-1" placeholder={t("Spec / notes", "Spesifikasi / catatan")} value={it.spec}
+            <div key={i} className="rounded-lg border border-ink-200 p-2 space-y-2">
+              <div className="flex gap-2 items-center">
+                <input className="input w-32" placeholder={t("SKU no.", "No. SKU")}
+                  aria-label={`SKU ${i + 1}`} value={it.sku}
+                  onChange={(e) => setItem(i, "sku", e.target.value)} />
+                <input className="input flex-1"
+                  placeholder={t("Product name", "Nama produk")}
+                  aria-label={`Product name ${i + 1}`} value={it.description}
+                  onChange={(e) => setItem(i, "description", e.target.value)} />
+                <button className="btn-ghost text-red-600"
+                  aria-label={`Remove line ${i + 1}`}
+                  onClick={() => setItems((arr) => arr.filter((_, idx) => idx !== i))}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <div className="flex gap-2 items-center flex-wrap">
+                <input className="input w-40" placeholder={t("Category", "Kategori")}
+                  aria-label={`Category ${i + 1}`} value={it.category}
+                  onChange={(e) => setItem(i, "category", e.target.value)} />
+                <input className="input w-20" type="number"
+                  placeholder={t("Qty", "Jml")} aria-label={`Qty ${i + 1}`}
+                  value={it.qty}
+                  onChange={(e) => setItem(i, "qty", Number(e.target.value))} />
+                <select className="input w-28" aria-label={`Unit ${i + 1}`}
+                  value={it.uom}
+                  onChange={(e) => setItem(i, "uom", e.target.value)}>
+                  <option value="">{t("Unit…", "Satuan…")}</option>
+                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <input className="input flex-1" placeholder="https://…"
+                  aria-label={`Link ${i + 1}`} value={it.link}
+                  onChange={(e) => setItem(i, "link", e.target.value)} />
+              </div>
+              <input className="input"
+                placeholder={t("Spec / notes", "Spesifikasi / catatan")}
+                aria-label={`Spec ${i + 1}`} value={it.spec}
                 onChange={(e) => setItem(i, "spec", e.target.value)} />
-              <button className="btn-ghost text-red-600"
-                onClick={() => setItems((arr) => arr.filter((_, idx) => idx !== i))}>
-                <Trash2 size={14} />
-              </button>
             </div>
           ))}
         </div>
         <button className="btn-ghost mt-2"
-          onClick={() => setItems((a) => [...a, { description: "", qty: 1, uom: "", spec: "" }])}>
+          onClick={() => setItems((a) => [...a, emptyLine()])}>
           <Plus size={14} /> {t("Add line", "Tambah baris")}
         </button>
+        <p className="text-[11px] muted mt-1">
+          {t("Leave the SKU blank and one is issued from the company's own series.",
+             "Kosongkan SKU dan nomor akan dibuat otomatis dari seri perusahaan.")}
+        </p>
       </div>
 
       <div>
@@ -381,7 +425,8 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
 
   // Line-item editing. `null` = not editing; otherwise the working copy.
   const [editItems, setEditItems] = useState<
-    { description: string; qty: number | string; uom: string; spec: string }[] | null
+    { sku: string; description: string; category: string;
+      qty: number | string; uom: string; link: string; spec: string }[] | null
   >(null);
   // "edit" writes straight to the request (draft, or the director overriding).
   // "propose" files a revision for the director to decide — the negotiation path.
@@ -399,9 +444,12 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const propose = useMutation({
     mutationFn: () => api.post(`/price-requests/${id}/revise`, {
       items: (editItems ?? []).map((row) => ({
+        sku: row.sku.trim() || null,
         description: row.description.trim(),
+        category: row.category.trim() || null,
         qty: Number(row.qty) || 0,
         uom: row.uom.trim() || null,
+        link: row.link.trim() || null,
         spec: row.spec.trim() || null,
       })),
       reason: reviseReason.trim() || null,
@@ -417,9 +465,12 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const saveItems = useMutation({
     mutationFn: () => api.patch(`/price-requests/${id}`, {
       items: (editItems ?? []).map((row) => ({
+        sku: row.sku.trim() || null,
         description: row.description.trim(),
+        category: row.category.trim() || null,
         qty: Number(row.qty) || 0,
         uom: row.uom.trim() || null,
+        link: row.link.trim() || null,
         spec: row.spec.trim() || null,
       })),
     }).then((r) => r.data),
@@ -668,9 +719,12 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             <button
               className="btn-ghost ml-auto text-xs"
               onClick={() => { setEditMode("edit"); setEditItems((pr.items ?? []).map((it: any) => ({
+                sku: it.sku ?? "",
                 description: it.description ?? "",
+                category: it.category ?? "",
                 qty: it.qty ?? 1,
                 uom: it.uom ?? "",
+                link: it.link ?? "",
                 spec: it.spec ?? "",
               }))); }}
             >
@@ -683,8 +737,10 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
               onClick={() => {
                 setEditMode("propose");
                 setEditItems((pr.items ?? []).map((it: any) => ({
-                  description: it.description ?? "", qty: it.qty ?? 1,
-                  uom: it.uom ?? "", spec: it.spec ?? "",
+                  sku: it.sku ?? "", description: it.description ?? "",
+                  category: it.category ?? "", qty: it.qty ?? 1,
+                  uom: it.uom ?? "", link: it.link ?? "",
+                  spec: it.spec ?? "",
                 })));
               }}
             >
@@ -735,35 +791,25 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
               </div>
             )}
 
-            {editItems.map((row, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2">
+            {editItems.map((row, i) => {
+              const set = (field: string, value: any) => setEditItems((rows) =>
+                rows!.map((x, j) => (j === i ? { ...x, [field]: value } : x)));
+              return (
+              <div key={i} className="grid grid-cols-12 gap-2 rounded-lg
+                                      border border-ink-200 p-2">
                 <input
-                  className="input col-span-12 sm:col-span-5"
-                  placeholder={t("Description", "Deskripsi")}
+                  className="input col-span-5 sm:col-span-3"
+                  placeholder={t("SKU no.", "No. SKU")}
+                  aria-label={`Edit SKU ${i + 1}`}
+                  value={row.sku}
+                  onChange={(e) => set("sku", e.target.value)}
+                />
+                <input
+                  className="input col-span-6 sm:col-span-8"
+                  placeholder={t("Product name", "Nama produk")}
+                  aria-label={`Edit product name ${i + 1}`}
                   value={row.description}
-                  onChange={(e) => setEditItems((rows) => rows!.map(
-                    (x, j) => (j === i ? { ...x, description: e.target.value } : x)))}
-                />
-                <input
-                  className="input col-span-4 sm:col-span-2 text-right" type="number" min="0"
-                  placeholder={t("Qty", "Jml")}
-                  value={row.qty}
-                  onChange={(e) => setEditItems((rows) => rows!.map(
-                    (x, j) => (j === i ? { ...x, qty: e.target.value } : x)))}
-                />
-                <input
-                  className="input col-span-4 sm:col-span-2"
-                  placeholder={t("UoM", "Satuan")}
-                  value={row.uom}
-                  onChange={(e) => setEditItems((rows) => rows!.map(
-                    (x, j) => (j === i ? { ...x, uom: e.target.value } : x)))}
-                />
-                <input
-                  className="input col-span-3 sm:col-span-2"
-                  placeholder={t("Spec", "Spesifikasi")}
-                  value={row.spec}
-                  onChange={(e) => setEditItems((rows) => rows!.map(
-                    (x, j) => (j === i ? { ...x, spec: e.target.value } : x)))}
+                  onChange={(e) => set("description", e.target.value)}
                 />
                 <button
                   className="col-span-1 grid place-items-center rounded-lg text-red-600
@@ -773,13 +819,50 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 >
                   <Trash2 size={14} />
                 </button>
+                <input
+                  className="input col-span-6 sm:col-span-3"
+                  placeholder={t("Category", "Kategori")}
+                  aria-label={`Edit category ${i + 1}`}
+                  value={row.category}
+                  onChange={(e) => set("category", e.target.value)}
+                />
+                <input
+                  className="input col-span-3 sm:col-span-2 text-right" type="number" min="0"
+                  placeholder={t("Qty", "Jml")}
+                  aria-label={`Edit qty ${i + 1}`}
+                  value={row.qty}
+                  onChange={(e) => set("qty", e.target.value)}
+                />
+                <select
+                  className="input col-span-3 sm:col-span-2"
+                  aria-label={`Edit unit ${i + 1}`}
+                  value={row.uom}
+                  onChange={(e) => set("uom", e.target.value)}
+                >
+                  <option value="">{t("Unit…", "Satuan…")}</option>
+                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <input
+                  className="input col-span-12 sm:col-span-5"
+                  placeholder="https://…"
+                  aria-label={`Edit link ${i + 1}`}
+                  value={row.link}
+                  onChange={(e) => set("link", e.target.value)}
+                />
+                <input
+                  className="input col-span-12"
+                  placeholder={t("Spec", "Spesifikasi")}
+                  aria-label={`Edit spec ${i + 1}`}
+                  value={row.spec}
+                  onChange={(e) => set("spec", e.target.value)}
+                />
               </div>
-            ))}
+              );
+            })}
 
             <button
               className="btn-ghost text-xs"
-              onClick={() => setEditItems((rows) => [
-                ...(rows ?? []), { description: "", qty: 1, uom: "", spec: "" }])}
+              onClick={() => setEditItems((rows) => [...(rows ?? []), emptyLine()])}
             >
               <Plus size={13} /> {t("Add line", "Tambah baris")}
             </button>
@@ -822,8 +905,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
-              <th className="th">#</th><th className="th">{t("Description", "Deskripsi")}</th>
-              <th className="th text-right">{t("Qty", "Jml")}</th><th className="th">{t("UoM", "Satuan")}</th>
+              <th className="th">#</th>
+              <th className="th">{t("SKU", "SKU")}</th>
+              <th className="th">{t("Product", "Produk")}</th>
+              <th className="th">{t("Category", "Kategori")}</th>
+              <th className="th text-right">{t("Qty", "Jml")}</th><th className="th">{t("Unit", "Satuan")}</th>
               <th className="th">{t("Spec", "Spesifikasi")}</th>
               {pr.items?.[0] && "cost_price" in pr.items[0] && <th className="th text-right">{t("Cost", "Biaya")}</th>}
               {pr.items?.[0] && "sell_price" in pr.items[0] && <th className="th text-right">{t("Sell", "Jual")}</th>}
@@ -833,7 +919,22 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             {(pr.items ?? []).map((it: any) => (
               <tr key={it.line_no} className="border-t border-ink-100">
                 <td className="td muted">{it.line_no}</td>
-                <td className="td">{it.description}</td>
+                <td className="td font-mono text-xs">
+                  {it.sku || <span className="muted">{t("on submit", "saat dikirim")}</span>}
+                </td>
+                <td className="td">
+                  {it.description}
+                  {it.link && (
+                    // rel=noreferrer: the link is typed by a person and points
+                    // off our site, so the target learns nothing about where
+                    // it was clicked from.
+                    <a href={it.link} target="_blank" rel="noreferrer noopener"
+                      className="ml-1.5 text-brand-700 hover:underline text-xs">
+                      {t("link", "tautan")}
+                    </a>
+                  )}
+                </td>
+                <td className="td muted text-xs">{it.category || "—"}</td>
                 <td className="td text-right tabular-nums">{it.qty}</td>
                 <td className="td muted">{it.uom || "—"}</td>
                 <td className="td muted text-xs">{it.spec || "—"}</td>

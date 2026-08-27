@@ -79,8 +79,11 @@ async def main():
     async def a_price_request(desc_a, desc_b):
         pr = J(await c.post("/price-requests", headers=s1, json={
             "customer_id": cust,
+            # Every line carries a unit: a price request cannot be submitted
+            # without one, because submitting is what creates the catalogue
+            # row and bakes the unit into it.
             "items": [{"description": desc_a, "qty": 40, "uom": "meter"},
-                      {"description": desc_b, "qty": 4, "uom": ""}]}))
+                      {"description": desc_b, "qty": 4, "uom": "set"}]}))
         await c.post(f"/price-requests/{pr['id']}/submit", headers=s1)
         return pr
 
@@ -121,8 +124,8 @@ async def main():
     # ══ the lines ════════════════════════════════════════════════════════════
     print("\n── the lines on a draft ──")
     before = J(await c.get(f"{BASE}/{sid}", headers=pur))["items"]
-    check("the copied line has no UOM, exactly as sales left it",
-          (before[1].get("uom") or "") == "", str(before[1].get("uom")))
+    check("the copied line carries the unit sales chose, not a guess",
+          (before[1].get("uom") or "") == "set", str(before[1].get("uom")))
     fixed = [
         {"line_no": 1, "description": f"CHAIN C-2122 DUPLEX {tag}",
          "qty": 40, "uom": "meter"},

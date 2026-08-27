@@ -554,6 +554,12 @@ async def po_prefill(
             "qty": qty,
             "uom": it.get("uom"),
             "spec": it.get("spec"),
+            # The catalogue row the price request created for this part.
+            # Carried so the goods land back on the same row rather than on
+            # whatever a name match turns up.
+            "sku": it.get("sku"),
+            "category": it.get("category"),
+            "link": it.get("link"),
             "unit_price": unit_cost,   # buying price per unit
             "amount": amount,
             "costed": bool(unit_cost),

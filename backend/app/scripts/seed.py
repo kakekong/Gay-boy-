@@ -75,6 +75,10 @@ COLUMN_MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS ix_journal_lines_account "
     "ON journal_lines (account_no, journal_id)",
 
+    # A catalogue row can carry the supplier / datasheet link sales pasted
+    # into the price request that created it.
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS link VARCHAR(1000)",
+
     # Users gained an optional per-user sidebar page override
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pages JSONB",
     # …and an employment record: the day they started, and where payroll

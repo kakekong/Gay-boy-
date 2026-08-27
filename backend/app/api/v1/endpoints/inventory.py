@@ -196,6 +196,7 @@ async def list_items(
             "reorder_point": float(r.reorder_point or 0),
             "reorder_qty": float(r.reorder_qty or 0),
             "location": r.location, "supplier_hint": r.supplier_hint,
+            "link": r.link,
             "notes": r.notes, "is_active": r.is_active,
             "stock_status": st,
         })
@@ -257,6 +258,7 @@ async def get_item(item_id: UUID,
         "reorder_point": float(r.reorder_point or 0),
         "reorder_qty": float(r.reorder_qty or 0),
         "location": r.location, "supplier_hint": r.supplier_hint,
+        "link": r.link,
         "notes": r.notes, "is_active": r.is_active,
         "stock_status": _status(r),
     }

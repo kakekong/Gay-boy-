@@ -11,13 +11,19 @@ figure nobody maintains is worse than no stock figure: people check it once,
 find it wrong, and stop checking — and the page that says "check what's in
 stock before promising delivery" is then a page that helps you promise wrong.
 
-So the two documents that move goods move the number:
+Three documents, three different jobs:
 
+* a **submitted price request** puts the *product* in the catalogue and no
+  quantity at all — a customer wanting something is not us having it;
 * an **open supplier PO** puts its lines into stock, creating the item — with
-  a generated SKU — the first time a part is ordered;
+  a generated SKU — if the price request has not already;
 * a **delivery order** takes them out again.
 
-Two decisions worth stating.
+Three decisions worth stating.
+
+**A price request introduces the part; it never moves the count.** That split
+is the point: quantity has exactly one source on the way in, the purchase
+order, so there is never a question of whether a number was counted twice.
 
 **Stock rises when the PO is open, not when it is typed.** A PO a non-director
 files sits at `pending_approval` until the director releases it, and may be
@@ -30,10 +36,13 @@ document that never happened leaves the count where it found it. That is why
 every change is written as a movement with the document's number on it, and
 never as a bare edit to the running total.
 
-Matching is by name, normalised for case and spacing, because that is what
-the two documents actually share — a PO line and an inventory item are both
-"ATTACHMENT ; CHAIN 09061 ; 152X107X57MM", typed by different people on
-different days.
+Matching is by SKU where the line carries one, and by name where it does not.
+The SKU is the exact answer — it is written onto the price request line when
+the catalogue row is created, and travels from there onto the purchase order
+and the delivery order. The name match is the fallback for everything typed
+before that chain existed, or typed by hand: a PO line and an inventory item
+are both "ATTACHMENT ; CHAIN 09061 ; 152X107X57MM", written by different
+people on different days, and normalising case and spacing is all they share.
 """
 
 from __future__ import annotations
@@ -77,32 +86,93 @@ async def _next_sku(db: AsyncSession) -> str:
 
 async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
                     unit_cost: float | None, category: str | None = None,
-                    supplier_hint: str | None = None) -> InventoryItem:
-    """The inventory item this line is about, creating it if it is new."""
-    key = _key(name)
-    for it in (await db.scalars(select(InventoryItem))).all():
-        if _key(it.name) == key:
-            # A later order at a different price is the current price. Zero
-            # means "not stated on this line", which must not wipe a price
-            # somebody already knows.
-            if unit_cost:
-                it.unit_cost = float(unit_cost)
-            if uom and not it.uom:
-                it.uom = uom
-            return it
+                    supplier_hint: str | None = None, sku: str | None = None,
+                    link: str | None = None) -> InventoryItem:
+    """The inventory item this line is about, creating it if it is new.
+
+    A stated SKU wins over the name: it is the identifier somebody chose,
+    and once a price request has put a part in the catalogue under one, that
+    is what the later documents are about. The name match stays as the
+    fallback, because a supplier PO typed by hand still only has the name.
+    """
+    wanted = (sku or "").strip()
+    items = (await db.scalars(select(InventoryItem))).all()
+    found = None
+    if wanted:
+        found = next((i for i in items if (i.sku or "").strip() == wanted), None)
+    if found is None:
+        key = _key(name)
+        found = next((i for i in items if _key(i.name) == key), None)
+    if found is not None:
+        # A later order at a different price is the current price. Zero
+        # means "not stated on this line", which must not wipe a price
+        # somebody already knows.
+        if unit_cost:
+            found.unit_cost = float(unit_cost)
+        if uom and not found.uom:
+            found.uom = uom
+        # Same for the details a price request supplies and a purchase order
+        # does not: fill a gap, never overwrite an answer.
+        if category and not found.category:
+            found.category = category[:120]
+        if link and not found.link:
+            found.link = link[:1000]
+        return found
     item = InventoryItem(
-        sku=await _next_sku(db),
+        sku=wanted[:40] or await _next_sku(db),
         name=(name or "").strip()[:255],
-        category=category,
+        category=(category or None) and category[:120],
         uom=(uom or "pcs")[:20],
         unit_cost=float(unit_cost or 0),
         current_stock=0,
         supplier_hint=supplier_hint,
+        link=(link or None) and link[:1000],
         is_active=True,
     )
     db.add(item)
     await db.flush()
     return item
+
+
+async def catalogue_from_price_request(db: AsyncSession, pr,
+                                       user: User | None = None) -> list[str]:
+    """Put a submitted price request's products into the catalogue — no stock.
+
+    Asked for: *"when a price request is submitted put the product in the
+    price request into the inventory and not the quantity. For quantity it
+    comes from the purchasing PR."*
+
+    That split is the whole design. A price request says a customer wants
+    something; it does not say we have any. So this creates the item and
+    writes **no movement at all** — the count stays where it was, which for
+    a new part is zero. Stock arrives later, when purchasing opens a supplier
+    PO for it, and leaves again on a delivery order. A price request that
+    added quantity would put goods on the shelf that nobody has bought.
+
+    The SKU is written back onto the request's own line, so from here on the
+    request, the purchase order and the delivery order are all talking about
+    the same catalogue row by identifier rather than by matching strings.
+    """
+    touched: list[str] = []
+    lines = [dict(i) for i in (pr.items or [])]
+    changed = False
+    for line in lines:
+        name = (line.get("description") or "").strip()
+        if not name:
+            continue
+        item = await _item_for(
+            db, name=name, uom=line.get("uom"), unit_cost=None,
+            category=line.get("category"), sku=line.get("sku"),
+            link=line.get("link"),
+        )
+        if line.get("sku") != item.sku:
+            line["sku"] = item.sku
+            changed = True
+        touched.append(item.sku)
+    if changed:
+        pr.items = lines
+    await db.flush()
+    return touched
 
 
 async def _move(db: AsyncSession, item: InventoryItem, *, delta: float,
@@ -154,6 +224,8 @@ async def receive_purchase_order(db: AsyncSession, po, user: User | None = None)
         item = await _item_for(
             db, name=name, uom=line.get("uom"),
             unit_cost=line.get("unit_price") or line.get("unit_cost"),
+            category=line.get("category"), sku=line.get("sku"),
+            link=line.get("link"),
         )
         await _move(db, item, delta=qty, reason="po_in", reference=ref,
                     user=user, notes=f"Ordered on {ref}")
@@ -182,9 +254,14 @@ async def issue_delivery_order(db: AsyncSession, do, user: User | None = None) -
     touched: list[str] = []
     items = (await db.scalars(select(InventoryItem))).all()
     by_key = {_key(i.name): i for i in items}
+    by_sku = {(i.sku or "").strip(): i for i in items if (i.sku or "").strip()}
     for line in (do.items or []):
         qty = float(line.get("qty") or 0)
-        item = by_key.get(_key(line.get("description")))
+        # By SKU where the line carries one — it came from the price request
+        # that created the catalogue row, so it is the exact answer. The name
+        # match stays for lines that predate a SKU or were typed by hand.
+        item = by_sku.get((line.get("sku") or "").strip()) \
+            or by_key.get(_key(line.get("description")))
         if qty <= 0 or item is None:
             continue
         await _move(db, item, delta=-qty, reason="do_out", reference=ref,

@@ -181,7 +181,7 @@ async def main():
     a = await price_request("Semen", [(f"BOLT M12 {tag}", 100, "pcs")])
     b = await price_request("Kertas", [(f"NUT M12 {tag}", 100, "pcs"),
                                        (f"WASHER M12 {tag}", 200, "pcs")])
-    e = await price_request("Kaca", [(f"PLATE 10MM {tag}", 5, "sheet")])
+    e = await price_request("Kaca", [(f"PLATE 10MM {tag}", 5, "set")])
 
     r = await c.post(BASE, headers=pur, json={
         "supplier_ids": [chain_sup],

@@ -1477,7 +1477,7 @@ async def _billing_lines(db: AsyncSession, p: Project) -> list[dict]:
         pr = await db.get(PriceRequest, p.price_request_id)
         if pr and (pr.items or []):
             return [{"description": i.get("description"), "qty": i.get("qty"),
-                     "uom": i.get("uom"),
+                     "uom": i.get("uom"), "sku": i.get("sku"),
                      "unit_price": i.get("sell_price")} for i in (pr.items or [])]
     return []
 
@@ -1489,8 +1489,11 @@ async def _do_lines(db: AsyncSession, p: Project) -> list[dict]:
     signed by whoever is on the gate at the site — it says what arrived, and
     it is not the place to publish what the customer is paying for it.
     """
+    # The SKU travels with the line where the upstream document has one, so
+    # the shelf is found by identifier rather than by matching the same
+    # string a fourth time. Never printed — it is for the stock ledger.
     return [{"description": i.get("description"), "qty": float(i.get("qty") or 0),
-             "uom": i.get("uom") or "EA"}
+             "uom": i.get("uom") or "EA", "sku": i.get("sku")}
             for i in await _billing_lines(db, p)]
 
 
@@ -1509,6 +1512,9 @@ class DeliveryLineIn(BaseModel):
     description: str
     qty: float = 0
     uom: str | None = None
+    # Carried so a shipment assembled by hand still deducts the right
+    # catalogue row rather than falling back to a name match.
+    sku: str | None = None
 
 
 async def _file_do_approval(db: AsyncSession, do: DeliveryOrder, *,

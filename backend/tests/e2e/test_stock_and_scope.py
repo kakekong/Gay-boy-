@@ -111,8 +111,13 @@ async def main():
 
     # ══ a purchase order puts goods on the shelf ═════════════════════════════
     print("\n── ordering ──")
-    have, _ = await stock_of(part)
-    check("the part is not in the catalogue yet", have is None, str(have))
+    # The price request already introduced the part when it was submitted —
+    # the product, and only the product. Nothing has been bought, so the
+    # count is zero rather than absent, which is a stronger statement: the
+    # catalogue knows about it and says we have none.
+    have, sku_before = await stock_of(part)
+    check("the part is in the catalogue, at nothing", have == 0.0, str(have))
+    check("...already carrying a SKU", bool(sku_before), str(sku_before))
     sup = J(await c.post("/purchasing/suppliers", headers=pur,
                          json={"name": f"PT Pemasok {tag}"}))["id"]
     r = await c.post("/purchasing/po", headers=pur, json={
@@ -125,7 +130,7 @@ async def main():
     check("...which waits for the director", po["status"] == "pending_approval",
           po["status"])
     have, _ = await stock_of(part)
-    check("...and moves no stock while it waits", have is None, str(have))
+    check("...and moves no stock while it waits", have == 0.0, str(have))
 
     appr = [a for a in J(await c.get("/approvals", headers=d))
             if a.get("target_id") == po["id"]]
@@ -134,7 +139,8 @@ async def main():
     check("...and approves it", r.status_code == 200, f"{r.status_code} {J(r)}"[:150])
 
     have, sku = await stock_of(part)
-    check("the part is now in the catalogue", have is not None, "not created")
+    check("the part is still the one row the price request created",
+          sku == sku_before, f"{sku} vs {sku_before}")
     check("...with a generated SKU in the company's own series",
           bool(sku) and sku.isdigit() and int(sku) > 100_000, str(sku))
     check("...and the ordered quantity on the shelf", have == 10.0, str(have))
