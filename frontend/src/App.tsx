@@ -24,6 +24,7 @@ const CashBankPage         = lazy(() => import("@/pages/CashBank"));
 const MasterDataPage       = lazy(() => import("@/pages/MasterData"));
 const FixedAssetsPage      = lazy(() => import("@/pages/FixedAssets"));
 const AssetDetailPage      = lazy(() => import("@/pages/AssetDetail"));
+const BudgetsPage          = lazy(() => import("@/pages/Budgets"));
 const RecentLedgersPage    = lazy(() => import("@/pages/RecentLedgers"));
 const EmployeesPage        = lazy(() => import("@/pages/Employees"));
 const EmployeeDetailPage   = lazy(() => import("@/pages/EmployeeDetail"));
@@ -218,6 +219,9 @@ function MainApp() {
           <Route path="/assets/:assetId" element={
             <RequireRole roles={["finance", "director", "manager"]}>
               <AssetDetailPage /></RequireRole>} />
+          <Route path="/budgets" element={
+            <RequireRole roles={["finance", "director", "manager"]}>
+              <BudgetsPage /></RequireRole>} />
           <Route path="/recent-ledgers" element={<RequireRole roles={["finance", "director"]}><RecentLedgersPage /></RequireRole>} />
           <Route path="/employees" element={<EmployeesPage />} />
           <Route path="/employees/:id" element={<EmployeeDetailPage />} />
