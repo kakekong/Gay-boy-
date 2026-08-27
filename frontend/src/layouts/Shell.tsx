@@ -9,7 +9,7 @@ import {
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
   Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, CheckCheck,
-  Upload, Landmark,
+  Upload, Landmark, Building2,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -87,6 +87,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/journals", label: "General journal", label_id: "Jurnal umum", icon: BookOpen,
         roles: ["finance", "director", "manager"] },
       { to: "/master-data", label: "Master data", label_id: "Data induk", icon: Receipt,
+        roles: ["finance", "director", "manager"] },
+      { to: "/assets", label: "Fixed assets", label_id: "Aset tetap", icon: Building2,
         roles: ["finance", "director", "manager"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
         roles: ["finance", "director"] },
@@ -266,6 +268,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/journals",       // Jurnal Umum — finance keeps the books
     "/cash-bank",      // Kas & Bank — the money desk itself
     "/master-data",    // Pajak + Gaji/Tunjangan — finance's own two lists
+    "/assets",         // Aset Tetap — the register and its monthly run
     "/finance/payment-verification",
     "/finance/estimated",
     "/finance/reports",

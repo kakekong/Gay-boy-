@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     accounts,
     ai,
+    assets,
     approvals,
     attachments,
     attendance,
@@ -70,6 +71,7 @@ api_router.include_router(ledger.router, prefix="/ledger", tags=["ledger"])
 api_router.include_router(journals.router, prefix="/journals", tags=["journals"])
 api_router.include_router(cash.router, prefix="/cash", tags=["cash-bank"])
 api_router.include_router(master.router, prefix="/master", tags=["master-data"])
+api_router.include_router(assets.router, prefix="/assets", tags=["fixed-assets"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(salaries.router, prefix="/salaries", tags=["salaries"])
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"])

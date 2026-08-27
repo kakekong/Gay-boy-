@@ -74,7 +74,7 @@ done
 echo
 echo "=== pytest unit suites ==="
 PYTHONPATH=. python -m pytest tests/test_permissions.py tests/test_discount_rules.py \
-  tests/test_financials.py -q 2>&1 | tail -2
+  tests/test_financials.py tests/test_depreciation.py -q 2>&1 | tail -2
 echo "=== DP flow ==="
 dp=$(python tests/e2e_dp_flow.py 2>&1)
 echo "$dp" | grep RESULT || echo "DP flow: NO RESULT"

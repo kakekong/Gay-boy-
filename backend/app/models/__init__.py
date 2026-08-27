@@ -4,6 +4,13 @@ from app.models.account import Account  # noqa: F401
 from app.models.cash import CashLine, CashTransaction  # noqa: F401
 from app.models.journal import JournalEntry, JournalLine  # noqa: F401
 from app.models.approval import ApprovalRequest  # noqa: F401
+from app.models.asset import (  # noqa: F401
+    AssetCategory,
+    AssetChange,
+    AssetDepreciation,
+    DepreciationRun,
+    FixedAsset,
+)
 from app.models.attachment import Attachment  # noqa: F401
 from app.models.attendance import Attendance  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401

@@ -22,6 +22,8 @@ const AccountLedgerPage    = lazy(() => import("@/pages/AccountLedger"));
 const InvoiceDetailPage    = lazy(() => import("@/pages/InvoiceDetail"));
 const CashBankPage         = lazy(() => import("@/pages/CashBank"));
 const MasterDataPage       = lazy(() => import("@/pages/MasterData"));
+const FixedAssetsPage      = lazy(() => import("@/pages/FixedAssets"));
+const AssetDetailPage      = lazy(() => import("@/pages/AssetDetail"));
 const RecentLedgersPage    = lazy(() => import("@/pages/RecentLedgers"));
 const EmployeesPage        = lazy(() => import("@/pages/Employees"));
 const EmployeeDetailPage   = lazy(() => import("@/pages/EmployeeDetail"));
@@ -210,6 +212,12 @@ function MainApp() {
           <Route path="/master-data" element={
             <RequireRole roles={["finance", "director", "manager"]}>
               <MasterDataPage /></RequireRole>} />
+          <Route path="/assets" element={
+            <RequireRole roles={["finance", "director", "manager"]}>
+              <FixedAssetsPage /></RequireRole>} />
+          <Route path="/assets/:assetId" element={
+            <RequireRole roles={["finance", "director", "manager"]}>
+              <AssetDetailPage /></RequireRole>} />
           <Route path="/recent-ledgers" element={<RequireRole roles={["finance", "director"]}><RecentLedgersPage /></RequireRole>} />
           <Route path="/employees" element={<EmployeesPage />} />
           <Route path="/employees/:id" element={<EmployeeDetailPage />} />
