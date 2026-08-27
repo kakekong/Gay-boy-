@@ -86,6 +86,8 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         roles: ["finance", "director", "manager"] },
       { to: "/journals", label: "General journal", label_id: "Jurnal umum", icon: BookOpen,
         roles: ["finance", "director", "manager"] },
+      { to: "/master-data", label: "Master data", label_id: "Data induk", icon: Receipt,
+        roles: ["finance", "director", "manager"] },
       { to: "/recent-ledgers", label: "Recent ledgers", label_id: "Ledger terbaru", icon: BookOpen,
         roles: ["finance", "director"] },
     ],
@@ -263,6 +265,7 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/accounts",
     "/journals",       // Jurnal Umum — finance keeps the books
     "/cash-bank",      // Kas & Bank — the money desk itself
+    "/master-data",    // Pajak + Gaji/Tunjangan — finance's own two lists
     "/finance/payment-verification",
     "/finance/estimated",
     "/finance/reports",
