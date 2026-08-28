@@ -152,29 +152,28 @@ async def list_notifications(
                 "link": f"/customer-pos/{po.id}",
                 "at": po.created_at,
             })
-    if role in (Role.SALES, Role.MANAGER):
-        dp_wait_sales_stmt = (
+    # Whether the deposit arrived is a fact about the bank account, so this
+    # sits with finance rather than with the rep whose job it starts.
+    if role in (Role.FINANCE, Role.DIRECTOR):
+        dp_wait_pay_stmt = (
             select(CustomerPO, Customer)
             .join(Customer, CustomerPO.customer_id == Customer.id)
             .where(
                 CustomerPO.is_downpayment.is_(True),
-                CustomerPO.status == "pending_sales_confirm",
+                CustomerPO.status == "pending_payment_confirm",
             )
             .order_by(CustomerPO.dp_finance_approved_at.asc().nullslast())
             .limit(20)
         )
-        if role == Role.SALES:
-            dp_wait_sales_stmt = dp_wait_sales_stmt.where(
-                Customer.sales_pic_id == me.id
-            )
-        for po, c in (await db.execute(dp_wait_sales_stmt)).all():
+        for po, c in (await db.execute(dp_wait_pay_stmt)).all():
             items.append({
-                "id": f"dp-sales:{po.id}",
+                "id": f"dp-payment:{po.id}",
                 "kind": "approval",
                 "severity": "high",
-                "title": f"Confirm DP received: {po.number}",
-                "body": f"{c.company_name} · finance approved — confirm the "
-                        "deposit landed to start the project",
+                "title": f"Deposit received? {po.number}",
+                "body": f"{c.company_name} · DP invoiced — confirm the money "
+                        "landed to start the project, or reject if it never "
+                        "came",
                 "link": f"/customer-pos/{po.id}",
                 "at": po.dp_finance_approved_at or po.created_at,
             })

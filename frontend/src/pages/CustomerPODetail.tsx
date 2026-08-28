@@ -22,7 +22,7 @@ interface CustomerPO {
   status: string;
   is_downpayment: boolean;
   dp_finance_approved_at: string | null;
-  dp_sales_confirmed_at: string | null;
+  dp_payment_confirmed_at: string | null;
   customer_id: string;
   customer_name: string | null;
   quotation_id: string | null;
@@ -53,7 +53,7 @@ interface CustomerPO {
 const STATUS_CHIP: Record<string, string> = {
   pending_approval:      "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
   pending_finance:       "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
-  pending_sales_confirm: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
+  pending_payment_confirm: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
   approved:              "bg-emerald-50 text-emerald-700",
   rejected:              "bg-red-50 text-red-700",
   cancelled:             "bg-ink-100 text-ink-600",
@@ -64,7 +64,7 @@ const STATUS_CHIP: Record<string, string> = {
 const STATUS_LABEL_ID: Record<string, string> = {
   pending_approval: "menunggu persetujuan",
   pending_finance: "menunggu keuangan",
-  pending_sales_confirm: "menunggu konfirmasi sales",
+  pending_payment_confirm: "menunggu konfirmasi pembayaran",
   approved: "disetujui",
   rejected: "ditolak",
   cancelled: "dibatalkan",
@@ -107,9 +107,10 @@ export default function CustomerPODetailPage() {
   const t = useT();
   const me = useAuthStore((s) => s.user);
   const canDecide = me?.role === "manager" || me?.role === "director";
+  // Both DP steps are finance's. Whether a deposit arrived is a fact about
+  // the bank account, and finance is who can see it — so the same desk that
+  // approved the PO and issued the invoice answers "did the money land".
   const canFinanceApproveDp = me?.role === "finance" || me?.role === "director";
-  const canSalesConfirmDp =
-    me?.role === "sales" || me?.role === "manager" || me?.role === "director";
   const [reason, setReason] = useState("");
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -200,8 +201,8 @@ export default function CustomerPODetailPage() {
     }),
   });
 
-  const dpSalesConfirm = useMutation({
-    mutationFn: () => api.post(`/customer-pos/${id}/dp/sales-confirm`,
+  const dpPaymentConfirm = useMutation({
+    mutationFn: () => api.post(`/customer-pos/${id}/dp/payment-confirm`,
       { notes: reason.trim() || null }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customer-po", id] });
@@ -220,8 +221,9 @@ export default function CustomerPODetailPage() {
   });
 
   // DP rejection has its own endpoint — the standard /reject 403s finance
-  // and 409s on DP statuses. Works at pending_finance AND
-  // pending_sales_confirm (deposit never arrived).
+  // and 409s on DP statuses. Works at pending_finance (the PO is wrong) and
+  // at pending_payment_confirm, where it is the "no" half of the question
+  // finance is being asked: the deposit never arrived.
   const dpReject = useMutation({
     mutationFn: () => api.post(`/customer-pos/${id}/dp/finance-reject`,
       { notes: reason.trim() || null }),
@@ -245,7 +247,8 @@ export default function CustomerPODetailPage() {
   });
 
   // Finance issues the DP invoice against the PO itself — the project
-  // doesn't exist yet at this stage (it spawns at sales-confirm).
+  // doesn't exist yet at this stage (it spawns when finance confirms the
+  // money landed).
   const [dpInvAmount, setDpInvAmount] = useState("");
   const [dpInvFile, setDpInvFile] = useState<File | null>(null);
   const issueDpInvoice = useMutation({
@@ -483,9 +486,10 @@ export default function CustomerPODetailPage() {
         )}
 
         {/* DP PO leg 2: finance issues the DP invoice (against the PO —
-            no project exists yet), then sales confirms the deposit landed
-            → project spawns and the invoice is re-linked to it. */}
-        {p.is_downpayment && p.status === "pending_sales_confirm" && (
+            no project exists yet), then answers whether the money landed.
+            Yes spawns the project and re-links the invoice to it; no ends
+            the order with a reason sales can read. */}
+        {p.is_downpayment && p.status === "pending_payment_confirm" && (
           <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 space-y-3">
             <div className="text-xs font-semibold text-blue-900">
               {t("Finance approved the DP", "Keuangan menyetujui DP")}{p.dp_finance_approved_at && (
@@ -496,8 +500,8 @@ export default function CustomerPODetailPage() {
                     "Keuangan — terbitkan faktur DP di bawah agar pelanggan bisa membayar.",
                   )
                 : t(
-                    "Sales — confirm the deposit has cleared to start the project.",
-                    "Sales — konfirmasi DP sudah masuk untuk memulai proyek.",
+                    "Has the deposit cleared? Confirming it starts the project.",
+                    "Apakah DP sudah masuk? Konfirmasi akan memulai proyek.",
                   )}
             </div>
 
@@ -538,15 +542,17 @@ export default function CustomerPODetailPage() {
                 </button>
                 <div className="text-[11px] muted">
                   {t(
-                    "Parks at pending-finance like every invoice — enter the faktur pajak in Finance → Pending invoice approvals. It re-links to the project automatically once sales confirms the deposit.",
-                    "Berstatus menunggu keuangan seperti faktur lainnya — masukkan faktur pajak di Keuangan → Persetujuan faktur menunggu. Faktur otomatis tertaut ulang ke proyek begitu sales mengonfirmasi DP.",
+                    "Parks at pending-finance like every invoice — enter the faktur pajak in Finance → Pending invoice approvals. It re-links to the project automatically once the deposit is confirmed received.",
+                    "Berstatus menunggu keuangan seperti faktur lainnya — masukkan faktur pajak di Keuangan → Persetujuan faktur menunggu. Faktur otomatis tertaut ulang ke proyek begitu DP dikonfirmasi diterima.",
                   )}
                 </div>
               </div>
             )}
 
-            {/* Sales: confirm the deposit landed. */}
-            {canSalesConfirmDp ? (
+            {/* Finance: did the money arrive? Yes starts the job; no ends
+                the order. Both answers live here so the question is asked
+                once, of the one desk that can see the bank. */}
+            {canFinanceApproveDp ? (
               <>
                 <textarea
                   className="input text-sm"
@@ -554,41 +560,39 @@ export default function CustomerPODetailPage() {
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder={t(
-                    "Reference / bank confirmation (optional)…",
-                    "Referensi / konfirmasi bank (opsional)…",
+                    "Bank reference / transfer detail (optional)…",
+                    "Referensi bank / detail transfer (opsional)…",
                   )}
                 />
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { setFlash(null); dpSalesConfirm.mutate(); }}
+                    onClick={() => { setFlash(null); dpPaymentConfirm.mutate(); }}
                     className="btn-success"
-                    disabled={dpSalesConfirm.isPending}
+                    disabled={dpPaymentConfirm.isPending || dpReject.isPending}
                   >
-                    {dpSalesConfirm.isPending
+                    {dpPaymentConfirm.isPending
                       ? <Loader2 size={14} className="animate-spin" />
                       : <Check size={14} />}
-                    {t("Confirm deposit received", "Konfirmasi DP diterima")}
+                    {t("Yes — deposit received", "Ya — DP sudah diterima")}
                   </button>
-                  {canFinanceApproveDp && (
-                    <button
-                      onClick={onDpReject}
-                      className="btn-ghost text-red-600"
-                      disabled={dpReject.isPending}
-                      title={t(
-                        "Deposit never arrived / deal fell through — requires a reason above",
-                        "DP tidak pernah masuk / transaksi batal — perlu alasan di atas",
-                      )}
-                    >
-                      <X size={14} /> {t("Cancel DP (deposit not received)", "Batalkan DP (DP tidak diterima)")}
-                    </button>
-                  )}
+                  <button
+                    onClick={onDpReject}
+                    className="btn-ghost text-red-600"
+                    disabled={dpReject.isPending || dpPaymentConfirm.isPending}
+                    title={t(
+                      "Deposit never arrived / deal fell through — requires a reason above",
+                      "DP tidak pernah masuk / transaksi batal — perlu alasan di atas",
+                    )}
+                  >
+                    <X size={14} /> {t("No — never arrived", "Tidak — DP tidak masuk")}
+                  </button>
                 </div>
               </>
             ) : (
               <div className="text-xs muted">
                 {t(
-                  "Waiting on sales to confirm the deposit landed.",
-                  "Menunggu sales mengonfirmasi DP sudah masuk.",
+                  "Waiting on finance to confirm the deposit landed.",
+                  "Menunggu keuangan mengonfirmasi DP sudah masuk.",
                 )}
               </div>
             )}
@@ -694,7 +698,13 @@ export default function CustomerPODetailPage() {
                 : p.status === "pending_approval"
                   ? t("What was asked for last time it was sent back",
                       "Yang diminta saat terakhir dikembalikan")
-                  : t("Director decision", "Keputusan direktur")}
+                  // On a DP PO this note is finance's bank reference, not a
+                  // director's ruling — labelling it "Director decision"
+                  // attributed a payment confirmation to the wrong desk.
+                  : p.is_downpayment && p.dp_payment_confirmed_at
+                    ? t("Deposit confirmed by finance",
+                        "DP dikonfirmasi keuangan")
+                    : t("Director decision", "Keputusan direktur")}
             </div>
             <div className="text-ink-700">{p.decision_notes}</div>
             {p.decided_at && (

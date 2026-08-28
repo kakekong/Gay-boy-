@@ -263,7 +263,7 @@ async def apply_to_target(
             # on it directly), do NOT re-apply — re-approving used to
             # spawn a duplicate project.
             pending_states = (
-                ("pending_finance", "pending_sales_confirm")
+                ("pending_finance", "pending_payment_confirm")
                 if is_dp_request else ("pending_approval",)
             )
             if po.status not in pending_states:
@@ -283,7 +283,7 @@ async def apply_to_target(
                     # Never spawn the project — that stays gated behind
                     # sales confirming the deposit landed.
                     if po.status == "pending_finance":
-                        po.status = "pending_sales_confirm"
+                        po.status = "pending_payment_confirm"
                         po.dp_finance_approved_by = req.decided_by
                         po.dp_finance_approved_at = req.decided_at or datetime.now(UTC)
                     applied["dp"] = "finance approval applied; awaiting sales deposit confirmation"

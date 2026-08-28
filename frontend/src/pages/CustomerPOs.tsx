@@ -38,7 +38,7 @@ const STATUS_CHIP: Record<string, string> = {
 const STATUS_LABEL_ID: Record<string, string> = {
   pending_approval: "menunggu persetujuan",
   pending_finance: "menunggu keuangan",
-  pending_sales_confirm: "menunggu konfirmasi sales",
+  pending_payment_confirm: "menunggu konfirmasi pembayaran",
   approved: "disetujui",
   rejected: "ditolak",
   cancelled: "dibatalkan",

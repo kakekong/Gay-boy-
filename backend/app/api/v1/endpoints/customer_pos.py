@@ -88,7 +88,7 @@ async def _enrich(db: AsyncSession, po: CustomerPO) -> dict:
         "status": po.status,
         "is_downpayment": bool(po.is_downpayment),
         "dp_finance_approved_at": po.dp_finance_approved_at,
-        "dp_sales_confirmed_at": po.dp_sales_confirmed_at,
+        "dp_payment_confirmed_at": po.dp_payment_confirmed_at,
         "project_id": po.project_id,
         "project_code": project.code if project else None,
         "decided_by": po.decided_by,
@@ -288,7 +288,8 @@ async def create_customer_po(
     is_director = Role(user.role) == Role.DIRECTOR
     is_dp = bool(payload.is_downpayment)
 
-    # DP POs route through finance → sales-confirm → project. Non-DP POs
+    # DP POs route through finance approve → payment confirm → project.
+    # Non-DP POs
     # keep the historical director-approves-then-project path.
     if is_dp:
         initial_status = "pending_finance"
@@ -540,9 +541,10 @@ async def dp_finance_approve(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Finance approves a DP PO. Moves it to `pending_sales_confirm`, at
-    which point finance issues the DP invoice and sales confirms the
-    deposit has actually been received before the project spawns."""
+    """Finance approves a DP PO. Moves it to `pending_payment_confirm`,
+    at which point finance issues the DP invoice and — once the money
+    is actually in the bank — confirms receipt, which is what spawns
+    the project."""
     from datetime import UTC
     from datetime import datetime as _dt
 
@@ -568,7 +570,7 @@ async def dp_finance_approve(
     po.dp_finance_approved_at = _dt.now(UTC)
     if payload.notes:
         po.decision_notes = payload.notes
-    po.status = "pending_sales_confirm"
+    po.status = "pending_payment_confirm"
     await _close_dp_approval_request(
         db, po_id, approve=True, decider_id=user.id, notes=payload.notes,
     )
@@ -586,7 +588,7 @@ async def dp_finance_reject(
     """Finance (or director) rejects a DP PO — at either DP stage.
 
     pending_finance: the PO itself is wrong (bad number, wrong items).
-    pending_sales_confirm: the deposit never arrived, deal fell through.
+    pending_payment_confirm: the deposit never arrived, deal fell through.
     A reason is required; it lands in decision_notes so sales sees why.
     """
     from datetime import UTC
@@ -610,7 +612,7 @@ async def dp_finance_reject(
             status.HTTP_409_CONFLICT,
             "This isn't a down-payment PO — use the standard reject flow.",
         )
-    if po.status not in ("pending_finance", "pending_sales_confirm"):
+    if po.status not in ("pending_finance", "pending_payment_confirm"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"DP PO is already '{po.status}' — nothing to reject.",
@@ -730,7 +732,7 @@ async def issue_dp_invoice(
             status.HTTP_409_CONFLICT,
             "This PO isn't a down payment — issue the invoice from the project page.",
         )
-    if po.status not in ("pending_finance", "pending_sales_confirm"):
+    if po.status not in ("pending_finance", "pending_payment_confirm"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"DP PO is at status '{po.status}' — the DP invoice is issued "
@@ -781,23 +783,39 @@ async def issue_dp_invoice(
     }
 
 
-@router.post("/{po_id}/dp/sales-confirm", response_model=CustomerPOOut)
-async def dp_sales_confirm(
+@router.post("/{po_id}/dp/payment-confirm", response_model=CustomerPOOut)
+# The name this step had when sales owned it. Kept so a browser tab left
+# open on the old page finishes its job instead of 404-ing halfway through
+# a deposit — it runs the same handler, under the same finance-only gate.
+@router.post("/{po_id}/dp/sales-confirm", response_model=CustomerPOOut,
+             include_in_schema=False)
+async def dp_payment_confirm(
     po_id: UUID,
     payload: _DecisionIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Sales confirms the deposit has landed. This is the trigger that
+    """Finance confirms the deposit has landed. This is the trigger that
     spawns the project on a DP PO. Any DP invoices issued against the PO
-    are re-linked to the new project."""
+    are re-linked to the new project.
+
+    Finance's, not sales'. Whether money arrived is a fact about the bank
+    account, and finance is who can see it — whereas sales is the person
+    with the most reason to want the job started. Both DP steps therefore
+    sit with the same desk that approved the PO and issued the invoice, and
+    the answer to "did it arrive" has one owner rather than two.
+
+    The *no* is the sibling of this endpoint, not a missing feature:
+    /dp/finance-reject at this status records that the deposit never came.
+    """
     from datetime import UTC
     from datetime import datetime as _dt
 
-    if Role(user.role) not in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only sales (or manager/director) can confirm a DP PO.",
+            "Only finance (or director) can confirm a deposit has been "
+            "received.",
         )
     po = await db.get(CustomerPO, po_id)
     if not po:
@@ -805,22 +823,16 @@ async def dp_sales_confirm(
     if not po.is_downpayment:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "This isn't a down-payment PO — nothing for sales to confirm here.",
+            "This isn't a down-payment PO — there is no deposit to confirm.",
         )
-    if po.status != "pending_sales_confirm":
+    if po.status != "pending_payment_confirm":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"DP PO is at status '{po.status}', not awaiting sales confirmation.",
+            f"DP PO is at status '{po.status}', not awaiting payment "
+            "confirmation.",
         )
-    if Role(user.role) == Role.SALES:
-        cust = await db.get(Customer, po.customer_id)
-        if not cust or cust.sales_pic_id != user.id:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "You can only confirm DP for your own customers.",
-            )
-    po.dp_sales_confirmed_by = user.id
-    po.dp_sales_confirmed_at = _dt.now(UTC)
+    po.dp_payment_confirmed_by = user.id
+    po.dp_payment_confirmed_at = _dt.now(UTC)
     po.status = "approved"
     po.decided_by = user.id
     po.decided_at = _dt.now(UTC)

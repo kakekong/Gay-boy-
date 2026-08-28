@@ -34,8 +34,14 @@ class CustomerPO(Base, UUIDPK, TimestampMixin, AuthorshipMixin):
 
     Down-payment PO (`is_downpayment=True`):
       pending_finance → (finance approves + issues DP invoice)
-        → pending_sales_confirm → (sales confirms after DP received)
+        → pending_payment_confirm → (finance confirms the money landed)
         → approved → (project spawns) → project_id set
+
+    Both DP steps are finance's, and deliberately so: whether a deposit
+    arrived is a fact about the bank account, and finance is who can see
+    it. Sales used to confirm receipt, which meant the person with the
+    most reason to want the job started was the one attesting the money
+    was in.
 
       Any step can also land at rejected / cancelled.
     """
@@ -88,9 +94,11 @@ class CustomerPO(Base, UUIDPK, TimestampMixin, AuthorshipMixin):
     dp_finance_approved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
-    dp_sales_confirmed_by: Mapped[UUID | None] = mapped_column(
+    # Who confirmed the deposit actually landed, and when. Finance's,
+    # since it is a statement about the bank rather than about the deal.
+    dp_payment_confirmed_by: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
-    dp_sales_confirmed_at: Mapped[datetime | None] = mapped_column(
+    dp_payment_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )

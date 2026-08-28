@@ -53,7 +53,7 @@ class CustomerPOOut(BaseModel):
     status: str
     is_downpayment: bool = False
     dp_finance_approved_at: datetime | None = None
-    dp_sales_confirmed_at: datetime | None = None
+    dp_payment_confirmed_at: datetime | None = None
     # DP invoices issued against this PO (before the project exists).
     # Populated on the detail endpoint only — lists skip it to stay cheap.
     dp_invoices: list[dict] = []

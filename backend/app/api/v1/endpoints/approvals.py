@@ -276,7 +276,7 @@ async def inbox(
             select(CustomerPO).where(CustomerPO.id.in_(cpo_ids)))).all()}
 
     _QUOTE_CLOSED = ("won", "lost", "cancelled", "superseded")
-    _CPO_OPEN = ("pending_approval", "pending_finance", "pending_sales_confirm")
+    _CPO_OPEN = ("pending_approval", "pending_finance", "pending_payment_confirm")
 
     def _stale(r) -> bool:
         t = r.target_type

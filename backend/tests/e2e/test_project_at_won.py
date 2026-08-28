@@ -243,9 +243,11 @@ async def main():
           f"{r.status_code} {J(r)}"[:140])
     check("...still no job", not await projects_for(quote3))
 
-    r = await c.post(f"/customer-pos/{dp['id']}/dp/sales-confirm", headers=s1,
+    # Finance's call, not sales': whether the money arrived is a fact about
+    # the bank account.
+    r = await c.post(f"/customer-pos/{dp['id']}/dp/payment-confirm", headers=fin,
                      json={"notes": "landed"})
-    check("sales confirm the deposit landed", r.status_code == 200,
+    check("finance confirm the deposit landed", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:140])
     check("...and that is when the job starts",
           len(await projects_for(quote3)) == 1,

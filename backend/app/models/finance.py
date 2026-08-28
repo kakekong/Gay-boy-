@@ -30,7 +30,7 @@ class Invoice(Base, UUIDPK, TimestampMixin):
     )
     # DP invoices are issued against the customer PO BEFORE the project
     # exists (the deposit is what triggers project creation). This link is
-    # how the invoice finds its project later: dp_sales_confirm backfills
+    # how the invoice finds its project later: dp_payment_confirm backfills
     # project_id on every invoice carrying this PO id.
     customer_po_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

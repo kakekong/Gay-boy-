@@ -702,8 +702,8 @@ const TROUBLES: { problem: string; problem_id: string; answer: string; answer_id
   {
     problem: "DP PO stuck on 'pending finance' or 'pending sales confirm'",
     problem_id: "PO DP macet di 'menunggu keuangan' atau 'menunggu sales konfirmasi'",
-    answer: "'pending_finance' → ping Finance to open Approvals and click 'Finance approve DP'. 'pending_sales_confirm' → ping Sales; they click 'Confirm deposit received' on the customer PO once the money's in the bank, and the project spawns.",
-    answer_id: "'pending_finance' → hubungi Keuangan untuk membuka Persetujuan dan klik 'Setujui DP'. 'pending_sales_confirm' → hubungi Sales; mereka klik 'Konfirmasi DP diterima' di PO pelanggan setelah uang masuk rekening, dan proyek akan terbentuk.",
+    answer: "Both steps are Finance's. 'pending_finance' → Finance opens the customer PO and clicks 'Finance approve DP', then issues the DP invoice. 'pending_payment_confirm' → once the money is in the bank Finance clicks 'Yes — deposit received' and the project spawns; if it never came they click 'No — never arrived' with a reason, which sales sees.",
+    answer_id: "Kedua langkah milik Keuangan. 'pending_finance' → Keuangan membuka PO pelanggan dan klik 'Setujui DP', lalu menerbitkan faktur DP. 'pending_payment_confirm' → setelah uang masuk rekening Keuangan klik 'Ya — DP sudah diterima' dan proyek terbentuk; jika tidak pernah masuk mereka klik 'Tidak — DP tidak masuk' dengan alasan, yang bisa dilihat sales.",
   },
   {
     problem: "PO was rejected — why?",

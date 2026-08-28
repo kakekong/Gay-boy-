@@ -372,12 +372,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   // GET /approvals is manager/director-only on the backend — polling it as
   // finance just 403s every 30s. Finance gets its own DP queue below.
   const canSeePendingApprovals = ["manager", "director"].includes(role);
-  // DP customer-PO queues: finance owns pending_finance, the sales rep owns
-  // pending_sales_confirm (the list endpoint scopes sales to own customers).
+  // The DP customer-PO queue is finance's from end to end: they approve the
+  // PO, invoice it, and then say whether the money arrived. Sales no longer
+  // has a step here, so no longer has a badge.
   const dpQueueStatus =
-    role === "finance" || role === "director" ? "pending_finance"
-    : role === "sales" ? "pending_sales_confirm"
-    : null;
+    role === "finance" || role === "director" ? "pending_finance" : null;
 
   const pendingInvoices = useQuery({
     queryKey: ["nav-pending-invoices"],

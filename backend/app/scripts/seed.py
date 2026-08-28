@@ -165,11 +165,42 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS is_downpayment BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_finance_approved_by UUID REFERENCES users(id) ON DELETE SET NULL",
     "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_finance_approved_at TIMESTAMPTZ",
-    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_sales_confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL",
-    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_sales_confirmed_at TIMESTAMPTZ",
+    # Confirming a deposit arrived moved from sales to finance: it is a
+    # fact about the bank account, and finance is who can see it. The
+    # columns and the status are renamed rather than duplicated, so a row
+    # cannot end up with the old name holding a finance user's id. Both
+    # halves are guarded on information_schema, so re-running is a no-op.
+    """DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'customer_pos'
+                   AND column_name = 'dp_sales_confirmed_by')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'customer_pos'
+                   AND column_name = 'dp_payment_confirmed_by')
+      THEN
+        ALTER TABLE customer_pos
+          RENAME COLUMN dp_sales_confirmed_by TO dp_payment_confirmed_by;
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'customer_pos'
+                   AND column_name = 'dp_sales_confirmed_at')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'customer_pos'
+                   AND column_name = 'dp_payment_confirmed_at')
+      THEN
+        ALTER TABLE customer_pos
+          RENAME COLUMN dp_sales_confirmed_at TO dp_payment_confirmed_at;
+      END IF;
+    END $$;""",
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_payment_confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE customer_pos ADD COLUMN IF NOT EXISTS dp_payment_confirmed_at TIMESTAMPTZ",
+    # POs already mid-flight keep their place in the queue under the new name.
+    "UPDATE customer_pos SET status = 'pending_payment_confirm' "
+    "WHERE status = 'pending_sales_confirm'",
 
     # DP invoices are issued against the customer PO before the project
-    # exists; project_id is backfilled at sales-confirm via this link.
+    # exists; project_id is backfilled at payment-confirm via this link.
     "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_po_id UUID REFERENCES customer_pos(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_invoices_customer_po_id ON invoices (customer_po_id)",
 

@@ -8,9 +8,15 @@ HOW TO RUN (needs a local Postgres; never point this at production):
 
 Drives the real ASGI app with per-role authenticated clients:
   sales files DP PO -> finance approves -> finance issues DP invoice (no
-  project yet) -> finance approves invoice w/ faktur pajak -> sales confirms
-  deposit -> project spawns + invoice re-linked. Plus reject path, the
-  /approvals bypass guard, and the regular (non-DP) PO path.
+  project yet) -> finance approves invoice w/ faktur pajak -> finance
+  confirms the deposit landed -> project spawns + invoice re-linked. Plus
+  the "it never arrived" path, the /approvals bypass guard, and the regular
+  (non-DP) PO path.
+
+  Both DP decisions are finance's on purpose: whether money arrived is a
+  fact about the bank account, and finance is who can see it. Sales used to
+  confirm receipt, which put the person with the most reason to want the
+  job started in charge of attesting the money was in.
 """
 import asyncio
 import os
@@ -157,8 +163,8 @@ async def main():
     check("finance bell shows 'DP PO awaiting finance'", has_dp_fin)
 
     r = await finance.post(f"/customer-pos/{po1['id']}/dp/finance-approve", json={"notes": "ok"})
-    check("finance approves DP -> pending_sales_confirm",
-          r.status_code == 200 and r.json()["status"] == "pending_sales_confirm",
+    check("finance approves DP -> pending_payment_confirm",
+          r.status_code == 200 and r.json()["status"] == "pending_payment_confirm",
           f"{r.status_code} {r.text[:200]}")
 
     r = await director.get("/approvals")
@@ -179,15 +185,26 @@ async def main():
                            data={"faktur_pajak_no": "010.000-24.00000001"})
     check("finance approves DP invoice with faktur pajak", r.status_code == 200, r.text[:200])
 
+    r = await finance.get("/notifications")
+    has_dp_pay = any(i["id"] == f"dp-payment:{po1['id']}" for i in r.json()["items"])
+    check("finance bell asks 'Deposit received?'", has_dp_pay)
     r = await sales.get("/notifications")
-    has_dp_sales = any(i["id"] == f"dp-sales:{po1['id']}" for i in r.json()["items"])
-    check("sales bell shows 'Confirm DP received'", has_dp_sales)
+    check("...and sales is no longer asked a question it cannot answer",
+          not any(i["id"].startswith("dp-payment:") or i["id"].startswith("dp-sales:")
+                  for i in r.json()["items"]))
 
-    r = await sales.post(f"/customer-pos/{po1['id']}/dp/sales-confirm", json={"notes": "trf rk123"})
+    r = await sales.post(f"/customer-pos/{po1['id']}/dp/payment-confirm",
+                         json={"notes": "trf rk123"})
+    check("sales cannot say the money arrived", r.status_code == 403,
+          f"{r.status_code} {r.text[:150]}")
+    r = await finance.post(f"/customer-pos/{po1['id']}/dp/payment-confirm",
+                           json={"notes": "trf rk123"})
     body = r.json()
-    check("sales confirms deposit -> PO approved + project spawned",
+    check("finance confirms deposit -> PO approved + project spawned",
           r.status_code == 200 and body["status"] == "approved" and body.get("project_id"),
           f"{r.status_code} {r.text[:200]}")
+    check("...and the confirmation is recorded against finance",
+          body.get("dp_payment_confirmed_at"), str(body.get("dp_payment_confirmed_at")))
     project1_id = body.get("project_id")
 
     r = await sales.get(f"/customer-pos/{po1['id']}")
@@ -224,11 +241,14 @@ async def main():
               r.status_code == 403, f"{r.status_code} {r.text[:150]}")
         r = await director.post(f"/approvals/{req3['id']}/approve", json={"notes": ""})
         po3_now = (await director.get(f"/customer-pos/{po3['id']}")).json()
-        check("director /approvals approve advances DP to pending_sales_confirm (NO project)",
-              po3_now["status"] == "pending_sales_confirm" and not po3_now.get("project_id"),
+        check("director /approvals approve advances DP to pending_payment_confirm (NO project)",
+              po3_now["status"] == "pending_payment_confirm" and not po3_now.get("project_id"),
               f"status={po3_now['status']} project={po3_now.get('project_id')}")
-        r = await sales.post(f"/customer-pos/{po3['id']}/dp/sales-confirm", json={"notes": ""})
-        check("sales confirm after bypass-guard path spawns exactly one project",
+        # The old URL, which a browser tab left open on the previous page
+        # would still be posting to. It has to keep working — and keep the
+        # same finance-only gate.
+        r = await finance.post(f"/customer-pos/{po3['id']}/dp/sales-confirm", json={"notes": ""})
+        check("the old URL still finishes the job, under the new gate",
               r.status_code == 200 and r.json().get("project_id"),
               f"{r.status_code} {r.text[:150]}")
 
