@@ -178,6 +178,45 @@ async def list_notifications(
                 "at": po.dp_finance_approved_at or po.created_at,
             })
 
+    # 1c. The deposit cleared — for the rep whose job just started.
+    #
+    # Sales does not see the deposit invoice: it is finance's document from
+    # end to end. What sales needs from it is the one fact that changes
+    # their week, and this is where they get it — the money is in, the
+    # project exists, go. Scoped to the rep who owns the customer, and it
+    # ages out after a week because by then they know.
+    if role in (Role.SALES, Role.MANAGER, Role.DIRECTOR):
+        dp_done_stmt = (
+            select(CustomerPO, Customer)
+            .join(Customer, CustomerPO.customer_id == Customer.id)
+            .where(
+                CustomerPO.is_downpayment.is_(True),
+                CustomerPO.status == "approved",
+                CustomerPO.dp_payment_confirmed_at.is_not(None),
+                CustomerPO.dp_payment_confirmed_at >= now - timedelta(days=7),
+            )
+            .order_by(CustomerPO.dp_payment_confirmed_at.desc())
+            .limit(20)
+        )
+        if role is Role.SALES:
+            dp_done_stmt = dp_done_stmt.where(Customer.sales_pic_id == me.id)
+        for po, c in (await db.execute(dp_done_stmt)).all():
+            project = (await db.get(Project, po.project_id)
+                       if po.project_id else None)
+            items.append({
+                "id": f"dp-cleared:{po.id}",
+                "kind": "info",
+                "severity": "medium",
+                "title": f"Deposit cleared: {po.number}",
+                "body": (f"{c.company_name} · finance confirmed the DP — "
+                         + (f"{project.code} is open, work can start"
+                            if project else "the project is open")),
+                # Straight to the job it started, not back to the PO.
+                "link": (f"/projects/{po.project_id}" if po.project_id
+                         else f"/customer-pos/{po.id}"),
+                "at": po.dp_payment_confirmed_at,
+            })
+
     # 1b. Decision on YOUR request (any role) — surface the outcome + the
     # reason the approver gave so the requester learns why.
     #

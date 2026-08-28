@@ -500,8 +500,8 @@ export default function CustomerPODetailPage() {
                     "Keuangan — terbitkan faktur DP di bawah agar pelanggan bisa membayar.",
                   )
                 : t(
-                    "Has the deposit cleared? Confirming it starts the project.",
-                    "Apakah DP sudah masuk? Konfirmasi akan memulai proyek.",
+                    "Has the deposit cleared? Recording the payment against the DP invoice starts the project on its own — confirm here only if the money arrived without one.",
+                    "Apakah DP sudah masuk? Mencatat pembayaran pada faktur DP otomatis memulai proyek — konfirmasi di sini hanya jika uang masuk tanpa faktur.",
                   )}
             </div>
 
@@ -551,7 +551,12 @@ export default function CustomerPODetailPage() {
 
             {/* Finance: did the money arrive? Yes starts the job; no ends
                 the order. Both answers live here so the question is asked
-                once, of the one desk that can see the bank. */}
+                once, of the one desk that can see the bank.
+
+                The ordinary route is no longer this button — recording the
+                payment against the DP invoice settles the order by itself,
+                and leaves a date, an amount and a bank reference behind.
+                This is for a deposit that turns up without an invoice. */}
             {canFinanceApproveDp ? (
               <>
                 <textarea
@@ -600,6 +605,10 @@ export default function CustomerPODetailPage() {
         )}
 
         {/* DP invoices issued against this PO. */}
+        {/* Finance's document, so finance's card. The server omits
+            dp_invoices for sales entirely; this guard follows from that
+            rather than duplicating the rule. Sales learns the deposit
+            cleared from a notification, which is the part they act on. */}
         {p.is_downpayment && (p.dp_invoices ?? []).length > 0 && (
           <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
             <div className="text-[11px] uppercase tracking-wider muted mb-1.5">

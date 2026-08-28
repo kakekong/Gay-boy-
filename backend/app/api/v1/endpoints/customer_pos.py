@@ -209,7 +209,14 @@ async def get_customer_po(
     out = await _enrich(db, po)
     # Surface any DP invoices issued against this PO so the detail page can
     # show them before the project exists (detail-only — lists skip this).
-    if po.is_downpayment:
+    #
+    # Not to sales. The deposit invoice is finance's document from end to
+    # end: finance issues it, numbers its faktur pajak, and records the
+    # money against it. Sales learns the deposit cleared from a notice when
+    # it happens, which is the part of it they actually need — an invoice
+    # they can neither act on nor answer for is a page that only invites
+    # them to chase finance about it.
+    if po.is_downpayment and Role(user.role) is not Role.SALES:
         from app.models.finance import Invoice
         out["dp_invoices"] = [
             {
@@ -783,6 +790,72 @@ async def issue_dp_invoice(
     }
 
 
+async def settle_dp_po(db: AsyncSession, po: CustomerPO, *, actor: User,
+                       notes: str | None = None) -> Project:
+    """The deposit landed: approve the PO, start the job, tie the paperwork up.
+
+    Extracted because there are two honest ways to learn the money arrived,
+    and they must do exactly the same thing. Finance can say so on the PO,
+    and finance can record the payment against the DP invoice — the second
+    is the one that leaves a bank reference and a ledger entry, so it
+    settles the order by itself rather than asking for the same fact twice.
+
+    A deposit order does not start at Won — that is what a deposit is for —
+    so this is the one place a customer PO may mint a project.
+    """
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    now = _dt.now(UTC)
+    po.dp_payment_confirmed_by = actor.id
+    po.dp_payment_confirmed_at = now
+    po.status = "approved"
+    po.decided_by = actor.id
+    po.decided_at = now
+    if notes:
+        po.decision_notes = notes
+    project = await _spawn_project(db, po, actor, create_if_missing=True)
+    # Re-link DP invoices issued against this PO to the new project so
+    # they show up on the project page and its payment tracking.
+    from app.models.finance import Invoice
+    for inv in (await db.scalars(
+        select(Invoice).where(
+            Invoice.customer_po_id == po.id,
+            Invoice.project_id.is_(None),
+        )
+    )).all():
+        inv.project_id = project.id
+    # Defensive: the request should already be closed by finance-approve,
+    # but clean up any pending one so the director's queue can't re-fire.
+    await _close_dp_approval_request(
+        db, po.id, approve=True, decider_id=actor.id, notes=notes,
+    )
+    await db.flush()
+    return project
+
+
+async def settle_dp_po_for_invoice(db: AsyncSession, invoice, *,
+                                   actor: User) -> Project | None:
+    """A DP invoice has just been paid in full — start the job it paid for.
+
+    This is the trigger the deposit flow is really about: an invoice marked
+    paid is a payment somebody recorded with a date, an amount and a bank
+    reference, which is better evidence than a button. Returns None when
+    the invoice is not a deposit against a waiting PO, so callers can call
+    it after every payment without asking first.
+    """
+    if not getattr(invoice, "customer_po_id", None):
+        return None
+    po = await db.get(CustomerPO, invoice.customer_po_id)
+    # Only a deposit order still waiting on its money. Anything else has
+    # either already started or was never going to.
+    if not po or not po.is_downpayment or po.status != "pending_payment_confirm":
+        return None
+    return await settle_dp_po(
+        db, po, actor=actor,
+        notes=f"Deposit received — {invoice.number} paid in full.")
+
+
 @router.post("/{po_id}/dp/payment-confirm", response_model=CustomerPOOut)
 # The name this step had when sales owned it. Kept so a browser tab left
 # open on the old page finishes its job instead of 404-ing halfway through
@@ -795,15 +868,18 @@ async def dp_payment_confirm(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Finance confirms the deposit has landed. This is the trigger that
-    spawns the project on a DP PO. Any DP invoices issued against the PO
-    are re-linked to the new project.
+    """Finance confirms the deposit has landed, by hand.
+
+    The ordinary path no longer comes through here: recording the payment
+    against the DP invoice settles the order by itself, and that route
+    leaves a date, an amount and a bank reference behind. This stays for
+    the deposit that arrives without one — money in the account against a
+    PO nobody issued an invoice for — because otherwise such an order can
+    never start.
 
     Finance's, not sales'. Whether money arrived is a fact about the bank
     account, and finance is who can see it — whereas sales is the person
-    with the most reason to want the job started. Both DP steps therefore
-    sit with the same desk that approved the PO and issued the invoice, and
-    the answer to "did it arrive" has one owner rather than two.
+    with the most reason to want the job started.
 
     The *no* is the sibling of this endpoint, not a missing feature:
     /dp/finance-reject at this status records that the deposit never came.
@@ -831,33 +907,7 @@ async def dp_payment_confirm(
             f"DP PO is at status '{po.status}', not awaiting payment "
             "confirmation.",
         )
-    po.dp_payment_confirmed_by = user.id
-    po.dp_payment_confirmed_at = _dt.now(UTC)
-    po.status = "approved"
-    po.decided_by = user.id
-    po.decided_at = _dt.now(UTC)
-    if payload.notes:
-        po.decision_notes = payload.notes
-    # A deposit order does not start at Won — that is what a deposit is for.
-    # Confirming the money landed is its starting gun, so this is the one
-    # place a customer PO may mint the job.
-    project = await _spawn_project(db, po, user, create_if_missing=True)
-    # Re-link DP invoices issued against this PO to the new project so
-    # they show up on the project page and its payment tracking.
-    from app.models.finance import Invoice
-    for inv in (await db.scalars(
-        select(Invoice).where(
-            Invoice.customer_po_id == po.id,
-            Invoice.project_id.is_(None),
-        )
-    )).all():
-        inv.project_id = project.id
-    # Defensive: the request should already be closed by finance-approve,
-    # but clean up any pending one so the director's queue can't re-fire.
-    await _close_dp_approval_request(
-        db, po_id, approve=True, decider_id=user.id, notes=payload.notes,
-    )
-    await db.flush()
+    await settle_dp_po(db, po, actor=user, notes=payload.notes)
     return await _enrich(db, po)
 
 

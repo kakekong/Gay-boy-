@@ -9,14 +9,22 @@ HOW TO RUN (needs a local Postgres; never point this at production):
 Drives the real ASGI app with per-role authenticated clients:
   sales files DP PO -> finance approves -> finance issues DP invoice (no
   project yet) -> finance approves invoice w/ faktur pajak -> finance
-  confirms the deposit landed -> project spawns + invoice re-linked. Plus
-  the "it never arrived" path, the /approvals bypass guard, and the regular
-  (non-DP) PO path.
+  RECORDS THE PAYMENT -> project spawns + invoice re-linked + the rep is
+  told. Plus the "it never arrived" path, the manual fallback, the
+  /approvals bypass guard, and the regular (non-DP) PO path.
 
-  Both DP decisions are finance's on purpose: whether money arrived is a
-  fact about the bank account, and finance is who can see it. Sales used to
-  confirm receipt, which put the person with the most reason to want the
-  job started in charge of attesting the money was in.
+  Two things this pins down beyond "it works".
+
+  **The deposit invoice is finance's document.** Sales cannot see it — they
+  can neither issue it, number its faktur pajak, nor record money against
+  it, and a page showing them one only invites them to chase finance. What
+  they get instead is the single fact that changes their week, when it
+  changes: the deposit cleared and the job is open.
+
+  **A paid deposit opens a job; it must never close one.** Settlement links
+  the DP invoice to the project it just created, and the payment path
+  closes a project whose invoice is fully paid — so without a guard the
+  deposit would open the job and close it in the same breath.
 """
 import asyncio
 import os
@@ -57,6 +65,9 @@ async def main():
             ("director@demo.local", "Director Demo", "director"),
             ("manager@demo.local", "Manager Demo", "manager"),
             ("sales1@demo.local", "Sales One", "sales"),
+            # A second rep, to prove the "deposit cleared" notice reaches
+            # the customer's own rep and not the whole sales floor.
+            ("sales2@demo.local", "Sales Two", "sales"),
             ("finance@demo.local", "Finance Demo", "finance"),
             ("purchasing@demo.local", "Purchasing Demo", "purchasing"),
         ]:
@@ -89,6 +100,7 @@ async def main():
 
     director = await client_for("director@demo.local")
     sales = await client_for("sales1@demo.local")
+    sales2 = await client_for("sales2@demo.local")
     finance = await client_for("finance@demo.local")
     manager = await client_for("manager@demo.local")
 
@@ -193,23 +205,73 @@ async def main():
           not any(i["id"].startswith("dp-payment:") or i["id"].startswith("dp-sales:")
                   for i in r.json()["items"]))
 
+    # ── the deposit invoice is finance's document ──────────────────────
+    r = await sales.get(f"/customer-pos/{po1['id']}")
+    check("sales can still open their own DP PO", r.status_code == 200,
+          str(r.status_code))
+    check("...but is not shown the deposit invoice",
+          not r.json().get("dp_invoices"),
+          str(r.json().get("dp_invoices"))[:160])
+    r = await finance.get(f"/customer-pos/{po1['id']}")
+    check("...while finance, who issues and banks it, is",
+          any(i["id"] == dp_inv["id"] for i in (r.json().get("dp_invoices") or [])),
+          str(r.json().get("dp_invoices"))[:160])
+
     r = await sales.post(f"/customer-pos/{po1['id']}/dp/payment-confirm",
                          json={"notes": "trf rk123"})
     check("sales cannot say the money arrived", r.status_code == 403,
           f"{r.status_code} {r.text[:150]}")
-    r = await finance.post(f"/customer-pos/{po1['id']}/dp/payment-confirm",
-                           json={"notes": "trf rk123"})
-    body = r.json()
-    check("finance confirms deposit -> PO approved + project spawned",
-          r.status_code == 200 and body["status"] == "approved" and body.get("project_id"),
-          f"{r.status_code} {r.text[:200]}")
-    check("...and the confirmation is recorded against finance",
-          body.get("dp_payment_confirmed_at"), str(body.get("dp_payment_confirmed_at")))
-    project1_id = body.get("project_id")
 
-    r = await sales.get(f"/customer-pos/{po1['id']}")
+    # ── recording the payment is what starts the job ───────────────────
+    r = await finance.post("/payments/manual", json={
+        "invoice_id": dp_inv["id"], "amount": 3_000_000,
+        "method": "transfer", "reference": "TRF BCA 8891",
+        "notes": "DP masuk"})
+    check("finance records the deposit against the DP invoice",
+          r.status_code == 201, f"{r.status_code} {r.text[:200]}")
+
+    po1_now = (await finance.get(f"/customer-pos/{po1['id']}")).json()
+    check("paying the DP invoice settles the PO by itself",
+          po1_now["status"] == "approved" and po1_now.get("project_id"),
+          f"status={po1_now['status']} project={po1_now.get('project_id')}")
+    check("...stamped as a payment confirmation",
+          po1_now.get("dp_payment_confirmed_at"),
+          str(po1_now.get("dp_payment_confirmed_at")))
+    check("...crediting the invoice that proves it, not a button",
+          dp_inv["number"] in (po1_now.get("decision_notes") or ""),
+          str(po1_now.get("decision_notes")))
+    project1_id = po1_now.get("project_id")
+
+    # A deposit opens the job. It must not also close it.
+    proj = (await director.get(f"/operation/projects/{project1_id}/full")).json()
+    st = (proj.get("project") or proj).get("status")
+    check("the job it started is open, not closed and paid",
+          st not in ("closed", "paid"), str(st))
+
+    # ── and the rep whose job it is hears about it ─────────────────────
+    r = await sales.get("/notifications")
+    cleared = [i for i in r.json()["items"] if i["id"] == f"dp-cleared:{po1['id']}"]
+    check("the sales rep is told the deposit cleared", len(cleared) == 1,
+          str([i["id"] for i in r.json()["items"]])[:200])
+    if cleared:
+        check("...and is pointed at the job, not back at the PO",
+              "/projects/" in cleared[0]["link"], cleared[0]["link"])
+    r = await sales2.get("/notifications")
+    check("...but a rep who does not own the customer is not",
+          not any(i["id"] == f"dp-cleared:{po1['id']}" for i in r.json()["items"]))
+
+    # Still listed on the PO after settlement — for finance, whose document
+    # it is. Sales was checked above and must not see it at any stage.
+    r = await finance.get(f"/customer-pos/{po1['id']}")
     dp_invs = r.json().get("dp_invoices") or []
-    check("PO detail lists the DP invoice", any(i["id"] == dp_inv["id"] for i in dp_invs))
+    check("PO detail still lists the DP invoice for finance",
+          any(i["id"] == dp_inv["id"] for i in dp_invs))
+    check("...and it now reads as paid",
+          any(i["id"] == dp_inv["id"] and i["status"] == "paid" for i in dp_invs),
+          str(dp_invs)[:200])
+    r = await sales.get(f"/customer-pos/{po1['id']}")
+    check("...and sales still is not shown it, even once settled",
+          not r.json().get("dp_invoices"), str(r.json().get("dp_invoices"))[:120])
 
     r = await director.get(f"/operation/projects/{project1_id}/full")
     proj_invs = r.json().get("invoices") or []

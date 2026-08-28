@@ -287,7 +287,16 @@ async def record_manual_payment(
     )
 
     new_inv_status = await _recompute_invoice_status(db, payload.invoice_id)
-    if new_inv_status == "paid" and inv.project_id:
+    # A deposit invoice paid in full is what starts the job it paid for.
+    # No-op for every other invoice, so it is safe to ask after any payment.
+    if new_inv_status == "paid":
+        from app.api.v1.endpoints.customer_pos import settle_dp_po_for_invoice
+        await settle_dp_po_for_invoice(db, inv, actor=me)
+    # …but a *deposit* invoice never does. Paying a deposit is what starts
+    # a job, not what finishes it, and the settlement above has just linked
+    # this invoice to the project it created — so without this the deposit
+    # would open the job and close it in the same breath.
+    if new_inv_status == "paid" and inv.project_id and inv.type != "dp":
         from app.models.operation import Project, advance_project_status
         project = await db.get(Project, inv.project_id)
         if project:
@@ -364,9 +373,20 @@ async def verify_claim(
     c.decision_notes = payload.notes
     new_inv_status = await _recompute_invoice_status(db, c.invoice_id)
 
+    # A deposit invoice paid in full starts the job it paid for — the same
+    # settlement the manual path runs, so a customer paying through the
+    # portal reaches the same place as one who transfers.
+    if new_inv_status == "paid" and inv:
+        from app.api.v1.endpoints.customer_pos import settle_dp_po_for_invoice
+        await settle_dp_po_for_invoice(db, inv, actor=me)
+
     # When the invoice is fully paid, advance the project to 'paid', then
     # auto-close it — payment is the last real-world signal in the pipeline.
-    if new_inv_status == "paid" and inv and inv.project_id:
+    # …but a *deposit* invoice never does. Paying a deposit is what starts
+    # a job, not what finishes it, and the settlement above has just linked
+    # this invoice to the project it created — so without this the deposit
+    # would open the job and close it in the same breath.
+    if new_inv_status == "paid" and inv and inv.project_id and inv.type != "dp":
         from app.models.operation import Project, advance_project_status
         project = await db.get(Project, inv.project_id)
         if project:
