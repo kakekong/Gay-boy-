@@ -73,8 +73,6 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
         badgeQuery: "finance-pending" },
       { to: "/finance/reports", label: "Financial reports", label_id: "Laporan keuangan", icon: BarChart3,
         roles: ["finance", "admin", "manager", "director"] },
-      { to: "/finance/estimated", label: "Estimated finance", label_id: "Estimasi keuangan", icon: Banknote,
-        roles: ["finance", "admin", "manager", "director"] },
       { to: "/finance/payment-verification", label: "Payment verification", label_id: "Verifikasi pembayaran", icon: Banknote,
         roles: ["admin", "finance", "manager", "director"],
         badgeQuery: "claims-pending" },
@@ -276,7 +274,6 @@ export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
     "/budgets",        // Anggaran — the plan the ledger is measured against
     "/report-catalogue",  // Daftar Laporan — the catalogue and its reports
     "/finance/payment-verification",
-    "/finance/estimated",
     "/finance/reports",
     "/finance",
     // Finance approves DP customer POs + issues the DP invoice from the

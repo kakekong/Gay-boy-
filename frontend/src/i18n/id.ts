@@ -367,7 +367,6 @@ export const ID_STATIC: Record<string, string> = {
   "Equity": "Ekuitas",
   "Est. arrival at our warehouse": "Perkiraan tiba di gudang kami",
   "Estimate": "Perkiraan",
-  "Estimated finance": "Estimasi keuangan",
   "Estimated receivable": "Perkiraan piutang",
   "Estimated revenue": "Perkiraan pendapatan",
   "Estimated tax": "Perkiraan pajak",

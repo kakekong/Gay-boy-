@@ -139,6 +139,12 @@ class QuoteIn(BaseModel):
     quoted_lead_days: int | None = None
     valid_until: date | None = None
     notes: str | None = None
+    # What the supplier answered in, and what a unit of it costs in rupiah.
+    # Both are set here rather than at request time because the vendor is
+    # free to answer in whatever they like — you ask a Jiangsu mill for a
+    # price and get one in CNY whichever currency the sheet went out in.
+    currency: str | None = None
+    fx_rate: float | None = None
 
 
 class CloseIn(BaseModel):
@@ -183,6 +189,7 @@ def _out(spr: SupplierPriceRequest, supplier: Supplier | None,
         "items": items,
         "notes": spr.notes,
         "currency": spr.currency,
+        "fx_rate": float(spr.fx_rate) if spr.fx_rate is not None else None,
         "valid_until": spr.valid_until,
         "quoted_lead_days": spr.quoted_lead_days,
         "sent_at": spr.sent_at,
@@ -636,6 +643,18 @@ async def record_quote(
         if q.note is not None:
             it["note"] = q.note
     spr.items = items
+    if payload.currency:
+        spr.currency = payload.currency.strip().upper()[:8]
+    if payload.fx_rate is not None:
+        rate = float(payload.fx_rate)
+        if rate <= 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "A rate is how many rupiah one unit costs — a positive number.")
+        spr.fx_rate = rate
+    # Rupiah is its own rate, so nobody is asked to type 1.
+    if (spr.currency or "IDR").upper() == "IDR":
+        spr.fx_rate = 1
     if payload.quoted_lead_days is not None:
         spr.quoted_lead_days = payload.quoted_lead_days
     if payload.valid_until is not None:
@@ -690,6 +709,22 @@ async def apply_to_price_request(
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "This quote has no prices on it yet.")
 
+    # The price request is kept in rupiah, so a foreign quote is converted
+    # on the way in — and refused if nobody has said at what rate. Applying
+    # 1,800 CNY as Rp 1,800 is the kind of wrong that looks like a typo,
+    # survives review, and sets a margin on a number that never existed.
+    currency = (spr.currency or "IDR").upper()
+    rate = float(spr.fx_rate) if spr.fx_rate is not None else None
+    if currency == "IDR":
+        rate = 1.0
+    elif not rate or rate <= 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{spr.number} is quoted in {currency} but has no exchange rate. "
+            "Say how many rupiah one "
+            f"{currency} costs, then apply it — otherwise the cost lands as "
+            "though the supplier had quoted rupiah.")
+
     supplier = await db.get(Supplier, spr.supplier_id)
     results: list[dict] = []
     touched_total = 0
@@ -719,7 +754,7 @@ async def apply_to_price_request(
             continue
 
         want = {int(i.get("source_line_no") or i.get("line_no") or 0):
-                float(i["quoted_price"]) for i in lines}
+                round(float(i["quoted_price"]) * rate, 2) for i in lines}
         items = [dict(it) for it in (pr.items or [])]
         touched = 0
         for it in items:

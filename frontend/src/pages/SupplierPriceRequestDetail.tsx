@@ -18,6 +18,7 @@ import {
   Archive, Trash2, Truck, Building2, CalendarDays, Pencil, X,
 } from "lucide-react";
 import clsx from "clsx";
+import { CURRENCIES, money } from "@/lib/currency";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
@@ -70,6 +71,7 @@ interface SPR {
   items: Line[];
   notes: string | null;
   currency: string;
+  fx_rate: number | null;
   valid_until: string | null;
   quoted_lead_days: number | null;
   sent_at: string | null;
@@ -90,6 +92,11 @@ export default function SupplierPriceRequestDetailPage() {
   // the saved row so a half-finished call is never mistaken for a quote.
   const [draft, setDraft] = useState<Record<number, { price: string; lead: string }>>({});
   const [basis, setBasis] = useState<"unit" | "total">("unit");
+  // What the supplier answered in, and what a unit of it costs in rupiah.
+  // A vendor answers in whatever they like regardless of the sheet they were
+  // sent, so both are stated here with the quote rather than up front.
+  const [currency, setCurrency] = useState("IDR");
+  const [fxRate, setFxRate] = useState("");
   const [leadDays, setLeadDays] = useState("");
   const [quoteNote, setQuoteNote] = useState("");
   // Correcting the sheet itself — the number on it and what it asks for —
@@ -121,6 +128,8 @@ export default function SupplierPriceRequestDetailPage() {
       lead: it.lead_days != null ? String(it.lead_days) : "",
     }])));
     setLeadDays(q.data.quoted_lead_days != null ? String(q.data.quoted_lead_days) : "");
+    setCurrency(q.data.currency || "IDR");
+    setFxRate(q.data.fx_rate != null ? String(q.data.fx_rate) : "");
   }, [q.data?.id, q.data?.quoted_at]);
 
   const refresh = () => {
@@ -169,6 +178,8 @@ export default function SupplierPriceRequestDetailPage() {
         })),
       quoted_lead_days: leadDays === "" ? null : Number(leadDays),
       notes: quoteNote.trim() || null,
+      currency,
+      fx_rate: currency === "IDR" || fxRate === "" ? null : Number(fxRate),
     }),
     onSuccess: () => {
       setQuoteNote("");
@@ -420,14 +431,36 @@ export default function SupplierPriceRequestDetailPage() {
             </div>
           </div>
           {quoting && (
-            <label className="text-xs flex items-center gap-2">
-              {t("They quoted per", "Mereka memberi harga per")}
-              <select className="input py-1" value={basis}
-                onChange={(e) => setBasis(e.target.value as "unit" | "total")}>
-                <option value="unit">{t("unit", "satuan")}</option>
-                <option value="total">{t("whole line", "total baris")}</option>
-              </select>
-            </label>
+            <div className="flex items-end gap-3 flex-wrap">
+              <label className="text-xs flex items-center gap-2">
+                {t("They quoted per", "Mereka memberi harga per")}
+                <select className="input py-1" value={basis}
+                  onChange={(e) => setBasis(e.target.value as "unit" | "total")}>
+                  <option value="unit">{t("unit", "satuan")}</option>
+                  <option value="total">{t("whole line", "total baris")}</option>
+                </select>
+              </label>
+              <label className="text-xs flex items-center gap-2">
+                {t("in", "dalam")}
+                <select className="input py-1" value={currency}
+                  aria-label="Quote currency"
+                  onChange={(e) => setCurrency(e.target.value)}>
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>{c.code}</option>
+                  ))}
+                </select>
+              </label>
+              {currency !== "IDR" && (
+                <label className="text-xs flex items-center gap-2">
+                  {t(`Rp per ${currency}`, `Rp per ${currency}`)}
+                  <input className="input py-1 w-28" type="number" min="0"
+                    step="0.000001" value={fxRate}
+                    aria-label="Exchange rate"
+                    placeholder="16.200"
+                    onChange={(e) => setFxRate(e.target.value)} />
+                </label>
+              )}
+            </div>
           )}
         </header>
         <table className="w-full text-sm">
@@ -521,7 +554,7 @@ export default function SupplierPriceRequestDetailPage() {
                     )}
                   </td>
                   <td className="td text-right tabular-nums font-medium">
-                    {perUnit ? idr(perUnit * (it.qty || 0)) : "—"}
+                    {perUnit ? money(perUnit * (it.qty || 0), currency) : "—"}
                   </td>
                 </tr>
               );
@@ -556,7 +589,16 @@ export default function SupplierPriceRequestDetailPage() {
                 {t("Save their quote", "Simpan penawaran")}
               </button>
               <span className="text-sm muted tabular-nums">
-                {t("Total as typed", "Total sesuai ketikan")}: {idr(typedTotal)}
+                {t("Total as typed", "Total sesuai ketikan")}:{" "}
+                {money(typedTotal, currency)}
+                {currency !== "IDR" && Number(fxRate) > 0 && (
+                  // What it becomes on the price request. Shown while it is
+                  // being typed, because that is when a rate typed a decimal
+                  // place out is still cheap to notice.
+                  <span className="muted">
+                    {" ≈ "}{money(typedTotal * Number(fxRate), "IDR")}
+                  </span>
+                )}
               </span>
             </div>
           </div>

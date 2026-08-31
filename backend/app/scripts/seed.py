@@ -79,6 +79,11 @@ COLUMN_MIGRATIONS: list[str] = [
     # into the price request that created it.
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS link VARCHAR(1000)",
 
+    # A supplier's quote carries the currency it was given in and the rate
+    # that turns it into rupiah — without the rate a CNY quote was applied
+    # as its face value and the cost was wrong by a factor of two thousand.
+    "ALTER TABLE supplier_price_requests ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(18,6)",
+
     # Users gained an optional per-user sidebar page override
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pages JSONB",
     # …and an employment record: the day they started, and where payroll

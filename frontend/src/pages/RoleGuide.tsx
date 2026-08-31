@@ -436,7 +436,7 @@ const ROLES: RoleSection[] = [
       "DP customer POs come straight to you (bell + Customer PO page), not the director. Approving one moves it to sales' 'confirm deposit received' step — you don't spawn the project yourself.",
       "Two ways money gets recorded: portal customers file a claim you Verify on Payment verification; everyone else you enter yourself on the project's invoice card ('Enter payment manually') — one stroke, already verified. Fully paying an invoice auto-advances its project to paid → closed.",
       "You can delete a duplicate/mistaken invoice and its faktur pajak record — but not once a payment has been verified against it.",
-      "Your sidebar: Customer PO, Projects, Finance, Financial reports, Estimated finance, Payment verification, Chart of Accounts, Recent ledgers, Attendance, Chat.",
+      "Your sidebar: Customer PO, Projects, Finance, Financial reports, Payment verification, Chart of Accounts, Recent ledgers, Attendance, Chat.",
       "Reject a payment proof or a DP PO with a clear reason — sales and the customer see it.",
     ],
     rules_id: [
@@ -445,7 +445,7 @@ const ROLES: RoleSection[] = [
       "PO pelanggan DP langsung ke Anda (lonceng + halaman PO Pelanggan), bukan direktur. Setuju memindahkannya ke langkah 'konfirmasi DP diterima' milik sales — Anda tidak membentuk proyek sendiri.",
       "Dua cara uang tercatat: pelanggan portal mengirim klaim yang Anda Verifikasi di Verifikasi Pembayaran; selain itu Anda masukkan sendiri di kartu faktur proyek ('Masukkan pembayaran manual') — sekali jalan, langsung terverifikasi. Faktur lunas otomatis memajukan proyeknya ke lunas → tutup.",
       "Anda bisa menghapus faktur duplikat/salah beserta catatan faktur pajaknya — tapi tidak setelah ada pembayaran terverifikasi di dalamnya.",
-      "Sidebar Anda: PO Pelanggan, Proyek, Keuangan, Laporan keuangan, Estimasi keuangan, Verifikasi Pembayaran, Bagan Akun, Ledger Terbaru, Absensi, Chat.",
+      "Sidebar Anda: PO Pelanggan, Proyek, Keuangan, Laporan keuangan, Verifikasi Pembayaran, Bagan Akun, Ledger Terbaru, Absensi, Chat.",
       "Tolak bukti bayar atau PO DP dengan alasan jelas — sales dan pelanggan melihatnya.",
     ],
   },

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  Banknote, LineChart, BarChart3, CheckCircle, FileText, Loader2, XCircle,
+  Banknote, BarChart3, CheckCircle, FileText, Loader2, XCircle,
   Download, ReceiptText,
 } from "lucide-react";
 import clsx from "clsx";
@@ -31,8 +31,6 @@ export default function FinancePage() {
         <div className="flex gap-2">
           <Link to="/finance/reports" className="btn-ghost">
             <BarChart3 size={15} /> {T("Financial reports")}</Link>
-          <Link to="/finance/estimated" className="btn-ghost">
-            <LineChart size={15} /> {T("Estimated finance")}</Link>
         </div>
       </div>
 

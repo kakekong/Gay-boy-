@@ -299,6 +299,69 @@ async def main():
           r.status_code == 409, f"{r.status_code} {J(r)}"[:150])
     check("...and says why", "approved" in str(J(r)).lower(), str(J(r))[:150])
 
+    # ══ a vendor who answers in their own money ══════════════════════════════
+    # Overseas suppliers quote in CNY or USD. The price request is kept in
+    # rupiah, so the quote is converted on the way in — and refused outright
+    # if nobody has said at what rate. Applying 1,800 CNY as Rp 1,800 is the
+    # kind of wrong that looks like a typo, survives review, and sets a
+    # margin on a number that never existed.
+    print("\n── a quote in yuan ──")
+    fx_pr = J(await c.post("/price-requests", headers=s1, json={
+        "customer_id": cust,
+        "items": [{"description": f"BEARING SKF {tag}", "qty": 10,
+                   "uom": "pcs"}]}))
+    await c.post(f"/price-requests/{fx_pr['id']}/submit", headers=s1)
+    cn = J(await c.post(BASE, headers=pur, json={
+        "supplier_ids": [sup_a], "price_request_id": fx_pr["id"]}))[0]
+
+    r = await c.post(f"{BASE}/{cn['id']}/quote", headers=pur, json={
+        "items": [{"line_no": 1, "quoted_price": 1_800, "basis": "unit"}],
+        "currency": "CNY"})
+    check("a quote can be recorded in the supplier's own currency",
+          r.status_code == 200 and J(r)["currency"] == "CNY",
+          f"{r.status_code} {J(r).get('currency')}")
+
+    r = await c.post(f"{BASE}/{cn['id']}/apply", headers=pur)
+    check("...but it cannot be applied with no rate", r.status_code == 409,
+          f"{r.status_code} {J(r)}"[:170])
+    check("...and the refusal says what would go wrong",
+          "quoted rupiah" in str(J(r)).lower(), str(J(r))[:220])
+    still = J(await c.get(f"/price-requests/{fx_pr['id']}", headers=pur))
+    check("...leaving the cost untouched rather than wrong",
+          still["items"][0].get("cost_price") in (None, 0),
+          str(still["items"][0].get("cost_price")))
+
+    r = await c.post(f"{BASE}/{cn['id']}/quote", headers=pur, json={
+        "items": [{"line_no": 1, "quoted_price": 1_800, "basis": "unit"}],
+        "currency": "CNY", "fx_rate": 2_250})
+    check("the rate is recorded with the quote",
+          r.status_code == 200 and float(J(r)["fx_rate"]) == 2_250,
+          f"{r.status_code} {J(r).get('fx_rate')}")
+    r = await c.post(f"{BASE}/{cn['id']}/apply", headers=pur)
+    check("...and now it applies", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:170])
+    costed_fx = J(await c.get(f"/price-requests/{fx_pr['id']}", headers=pur))
+    check("...as rupiah, not as the face value",
+          float(costed_fx["items"][0]["cost_price"]) == 1_800 * 2_250,
+          str(costed_fx["items"][0].get("cost_price")))
+
+    # Rupiah needs no rate, and nobody should be made to type 1.
+    idr_pr = J(await c.post("/price-requests", headers=s1, json={
+        "customer_id": cust,
+        "items": [{"description": f"BAUT {tag}", "qty": 5, "uom": "pcs"}]}))
+    await c.post(f"/price-requests/{idr_pr['id']}/submit", headers=s1)
+    local = J(await c.post(BASE, headers=pur, json={
+        "supplier_ids": [sup_b], "price_request_id": idr_pr["id"]}))[0]
+    await c.post(f"{BASE}/{local['id']}/quote", headers=pur, json={
+        "items": [{"line_no": 1, "quoted_price": 50_000, "basis": "unit"}]})
+    r = await c.post(f"{BASE}/{local['id']}/apply", headers=pur)
+    check("a rupiah quote still applies with nothing extra typed",
+          r.status_code == 200, f"{r.status_code} {J(r)}"[:150])
+    costed_idr = J(await c.get(f"/price-requests/{idr_pr['id']}", headers=pur))
+    check("...unchanged, because rupiah is its own rate",
+          float(costed_idr["items"][0]["cost_price"]) == 50_000,
+          str(costed_idr["items"][0].get("cost_price")))
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

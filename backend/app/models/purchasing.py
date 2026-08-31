@@ -106,7 +106,18 @@ class SupplierPriceRequest(Base, UUIDPK, TimestampMixin):
     # scanning every row's items.
     source_pr_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+    # What the supplier quoted in. Overseas vendors answer in USD or CNY, and
+    # a quote read as rupiah is off by a factor of fifteen thousand — a cost
+    # that then becomes a margin the director sets on a number that never
+    # existed.
     currency: Mapped[str] = mapped_column(String(8), default="IDR", nullable=False)
+    # Rupiah per unit of `currency`, on this quote. Stored rather than looked
+    # up live for the same reason the supplier PO stores one: the rate that
+    # matters is the one this price was agreed at, and a rate fetched today
+    # would silently restate what a March quote costed. NULL means "not
+    # stated", which reads differently from a rate of zero, and applying a
+    # foreign quote without one is refused rather than guessed.
+    fx_rate: Mapped[float | None] = mapped_column(Numeric(18, 6))
     # How long the supplier's quote holds, and how long they said delivery
     # takes — both are half of what makes one quote better than another.
     valid_until: Mapped[date | None] = mapped_column(Date)
