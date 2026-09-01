@@ -71,10 +71,15 @@ async def main():
     # A month of history: some present days, an absence, a half day, sick
     # leave — and one day for the other person, in the same month.
     today = date.today()
-    first = today.replace(day=1)
-    period = first.strftime("%Y-%m")
     plan = [("present", 8.0), ("present", 7.5), ("absent", 0.0),
             ("half_day", 4.0), ("sick", 0.0), ("present", 8.25)]
+    # Attendance is only recorded for days that have happened, so early in a
+    # month there is nowhere to put six of them — run against the month before
+    # instead, which is entirely in the past.
+    first = today.replace(day=1)
+    if today.day < len(plan):
+        first = (first - timedelta(days=1)).replace(day=1)
+    period = first.strftime("%Y-%m")
     made = 0
     for i, (st, hours) in enumerate(plan):
         day = first + timedelta(days=i)

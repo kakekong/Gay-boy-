@@ -25,6 +25,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AccountPicker } from "@/components/AccountPicker";
+import { ChartOfAccountsPanel } from "@/components/ChartOfAccountsPanel";
 import { useT, T, locale } from "@/store/lang";
 
 interface BankAccount { account_no: string; name: string; balance: number }
@@ -187,6 +188,10 @@ export default function CashBankPage() {
           </div>
         ))}
       </div>
+
+      {/* The cards above are the cash accounts only — this is everything
+          else money can be posted against, balances included. */}
+      <ChartOfAccountsPanel />
 
       {flash && (
         <div className={clsx(

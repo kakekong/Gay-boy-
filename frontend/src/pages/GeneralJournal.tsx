@@ -22,6 +22,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { AccountPicker } from "@/components/AccountPicker";
+import { ChartOfAccountsPanel } from "@/components/ChartOfAccountsPanel";
 import { useT, T, locale } from "@/store/lang";
 
 interface Line {
@@ -169,6 +170,10 @@ export default function GeneralJournalPage() {
           <button onClick={() => setFlash(null)}><X size={14} /></button>
         </div>
       )}
+
+      {/* The whole chart, for the "which account is this" that comes up
+          mid-entry. Collapsed, because the form is what the page is for. */}
+      <ChartOfAccountsPanel />
 
       {/* ── the entry form ───────────────────────────────────────────────── */}
       <div className="card overflow-hidden">
