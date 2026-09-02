@@ -72,9 +72,12 @@ async def main():
 
     # ══ the contact address ══════════════════════════════════════════════════
     print("\n── an address separate from the login ──")
+    rep_emp = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Rep Tanda {tag}", "intended_role": "sales"}))
     rep = J(await c.post("/users", headers=d, json={
         "email": f"rep-{tag}@demo.local", "full_name": f"Rep Tanda {tag}",
         "role": "sales", "password": "test-pass-123",
+        "employee_id": rep_emp["id"],
         "contact_email": f"Rep.Tanda+{tag}@transmisi.co.id",
         "phone": "081234567890"}))
     check("a user can be created with both", rep.get("id") is not None, str(rep)[:150])
@@ -105,15 +108,21 @@ async def main():
                   json={"contact_email": f"rep.tanda+{tag}@transmisi.co.id"})
 
     # Two people may share one mailbox — it is a contact detail, not an identity.
+    rep2_emp = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Rep Dua {tag}", "intended_role": "sales"}))
     rep2 = J(await c.post("/users", headers=d, json={
         "email": f"rep2-{tag}@demo.local", "full_name": f"Rep Dua {tag}",
         "role": "sales", "password": "test-pass-123",
+        "employee_id": rep2_emp["id"],
         "contact_email": f"rep.tanda+{tag}@transmisi.co.id"}))
     check("two people can share one contact address", rep2.get("id") is not None,
           str(rep2)[:150])
+    clash_emp = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Clash {tag}", "intended_role": "sales"}))
     r = await c.post("/users", headers=d, json={
         "email": f"rep-{tag}@demo.local", "full_name": "Clash",
-        "role": "sales", "password": "test-pass-123"})
+        "role": "sales", "employee_id": clash_emp["id"],
+        "password": "test-pass-123"})
     check("...while a duplicate LOGIN is still refused",
           r.status_code in (400, 409), str(r.status_code))
 

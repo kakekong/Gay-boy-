@@ -23,6 +23,7 @@ from app.models.custom_role import CustomRole  # noqa: F401
 from app.models.crm import Activity, Customer, Reminder  # noqa: F401
 from app.models.customer_po import CustomerPO  # noqa: F401
 from app.models.daily_log import DailyLog  # noqa: F401
+from app.models.employee import Employee  # noqa: F401
 from app.models.finance import Invoice, LedgerEntry, Payment  # noqa: F401
 from app.models.import_run import ImportedRecord, ImportRun  # noqa: F401
 from app.models.inventory import InventoryItem, InventoryMovement  # noqa: F401

@@ -17,11 +17,13 @@ import { useAuthStore } from "@/store/auth";
 import { useT, T, locale } from "@/store/lang";
 
 const ROLE_CHIP: Record<string, string> = {
-  sales:    "bg-brand-50 text-brand-700",
-  admin:    "bg-violet-50 text-violet-700",
-  hr:       "bg-amber-50 text-amber-700",
-  manager:  "bg-emerald-50 text-emerald-700",
-  director: "bg-red-50 text-red-700",
+  sales:      "bg-brand-50 text-brand-700",
+  admin:      "bg-violet-50 text-violet-700",
+  hr:         "bg-amber-50 text-amber-700",
+  finance:    "bg-lime-50 text-lime-700",
+  purchasing: "bg-orange-50 text-orange-700",
+  manager:    "bg-emerald-50 text-emerald-700",
+  director:   "bg-red-50 text-red-700",
 };
 
 const ATT_CHIP: Record<string, string> = {

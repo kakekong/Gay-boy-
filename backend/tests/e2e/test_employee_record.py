@@ -54,9 +54,11 @@ async def main():
     s1 = await login("sales1@demo.local")
     fin = await login("finance@demo.local")
 
+    emp = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Pegawai {tag}", "intended_role": "sales"}))
     who = J(await c.post("/users", headers=d, json={
         "email": f"pegawai{tag}@demo.local", "full_name": f"Pegawai {tag}",
-        "role": "sales", "password": "test-pass-123"}))
+        "role": "sales", "employee_id": emp["id"], "password": "test-pass-123"}))
     uid = who["id"]
     check("a person exists to keep a record for", bool(uid), str(who)[:150])
     them = await login(f"pegawai{tag}@demo.local")

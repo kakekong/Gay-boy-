@@ -54,9 +54,12 @@ async def main():
     # A second decision-maker who sees the same alerts, to prove dismissals
     # do not leak between people.
     other_email = f"mgr2-{tag}@demo.local"
+    emp2 = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Manager Two {tag}", "intended_role": "manager"}))
     J(await c.post("/users", headers=d, json={
         "email": other_email, "full_name": f"Manager Two {tag}",
-        "role": "manager", "password": "test-pass-123"}))
+        "role": "manager", "employee_id": emp2["id"],
+        "password": "test-pass-123"}))
     m = await login(c, other_email)
 
     # This driver dismisses alerts that are day- or state-scoped, so a second

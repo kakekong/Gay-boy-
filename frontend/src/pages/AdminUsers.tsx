@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ModalCloseX } from "@/components/ModalCloseX";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Shield, Plus, Loader2, Trash2, Pencil, Save, X, KeyRound, UserCheck, UserX,
@@ -23,6 +23,19 @@ interface User {
   pages?: string[];
   phone?: string | null;
   is_active: boolean;
+  employee_id?: string | null;
+  employee_no?: string | null;
+}
+
+interface Employee {
+  id: string;
+  employee_no: string;
+  full_name: string;
+  position?: string | null;
+  department?: string | null;
+  intended_role?: string | null;
+  phone?: string | null;
+  has_login: boolean;
 }
 
 interface CustomRole {
@@ -47,22 +60,29 @@ const ROLE_CHIP: Record<string, string> = {
 
 const ROLES = ["sales", "admin", "hr", "finance", "manager", "director", "purchasing", "customer", "supplier"];
 
+// Logins for people outside the company. Everyone else is on the payroll and
+// has to be on the employee register before they can be given an account.
+const PORTAL_ROLES = ["customer", "supplier"];
+
 interface Customer { id: string; company_name: string; }
 interface Supplier { id: string; name: string; }
+
+const BLANK_FORM = {
+  email: "", contact_email: "", full_name: "", role: "sales", password: "",
+  phone: "", linked_customer_id: "", linked_supplier_id: "",
+  custom_role_id: "", employee_id: "",
+};
 
 export default function AdminUsersPage() {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
+  const [params, setParams] = useSearchParams();
   const [openNew, setOpenNew] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   // Form state
-  const [form, setForm] = useState({
-    email: "", contact_email: "", full_name: "", role: "sales", password: "",
-    phone: "", linked_customer_id: "", linked_supplier_id: "",
-    custom_role_id: "",
-  });
+  const [form, setForm] = useState({ ...BLANK_FORM });
 
   const customRoles = useQuery({
     queryKey: ["custom-roles"],
@@ -78,6 +98,44 @@ export default function AdminUsersPage() {
   // Always load when either modal is open — the role might switch to
   // customer/supplier mid-form and we want the picker ready immediately.
   const formOpen = openNew || !!editing;
+
+  // Only the people who still need one: offering somebody who already signs
+  // in would be offering a refusal.
+  const freeEmployees = useQuery({
+    queryKey: ["employees-without-login"],
+    queryFn: () => api.get("/employees", { params: { without_login: true } })
+      .then((r) => r.data as Employee[]),
+    enabled: formOpen,
+    refetchOnMount: "always",
+    staleTime: 0,
+    retry: false,
+  });
+
+  // Arriving from the register's "Create login" button: open the form with
+  // that person already chosen, so the two screens are one errand.
+  const wantEmployee = params.get("employee");
+  useEffect(() => {
+    if (!wantEmployee) return;
+    setOpenNew(true);
+    setForm((f) => ({ ...f, employee_id: wantEmployee }));
+    params.delete("employee");
+    setParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantEmployee]);
+
+  // Once the register has loaded, take the name, phone and intended role
+  // from the record rather than making the director retype them.
+  useEffect(() => {
+    const emp = (freeEmployees.data ?? []).find((e) => e.id === form.employee_id);
+    if (!emp) return;
+    setForm((f) => ({
+      ...f,
+      full_name: emp.full_name,
+      phone: f.phone || emp.phone || "",
+      role: f.custom_role_id ? f.role : (emp.intended_role || f.role),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.employee_id, freeEmployees.data]);
   const customers = useQuery({
     queryKey: ["customers-min"],
     queryFn: () => api.get("/customers", { params: { page_size: 200 } })
@@ -114,16 +172,19 @@ export default function AdminUsersPage() {
       linked_customer_id: form.linked_customer_id || null,
       linked_supplier_id: form.linked_supplier_id || null,
       custom_role_id: form.custom_role_id || null,
+      // A portal login is not an employee, so it must not carry one.
+      employee_id: PORTAL_ROLES.includes(form.role)
+        ? null : (form.employee_id || null),
       phone: form.phone || null,
       contact_email: form.contact_email || null,
     }),
     onSuccess: () => {
       setOpenNew(false);
-      setForm({ email: "", contact_email: "", full_name: "", role: "sales", password: "",
-                phone: "", linked_customer_id: "", linked_supplier_id: "",
-                custom_role_id: "" });
+      setForm({ ...BLANK_FORM });
       setFlash({ kind: "ok", text: "User created." });
       qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["employees-without-login"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
     },
     onError: (e: any) => setFlash({
       kind: "err",
@@ -180,7 +241,10 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Shield size={22} className="text-brand-600" /> {T("Users")}</h1>
-          <p className="text-sm muted">{T("Create employees, customer-portal logins, and supplier-portal logins.")}</p>
+          <p className="text-sm muted">
+            {t("Logins for people already on the employee register, plus customer- and supplier-portal accounts.",
+               "Akun masuk untuk orang yang sudah ada di daftar karyawan, ditambah akun portal pelanggan dan pemasok.")}
+          </p>
         </div>
         <button className="btn-primary" onClick={() => setOpenNew(true)}>
           <Plus size={14} /> {T("New user")}</button>
@@ -216,7 +280,15 @@ export default function AdminUsersPage() {
                 "tr-hover border-t border-ink-100",
                 !u.is_active && "opacity-50",
               )}>
-                <td className="td font-medium">{u.full_name}</td>
+                <td className="td font-medium">
+                  {u.full_name}
+                  {u.employee_no && (
+                    <Link to="/employees"
+                      className="block text-[11px] font-normal text-ink-400 hover:text-brand-700">
+                      {u.employee_no}
+                    </Link>
+                  )}
+                </td>
                 <td className="td muted">
                   {u.email}
                   {u.contact_email && u.contact_email !== u.email && (
@@ -309,11 +381,18 @@ export default function AdminUsersPage() {
 
       {/* New user modal */}
       {openNew && (
-        <Modal title={T("New user")} subtitle={T("Director can create any role — employees, customer portal, supplier portal.")}
-               onClose={() => setOpenNew(false)}>
+        <Modal
+          title={T("New user")}
+          subtitle={t("An employee's login is created against their register entry. Customer and supplier portal accounts are not employees and need no record.",
+                      "Akun masuk karyawan dibuat dari data di daftar karyawan. Akun portal pelanggan dan pemasok bukan karyawan dan tidak perlu data itu.")}
+          onClose={() => setOpenNew(false)}>
           <UserForm
             form={form} setForm={setForm}
             customRoles={customRoles}
+            employees={freeEmployees.data ?? []}
+            employeesLoading={freeEmployees.isLoading}
+            employeesError={freeEmployees.error as any}
+            employeesRefetch={() => freeEmployees.refetch()}
             customers={customers.data ?? []}
             customersLoading={customers.isLoading}
             customersError={customers.error as any}
@@ -530,16 +609,62 @@ function Modal({ title, subtitle, onClose, children }: {
 }
 
 function UserForm({
-  form, setForm, customRoles, customers, customersLoading, customersError, customersRefetch,
+  form, setForm, customRoles,
+  employees, employeesLoading, employeesError, employeesRefetch,
+  customers, customersLoading, customersError, customersRefetch,
   suppliers, suppliersLoading, suppliersError, suppliersRefetch,
   isPending, submitLabel, onSubmit, onCancel,
 }: any) {
+  const isPortal = PORTAL_ROLES.includes(form.role);
+  // An internal login is the second half of hiring somebody. The register
+  // entry is the first half, and the server refuses the account without it,
+  // so there is no point letting the form be submitted without one.
+  const needsEmployee = !isPortal && !form.employee_id;
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-3">
+      {!isPortal && (
+        <SearchablePicker
+          label={T("Employee *")}
+          placeholder={t("Search the register by name or staff number…",
+                         "Cari daftar karyawan berdasarkan nama atau nomor…")}
+          items={employees}
+          loading={employeesLoading}
+          error={employeesError}
+          onRetry={employeesRefetch}
+          value={form.employee_id}
+          onChange={(v: string) => setForm({ ...form, employee_id: v })}
+          getId={(e: Employee) => e.id}
+          getLabel={(e: Employee) =>
+            `${e.employee_no} · ${e.full_name}${e.position ? ` — ${e.position}` : ""}`}
+          emptyCta={
+            <Link
+              to="/employees"
+              className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+            >
+              {t("Everyone on the register already has a login — add the person there first",
+                 "Semua orang di daftar karyawan sudah punya akun — tambahkan orangnya di sana dulu")}
+              {" "}<ExternalLink size={12} />
+            </Link>
+          }
+        />
+      )}
+      {!isPortal && (
+        <p className="text-[11px] muted -mt-1">
+          {t("A login belongs to somebody on the employee register. Add them there first if they are not listed.",
+             "Akun masuk selalu milik seseorang di daftar karyawan. Tambahkan di sana dulu bila belum terdaftar.")}
+        </p>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label={T("Full name *")}>
           <input className="input" required value={form.full_name}
+            readOnly={!isPortal && !!form.employee_id}
             onChange={(e: any) => setForm({ ...form, full_name: e.target.value })} />
+          {!isPortal && !!form.employee_id && (
+            <p className="text-[11px] muted mt-1">
+              {t("Taken from the employee record — change it there and it changes everywhere.",
+                 "Diambil dari data karyawan — ubah di sana dan berubah di semua tempat.")}
+            </p>
+          )}
         </Field>
         <Field label={T("Login email *")}>
           <input className="input" type="email" required value={form.email}
@@ -640,9 +765,15 @@ function UserForm({
           </div>
         )}
       </div>
-      <div className="flex justify-end gap-2 pt-2">
+      <div className="flex justify-end items-center gap-2 pt-2">
+        {needsEmployee && (
+          <span className="text-[11px] text-amber-700 mr-auto">
+            {t("Pick who this login is for.", "Pilih untuk siapa akun ini.")}
+          </span>
+        )}
         <button type="button" className="btn-ghost" onClick={onCancel}>{T("Cancel")}</button>
-        <button type="submit" className="btn-primary" disabled={isPending}>
+        <button type="submit" className="btn-primary"
+          disabled={isPending || needsEmployee}>
           {isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
           {submitLabel}
         </button>

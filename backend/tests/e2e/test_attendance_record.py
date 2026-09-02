@@ -58,12 +58,17 @@ async def main():
     fin = await login("finance@demo.local")
 
     # Two people, so "their record" can be shown to mean one of them.
-    who = J(await c.post("/users", headers=d, json={
-        "email": f"hadir{tag}@demo.local", "full_name": f"Hadir {tag}",
-        "role": "sales", "password": "test-pass-123"}))
-    other = J(await c.post("/users", headers=d, json={
-        "email": f"lain{tag}@demo.local", "full_name": f"Lain {tag}",
-        "role": "sales", "password": "test-pass-123"}))
+    # A login belongs to somebody on the employee register, so each of these
+    # is two steps now: the person, then their way to sign in.
+    async def hire(name, email, role="sales"):
+        emp = J(await c.post("/employees", headers=d, json={
+            "full_name": name, "intended_role": role}))
+        return J(await c.post("/users", headers=d, json={
+            "email": email, "full_name": name, "role": role,
+            "employee_id": emp["id"], "password": "test-pass-123"}))
+
+    who = await hire(f"Hadir {tag}", f"hadir{tag}@demo.local")
+    other = await hire(f"Lain {tag}", f"lain{tag}@demo.local")
     check("two employees exist to tell apart",
           bool(who.get("id")) and bool(other.get("id")),
           f"{who}/{other}"[:170])

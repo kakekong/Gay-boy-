@@ -43,6 +43,13 @@ class User(Base, UUIDPK, TimestampMixin):
     bank_account_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
     bank_account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # The person this login belongs to. Required for every internal role and
+    # refused for portal accounts — a customer's login is not an employee.
+    # Unique: one person, one login. Nullable only so the column could be
+    # added to a live table; `POST /users` will not create an internal
+    # account without it.
+    employee_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), unique=True, index=True)
     # Portal scopes — only set for customer / supplier accounts
     linked_customer_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     linked_supplier_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)

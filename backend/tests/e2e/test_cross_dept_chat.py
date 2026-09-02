@@ -53,9 +53,13 @@ async def main():
     # between them already.
     async def mkuser(name, role):
         email = f"{name}-{tag}@demo.local"
+        # The person goes on the employee register first; the login is
+        # created against that record.
+        emp = J(await c.post("/employees", headers=d, json={
+            "full_name": f"{name.title()} {tag}", "intended_role": role}))
         J(await c.post("/users", headers=d, json={
             "email": email, "full_name": f"{name.title()} {tag}",
-            "role": role, "password": "test-pass-123"}))
+            "role": role, "employee_id": emp["id"], "password": "test-pass-123"}))
         return email, await login(c, email)
 
     s_email, sales = await mkuser("xsales", "sales")

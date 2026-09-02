@@ -33,6 +33,9 @@ class UserCreate(BaseModel):
     password: str
     phone: str | None = None
     whatsapp_id: str | None = None
+    # Who this login belongs to. Required for every internal role: the person
+    # goes on the employee register before they get a way to sign in.
+    employee_id: UUID | None = None
     linked_customer_id: UUID | None = None
     linked_supplier_id: UUID | None = None
     custom_role_id: UUID | None = None
@@ -59,6 +62,52 @@ class UserPatch(BaseModel):
 
 
 VALID_ROLES = {"sales", "admin", "hr", "finance", "manager", "director", "customer", "supplier", "purchasing"}
+
+# Portal logins for people outside the company. Everything else is somebody on
+# the payroll, and needs an employee record before it can have a login.
+PORTAL_ROLES = {"customer", "supplier"}
+
+
+async def _employee_for_login(
+    db: AsyncSession, employee_id: UUID | None, role: str,
+) -> "object | None":
+    """The employee this login is being created for, or a refusal.
+
+    A login is the second half of hiring somebody, not the first. Requiring
+    the register entry first means the person exists once — with a staff
+    number, a position and a start date — instead of being invented by
+    whoever typed the account, and it is what stops two half-spelled records
+    of the same person appearing a month apart.
+    """
+    from app.models.employee import Employee
+
+    if role in PORTAL_ROLES:
+        if employee_id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Customer and supplier logins are for people outside the "
+                "company — they do not go on the employee register.")
+        return None
+    if not employee_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Add this person to the employee register first, then create "
+            "their login against that record.")
+    emp = await db.get(Employee, employee_id)
+    if not emp:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown employee")
+    if not emp.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{emp.full_name} is marked a leaver. Reactivate the employee "
+            "record before giving them a login.")
+    taken = await db.scalar(select(User).where(User.employee_id == emp.id))
+    if taken:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{emp.full_name} already signs in as {taken.email}. "
+            "One person, one login.")
+    return emp
 
 
 def _clean_contact_email(value: str | None) -> str | None:
@@ -172,11 +221,24 @@ async def list_employees(
                 missed_map.get(str(uid), 0.0) + (n * (0.5 if st == "half_day" else 1.0))
             )
 
+    # Which register entry each login belongs to, so the Users screen can say
+    # so instead of showing a name and leaving you to guess who it is.
+    from app.models.employee import Employee
+    emp_ids = {r.employee_id for r in rows if r.employee_id}
+    emp_no: dict = {}
+    if emp_ids:
+        for e in (await db.scalars(
+            select(Employee).where(Employee.id.in_(emp_ids))
+        )).all():
+            emp_no[e.id] = e.employee_no
+
     # HR sees the directory but not personal contact details (email/phone).
     hide_contact = Role(me.role) == Role.HR
     return [
         {
             "id": str(r.id),
+            "employee_id": str(r.employee_id) if r.employee_id else None,
+            "employee_no": emp_no.get(r.employee_id) if r.employee_id else None,
             "email": "(hidden)" if hide_contact else r.email,
             "contact_email": None if hide_contact else r.contact_email,
             "full_name": r.full_name,
@@ -486,14 +548,23 @@ async def create_user(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown custom_role_id")
         role = cr.base_role
     _validate_pages(payload.pages)
+    # The register entry comes first — this refuses the account outright if
+    # there is no employee behind it.
+    emp = await _employee_for_login(db, payload.employee_id, role)
     u = User(
         email=payload.email.lower(),
         contact_email=_clean_contact_email(payload.contact_email),
         password_hash=hash_password(payload.password),
-        full_name=payload.full_name,
+        # The register spells the name; the login copies it, so the two can
+        # never drift into two spellings of one person.
+        full_name=emp.full_name if emp else payload.full_name,
         role=role,
-        phone=payload.phone,
+        phone=payload.phone or (emp.phone if emp else None),
         whatsapp_id=payload.whatsapp_id,
+        employee_id=emp.id if emp else None,
+        # Payroll reads the start date off the login; HR decides it on the
+        # register. Carry it across at the moment the two are joined.
+        join_date=emp.join_date if emp else None,
         linked_customer_id=payload.linked_customer_id,
         linked_supplier_id=payload.linked_supplier_id,
         custom_role_id=payload.custom_role_id,
@@ -502,7 +573,8 @@ async def create_user(
     )
     db.add(u)
     await db.flush()
-    return {"id": str(u.id), "email": u.email, "role": u.role}
+    return {"id": str(u.id), "email": u.email, "role": u.role,
+            "employee_id": str(u.employee_id) if u.employee_id else None}
 
 
 # What HR may correct on somebody's record. The employment side of the

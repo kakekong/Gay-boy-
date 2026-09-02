@@ -41,19 +41,28 @@ if [ "${1:-}" = "--fresh" ]; then
   }
   rm -rf /tmp/storage_test/* 2>/dev/null
   python -m app.scripts.seed >/dev/null 2>&1
-  # the seed only creates 6 demo users; these two are needed by the drivers
+  # The seed now creates all eight demo logins, purchasing and finance
+  # included. This stays as a safety net for a database seeded by an older
+  # build — and it makes the employee record too, because an internal login
+  # without one is exactly what the drivers check is refused.
   python - <<'PY' >/dev/null 2>&1
 import asyncio
 from sqlalchemy import select
 from app.core.db import SessionLocal
 from app.core.security import hash_password
+from app.models.employee import Employee
 from app.models.user import User
 async def m():
     async with SessionLocal() as db:
-        for e, n, r in [("purchasing@demo.local", "Purchasing Demo", "purchasing"),
-                        ("finance@demo.local", "Finance Demo", "finance")]:
+        for i, (e, n, r) in enumerate([
+                ("purchasing@demo.local", "Purchasing Demo", "purchasing"),
+                ("finance@demo.local", "Finance Demo", "finance")], start=90):
             if not await db.scalar(select(User).where(User.email == e)):
-                db.add(User(email=e, full_name=n, role=r,
+                emp = Employee(employee_no=f"EMP-DEMO-{i:03d}", full_name=n,
+                               intended_role=r, is_active=True)
+                db.add(emp)
+                await db.flush()
+                db.add(User(email=e, full_name=n, role=r, employee_id=emp.id,
                             password_hash=hash_password("test-pass-123"), is_active=True))
         await db.commit()
 asyncio.run(m())

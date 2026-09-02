@@ -99,9 +99,12 @@ async def main():
     # lineage and leaves the shared scratch database intact for the drivers
     # that run after it.
     victim_email = f"purge-victim-{tag}@demo.local"
+    victim_emp = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Purge Victim {tag}", "intended_role": "sales"}))
     victim = J(await c.post("/users", headers=d, json={
         "email": victim_email, "full_name": f"Purge Victim {tag}",
-        "role": "sales", "password": "test-pass-123"}))
+        "role": "sales", "employee_id": victim_emp["id"],
+        "password": "test-pass-123"}))
     check("created a throwaway rep to purge", bool(victim.get("id")), str(victim)[:140])
     vs = await login(c, victim_email)
 

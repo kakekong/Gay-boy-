@@ -57,9 +57,13 @@ async def main():
     # A second rep to hand things to, and a finance account to prove the
     # server refuses somebody who has no business holding a customer.
     rep2_name = f"Rep Dua {tag}"
+    # The register entry comes before the login.
+    rep2_emp = J(await c.post("/employees", headers=d, json={
+        "full_name": rep2_name, "intended_role": "sales"}))
     second = J(await c.post("/users", headers=d, json={
         "email": f"rep2-{tag}@demo.local", "full_name": rep2_name,
-        "role": "sales", "password": "test-pass-123"}))
+        "role": "sales", "employee_id": rep2_emp["id"],
+        "password": "test-pass-123"}))
     s2 = await login(f"rep2-{tag}@demo.local")
     me2 = J(await c.get("/auth/me", headers=s2))
     fin = J(await c.get("/users", headers=d, params={"role": "finance"}))
@@ -333,9 +337,12 @@ async def main():
           all(f"Bukan Diani" not in x["company_name"] for x in by_hint["data"]))
 
     # Now Diani gets an account, and the director hands the three over.
+    diani_emp = J(await c.post("/employees", headers=d, json={
+        "full_name": f"Diani Putri {tag}", "intended_role": "sales"}))
     diani = J(await c.post("/users", headers=d, json={
         "email": f"diani-{tag}@demo.local", "full_name": f"Diani Putri {tag}",
-        "role": "sales", "password": "test-pass-123"}))
+        "role": "sales", "employee_id": diani_emp["id"],
+        "password": "test-pass-123"}))
     out = J(await c.post("/customers/reassign", headers=d, json={
         "customer_ids": [x["id"] for x in by_hint["data"]],
         "sales_pic_id": diani["id"], "note": "account created after the import"}))

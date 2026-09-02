@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     customer_pos,
     customers,
     dashboards,
+    employees,
     feedback,
     finance,
     financial_reports,
@@ -49,6 +50,7 @@ from app.api.v1.endpoints import (
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(employees.router, prefix="/employees", tags=["employees"])
 api_router.include_router(customers.router, prefix="/customers", tags=["crm"])
 api_router.include_router(customer_pos.router, prefix="/customer-pos", tags=["customer-pos"])
 api_router.include_router(quotations.router, prefix="/quotations", tags=["quotation"])

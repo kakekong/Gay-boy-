@@ -27,6 +27,12 @@ _USERS = [
     ("hr@demo.local",       "HR Demo",       "hr"),
     ("sales1@demo.local",   "Sales One",     "sales"),
     ("sales2@demo.local",   "Sales Two",     "sales"),
+    # Both of these are roles the product has had for a long time; the demo
+    # seed simply never grew them, so every test run had to create them by
+    # hand afterwards and a demo instance had no way to look at finance or
+    # purchasing at all.
+    ("finance@demo.local",    "Finance Demo",    "finance"),
+    ("purchasing@demo.local", "Purchasing Demo", "purchasing"),
 ]
 
 
@@ -524,6 +530,47 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE drawings ALTER COLUMN kind SET DEFAULT 'customer'",
     "ALTER TABLE drawings ALTER COLUMN kind SET NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_drawings_kind ON drawings (kind)",
+
+    # ── The employee register comes before the login ─────────────────────
+    # A login now belongs to somebody on the register. Unique so one person
+    # cannot end up with two accounts; nullable because portal logins
+    # (customer / supplier) are not employees and never get a record.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id UUID",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_employee_id "
+    "ON users (employee_id)",
+    # Everybody who already had a login predates the register, so give each
+    # of them a record and link it. Without this the register would open
+    # empty on the first deploy — every employee in the company missing —
+    # and every existing account would violate the rule the next screen
+    # enforces.
+    #
+    # Keyed off `employee_id IS NULL`, so it runs once per unlinked account
+    # and is a no-op afterwards. The staff numbers are numbered from the
+    # highest already issued in the same series, so a second run (an account
+    # created directly in the database, say) cannot collide with the first.
+    """DO $mig$
+    DECLARE r RECORD; new_id UUID; n INT;
+    BEGIN
+        IF to_regclass('public.employees') IS NULL THEN RETURN; END IF;
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(employee_no,
+                   '^EMP-LEGACY-', ''), '')::int), 0)
+          INTO n FROM employees WHERE employee_no LIKE 'EMP-LEGACY-%';
+        FOR r IN
+            SELECT id, full_name, role, join_date, phone, is_active
+              FROM users
+             WHERE employee_id IS NULL
+               AND role NOT IN ('customer', 'supplier')
+             ORDER BY created_at
+        LOOP
+            n := n + 1;
+            INSERT INTO employees (id, employee_no, full_name, intended_role,
+                                   join_date, phone, is_active)
+            VALUES (gen_random_uuid(), 'EMP-LEGACY-' || lpad(n::text, 3, '0'),
+                    r.full_name, r.role, r.join_date, r.phone, r.is_active)
+            RETURNING id INTO new_id;
+            UPDATE users SET employee_id = new_id WHERE id = r.id;
+        END LOOP;
+    END $mig$""",
 ]
 
 
@@ -591,11 +638,23 @@ async def main() -> None:
             if not demo_pw:
                 print("Skipping demo-user seed: DEMO_SEED_PASSWORD not set.")
             else:
-                for email, name, role in _USERS:
+                from app.models.employee import Employee
+                for i, (email, name, role) in enumerate(_USERS, start=1):
                     existing = await db.scalar(select(User).where(User.email == email))
                     if existing:
                         continue
+                    # Every internal login belongs to somebody on the
+                    # register, demo accounts included — otherwise the very
+                    # first thing a demo shows is a Users list full of people
+                    # who are not employees.
+                    emp = Employee(
+                        employee_no=f"EMP-DEMO-{i:03d}", full_name=name,
+                        intended_role=role, is_active=True,
+                    )
+                    db.add(emp)
+                    await db.flush()
                     db.add(User(email=email, full_name=name, role=role,
+                                employee_id=emp.id,
                                 password_hash=hash_password(demo_pw), is_active=True))
                 await db.flush()
 

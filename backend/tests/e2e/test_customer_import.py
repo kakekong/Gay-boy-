@@ -88,10 +88,12 @@ async def main():
     # not, so the unmatched-rep warning has something real to report.
     reps = {}
     for first in (f"Candra{tag}", f"Gora{tag}"):
+        emp = J(await c.post("/employees", headers=d, json={
+            "full_name": f"{first} Wijaya", "intended_role": "sales"}))
         r = J(await c.post("/users", headers=d, json={
             "email": f"{first.lower()}@voler.co.id",
             "full_name": f"{first} Wijaya", "role": "sales",
-            "password": "test-pass-123"}))
+            "employee_id": emp["id"], "password": "test-pass-123"}))
         reps[first.lower()] = r.get("id")
     check("the sales accounts the import will link to exist",
           all(reps.values()), str(reps))
