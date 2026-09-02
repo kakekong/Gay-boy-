@@ -104,6 +104,11 @@ export default function SupplierPriceRequestDetailPage() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<{ number: string; items: Line[] }>(
     { number: "", items: [] });
+  // Correcting the currency on a request that is already closed — its own
+  // small form, because it is the one thing that stays changeable.
+  const [curOpen, setCurOpen] = useState(false);
+  const [curCode, setCurCode] = useState("IDR");
+  const [curRate, setCurRate] = useState("");
 
   const q = useQuery({
     queryKey: ["supplier-price-request", id],
@@ -130,7 +135,9 @@ export default function SupplierPriceRequestDetailPage() {
     setLeadDays(q.data.quoted_lead_days != null ? String(q.data.quoted_lead_days) : "");
     setCurrency(q.data.currency || "IDR");
     setFxRate(q.data.fx_rate != null ? String(q.data.fx_rate) : "");
-  }, [q.data?.id, q.data?.quoted_at]);
+    setCurCode(q.data.currency || "IDR");
+    setCurRate(q.data.fx_rate != null ? String(q.data.fx_rate) : "");
+  }, [q.data?.id, q.data?.quoted_at, q.data?.currency, q.data?.fx_rate]);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["supplier-price-request", id] });
@@ -206,6 +213,32 @@ export default function SupplierPriceRequestDetailPage() {
     mutationFn: (reason: string) =>
       api.post(`/purchasing/price-requests/${id}/close`, { reason: reason || null }),
     onSuccess: () => { refresh(); setFlash({ kind: "ok", text: t("Closed.", "Ditutup.") }); },
+    onError: onErr,
+  });
+  // The currency stays correctable after everything else is frozen: it is a
+  // fact read off the vendor's sheet, not a decision, and the way it goes
+  // wrong is only ever noticed later. Changing it here also recomputes the
+  // cost it put on the price request, which is the whole point.
+  const fixCurrency = useMutation({
+    mutationFn: () => api.patch(`/purchasing/price-requests/${id}/currency`, {
+      currency: curCode,
+      fx_rate: curCode === "IDR" || curRate === "" ? null : Number(curRate),
+    }),
+    onSuccess: (res: any) => {
+      setCurOpen(false);
+      refresh();
+      qc.invalidateQueries({ queryKey: ["price-requests"] });
+      const n = res.data?.recosted?.length ?? 0;
+      setFlash({
+        kind: "ok",
+        text: n
+          ? t(`Currency corrected — the cost on ${res.data.recosted
+                .map((x: any) => x.price_request_number).join(", ")} was recomputed.`,
+              `Mata uang diperbaiki — biaya di ${res.data.recosted
+                .map((x: any) => x.price_request_number).join(", ")} dihitung ulang.`)
+          : t("Currency corrected.", "Mata uang diperbaiki."),
+      });
+    },
     onError: onErr,
   });
   const drop = useMutation({
@@ -394,8 +427,12 @@ export default function SupplierPriceRequestDetailPage() {
             <span className="tabular-nums">{r.lines_quoted}/{r.lines_total}</span>
           </Cell>
           <Cell label={t("Quoted total", "Total penawaran")}>
+            {/* In the vendor's currency, because that is the number they
+                said. Printing "Rp" in front of a yuan figure is the exact
+                confusion the exchange rate exists to resolve. */}
             <span className="tabular-nums">
-              {r.quoted_total == null ? "—" : idr(r.quoted_total)}
+              {r.quoted_total == null
+                ? "—" : money(r.quoted_total, r.currency || "IDR")}
             </span>
           </Cell>
           <Cell label={t("Lead time", "Waktu kirim")}>
@@ -444,7 +481,17 @@ export default function SupplierPriceRequestDetailPage() {
                 {t("in", "dalam")}
                 <select className="input py-1" value={currency}
                   aria-label="Quote currency"
-                  onChange={(e) => setCurrency(e.target.value)}>
+                  onChange={(e) => {
+                    // A rate belongs to the currency it was typed for.
+                    // Carrying it across is how a CNY quote gets saved at
+                    // 1 rupiah to the yuan — the exact mistake the rate
+                    // exists to prevent — so it is cleared unless we are
+                    // returning to the one already on the record.
+                    const next = e.target.value;
+                    setCurrency(next);
+                    setFxRate(next === (r.currency || "IDR") && r.fx_rate != null
+                      ? String(r.fx_rate) : "");
+                  }}>
                   {CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>{c.code}</option>
                   ))}
@@ -462,7 +509,87 @@ export default function SupplierPriceRequestDetailPage() {
               )}
             </div>
           )}
+
+          {/* Everything else on a closed request is frozen. The currency is
+              not: it is a fact read off the vendor's sheet, and reading it
+              wrong is only ever noticed after the quote has been applied —
+              which used to be exactly when it stopped being fixable. */}
+          {!quoting && !editing && (
+            <div className="flex items-end gap-2 flex-wrap">
+              {!curOpen ? (
+                <>
+                  <span className="text-xs muted">
+                    {t("Quoted in", "Dihargai dalam")}{" "}
+                    <b>{r.currency || "IDR"}</b>
+                    {(r.currency || "IDR") !== "IDR" && r.fx_rate != null && (
+                      <> {t("at", "pada")} {new Intl.NumberFormat("id-ID")
+                        .format(Number(r.fx_rate))}</>
+                    )}
+                  </span>
+                  <button className="btn-ghost text-xs border border-ink-200"
+                    onClick={() => setCurOpen(true)}>
+                    <Pencil size={12} /> {t("Correct currency", "Perbaiki mata uang")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label className="text-xs flex items-center gap-2">
+                    {t("They quoted in", "Mereka menghargai dalam")}
+                    <select className="input py-1" value={curCode}
+                      aria-label="Correct the quote currency"
+                      onChange={(e) => {
+                        // Same rule as the quote form: the old currency's
+                        // rate must not survive into the new one.
+                        const next = e.target.value;
+                        setCurCode(next);
+                        setCurRate(next === (r.currency || "IDR") && r.fx_rate != null
+                          ? String(r.fx_rate) : "");
+                      }}>
+                      {CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>{c.code}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {curCode !== "IDR" && (
+                    <label className="text-xs flex items-center gap-2">
+                      {t(`Rp per ${curCode}`, `Rp per ${curCode}`)}
+                      <input className="input py-1 w-28" type="number" min="0"
+                        step="0.000001" value={curRate}
+                        aria-label="Correct the exchange rate"
+                        placeholder="16.200"
+                        onChange={(e) => setCurRate(e.target.value)} />
+                    </label>
+                  )}
+                  <button className="btn-ghost text-xs"
+                    onClick={() => {
+                      setCurOpen(false);
+                      setCurCode(r.currency || "IDR");
+                      setCurRate(r.fx_rate != null ? String(r.fx_rate) : "");
+                    }}>
+                    {t("Cancel", "Batal")}
+                  </button>
+                  <button className="btn-primary text-xs"
+                    disabled={fixCurrency.isPending
+                      || (curCode !== "IDR" && !(Number(curRate) > 0))}
+                    onClick={() => fixCurrency.mutate()}>
+                    {fixCurrency.isPending
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <Save size={12} />}
+                    {t("Save currency", "Simpan mata uang")}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </header>
+
+        {curOpen && r.applied_at && (
+          <p className="px-5 py-2 text-xs bg-amber-50/70 text-amber-900
+                        border-b border-amber-100">
+            {t("This quote is the cost on the price request it was raised against — saving a new currency recomputes that cost at the new rate.",
+               "Penawaran ini adalah biaya pada permintaan harga yang menjadi asalnya — menyimpan mata uang baru akan menghitung ulang biaya itu dengan kurs baru.")}
+          </p>
+        )}
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
@@ -534,7 +661,8 @@ export default function SupplierPriceRequestDetailPage() {
                       />
                     ) : (
                       <span className="tabular-nums">
-                        {it.quoted_price == null ? "—" : idr(it.quoted_price)}
+                        {it.quoted_price == null
+                          ? "—" : money(it.quoted_price, currency)}
                       </span>
                     )}
                   </td>
@@ -686,7 +814,18 @@ export default function SupplierPriceRequestDetailPage() {
                   <td className="td text-right tabular-nums">{o.lines_quoted}/{o.lines_total}</td>
                   <td className="td text-right tabular-nums">{o.quoted_lead_days ?? "—"}</td>
                   <td className="td text-right tabular-nums font-medium">
-                    {o.quoted_total == null ? "—" : idr(o.quoted_total)}
+                    {/* Each vendor in their own currency — two totals side by
+                        side that are not the same money must not look like
+                        they are. The rupiah each converts to is what the
+                        comparison is really on, and follows below. */}
+                    {o.quoted_total == null
+                      ? "—" : money(o.quoted_total, o.currency || "IDR")}
+                    {(o.currency || "IDR") !== "IDR" && o.fx_rate != null
+                      && o.quoted_total != null && (
+                      <span className="block text-[11px] muted font-normal">
+                        {idr(o.quoted_total * Number(o.fx_rate))}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

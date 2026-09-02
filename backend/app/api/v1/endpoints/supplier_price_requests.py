@@ -151,6 +151,11 @@ class CloseIn(BaseModel):
     reason: str | None = None
 
 
+class CurrencyIn(BaseModel):
+    currency: str
+    fx_rate: float | None = None
+
+
 def _to_unit(value: float, basis: str | None, qty: float) -> float:
     """Normalise a quoted figure to a per-unit price.
 
@@ -644,7 +649,15 @@ async def record_quote(
             it["note"] = q.note
     spr.items = items
     if payload.currency:
+        was = (spr.currency or "IDR").upper()
         spr.currency = payload.currency.strip().upper()[:8]
+        # A rate belongs to the currency it was typed for. A quote revised
+        # from rupiah to yuan without a new rate would otherwise keep the 1
+        # that rupiah implies — and 1 is a rate `apply` accepts, so 1,800 CNY
+        # would land as Rp 1,800 with nothing anywhere saying so. Dropping it
+        # makes `apply` ask for the rate instead of inventing one.
+        if spr.currency != was and payload.fx_rate is None:
+            spr.fx_rate = None
     if payload.fx_rate is not None:
         rate = float(payload.fx_rate)
         if rate <= 0:
@@ -861,6 +874,137 @@ async def close_request(
                        after={"number": spr.number, "reason": payload.reason})
     await db.flush()
     return (await _decorate(db, [spr]))[0]
+
+
+@router.patch("/{spr_id}/currency")
+async def change_currency(
+    spr_id: UUID,
+    payload: CurrencyIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Correct what the supplier quoted in — at any point, closed included.
+
+    Everything else on an answered request is frozen, and rightly: the vendor
+    is holding the list they were sent. The currency is different. It is not
+    a decision anybody made, it is a fact about a document that was read off
+    it, and the way it goes wrong is quiet — a quote in CNY typed as though
+    it were rupiah looks like a bargain, applies at face value, and sets a
+    margin on a number that never existed. That mistake is usually noticed
+    *after* the quote has been applied, which under the old rules was exactly
+    when it stopped being fixable.
+
+    So the label can always be corrected. What makes this worth doing rather
+    than cosmetic is the second half: if this quote is the live cost on a
+    price request, the cost is recomputed at the new rate in the same call.
+    Correcting the currency and leaving the money is not a correction — it is
+    the same wrong number with a more convincing label on it.
+
+    Which is also why it refuses when it cannot finish. If a price request
+    this quote costed has already gone past the point of being re-costed, the
+    change is rejected whole rather than applied to the parts that are still
+    reachable: half a correction across two jobs is worse than none, because
+    nothing on the screen would say which half.
+    """
+    spr = await _load(spr_id, db)
+    currency = (payload.currency or "").strip().upper()[:8]
+    if not currency:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Say which currency they quoted in.")
+    rate = float(payload.fx_rate) if payload.fx_rate is not None else None
+    if currency == "IDR":
+        # Rupiah is its own rate. Nobody is asked to type 1, and a rate typed
+        # anyway is ignored rather than silently scaling rupiah by it.
+        rate = 1.0
+    elif rate is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Say how many rupiah one {currency} costs — without a rate the "
+            "cost lands as though the supplier had quoted rupiah.")
+    elif rate <= 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "A rate is how many rupiah one unit costs — a positive number.")
+
+    before = {"currency": spr.currency,
+              "fx_rate": float(spr.fx_rate) if spr.fx_rate is not None else None}
+    if before["currency"] == currency and before["fx_rate"] == rate:
+        return (await _decorate(db, [spr]))[0]
+
+    # ── the money that already went out on the old rate ──────────────────
+    recosted: list[dict] = []
+    if spr.applied_at is not None:
+        priced = [i for i in (spr.items or []) if i.get("quoted_price") is not None]
+        by_pr: dict[str, list[dict]] = {}
+        for i in priced:
+            src = i.get("source_pr_id") or (str(spr.price_request_id)
+                                            if spr.price_request_id else None)
+            if src:
+                by_pr.setdefault(str(src), []).append(i)
+
+        # Look before writing anything: a refusal has to leave the record
+        # exactly as it found it.
+        blocked: list[str] = []
+        targets: list[tuple] = []
+        for pr_id_str, lines in by_pr.items():
+            pr = await db.get(PriceRequest, UUID(pr_id_str))
+            if not pr or pr.is_deleted:
+                continue
+            if pr.status not in ("pending_purchasing", "pending_director"):
+                blocked.append(f"{pr.number} is '{pr.status}'")
+                continue
+            targets.append((pr, lines))
+        if blocked:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"This quote is the cost on {'; '.join(blocked)}, which has "
+                "moved past re-costing. Changing the currency here would "
+                "leave that cost at the old rate, so it is refused rather "
+                "than half-done — correct it on the price request itself.",
+            )
+
+        for pr, lines in targets:
+            want = {int(i.get("source_line_no") or i.get("line_no") or 0):
+                    round(float(i["quoted_price"]) * rate, 2) for i in lines}
+            items = [dict(it) for it in (pr.items or [])]
+            touched = 0
+            for it in items:
+                price = want.get(int(it.get("line_no") or 0))
+                if price is None:
+                    continue
+                it["cost_price"] = price
+                it["cost_basis"] = "unit"
+                it["cost_source"] = spr.number
+                touched += 1
+            pr.items = items
+            pr.notes = ((pr.notes or "")
+                        + f"\n[purchasing] {spr.number} was quoted in "
+                        + f"{currency}, not {before['currency'] or 'IDR'} — "
+                        + f"cost recomputed at {rate:g}").strip()
+            recosted.append({"price_request_id": str(pr.id),
+                             "price_request_number": pr.number,
+                             "recosted_lines": touched})
+            await audit_record(db, actor=user, action="recost",
+                               entity="price_request", entity_id=pr.id,
+                               before={"currency": before["currency"],
+                                       "fx_rate": str(before["fx_rate"])},
+                               after={"from": spr.number, "currency": currency,
+                                      "fx_rate": str(rate), "lines": touched})
+
+    spr.currency = currency
+    spr.fx_rate = rate
+    spr.notes = ((spr.notes or "")
+                 + f"\n[currency] {before['currency'] or 'IDR'} → {currency}"
+                 + (f" at {rate:g}" if currency != "IDR" else "")).strip()
+    await audit_record(db, actor=user, action="change_currency",
+                       entity="supplier_price_request", entity_id=spr.id,
+                       before={k: str(v) for k, v in before.items()},
+                       after={"currency": currency, "fx_rate": str(rate),
+                              "recosted": len(recosted)})
+    await db.flush()
+    out = (await _decorate(db, [spr]))[0]
+    out["recosted"] = recosted
+    return out
 
 
 @router.delete("/{spr_id}", status_code=204)
