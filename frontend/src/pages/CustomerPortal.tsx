@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { ModalCloseX } from "@/components/ModalCloseX";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, FileText, Truck, Receipt, Hammer, CheckCircle2, RotateCcw, Loader2,
-  Banknote, X,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -248,147 +246,35 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * An invoice, to read.
+ *
+ * There used to be an "I paid this" button here, which opened a form the
+ * customer filled in for finance to verify. It is gone: the record of money
+ * arriving now starts with finance reading the bank statement, not with the
+ * customer telling us. Nothing is lost from the customer's side — they could
+ * only ever describe a transfer they had already made, and the status below
+ * still turns paid once finance has seen it land.
+ */
 function InvoiceRow({ invoice }: { invoice: any }) {
-  const [open, setOpen] = useState(false);
-  const qc = useQueryClient();
-
-  // Pull existing claims for this invoice so we can show progress
-  const claims = useQuery({
-    queryKey: ["portal-claims", invoice.id],
-    queryFn: () => api.get("/payments/claims/mine").then((r) => r.data as any[]),
-  });
-  const myClaims = (claims.data ?? []).filter((c) => c.invoice_id === invoice.id);
-
   return (
-    <>
-      <li className="rounded-xl border border-ink-100 p-3 text-sm">
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="font-mono text-xs">{invoice.number}</span>
-          <span className={clsx("chip",
-            invoice.status === "paid" ? "bg-emerald-50 text-emerald-700"
-            : invoice.status === "partial" ? "bg-amber-50 text-amber-700"
-            : invoice.status === "overdue" ? "bg-red-50 text-red-700"
-            : "bg-ink-100 text-ink-700"
-          )}>{invoice.status}</span>
-          <span className="muted">{T("Due:")}{" "}{invoice.due_date ?? "—"}</span>
-          <span className="ml-auto font-medium tabular-nums">{idr(invoice.total)}</span>
-          {invoice.status !== "paid" && (
-            <button className="btn-primary" onClick={() => setOpen(true)}>
-              <Banknote size={13} /> {T("I paid this")}</button>
-          )}
-        </div>
-        {myClaims.length > 0 && (
-          <ul className="mt-2 text-xs space-y-1">
-            {myClaims.map((c: any) => (
-              <li key={c.id} className="flex items-center gap-2">
-                <span className={clsx("chip uppercase",
-                  c.status === "verified" ? "bg-emerald-50 text-emerald-700"
-                  : c.status === "rejected" ? "bg-red-50 text-red-700"
-                                            : "bg-amber-50 text-amber-700",
-                )}>{c.status}</span>
-                <span className="muted">
-                  {idr(c.amount)} {c.method && <>· {c.method}</>} {c.reference && <>· {c.reference}</>}
-                  {c.paid_at && <> {T("· paid")}{" "}{c.paid_at}</>}
-                </span>
-                {c.decision_notes && <span className="text-ink-600">— {c.decision_notes}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </li>
-      {open && <PaymentClaimModal invoice={invoice} onClose={() => {
-        setOpen(false);
-        qc.invalidateQueries({ queryKey: ["portal-claims", invoice.id] });
-      }} />}
-    </>
-  );
-}
-
-function PaymentClaimModal({ invoice, onClose }: { invoice: any; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [amount, setAmount] = useState<number>(Number(invoice.total) || 0);
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
-  const [method, setMethod] = useState("bank_transfer");
-  const [reference, setReference] = useState("");
-  const [notes, setNotes] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-
-  const submit = useMutation({
-    mutationFn: () => api.post("/payments/claims", {
-      invoice_id: invoice.id,
-      amount,
-      paid_at: paidAt || null,
-      method, reference: reference || null, notes: notes || null,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["portal-claims", invoice.id] });
-      onClose();
-    },
-    onError: (e: any) => setErr(e?.response?.data?.errors?.[0]?.message ?? "Submit failed"),
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4">
-      {/* No onClick: a stray click beside the box must not throw away
-          what has been typed into it. The X and Escape close it. */}
-      <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-sm" />
-      <form onSubmit={(e) => { e.preventDefault(); setErr(null); submit.mutate(); }}
-        className="relative w-full max-w-md bg-white rounded-2xl shadow-card p-5 space-y-3"
-      >
-        <ModalCloseX onClose={onClose} />
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">{T("Submit payment for")}{" "}{invoice.number}</h2>
-            <p className="text-sm muted">{T("Finance will verify and mark the invoice paid.")}</p>
-          </div>
-          <button type="button" onClick={onClose} className="text-ink-400 hover:text-ink-700">
-            <X size={16} />
-          </button>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Amount (IDR)")}</span>
-            <input type="number" min={0} step="any" className="input" required
-              value={amount} onChange={(e) => setAmount(parseFloat(e.target.value || "0"))} />
-          </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Date paid")}</span>
-            <input type="date" className="input" required
-              value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
-          </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Method")}</span>
-            <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
-              <option value="bank_transfer">{T("Bank transfer")}</option>
-              <option value="cash">{T("Cash")}</option>
-              <option value="cheque">{T("Cheque")}</option>
-              <option value="other">{T("Other")}</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Reference / Bank #")}</span>
-            <input className="input" value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder={T("e.g. TRX1234567")} />
-          </label>
-        </div>
-        <label className="block">
-          <span className="block text-xs font-medium text-ink-600 mb-1">{T("Notes")}</span>
-          <textarea className="input min-h-[60px]" value={notes}
-            onChange={(e) => setNotes(e.target.value)} placeholder={T("optional")} />
-        </label>
-        {err && (
-          <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">{err}</div>
-        )}
-        <div className="text-[11px] muted">
-          {T("Tip: take a screenshot of the bank transfer and email it to your sales PIC; we'll attach it to this record.")}</div>
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>
-          <button type="submit" className="btn-primary" disabled={submit.isPending}>
-            {submit.isPending ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />}
-            {T("Submit for verification")}</button>
-        </div>
-      </form>
-    </div>
+    <li className="rounded-xl border border-ink-100 p-3 text-sm">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="font-mono text-xs">{invoice.number}</span>
+        <span className={clsx("chip",
+          invoice.status === "paid" ? "bg-emerald-50 text-emerald-700"
+          : invoice.status === "partial" ? "bg-amber-50 text-amber-700"
+          : invoice.status === "overdue" ? "bg-red-50 text-red-700"
+          : "bg-ink-100 text-ink-700"
+        )}>{invoice.status}</span>
+        <span className="muted">{T("Due:")}{" "}{invoice.due_date ?? "—"}</span>
+        <span className="ml-auto font-medium tabular-nums">{idr(invoice.total)}</span>
+      </div>
+      {invoice.status !== "paid" && (
+        <p className="mt-1.5 text-[11px] muted">
+          {T("Paid already? It shows here once our finance team matches it against the bank — no need to tell us twice.")}
+        </p>
+      )}
+    </li>
   );
 }

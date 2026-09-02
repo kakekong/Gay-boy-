@@ -130,8 +130,8 @@ const STAGE_GUIDE: Record<string, StageGuide> = {
   },
   delivered: {
     who: ["Finance", "Keuangan"],
-    action: ["Verify the customer's payment claim, or record the payment manually. Paying in full closes the project outright.",
-             "Verifikasi klaim pembayaran pelanggan, atau catat pembayaran manual. Pelunasan penuh langsung menutup proyek."],
+    action: ["Record the payment once you can see it in the bank. Paying in full closes the project outright.",
+             "Catat pembayaran begitu terlihat di rekening. Pelunasan penuh langsung menutup proyek."],
     where: ["Finance → Payment verification, or the invoice card → Enter payment manually",
             "Keuangan → Verifikasi pembayaran, atau kartu faktur → Catat pembayaran manual"],
     note: ["A part payment leaves the invoice 'partial' and the project here until the rest lands.",
@@ -589,9 +589,9 @@ export default function ProjectDetailPage() {
     },
     onError: onErr,
   });
-  // Finance records the payment manually and it's verified in one stroke
-  // (same endpoint as the Payment-verification page) — no separate
-  // claim-then-verify round trip when finance is the one typing it in.
+  // The same endpoint the Payment-verification page uses: recorded and
+  // verified in one stroke, because finance reading the bank statement is
+  // the verification. There is no other way in — customers do not submit.
   // Fully paying the invoice auto-advances the project to paid → closed.
   const recordManualPayment = useMutation({
     mutationFn: async (body: {
@@ -1772,7 +1772,7 @@ export default function ProjectDetailPage() {
                   <div className="rounded-lg bg-ink-50/60 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="text-[11px] uppercase tracking-wider muted">
-                        {t("Payments", "Pembayaran")} · {iv.claims?.length ?? 0} {t("claim(s)", "klaim")}
+                        {t("Payments", "Pembayaran")} · {iv.claims?.length ?? 0} {t("recorded", "tercatat")}
                       </div>
                       {showMoney && iv.total != null && (
                         <div className="text-[11px] muted tabular-nums">

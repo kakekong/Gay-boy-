@@ -1,9 +1,20 @@
-"""Customer-payment verification flow.
+"""Recording customer payments.
 
-Customer submits a payment claim from the customer portal (amount, date,
-method, reference, optional proof attachment). Finance / Director sees
-pending claims and verifies or rejects them. Verification creates a real
-Payment row and recomputes the invoice's status (issued → partial → paid).
+Finance records a payment against an invoice — amount, date, method,
+reference, optional proof — and that creates the Payment row, posts the
+receipt to the ledger, recomputes the invoice status (issued → partial →
+paid) and, when the invoice lands fully paid, moves the project on.
+
+Customers no longer submit anything here. They used to claim a payment from
+the portal for finance to verify, which meant the record of money arriving
+started with somebody outside the company saying it had. It is finance who
+watches the bank account, so it is finance who writes it down: the entry and
+the verification are one act, by the desk that can actually see the money.
+
+The claim table and the verify / reject endpoints stay, for two reasons —
+claims submitted before this change still have to be settled rather than
+stranded, and every recorded payment still writes one, so the audit trail
+reads the same all the way back.
 """
 
 from datetime import UTC, date as date_t, datetime
@@ -16,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import record as audit_record
 from app.core.db import get_db
-from app.core.deps import get_current_user
 from app.core.permissions import Role, require
 from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.payment_claim import PaymentClaim
@@ -26,16 +36,6 @@ router = APIRouter()
 # Admin is out of the finance verification loop — projects/ops/inventory
 # only. Finance verifies payment claims; manager sees; director backstop.
 _finance = require(Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
-
-
-class ClaimIn(BaseModel):
-    invoice_id: UUID
-    amount: float
-    paid_at: date_t | None = None
-    method: str | None = None
-    reference: str | None = None
-    notes: str | None = None
-    attachment_id: UUID | None = None
 
 
 class DecisionIn(BaseModel):
@@ -59,6 +59,14 @@ async def _serialize(db: AsyncSession, c: PaymentClaim) -> dict:
         "attachment_id": str(c.attachment_id) if c.attachment_id else None,
         "status": c.status,
         "created_at": c.created_at,
+        # Who wrote this down. On anything recorded since payments became
+        # finance's own entry that is a member of staff; on a claim left over
+        # from the portal days it is the customer, and `source` says which so
+        # the screen can label it honestly rather than calling both the same.
+        "submitted_by_name": user.full_name if user else None,
+        "source": ("portal" if user and Role(user.role) == Role.CUSTOMER
+                   else "finance"),
+        # Kept for older clients that still read this key.
         "customer_user_name": user.full_name if user else None,
         "verified_by": str(c.verified_by) if c.verified_by else None,
         "verified_by_name": verifier.full_name if verifier else None,
@@ -67,60 +75,12 @@ async def _serialize(db: AsyncSession, c: PaymentClaim) -> dict:
     }
 
 
-# ─── Customer-side (from the portal) ─────────────────────────────────────────
-
-@router.post("/claims", status_code=201)
-async def submit_claim(
-    payload: ClaimIn,
-    db: AsyncSession = Depends(get_db),
-    me: User = Depends(get_current_user),
-):
-    """Submit a payment claim. Customer or internal staff may call this."""
-    inv = await db.get(Invoice, payload.invoice_id)
-    if not inv:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
-    # Scope check for customer accounts
-    if Role(me.role) == Role.CUSTOMER:
-        if not me.linked_customer_id or me.linked_customer_id != inv.customer_id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your invoice")
-    if payload.amount <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Amount must be positive")
-    c = PaymentClaim(
-        invoice_id=payload.invoice_id,
-        customer_user_id=me.id,
-        amount=payload.amount,
-        paid_at=payload.paid_at,
-        method=payload.method,
-        reference=payload.reference,
-        notes=payload.notes,
-        attachment_id=payload.attachment_id,
-        status="pending",
-    )
-    db.add(c)
-    await db.flush()
-    return await _serialize(db, c)
-
-
-@router.get("/claims/mine")
-async def my_claims(
-    db: AsyncSession = Depends(get_db),
-    me: User = Depends(get_current_user),
-):
-    """Claims the current user submitted (or, for finance, all)."""
-    if Role(me.role) in (Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR):
-        rows = (await db.scalars(
-            select(PaymentClaim).order_by(PaymentClaim.created_at.desc())
-        )).all()
-    else:
-        rows = (await db.scalars(
-            select(PaymentClaim)
-            .where(PaymentClaim.customer_user_id == me.id)
-            .order_by(PaymentClaim.created_at.desc())
-        )).all()
-    return [await _serialize(db, c) for c in rows]
-
-
-# ─── Finance verification ────────────────────────────────────────────────────
+# ─── Finance's own record ────────────────────────────────────────────────────
+#
+# `POST /claims` and `GET /claims/mine` used to live here: the customer told
+# us they had paid, and finance agreed or disagreed. Both are gone. The money
+# arriving is something only finance can see, so finance is who writes it
+# down — `POST /manual`, below, in one step.
 
 @router.get("/claims")
 async def list_claims(
@@ -220,12 +180,15 @@ async def record_manual_payment(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(_finance),
 ):
-    """Finance records AND verifies a customer payment in one stroke — for
-    customers who pay by transfer and never touch the portal. Creates the
-    claim already verified (so the audit trail matches the portal flow),
-    the Payment row, the ledger post, recomputes the invoice status, and
-    advances the project when the invoice lands fully paid — identical
-    side effects to the claim-then-verify path.
+    """Finance writes down a payment that has arrived. This is the way in.
+
+    One step, because the two steps were only ever separate to give the
+    customer somewhere to put a claim. Finance is looking at the bank
+    statement; asking them to record what they can see and then agree with
+    themselves is ceremony. So this creates the claim already verified — the
+    audit trail reads the same shape as it always did — plus the Payment row
+    and the ledger post, recomputes the invoice status, and advances the
+    project when the invoice lands fully paid.
     """
     inv = await db.get(Invoice, payload.invoice_id)
     if not inv:
@@ -253,7 +216,7 @@ async def record_manual_payment(
         status="verified",
         verified_by=me.id,
         verified_at=now,
-        decision_notes="Recorded manually by finance (customer paid outside the portal).",
+        decision_notes=f"Recorded by {me.full_name} against the bank record.",
     )
     db.add(c)
     payment = Payment(

@@ -9,7 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { useAuthStore } from "@/store/auth";
-import { T } from "@/store/lang";
+import { T, t } from "@/store/lang";
 
 const BUCKETS = [
   { key: "current", label: "Current",    color: "bg-emerald-500" },
@@ -36,7 +36,7 @@ export default function FinancePage() {
 
       <EFakturExport />
       <PendingInvoiceApprovals />
-      <PendingPaymentClaims />
+      <MoneyIn />
       <ArAging />
     </div>
   );
@@ -91,64 +91,98 @@ function EFakturExport() {
   );
 }
 
-function PendingPaymentClaims() {
-  // Complements the invoice-approval queue above with the second thing
-  // finance actually has to do: verify customer payment claims. Landing
-  // on /finance with zero-pending on both is what tells finance the desk
-  // is clean. If claims are pending, one click jumps to the full
-  // Payment verification page to act on them.
+/**
+ * Money in: what is still owed, and anything left over from the old portal
+ * claims that still needs a decision.
+ *
+ * This card used to be a queue of payment claims customers submitted from
+ * their portal. That route is gone — finance records payments itself now —
+ * so a card built around it would sit permanently empty and say nothing.
+ * What finance actually wants on landing is the same question the queue was
+ * a proxy for: whose money has not arrived yet.
+ */
+function MoneyIn() {
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
-  const pending = useQuery({
+  const open = useQuery({
+    queryKey: ["open-invoices", "finance-dashboard"],
+    queryFn: () => api.get("/payments/open-invoices").then((r) => r.data as any[]),
+  });
+  // Only ever shrinks, and is empty on a clean system — but a claim a
+  // customer submitted before the change still has to be settled, so it is
+  // surfaced rather than left for somebody to find.
+  const legacy = useQuery({
     queryKey: ["pending-claims", "finance-dashboard"],
     queryFn: () => api
       .get("/payments/claims", { params: { status_eq: "pending" } })
       .then((r) => r.data as any[]),
   });
-  const rows = pending.data ?? [];
+  const rows = open.data ?? [];
+  const owed = rows.reduce((a: number, r: any) => a + Number(r.outstanding || 0), 0);
+  const stale = legacy.data ?? [];
+
   return (
     <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <div className="font-semibold flex items-center gap-2">
-            <Banknote size={15} className="text-brand-600" /> {T("Pending payment claims")}</div>
+            <Banknote size={15} className="text-brand-600" /> {T("Money in")}</div>
           <div className="text-xs muted">
-            {T("Customers submitted these payments — verify them to advance the project to paid/closed. Approving the invoice above isn't enough on its own; this is the actual money-in step.")}</div>
+            {t("Invoices still waiting on payment. Record one against the bank and the invoice — and its project — move on.",
+               "Faktur yang masih menunggu pembayaran. Catat sesuai rekening dan faktur — beserta proyeknya — akan bergerak.")}
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="chip bg-amber-50 text-amber-700">{rows.length} {T("pending")}</span>
+          <span className="chip bg-amber-50 text-amber-700">
+            {rows.length} {t("open", "terbuka")}
+          </span>
           <Link to="/finance/payment-verification" className="btn-ghost text-xs">
-            {T("Open verification queue")}</Link>
+            {t("Record a payment", "Catat pembayaran")}</Link>
         </div>
       </div>
-      {pending.isLoading ? (
+
+      {stale.length > 0 && (
+        <div className="px-5 py-2 bg-amber-50/70 text-xs text-amber-900
+                        flex items-center gap-2 flex-wrap border-b border-amber-100">
+          <span className="flex-1">
+            {stale.length}{" "}
+            {t("claim(s) submitted from the customer portal before this changed still need a decision.",
+               "klaim yang dikirim dari portal pelanggan sebelum perubahan ini masih butuh keputusan.")}
+          </span>
+          <Link to="/finance/payment-verification" className="underline hover:no-underline">
+            {t("Settle them", "Selesaikan")}
+          </Link>
+        </div>
+      )}
+
+      {open.isLoading ? (
         <div className="p-6 text-center text-sm muted flex items-center justify-center gap-2">
           <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
       ) : rows.length === 0 ? (
         <div className="p-6 text-center text-sm muted">
-          {T("No customer payments waiting for verification.")}</div>
+          {t("Nothing outstanding — every issued invoice has been paid.",
+             "Tidak ada tunggakan — semua faktur terbit sudah dibayar.")}
+        </div>
       ) : (
         <ul className="divide-y divide-ink-100">
-          {rows.slice(0, 5).map((c: any) => (
-            <li key={c.id} className="p-4 flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-sm">
-                <span className="font-mono font-medium">{c.invoice_number ?? "—"}</span>
-                <span className="muted"> · {c.customer_user_name ?? "—"}</span>
-                {c.method && <span className="muted"> · {c.method}</span>}
-                {c.reference && <span className="muted"> {T("· ref")}{" "}{c.reference}</span>}
+          {rows.slice(0, 5).map((r: any) => (
+            <li key={r.id} className="p-4 flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-sm min-w-0">
+                <span className="font-mono font-medium">{r.number ?? "—"}</span>
+                <span className="muted"> · {r.customer_name ?? "—"}</span>
+                {r.due_date && <span className="muted"> · {T("Due:")} {r.due_date}</span>}
               </div>
               <div className="flex items-center gap-3">
-                <div className="text-sm font-semibold tabular-nums">{idr(c.amount)}</div>
-                <Link
-                  to="/finance/payment-verification"
-                  className="btn-primary text-xs"
-                >
-                  <CheckCircle size={12} /> {T("Verify")}</Link>
+                <div className="text-sm font-semibold tabular-nums">{idr(r.outstanding)}</div>
+                <Link to="/finance/payment-verification" className="btn-primary text-xs">
+                  <CheckCircle size={12} /> {t("Record", "Catat")}</Link>
               </div>
             </li>
           ))}
           {rows.length > 5 && (
             <li className="px-4 py-2 text-xs muted text-center">
-              + {rows.length - 5} {T("more claim(s) in the verification queue.")}</li>
+              + {rows.length - 5}{" "}
+              {t("more, totalling", "lagi, senilai")} {idr(owed)} {t("outstanding.", "belum dibayar.")}
+            </li>
           )}
         </ul>
       )}

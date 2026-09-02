@@ -10,7 +10,18 @@ from app.models.base import TimestampMixin, UUIDPK
 
 
 class PaymentClaim(Base, UUIDPK, TimestampMixin):
-    """Customer-submitted payment claim, pending finance verification."""
+    """One recorded receipt of money against an invoice.
+
+    Named for what it used to be: a customer's claim from the portal that
+    they had paid, waiting for finance to agree. That route is gone —
+    finance records payments itself, in one step, and every such record still
+    writes a row here already verified, so the history reads continuously
+    either side of the change.
+
+    `customer_user_id` is therefore whoever wrote the row: a member of
+    finance on anything recent, the customer on the older ones. The column
+    keeps its name rather than being renamed under live data.
+    """
 
     __tablename__ = "payment_claims"
 

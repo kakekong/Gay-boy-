@@ -33,8 +33,16 @@ async def main():
     for ep in ("/portal/customer/me","/portal/customer/quotations","/portal/customer/projects"):
         r=await c.get(ep,headers=cu)
         check(f"portal endpoint {ep} works", r.status_code==200, f"HTTP{r.status_code}")
+    # Payments are finance's own entry now. The portal shows invoices and
+    # their status; there is nothing there for a customer to submit, and the
+    # endpoints that used to accept it are gone rather than merely hidden.
     r=await c.get("/payments/claims/mine",headers=cu)
-    check("portal payment claims work", r.status_code==200, f"HTTP{r.status_code}")
+    check("the portal's claim list is gone", r.status_code==404, f"HTTP{r.status_code}")
+    r=await c.post("/payments/claims",headers=cu,json={"invoice_id":cust,"amount":1})
+    check("...and a customer cannot submit one", r.status_code in (404,405),
+          f"HTTP{r.status_code}")
+    r=await c.get("/payments/claims",headers=cu)
+    check("...nor read finance's record of them", r.status_code==403, f"HTTP{r.status_code}")
 
     # Attachments: OWN customer files allowed, OTHER customer's denied
     fa={"file":("own.txt",io.BytesIO(b"x"),"text/plain")}

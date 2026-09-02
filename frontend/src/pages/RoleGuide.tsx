@@ -378,9 +378,8 @@ const ROLES: RoleSection[] = [
       "Meja keuangan. Anda menerbitkan faktur (DP dan final), menyetujuinya ke catatan pajak, " +
       "mengunci gerbang PO DP, dan memantau piutang / laporan keuangan.",
     daily:
-      "Morning: the bell shows DP POs waiting for you; Payment verification for new proofs. " +
-      "Whenever a project passes QC, upload its final invoice + DO. Approve invoices with the Faktur Pajak number, " +
-      "and record bank-transfer payments manually for customers who skip the portal.",
+      "Morning: the bell shows DP POs waiting for you. Check the bank, then record what has landed on Payment verification. " +
+      "Whenever a project passes QC, upload its final invoice + DO. Approve invoices with the Faktur Pajak number.",
     daily_id:
       "Pagi: lonceng menampilkan PO DP yang menunggu Anda; Verifikasi Pembayaran untuk bukti baru. " +
       "Setiap proyek lulus QC, unggah faktur akhir + DO. Setujui faktur dengan nomor Faktur Pajak, " +
@@ -401,9 +400,9 @@ const ROLES: RoleSection[] = [
       { title: "Approve invoices with the Faktur Pajak number", title_id: "Setujui faktur dengan nomor Faktur Pajak",
         detail: "Finance → Pending invoices → enter FP number + upload FP file → Approve.",
         detail_id: "Keuangan → Faktur menunggu → isi nomor FP + unggah file FP → Setujui." },
-      { title: "Money lands → verify the claim OR record it manually", title_id: "Uang masuk → verifikasi klaim ATAU catat manual",
-        detail: "Portal customers file claims you verify on Payment verification. Customers who pay by transfer without the portal: open the project → invoice card → 'Enter payment manually' — recorded + verified in one stroke. Full payment auto-closes the project.",
-        detail_id: "Pelanggan portal mengirim klaim yang Anda verifikasi di Verifikasi Pembayaran. Pelanggan yang transfer tanpa portal: buka proyek → kartu faktur → 'Masukkan pembayaran manual' — tercatat + terverifikasi sekaligus. Pembayaran penuh otomatis menutup proyek." },
+      { title: "Money lands → record it", title_id: "Uang masuk → catat",
+        detail: "Payment verification → pick the invoice → amount, date, reference, optional proof → Record payment. One step: it writes the receipt, posts to the ledger, and a full payment auto-closes the project. Customers no longer submit anything — you are the one who can see the bank.",
+        detail_id: "Verifikasi Pembayaran → pilih faktur → jumlah, tanggal, referensi, bukti opsional → Catat pembayaran. Satu langkah: mencatat penerimaan, memposting ke buku besar, dan pembayaran penuh otomatis menutup proyek. Pelanggan tidak lagi mengirim apa pun — Andalah yang bisa melihat rekening." },
       { title: "Watch AR + financial reports", title_id: "Pantau piutang + laporan keuangan" },
     ],
     buttons: [
@@ -419,8 +418,9 @@ const ROLES: RoleSection[] = [
       { page: "Finance → Pending invoices", page_id: "Keuangan → Faktur menunggu", button: "Approve (with FP no.)", button_id: "Setujui (dengan No. FP)",
         effect: "Enter faktur pajak + upload the FP file; invoice moves to approved",
         effect_id: "Isi faktur pajak + unggah file FP; faktur pindah ke approved" },
-      { page: "Payment verification", page_id: "Verifikasi pembayaran", button: "Verify / Reject", button_id: "Verifikasi / Tolak",
-        effect: "Settle or bounce a customer payment", effect_id: "Selesaikan atau tolak pembayaran pelanggan" },
+      { page: "Payment verification", page_id: "Verifikasi pembayaran", button: "Record payment", button_id: "Catat pembayaran",
+        effect: "Write down money that has arrived — creates the receipt, posts the ledger entry, moves the invoice and its project",
+        effect_id: "Catat uang yang sudah masuk — membuat penerimaan, memposting jurnal, menggerakkan faktur dan proyeknya" },
       { page: "Project detail (invoice card)", page_id: "Detail Proyek (kartu faktur)", button: "Enter payment manually", button_id: "Masukkan pembayaran manual",
         effect: "For customers who paid by transfer without the portal — amount prefills to the outstanding balance; recorded + verified in one stroke",
         effect_id: "Untuk pelanggan yang transfer tanpa portal — jumlah terisi otomatis sebesar sisa tagihan; tercatat + terverifikasi sekaligus" },
@@ -437,7 +437,7 @@ const ROLES: RoleSection[] = [
       "You now own invoice issuing — both flavours. DP invoices are issued from the CUSTOMER PO page (before any project exists); final invoices from the project page after QC passes, with the delivery order.",
       "The Faktur Pajak number is entered by you at the approve step, not at issue — that way a mistyped FP can't corrupt the tax record before finance double-checks.",
       "DP customer POs come straight to you (bell + Customer PO page), not the director. Approving one moves it to sales' 'confirm deposit received' step — you don't spawn the project yourself.",
-      "Two ways money gets recorded: portal customers file a claim you Verify on Payment verification; everyone else you enter yourself on the project's invoice card ('Enter payment manually') — one stroke, already verified. Fully paying an invoice auto-advances its project to paid → closed.",
+      "You record every payment yourself, on Payment verification or on the project's invoice card — one step, already verified. Customers cannot submit payments any more; the record of money arriving starts with the bank statement in front of you. Fully paying an invoice auto-advances its project to paid → closed.",
       "You can delete a duplicate/mistaken invoice and its faktur pajak record — but not once a payment has been verified against it.",
       "Your sidebar: Customer PO, Projects, Finance, Financial reports, Payment verification, Chart of Accounts, Recent ledgers, Attendance, Chat.",
       "Reject a payment proof or a DP PO with a clear reason — sales and the customer see it.",
@@ -612,22 +612,21 @@ const ROLES: RoleSection[] = [
     blurb_id:
       "Apa yang dilihat PELANGGAN Anda saat masuk. Sangat sederhana — tanpa sidebar, " +
       "tanpa data internal, hanya deal mereka sendiri.",
-    daily: "Log in, see status of their order, approve drawings, claim payments.",
-    daily_id: "Masuk, lihat status pesanan, setujui gambar, klaim pembayaran.",
+    daily: "Log in, see status of their order, approve drawings, watch invoices turn paid.",
+    daily_id: "Masuk, lihat status pesanan, setujui gambar, pantau faktur menjadi lunas.",
     flow: [
       { title: "Log in at /portal", title_id: "Masuk di /portal" },
       { title: "See own quotations + projects + invoices", title_id: "Lihat penawaran + proyek + faktur sendiri" },
       { title: "Drawing waiting? → Approve or Reject", title_id: "Ada gambar menunggu? → Setujui atau Tolak" },
       { title: "Shipping timeline shows Origin → Our warehouse → Their site", title_id: "Linimasa pengiriman: Asal → Gudang kami → Lokasi mereka",
         detail: "Forecast dates show amber, actuals green", detail_id: "Tanggal perkiraan kuning, aktual hijau" },
-      { title: "Already paid? → 'I paid this' modal → upload proof", title_id: "Sudah bayar? → modal 'Saya sudah bayar' → unggah bukti" },
-      { title: "Finance verifies → invoice marked paid", title_id: "Keuangan verifikasi → faktur ditandai lunas" },
+      { title: "Invoices are read-only — they turn paid on their own", title_id: "Faktur hanya bisa dibaca — berubah lunas dengan sendirinya",
+        detail: "Nothing to submit. Once the transfer reaches our bank, finance records it and the status changes here.",
+        detail_id: "Tidak ada yang perlu dikirim. Begitu transfer masuk ke rekening kami, keuangan mencatatnya dan statusnya berubah di sini." },
     ],
     buttons: [
       { page: "Customer portal", page_id: "Portal pelanggan", button: "Approve / Reject drawing", button_id: "Setujui / Tolak gambar",
         effect: "Sign off on supplier drawings", effect_id: "Tanda tangan gambar supplier" },
-      { page: "Customer portal", page_id: "Portal pelanggan", button: "I paid this", button_id: "Saya sudah bayar",
-        effect: "Submit a payment claim with proof", effect_id: "Kirim klaim pembayaran dengan bukti" },
     ],
     rules: [
       "They never see your suppliers, costs, other customers, employees, chat, or AI.",
@@ -766,10 +765,10 @@ const TROUBLES: { problem: string; problem_id: string; answer: string; answer_id
     answer_id: "ETA supplier di linimasa pengiriman menjawab ini; kalau sudah basi, hubungi supplier.",
   },
   {
-    problem: "Payment claim stuck",
-    problem_id: "Klaim pembayaran macet",
-    answer: "Finance (or Director) → Payment verification. If the customer paid by transfer without the portal, finance skips the claim entirely: project → invoice card → 'Enter payment manually'.",
-    answer_id: "Keuangan (atau Direktur) → Verifikasi pembayaran. Kalau pelanggan transfer tanpa portal, keuangan lewati klaim: proyek → kartu faktur → 'Masukkan pembayaran manual'.",
+    problem: "Customer paid but the invoice still says unpaid",
+    problem_id: "Pelanggan sudah bayar tapi faktur masih belum lunas",
+    answer: "Finance (or Director) → Payment verification → pick the invoice → Record payment. Customers do not submit payments; finance records what it can see in the bank. A claim left over from the old portal flow is settled on the same page, under Recorded payments.",
+    answer_id: "Keuangan (atau Direktur) → Verifikasi Pembayaran → pilih faktur → Catat pembayaran. Pelanggan tidak mengirim pembayaran; keuangan mencatat yang terlihat di rekening. Klaim sisa dari alur portal lama diselesaikan di halaman yang sama, di bagian Pembayaran tercatat.",
   },
   {
     problem: "Attendance wrong",
