@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import record as audit_record
+from app.services.quotation_sync import sync_from_price_request
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min, sales_may_see, sales_scope
@@ -84,6 +85,11 @@ def strip_internal_notes(text: str | None, keep: set[str] | None = None) -> str 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 class ItemIn(BaseModel):
+    # Which existing line this row *is*. Sent by the edit form for rows that
+    # were already on the request, omitted for ones being added. It is the
+    # line's identity, and the only thing that survives the description being
+    # reworded — see `_norm_items`.
+    line_no: int | None = None
     # The product name. Kept as `description` because that is what every
     # document downstream already reads — the quotation, the customer PO,
     # the delivery order — and renaming the key would orphan every line
@@ -353,25 +359,45 @@ def _carried(incoming: ItemIn, old: dict | None, field: str, clean):
 def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list[dict]:
     """Renumber the lines, carrying pricing across an edit.
 
-    `previous` matters when a request is edited *after* purchasing has costed
-    it — only the director can do that. Rebuilding the lines from scratch would
-    silently blank every cost and approved sell price, which is a quiet way to
-    lose real work. So a line whose description survives the edit keeps its
-    prices, and a new or renamed line starts unpriced, because it is a
-    different item and nobody has quoted it yet.
+    `previous` matters whenever a request is edited after somebody has put a
+    number on it. Rebuilding the lines from scratch would blank every cost and
+    approved sell price, which is a quiet way to lose real work.
 
-    Matching is on the description alone: prices are stored per unit, so
-    changing a quantity, a UoM or a spec note does not invalidate them.
-    Duplicate descriptions are paired off in order.
+    **A line is identified by its `line_no`, not by what it says.** This used
+    to match on the description, and the result was that correcting a typo in
+    a product name — the most ordinary edit there is — read as "this is a
+    different item" and reset its price to nothing. Sales would fix a spelling
+    and watch the price they had waited two days for go to zero, with no
+    warning and nothing saying why.
+
+    So the edit form sends each surviving row's `line_no` and the row keeps
+    its prices however it is reworded; a row sent without one is genuinely
+    new and starts unpriced. When no row carries a `line_no` at all — an
+    older client, or a caller that builds the list from nothing — the old
+    description matching still applies, so nothing that worked before stops
+    working.
+
+    Quantity, UoM and spec never invalidate a price either way: prices are
+    stored per unit.
     """
+    prev = list(previous or [])
+    by_no = {int(o.get("line_no") or 0): o for o in prev}
     by_desc: dict[str, list[dict]] = {}
-    for old in previous or []:
+    for old in prev:
         by_desc.setdefault((old.get("description") or "").strip().casefold(), []).append(old)
+    # Only trust identity when the caller actually speaks it. A payload with
+    # no line numbers anywhere is the old shape, and guessing would be worse
+    # than the fallback it replaces.
+    keyed = any(getattr(it, "line_no", None) for it in items)
 
     out = []
     for i, it in enumerate(items):
-        pool = by_desc.get((it.description or "").strip().casefold())
-        old = pool.pop(0) if pool else None
+        want_no = getattr(it, "line_no", None)
+        if keyed:
+            old = by_no.get(int(want_no)) if want_no else None
+        else:
+            pool = by_desc.get((it.description or "").strip().casefold())
+            old = pool.pop(0) if pool else None
         row = {
             "line_no": i + 1,
             "description": it.description,
@@ -557,7 +583,15 @@ async def update_price_request(
         )
 
     await db.flush()
-    return await _serialize(db, pr, Role(user.role))
+    # A quotation built from this request is this request, dressed for the
+    # customer. Letting the two drift was the old behaviour and the page said
+    # so out loud; now the change reaches it — rewritten where nobody has
+    # acted on it yet, flagged where somebody has.
+    synced = await sync_from_price_request(db, pr, user)
+    out = await _serialize(db, pr, Role(user.role))
+    if synced:
+        out["quotations"] = synced
+    return out
 
 
 @router.post("/{pr_id}/submit")
@@ -668,7 +702,13 @@ async def approve_price_request(
     await audit_record(db, actor=user, action="approve", entity="price_request",
                        entity_id=pr.id, after={"status": "approved"})
     await db.flush()
-    return await _serialize(db, pr, Role(user.role))
+    # Re-approving at a different price is the most consequential change
+    # there is: the quotation's line prices ARE these numbers.
+    synced = await sync_from_price_request(db, pr, user)
+    out = await _serialize(db, pr, Role(user.role))
+    if synced:
+        out["quotations"] = synced
+    return out
 
 
 @router.post("/{pr_id}/note")

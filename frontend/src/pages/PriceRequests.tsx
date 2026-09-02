@@ -23,6 +23,10 @@ const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.ro
 const UNITS = ["pcs", "meter", "set", "roll"] as const;
 
 const emptyLine = () => ({
+  // No line_no: this row is new, and the server reads its absence as "nobody
+  // has priced this yet". Rows loaded from an existing request carry theirs,
+  // which is what lets a description be reworded without losing its price.
+  line_no: undefined as number | undefined,
   sku: "", description: "", category: "", qty: 1, uom: "", link: "", spec: "",
 });
 
@@ -425,7 +429,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
 
   // Line-item editing. `null` = not editing; otherwise the working copy.
   const [editItems, setEditItems] = useState<
-    { sku: string; description: string; category: string;
+    { line_no?: number; sku: string; description: string; category: string;
       qty: number | string; uom: string; link: string; spec: string }[] | null
   >(null);
   // "edit" writes straight to the request (draft, or the director overriding).
@@ -444,6 +448,10 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const propose = useMutation({
     mutationFn: () => api.post(`/price-requests/${id}/revise`, {
       items: (editItems ?? []).map((row) => ({
+        // Which line this is. Sent so the server can tell a reworded line
+        // from a new one, instead of guessing from the description and
+        // resetting the price of everything renamed.
+        line_no: row.line_no ?? null,
         sku: row.sku.trim() || null,
         description: row.description.trim(),
         category: row.category.trim() || null,
@@ -465,6 +473,10 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const saveItems = useMutation({
     mutationFn: () => api.patch(`/price-requests/${id}`, {
       items: (editItems ?? []).map((row) => ({
+        // Which line this is. Sent so the server can tell a reworded line
+        // from a new one, instead of guessing from the description and
+        // resetting the price of everything renamed.
+        line_no: row.line_no ?? null,
         sku: row.sku.trim() || null,
         description: row.description.trim(),
         category: row.category.trim() || null,
@@ -719,6 +731,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             <button
               className="btn-ghost ml-auto text-xs"
               onClick={() => { setEditMode("edit"); setEditItems((pr.items ?? []).map((it: any) => ({
+                line_no: it.line_no,
                 sku: it.sku ?? "",
                 description: it.description ?? "",
                 category: it.category ?? "",
@@ -737,6 +750,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
               onClick={() => {
                 setEditMode("propose");
                 setEditItems((pr.items ?? []).map((it: any) => ({
+                  line_no: it.line_no,
                   sku: it.sku ?? "", description: it.description ?? "",
                   category: it.category ?? "", qty: it.qty ?? 1,
                   uom: it.uom ?? "", link: it.link ?? "",
@@ -765,13 +779,13 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                      "Permintaan ini sudah dihitung biayanya.")}
                 </div>
                 <div>
-                  {t("Lines you leave alone keep their cost and approved price. A line you rename or add comes back unpriced and has to go through purchasing again.",
-                     "Baris yang tidak diubah tetap membawa biaya dan harga yang disetujui. Baris yang Anda ganti namanya atau tambahkan akan kosong dan harus dihitung ulang oleh pembelian.")}
+                  {t("Existing lines keep their cost and approved price, however you reword them. A line you add comes back unpriced and has to go through purchasing.",
+                     "Baris yang sudah ada tetap membawa biaya dan harga yang disetujui, bagaimanapun Anda mengubah kalimatnya. Baris yang Anda tambahkan akan kosong dan harus melalui pembelian.")}
                 </div>
                 {pr.quotation_id && (
                   <div>
-                    {t("A quotation has already been made from this request — changing it here does not change the quotation.",
-                       "Penawaran sudah dibuat dari permintaan ini — mengubah di sini tidak mengubah penawarannya.")}
+                    {t("The quotation made from this request follows it: still a draft, it is rewritten to match. Already submitted or sent, it is left alone and told that this changed.",
+                       "Penawaran yang dibuat dari permintaan ini mengikutinya: bila masih draf, ditulis ulang agar sesuai. Bila sudah diajukan atau dikirim, dibiarkan dan diberi catatan bahwa ini berubah.")}
                   </div>
                 )}
               </div>
