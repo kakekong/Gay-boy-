@@ -13,7 +13,12 @@ from app.models.base import TimestampMixin, UUIDPK
 # documents about one part disagree about what a quantity means. Sales picks
 # from this list; `normalise_uom` maps the spellings that already exist in
 # the data onto it rather than refusing them.
-UNITS = ("pcs", "meter", "set", "roll")
+#
+# `link` is the chain one. A length of conveyor or roller chain is bought,
+# quoted and cut in links, and quoting it "per pcs" leaves the reader with
+# no idea how much chain is meant — one piece of a hundred links, or one
+# link.
+UNITS = ("pcs", "meter", "set", "roll", "link")
 
 _UOM_SYNONYMS = {
     "pc": "pcs", "pcs": "pcs", "piece": "pcs", "pieces": "pcs", "pce": "pcs",
@@ -23,6 +28,12 @@ _UOM_SYNONYMS = {
     "meters": "meter", "metre": "meter", "metres": "meter",
     "set": "set", "sets": "set", "st": "set",
     "roll": "roll", "rolls": "roll", "rol": "roll", "gulung": "roll",
+    # Chain is counted in links, and chain is most of what this company
+    # sells — a conveyor chain quoted "per pcs" says nothing about how much
+    # chain that is. Not to be confused with the URL field also called
+    # `link` on a price-request line; this one is a unit of measure.
+    "link": "link", "links": "link", "lnk": "link", "mata": "link",
+    "mata rantai": "link", "pitch": "link", "pitches": "link",
 }
 
 

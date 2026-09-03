@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { UnitSelect } from "@/components/UnitSelect";
 import { T } from "@/store/lang";
 
 interface Props {
@@ -65,8 +66,9 @@ export function InventoryItemForm({ initial, onClose }: Props) {
             placeholder={T("e.g. Chain, Bearing, Liner…")} />
         </Field>
         <Field label={T("UoM")}>
-          <input className="input" value={form.uom}
-            onChange={(e) => setForm({ ...form, uom: e.target.value })} />
+          {/* A stock row has to be counted in something, so no blank. */}
+          <UnitSelect label="Unit of measure" value={form.uom}
+            onChange={(v) => setForm({ ...form, uom: v })} allowBlank={false} />
         </Field>
         <Field label={T("Unit cost (IDR)")}>
           <input type="number" min={0} step="any" className="input" value={form.unit_cost}

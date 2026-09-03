@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { UnitSelect } from "@/components/UnitSelect";
 import { useAuthStore } from "@/store/auth";
 import { useT, t as tt, T, locale } from "@/store/lang";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
@@ -20,8 +21,6 @@ const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.ro
 // purpose: this is the field that quietly corrupts a quantity, because 30
 // metres of cable recorded as 30 pieces looks entirely plausible. The server
 // keeps the same list and maps the older spellings ("EA", "m") onto it.
-const UNITS = ["pcs", "meter", "set", "roll"] as const;
-
 const emptyLine = () => ({
   // No line_no: this row is new, and the server reads its absence as "nobody
   // has priced this yet". Rows loaded from an existing request carry theirs,
@@ -380,12 +379,11 @@ function CreateForm({
                   placeholder={t("Qty", "Jml")} aria-label={`Qty ${i + 1}`}
                   value={it.qty}
                   onChange={(e) => setItem(i, "qty", Number(e.target.value))} />
-                <select className="input w-28" aria-label={`Unit ${i + 1}`}
+                <UnitSelect
+                  className="input w-28"
+                  label={`Unit ${i + 1}`}
                   value={it.uom}
-                  onChange={(e) => setItem(i, "uom", e.target.value)}>
-                  <option value="">{t("Unit…", "Satuan…")}</option>
-                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                </select>
+                  onChange={(v) => setItem(i, "uom", v)} />
                 <input className="input flex-1" placeholder="https://…"
                   aria-label={`Link ${i + 1}`} value={it.link}
                   onChange={(e) => setItem(i, "link", e.target.value)} />
@@ -971,15 +969,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                   value={row.qty}
                   onChange={(e) => set("qty", e.target.value)}
                 />
-                <select
+                <UnitSelect
                   className="input col-span-3 sm:col-span-2"
-                  aria-label={`Edit unit ${i + 1}`}
+                  label={`Edit unit ${i + 1}`}
                   value={row.uom}
-                  onChange={(e) => set("uom", e.target.value)}
-                >
-                  <option value="">{t("Unit…", "Satuan…")}</option>
-                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                </select>
+                  onChange={(v) => set("uom", v)} />
                 <input
                   className="input col-span-12 sm:col-span-5"
                   placeholder="https://…"

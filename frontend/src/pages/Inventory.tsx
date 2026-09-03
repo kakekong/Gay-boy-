@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { UnitSelect } from "@/components/UnitSelect";
 import { Modal } from "@/components/Modal";
 import { InventoryItemForm } from "@/components/forms/InventoryItemForm";
 import { AdjustStockForm } from "@/components/forms/AdjustStockForm";
@@ -402,7 +403,11 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
                 <td className="pr-2 pb-1.5"><input className="input" value={r.sku} onChange={(e) => update(i, "sku", e.target.value)} /></td>
                 <td className="pr-2 pb-1.5"><input className="input" value={r.name} onChange={(e) => update(i, "name", e.target.value)} /></td>
                 <td className="pr-2 pb-1.5"><input className="input" value={r.category} onChange={(e) => update(i, "category", e.target.value)} /></td>
-                <td className="pr-2 pb-1.5"><input className="input w-16" value={r.uom} onChange={(e) => update(i, "uom", e.target.value)} /></td>
+                <td className="pr-2 pb-1.5">
+                  <UnitSelect className="input w-24" label={`Unit, row ${i + 1}`}
+                    value={r.uom} onChange={(v) => update(i, "uom", v)}
+                    allowBlank={false} />
+                </td>
                 <td className="pr-2 pb-1.5"><input className="input w-24" type="number" min={0} value={r.unit_cost} onChange={(e) => update(i, "unit_cost", e.target.value)} /></td>
                 <td className="pr-2 pb-1.5"><input className="input w-20" type="number" min={0} value={r.current_stock} onChange={(e) => update(i, "current_stock", e.target.value)} /></td>
                 <td className="pr-2 pb-1.5"><input className="input w-20" type="number" min={0} value={r.reorder_point} onChange={(e) => update(i, "reorder_point", e.target.value)} /></td>
@@ -534,8 +539,8 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
               </label>
               <label className="flex-1 block">
                 {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("UoM")}</span>}
-                <input className="input" placeholder={T("pcs")}
-                  value={l.uom} onChange={(e) => update(i, "uom", e.target.value)} />
+                <UnitSelect label={`Unit, line ${i + 1}`} value={l.uom}
+                  onChange={(v) => update(i, "uom", v)} allowBlank={false} />
               </label>
               <button type="button" className="btn-ghost text-red-600 shrink-0 mb-0.5"
                 onClick={() => setLines(lines.filter((_, idx) => idx !== i))}

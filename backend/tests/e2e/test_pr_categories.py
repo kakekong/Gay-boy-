@@ -64,7 +64,8 @@ async def main():
               "Sprocket", "Roller conveyor", "Others"],
           str([x.get("label") for x in cat.get("categories", [])]))
     check("...and the units come with them, from the same place",
-          cat.get("units") == ["pcs", "meter", "set", "roll"], str(cat.get("units")))
+          cat.get("units") == ["pcs", "meter", "set", "roll", "link"],
+          str(cat.get("units")))
 
     # ══ saving one ═══════════════════════════════════════════════════════
     print("\n── a request is raised ──")

@@ -2,7 +2,7 @@
 
 Asked for: *"For price request to inventory link I want it to be that it
 starts from PR where the sales have to put the no. SKU and product name,
-category, and unit — there's pcs, meter, set, roll — and link. When a price
+category, and unit — pcs, meter, set, roll, link — and a URL. When a price
 request is submitted put the product in the price request into the inventory
 and not the quantity. For quantity it comes from the purchasing PR. And when
 a delivery order is submitted the quantity of that product will be deducted
@@ -110,13 +110,13 @@ async def main():
     check("...with the line that has no SKU left blank until submit",
           lines[CHAIN].get("sku") is None, str(lines[CHAIN].get("sku")))
 
-    print("\n=== The unit is one of four, not free text ===")
+    print("\n=== The unit is one of the list, not free text ===")
     r = await c.post("/price-requests", headers=s1, json={
         "customer_id": cust["id"],
         "items": [{"description": f"Salah {tag}", "qty": 1, "uom": "lusin"}]})
     check("a unit nobody counts in is refused", r.status_code == 400,
           f"{r.status_code} {J(r)}")
-    check("...and the refusal names the four", "roll" in why(r), str(J(r))[:200])
+    check("...and the refusal names the list", "roll" in why(r), str(J(r))[:200])
     # A blank unit survives a draft — half-written requests are the normal
     # state of one somebody is still assembling — but it does not survive
     # submit, which is where the catalogue row is created with it.
@@ -129,7 +129,7 @@ async def main():
     r = await c.post(f"/price-requests/{blank['id']}/submit", headers=s1)
     check("...but it cannot be submitted that way", r.status_code == 400,
           f"{r.status_code} {J(r)}")
-    check("...and the refusal names the line and the four units",
+    check("...and the refusal names the line and the units",
           "roll" in why(r) and "line" in why(r), str(J(r))[:200])
     # The spellings already in the data still work — the point is one part
     # meaning one thing, not making anybody retype history.

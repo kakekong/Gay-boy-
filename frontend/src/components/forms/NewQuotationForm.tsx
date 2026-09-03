@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { UnitSelect } from "@/components/UnitSelect";
 import { useT, t as tt, T } from "@/store/lang";
 import type { Customer } from "@/types";
 
@@ -352,8 +353,8 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
               </div>
               <div className="col-span-3 md:col-span-1">
                 <span className="text-[10px] uppercase text-ink-500">{t("UoM", "Satuan")}</span>
-                <input className="input" value={it.uom}
-                  onChange={(e) => update(i, "uom", e.target.value)} />
+                <UnitSelect label={`UoM ${i + 1}`} value={it.uom}
+                  onChange={(v) => update(i, "uom", v)} allowBlank={false} />
               </div>
               <div className="col-span-6 md:col-span-3">
                 <span className="text-[10px] uppercase text-ink-500">{t("Unit price (IDR)", "Harga satuan (IDR)")}</span>
