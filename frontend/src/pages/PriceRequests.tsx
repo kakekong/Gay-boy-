@@ -416,6 +416,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const [editingNumber, setEditingNumber] = useState(false);
   const [numberDraft, setNumberDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
+  // What the last save did to the quotations built off this request. Shown
+  // rather than swallowed: editing a request whose quotation is already won
+  // looks, from this screen, exactly like nothing happening — which is how a
+  // working rule gets reported as a broken feature.
+  const [syncNote, setSyncNote] = useState<any[] | null>(null);
   const renumber = useMutation({
     mutationFn: (number: string) =>
       api.patch(`/price-requests/${id}`, { number }).then((r) => r.data),
@@ -486,7 +491,12 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         spec: row.spec.trim() || null,
       })),
     }).then((r) => r.data),
-    onSuccess: () => { setEditItems(null); refresh(); },
+    onSuccess: (data: any) => {
+      setEditItems(null);
+      setSyncNote(data?.quotations ?? []);
+      refresh();
+      qc.invalidateQueries({ queryKey: ["quotations"] });
+    },
     onError: onErr,
   });
 
@@ -724,6 +734,43 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             ) : null}
           </div>
         </div>
+
+        {syncNote !== null && (
+          <div className={clsx(
+            "mt-3 rounded-lg border px-3 py-2 text-xs flex items-start gap-2",
+            syncNote.every((x: any) => x.synced)
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+              : "border-amber-200 bg-amber-50 text-amber-900",
+          )}>
+            <div className="flex-1 space-y-0.5">
+              {syncNote.length === 0 ? (
+                <div>
+                  {t("Saved. No quotation has been made from this request yet.",
+                     "Tersimpan. Belum ada penawaran yang dibuat dari permintaan ini.")}
+                </div>
+              ) : syncNote.map((x: any) => (
+                <div key={x.quotation_id}>
+                  {x.synced ? (
+                    <>
+                      <b className="font-mono">{x.number}</b>{" "}
+                      {t("was updated to match — it is still a draft, so it follows this request.",
+                         "diperbarui agar sesuai — masih draf, jadi mengikuti permintaan ini.")}
+                    </>
+                  ) : (
+                    <>
+                      <b className="font-mono">{x.number}</b>{" "}
+                      {t(`is ${sl(x.status)} and was left as it is — the customer may be holding it. It now comes to Rp ${new Intl.NumberFormat("id-ID").format(Math.round(x.new_total || 0))} against the Rp ${new Intl.NumberFormat("id-ID").format(Math.round(x.old_total || 0))} quoted. Revise the quotation if they should see the new figure.`,
+                         `berstatus ${sl(x.status)} dan dibiarkan apa adanya — pelanggan mungkin sedang memegangnya. Sekarang menjadi Rp ${new Intl.NumberFormat("id-ID").format(Math.round(x.new_total || 0))} dibanding Rp ${new Intl.NumberFormat("id-ID").format(Math.round(x.old_total || 0))} yang ditawarkan. Revisi penawarannya bila pelanggan harus melihat angka baru.`)}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setSyncNote(null)}
+              aria-label={t("Dismiss", "Tutup")}
+              className="opacity-60 hover:opacity-100"><X size={13} /></button>
+          </div>
+        )}
 
         <div className="mt-4 flex items-center gap-2">
           <span className="overline">{t("Items", "Barang")}</span>

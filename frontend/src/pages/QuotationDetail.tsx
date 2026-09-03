@@ -202,6 +202,13 @@ export default function QuotationDetailPage() {
   if (!q.data)     return <div className="muted">{t("Not found.", "Tidak ditemukan.")}</div>;
 
   const Q = q.data;
+  // `[system]` lines in the notes are not the sales rep's prose — they are
+  // the app reporting that something moved underneath this document. Lifted
+  // out so they can be shown as a notice instead of read as body text.
+  const systemNotes: string[] = String(Q.notes || "")
+    .split("\n")
+    .filter((l: string) => l.trim().toLowerCase().startsWith("[system]"))
+    .map((l: string) => l.trim().replace(/^\[system\]\s*/i, ""));
   const tier = Q.discount_pct <= 5 ? "auto"
              : Q.discount_pct <= 15 ? "manager"
              : "director";
@@ -289,6 +296,28 @@ export default function QuotationDetailPage() {
                     "Yang diminta saat terakhir dikembalikan")}
             </div>
             <div className="mt-0.5 whitespace-pre-wrap">{Q.decision_notes}</div>
+          </div>
+        </div>
+      )}
+      {/* Anything the system itself had to say about this quotation.
+          These are `[system]`-tagged lines in the notes blob, written when
+          something changed underneath the document — a price request moving
+          after the quotation had already been submitted, say. Buried in the
+          notes they were invisible, which made a rule that deliberately
+          declines to rewrite a sent quotation look like a feature that
+          silently does nothing. */}
+      {systemNotes.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50
+                        px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-semibold">
+              {t("Something changed behind this quotation",
+                 "Ada yang berubah di balik penawaran ini")}
+            </div>
+            {systemNotes.map((line, i) => (
+              <div key={i} className="mt-0.5">{line}</div>
+            ))}
           </div>
         </div>
       )}
@@ -862,9 +891,20 @@ export default function QuotationDetailPage() {
  * a number the writer typed themselves is not repeated — so what is on the
  * screen is what comes out of the printer.
  */
+/**
+ * The note lines that reach the customer, in the order they print.
+ *
+ * `[system]` lines are ours — the app saying something moved underneath this
+ * document — and the server strips them from the PDF and the spreadsheet. So
+ * they are dropped here too, both because this card is a preview of what
+ * prints and because they are already shown, properly, as a notice at the top
+ * of the page. They stay in the blob the editor loads, so editing a note does
+ * not quietly delete the warning.
+ */
 export function printedNotes(notes: string | null | undefined): string[] {
   return (notes ?? "")
     .split("\n")
+    .filter((line) => !line.trim().toLowerCase().startsWith("[system]"))
     .map((line) => line.trim().replace(/^\d+\s*[.)]\s*/, ""))
     .filter(Boolean);
 }

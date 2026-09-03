@@ -1129,8 +1129,15 @@ async def _load(q_id: UUID, db: AsyncSession) -> Quotation:
         # [purchasing]/[director]/… side-channel line from the old copy
         # path gets scrubbed on the way out so it never renders on a
         # sales page or on the PDF/portal.
+        #
+        # `[system]` is deliberately kept. It is the app's own notice that
+        # something moved underneath this document, and the quotation page
+        # renders it as a banner — scrubbing it here would delete the one
+        # place a change to a sent quotation's price request is visible. It
+        # is stripped instead where it matters, on the customer's copy: see
+        # the PDF and XLSX exports below.
         from app.api.v1.endpoints.price_requests import strip_internal_notes
-        cleaned = strip_internal_notes(q.notes)
+        cleaned = strip_internal_notes(q.notes, keep={"system"})
         if cleaned != q.notes:
             q.notes = cleaned
     return q
@@ -1269,6 +1276,7 @@ async def export_quotation_pdf(
     user: User = Depends(get_current_user),
 ):
     from app.services.print_address import resolve_address
+    from app.api.v1.endpoints.price_requests import strip_internal_notes
     from app.services.quotation_pdf import build_quotation_pdf
 
     q, items, cust, contact, sales = await _quotation_bundle(db, q_id)
@@ -1318,7 +1326,10 @@ async def export_quotation_pdf(
         tax_pct=tax_pct,
         tax=tax,
         total=float(q.total or 0),
-        notes=q.notes,
+        # The customer's copy carries none of our side-channel: role-tagged
+        # asides and `[system]` notices are both ours, and this builder
+        # prints whatever it is given, verbatim.
+        notes=strip_internal_notes(q.notes),
         signer_name=(sales.full_name if sales else "—"),
         signer_phone=((sales.phone if sales else None)
                       or (sales.whatsapp_id if sales else None) or "—"),
@@ -1345,6 +1356,7 @@ async def export_quotation_excel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.api.v1.endpoints.price_requests import strip_internal_notes
     from app.services.print_address import resolve_address
     from io import BytesIO
     from openpyxl import Workbook
@@ -1449,11 +1461,11 @@ async def export_quotation_excel(
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[chr(64 + i)].width = w
 
-    if q.notes:
+    if strip_internal_notes(q.notes):
         row += 1
         ws.cell(row=row, column=1, value="Notes").font = bold
         row += 1
-        ws.cell(row=row, column=1, value=q.notes)
+        ws.cell(row=row, column=1, value=strip_internal_notes(q.notes))
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
         ws.cell(row=row, column=1).alignment = Alignment(wrap_text=True, vertical="top")
 

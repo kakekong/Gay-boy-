@@ -47,7 +47,7 @@ import re as _re
 _INTERNAL_TAG_LINE = _re.compile(
     # The tag is captured so a caller can ask to keep one — sales has to be
     # able to read the note it just wrote.
-    r"^\s*\[(purchasing|director|manager|admin|finance|sales)\](?:\s.*)?$",
+    r"^\s*\[(purchasing|director|manager|admin|finance|sales|system)\](?:\s.*)?$",
     _re.IGNORECASE,
 )
 
@@ -60,6 +60,11 @@ def strip_internal_notes(text: str | None, keep: set[str] | None = None) -> str 
     shouldn't see those on the PR page, and the tags MUST NOT bleed into
     the customer-facing quotation when we copy notes across — the quote's
     notes are printed on the PDF and shown on the customer portal.
+
+    `[system]` is the app's own voice, written when something moved
+    underneath a document — a price request changing after its quotation had
+    already been sent, say. It is internal for the same reason: the customer
+    has no use for it and every reason not to see it.
 
     Only strips lines that match a concrete known-internal tag so a
     user-authored line that happens to start with a bracket (e.g. an
