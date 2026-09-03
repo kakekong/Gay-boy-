@@ -260,6 +260,9 @@ async def create_from_price_request(
             quotation_id=q.id,
             line_no=it.get("line_no") or (i + 1),
             source="custom",
+            # The number the part is known by here goes onto the document the
+            # customer reads, so the two are talking about the same thing.
+            sku=it.get("sku") or None,
             description=it.get("description") or "",
             qty=float(it.get("qty") or 0),
             uom=it.get("uom") or "pcs",
@@ -1236,6 +1239,31 @@ async def _chosen_contact(db: AsyncSession, cust, contact_id, fallback):
     return ct
 
 
+async def _part_numbers(db: AsyncSession, items) -> dict:
+    """The part number to print for each line, keyed by line id.
+
+    In this order: the SKU the line carries — the number the price request
+    issued and the catalogue row uses, so the customer's document and our
+    shelves agree — then a linked catalogue product's own code, and only then
+    the line's position on the sheet.
+
+    Shared by the PDF and the spreadsheet on purpose. They are two views of
+    one document, and a part that is "TSE-2026-0042" on one and "001" on the
+    other is a support call nobody can answer.
+    """
+    codes: dict = {}
+    product_ids = [it.product_id for it in items if it.product_id]
+    if product_ids:
+        for prod in (await db.scalars(
+            select(Product).where(Product.id.in_(product_ids))
+        )).all():
+            codes[prod.id] = prod.code
+    return {
+        it.id: (it.sku or codes.get(it.product_id) or f"{it.line_no:03d}")
+        for it in items
+    }
+
+
 @router.get("/{q_id}/pdf-options")
 async def quotation_pdf_options(
     q_id: UUID,
@@ -1287,18 +1315,13 @@ async def export_quotation_pdf(
     pic = _pic_fields(cust, contact)
     addr = resolve_address(cust, address)
 
-    # KODE BARANG comes from the linked product where there is one; a
-    # free-text line falls back to its position on the sheet.
-    codes: dict = {}
-    product_ids = [it.product_id for it in items if it.product_id]
-    if product_ids:
-        for prod in (await db.scalars(
-            select(Product).where(Product.id.in_(product_ids))
-        )).all():
-            codes[prod.id] = prod.code
+    # KODE BARANG. Until now a price-request-backed quotation showed the
+    # line's position here — those lines link no catalogue product — so every
+    # quotation we sent began at "001" and the SKU never left the building.
+    part_no = await _part_numbers(db, items)
 
     rows = [{
-        "code": codes.get(it.product_id) or f"{it.line_no:03d}",
+        "code": part_no[it.id],
         "name": it.description or "",
         "qty": f"{float(it.qty or 0):g}",
         "uom": (it.uom or "").upper(),
@@ -1410,17 +1433,22 @@ async def export_quotation_excel(
     row += 1
     ws.cell(row=row, column=1, value="Line items").font = bold
     row += 1
-    headers = ["#", "Description", "Qty", "Unit", "Unit price (IDR)", "Line total (IDR)"]
+    # The first column was a running counter, which told the reader nothing
+    # they could act on. It is the part number now — the same one the PDF
+    # prints as KODE BARANG, from the same resolver.
+    headers = ["Product no.", "Description", "Qty", "Unit",
+               "Unit price (IDR)", "Line total (IDR)"]
     for col_idx, h in enumerate(headers, start=1):
         cell = ws.cell(row=row, column=col_idx, value=h)
         cell.font = bold
         cell.fill = header_fill
         cell.border = box
     row += 1
-    for i, it in enumerate(items, start=1):
+    part_no = await _part_numbers(db, items)
+    for it in items:
         line_total = float(it.qty or 0) * float(it.unit_price or 0)
         vals = [
-            i,
+            part_no[it.id],
             it.description or "",
             float(it.qty or 0),
             it.uom or "",
@@ -1457,7 +1485,7 @@ async def export_quotation_excel(
         row += 1
 
     # Column widths
-    widths = [5, 50, 8, 8, 18, 18]
+    widths = [16, 50, 8, 8, 18, 18]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[chr(64 + i)].width = w
 

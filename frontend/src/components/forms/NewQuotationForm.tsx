@@ -17,6 +17,11 @@ interface Props {
 }
 
 interface LineItem {
+  // The part number this line is for. Carried, never typed here: it comes
+  // from the price request that issued it. Saving replaces the lines
+  // wholesale, so a form that dropped it would blank KODE BARANG on the
+  // customer's document while somebody was fixing a quantity.
+  sku?: string | null;
   description: string;
   qty: number;
   uom: string;
@@ -54,6 +59,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
   const [items, setItems] = useState<LineItem[]>(
     quote?.items?.length
       ? quote.items.map((it: any) => ({
+          sku: it.sku ?? null,
           description: it.description ?? "",
           qty: Number(it.qty) || 0,
           uom: it.uom || "pcs",
@@ -201,6 +207,7 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
       items: items.map((it, i) => ({
         line_no: i + 1,
         source: it.source,
+        sku: it.sku ?? null,
         description: it.description,
         spec: {},
         qty: it.qty,

@@ -47,6 +47,7 @@ def _line_of(it: dict, i: int) -> dict:
     """
     return {
         "line_no": it.get("line_no") or (i + 1),
+        "sku": it.get("sku") or None,
         "description": it.get("description") or "",
         "qty": float(it.get("qty") or 0),
         "uom": it.get("uom") or "pcs",
@@ -59,6 +60,7 @@ def _differs(existing: list[QuotationItem], wanted: list[dict]) -> bool:
     if len(existing) != len(wanted):
         return True
     have = sorted(({"line_no": int(x.line_no or 0),
+                    "sku": x.sku or None,
                     "description": x.description or "",
                     "qty": float(x.qty or 0),
                     "uom": x.uom or "pcs",

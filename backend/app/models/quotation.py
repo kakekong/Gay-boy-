@@ -98,6 +98,16 @@ class QuotationItem(Base, UUIDPK, TimestampMixin):
     product_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL")
     )
+    # The part number this line is for, as the company knows it — the same
+    # SKU the price request issued and the catalogue row carries. It is what
+    # prints as KODE BARANG, so the number on the customer's quotation is the
+    # number everyone here uses for the part. Without it the export fell back
+    # to the line's position on the sheet: the first line of every quotation
+    # we ever sent was "001".
+    #
+    # Nullable because a quotation typed from scratch has no catalogue behind
+    # it, and the fallback is still right for those.
+    sku: Mapped[str | None] = mapped_column(String(60))
     description: Mapped[str] = mapped_column(Text, nullable=False)
     spec: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     qty: Mapped[float] = mapped_column(Numeric(18, 4), default=1, nullable=False)

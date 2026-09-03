@@ -531,6 +531,33 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE drawings ALTER COLUMN kind SET NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_drawings_kind ON drawings (kind)",
 
+    # ── The part number reaches the customer's document ──────────────────
+    # KODE BARANG on an exported quotation used to fall back to the line's
+    # position whenever the line had no catalogue product behind it — which
+    # is every line of every quotation built from a price request. So the
+    # SKU the request issued never left the building, and the first line of
+    # each document read "001".
+    "ALTER TABLE quotation_items ADD COLUMN IF NOT EXISTS sku VARCHAR(60)",
+    # Quotations already sent were built before the line carried one. Their
+    # price request still knows it, matched by line number, so the number
+    # can be put back rather than left as a position forever. Only fills
+    # blanks, so it runs once and is a no-op after that.
+    """UPDATE quotation_items qi
+          SET sku = src.sku
+         FROM (
+              SELECT q.id AS quotation_id,
+                     (it->>'line_no')::int AS line_no,
+                     NULLIF(it->>'sku', '') AS sku
+                FROM quotations q
+                JOIN price_requests pr ON pr.id = q.price_request_id
+                CROSS JOIN LATERAL jsonb_array_elements(pr.items) AS it
+               WHERE q.price_request_id IS NOT NULL
+         ) src
+        WHERE qi.quotation_id = src.quotation_id
+          AND qi.line_no = src.line_no
+          AND qi.sku IS NULL
+          AND src.sku IS NOT NULL""",
+
     # ── The employee register comes before the login ─────────────────────
     # A login now belongs to somebody on the register. Unique so one person
     # cannot end up with two accounts; nullable because portal logins

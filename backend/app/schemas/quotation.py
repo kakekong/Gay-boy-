@@ -8,6 +8,11 @@ class QuotationItemIn(BaseModel):
     line_no: int
     source: str = Field(default="product", pattern="^(product|custom)$")
     product_id: UUID | None = None
+    # The part number, printed as KODE BARANG on the export. Sent back by the
+    # edit form because a line edit replaces the row wholesale — a client that
+    # did not carry it would blank the number on the customer's document while
+    # somebody was fixing a quantity.
+    sku: str | None = None
     description: str
     spec: dict = Field(default_factory=dict)
     qty: float

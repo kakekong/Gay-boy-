@@ -550,7 +550,9 @@ export default function QuotationDetailPage() {
           <table className="w-full">
             <thead className="bg-ink-50/60">
               <tr>
-                <th className="th w-10">#</th>
+                {/* The number the export prints as KODE BARANG, so what is
+                    on screen and what the customer receives agree. */}
+                <th className="th w-28">{t("Product no.", "No. produk")}</th>
                 <th className="th">{t("Description", "Deskripsi")}</th>
                 <th className="th text-right">{t("Qty", "Jml")}</th>
                 <th className="th">{t("UoM", "Satuan")}</th>
@@ -561,7 +563,9 @@ export default function QuotationDetailPage() {
             <tbody>
               {(Q.items ?? []).map((it: any) => (
                 <tr key={it.id ?? it.line_no} className="border-t border-ink-100">
-                  <td className="td font-mono text-xs text-ink-500">{it.line_no}</td>
+                  <td className="td font-mono text-xs text-ink-500">
+                    {it.sku || String(it.line_no).padStart(3, "0")}
+                  </td>
                   <td className="td">
                     <div className="font-medium">{it.description}</div>
                     {it.source === "custom" && (
