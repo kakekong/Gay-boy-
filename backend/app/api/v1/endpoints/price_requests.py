@@ -23,7 +23,13 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min, sales_may_see, sales_scope
 from app.models.crm import Customer
-from app.models.inventory import UNITS, normalise_uom
+from app.models.inventory import (
+    CATEGORIES,
+    CATEGORY_LABELS,
+    UNITS,
+    normalise_category,
+    normalise_uom,
+)
 from app.models.price_request import PriceRequest
 from app.models.user import User
 from app.services.numbering import next_price_request_number
@@ -330,6 +336,41 @@ def _clean_unit(value: str | None) -> str | None:
         f"“{value}” is not a unit we count in. Use one of: {', '.join(UNITS)}.")
 
 
+def _clean_category(value: str | None, old: dict | None = None) -> str | None:
+    """One of the six categories, or a refusal that lists them.
+
+    The category used to be a free-text box, which produced "sprocket",
+    "Sprockets", "gear sprocket" and "SPROCKET 12T" for one kind of thing —
+    so nothing could be counted or filtered by it, which is the only reason
+    to record a category at all. It is a fixed list now.
+
+    Spellings that map are mapped rather than refused, in both languages, for
+    the same reason the unit box maps "EA" and "buah": the point is that one
+    kind of part means one thing, not that anybody retypes history.
+
+    The one thing it will not do is destroy what is already on a line. A row
+    written before the list existed carries whatever free text it was given,
+    and re-sending that same value unchanged is allowed through — otherwise
+    correcting a typo on an old request would be refused because of a field
+    nobody was touching. Changing it means choosing from the list.
+
+    Blank survives, as it does for the unit: a half-written request is the
+    normal state of one somebody is still assembling.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    resolved = normalise_category(raw)
+    if resolved:
+        return resolved
+    if old and raw == (old.get("category") or ""):
+        return raw[:120]
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        f"“{raw[:60]}” is not one of the categories. Use one of: "
+        + ", ".join(CATEGORY_LABELS[c] for c in CATEGORIES) + ".")
+
+
 def _clean_link(value: str | None) -> str | None:
     """A link that a browser will actually open, or nothing.
 
@@ -416,7 +457,7 @@ def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list
             # field explicitly sent as blank still clears it; one simply not
             # mentioned is left alone.
             "category": _carried(it, old, "category",
-                                 lambda v: (v or "").strip()[:120] or None),
+                                 lambda v: _clean_category(v, old)),
             "link": _carried(it, old, "link", _clean_link),
             # Blank until submit issues one. Losing the SKU here would let
             # the same part be introduced twice under two numbers.
@@ -514,6 +555,25 @@ async def list_price_requests(
         stmt = stmt.where(PriceRequest.customer_id == customer_id)
     rows = (await db.scalars(stmt)).all()
     return [await _serialize(db, pr, role) for pr in rows]
+
+
+@router.get("/catalog")
+async def catalog():
+    """The fixed lists a price-request line is built from.
+
+    Declared above `/{pr_id}` on purpose: routes match in the order they
+    are written, and "catalog" is not a UUID.
+
+    Served rather than hardcoded in the form so the two cannot drift: a
+    category the screen offers and the server refuses is a dead end you only
+    find by hitting it, and one the server accepts but the screen never shows
+    may as well not exist.
+    """
+    return {
+        "categories": [{"value": c, "label": CATEGORY_LABELS[c]}
+                       for c in CATEGORIES],
+        "units": list(UNITS),
+    }
 
 
 @router.get("/{pr_id}")

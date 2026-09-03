@@ -30,6 +30,83 @@ const emptyLine = () => ({
   sku: "", description: "", category: "", qty: 1, uom: "", link: "", spec: "",
 });
 
+/**
+ * The lists a line is built from, straight from the server.
+ *
+ * Shared across every line on the page — react-query dedupes it to one
+ * request — and long-lived, because a fixed list does not move.
+ */
+function usePrCatalog() {
+  const q = useQuery({
+    queryKey: ["pr-catalog"],
+    queryFn: () => api.get("/price-requests/catalog")
+      .then((r) => r.data as { categories: { value: string; label: string }[] }),
+    staleTime: 30 * 60_000,
+  });
+  return q.data?.categories ?? FALLBACK_CATEGORIES;
+}
+
+/**
+ * How a stored category reads. Values written before the list existed are
+ * free text and are shown as they are rather than hidden behind a guess.
+ */
+function categoryLabel(
+  value: string | null | undefined,
+  options: { value: string; label: string }[],
+): string {
+  if (!value) return "—";
+  return options.find((o) => o.value === value)?.label ?? value;
+}
+
+/** The six the server accepts, as a fallback until the catalog loads. */
+const FALLBACK_CATEGORIES = [
+  { value: "conveyor_chain",  label: "Conveyor chain" },
+  { value: "roller_chain",    label: "Roller chain" },
+  { value: "connecting_link", label: "Connecting link" },
+  { value: "sprocket",        label: "Sprocket" },
+  { value: "roller_conveyor", label: "Roller conveyor" },
+  { value: "others",          label: "Others" },
+];
+
+/**
+ * The category of a line — a fixed list, not a text box.
+ *
+ * It was free text, which produced "sprocket", "Sprockets" and
+ * "SPROCKET 12T" for one kind of thing, so nothing could be counted or
+ * filtered by it. The list is fetched rather than hardcoded here so the form
+ * and the server cannot come to offer different things.
+ *
+ * A line written before the list existed keeps whatever free text it was
+ * given, and that value is offered back as its own option: the server allows
+ * an unchanged legacy value through, so somebody correcting a typo elsewhere
+ * on an old request is not forced to reclassify it in the same breath.
+ */
+function CategorySelect({ value, onChange, label, className }: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  className?: string;
+}) {
+  const options = usePrCatalog();
+  const legacy = value && !options.some((o) => o.value === value) ? value : null;
+  return (
+    <select
+      className={className ?? "input w-44"}
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">{tt("Category…", "Kategori…")}</option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{tt(o.label, o.label)}</option>
+      ))}
+      {legacy && (
+        <option value={legacy}>{legacy} {tt("(old)", "(lama)")}</option>
+      )}
+    </select>
+  );
+}
+
 const STATUS_CHIP: Record<string, string> = {
   draft: "bg-ink-100 text-ink-700",
   pending_purchasing: "bg-amber-50 text-amber-700",
@@ -295,9 +372,10 @@ function CreateForm({
                 </button>
               </div>
               <div className="flex gap-2 items-center flex-wrap">
-                <input className="input w-40" placeholder={t("Category", "Kategori")}
-                  aria-label={`Category ${i + 1}`} value={it.category}
-                  onChange={(e) => setItem(i, "category", e.target.value)} />
+                <CategorySelect
+                  label={`Category ${i + 1}`}
+                  value={it.category}
+                  onChange={(v) => setItem(i, "category", v)} />
                 <input className="input w-20" type="number"
                   placeholder={t("Qty", "Jml")} aria-label={`Qty ${i + 1}`}
                   value={it.qty}
@@ -380,6 +458,7 @@ function CreateForm({
 }
 
 function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; onBack: () => void }) {
+  const categories = usePrCatalog();
   const t = useT();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -880,13 +959,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 >
                   <Trash2 size={14} />
                 </button>
-                <input
+                <CategorySelect
                   className="input col-span-6 sm:col-span-3"
-                  placeholder={t("Category", "Kategori")}
-                  aria-label={`Edit category ${i + 1}`}
+                  label={`Edit category ${i + 1}`}
                   value={row.category}
-                  onChange={(e) => set("category", e.target.value)}
-                />
+                  onChange={(v) => set("category", v)} />
                 <input
                   className="input col-span-3 sm:col-span-2 text-right" type="number" min="0"
                   placeholder={t("Qty", "Jml")}
@@ -995,7 +1072,9 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                     </a>
                   )}
                 </td>
-                <td className="td muted text-xs">{it.category || "—"}</td>
+                <td className="td muted text-xs">
+                  {categoryLabel(it.category, categories)}
+                </td>
                 <td className="td text-right tabular-nums">{it.qty}</td>
                 <td className="td muted">{it.uom || "—"}</td>
                 <td className="td muted text-xs">{it.spec || "—"}</td>

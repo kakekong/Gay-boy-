@@ -90,17 +90,19 @@ async def main():
         "items": [
             # A SKU sales already has, from the customer's own part list.
             {"description": CABLE, "qty": 30, "uom": "meter",
-             "category": "Sling & Kabel", "sku": MY_SKU,
+             # The category is one of six now, not a phrase somebody
+             # invented — see test_pr_categories for the list itself.
+             "category": "others", "sku": MY_SKU,
              "link": "https://example.com/kabel-baja"},
             # And one with no SKU — the series issues it on submit.
             {"description": CHAIN, "qty": 4, "uom": "set",
-             "category": "Rantai"},
+             "category": "roller_chain"},
         ]})
     check("the request is created", r.status_code == 201, f"{r.status_code} {J(r)}")
     pr = J(r)
     lines = {i["description"]: i for i in pr["items"]}
-    check("...carrying the category sales typed",
-          lines[CABLE]["category"] == "Sling & Kabel", str(lines[CABLE]))
+    check("...carrying the category sales picked",
+          lines[CABLE]["category"] == "others", str(lines[CABLE]))
     check("...and the link", lines[CABLE]["link"] == "https://example.com/kabel-baja",
           str(lines[CABLE].get("link")))
     check("...and the SKU sales already had",
@@ -166,7 +168,7 @@ async def main():
     check("...under the SKU sales chose", cable and cable["sku"] == MY_SKU,
           str(cable))
     check("...with its name", cable and cable["name"] == CABLE, str(cable))
-    check("...its category", cable and cable["category"] == "Sling & Kabel",
+    check("...its category", cable and cable["category"] == "others",
           str(cable))
     check("...its unit", cable and cable["uom"] == "meter", str(cable))
     check("...and its link", cable and cable["link"] == "https://example.com/kabel-baja",

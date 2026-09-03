@@ -39,6 +39,75 @@ def normalise_uom(value: str | None) -> str | None:
     return _UOM_SYNONYMS.get(key)
 
 
+# What the company actually sells. A free-text category box produced
+# "sprocket", "Sprockets", "gear sprocket" and "SPROCKET 12T" for one kind of
+# thing, so nothing could be counted or filtered by it — which is the only
+# reason to record a category at all. Sales picks from this list.
+#
+# `others` is deliberately part of it rather than an escape hatch bolted on:
+# a list without one gets the nearest wrong answer picked instead, and then
+# the wrong answer is what you filter on.
+CATEGORIES = (
+    "conveyor_chain",
+    "roller_chain",
+    "connecting_link",
+    "sprocket",
+    "roller_conveyor",
+    "others",
+)
+
+# How each reads on screen and on a document. Kept beside the values so the
+# two cannot drift; the API hands this out so no screen has to hardcode it.
+CATEGORY_LABELS = {
+    "conveyor_chain":  "Conveyor chain",
+    "roller_chain":    "Roller chain",
+    "connecting_link": "Connecting link",
+    "sprocket":        "Sprocket",
+    "roller_conveyor": "Roller conveyor",
+    "others":          "Others",
+}
+
+_CATEGORY_SYNONYMS = {
+    # The canonical values, and the way anybody would actually type them.
+    "conveyorchain": "conveyor_chain", "conveyor chain": "conveyor_chain",
+    "conveyor-chain": "conveyor_chain", "rantai konveyor": "conveyor_chain",
+    "rollerchain": "roller_chain", "roller chain": "roller_chain",
+    "roller-chain": "roller_chain", "rantai roller": "roller_chain",
+    "connectinglink": "connecting_link", "connecting link": "connecting_link",
+    "connecting-link": "connecting_link", "conn link": "connecting_link",
+    "sambungan rantai": "connecting_link",
+    "sprocket": "sprocket", "sprockets": "sprocket", "gir": "sprocket",
+    "rollerconveyor": "roller_conveyor", "roller conveyor": "roller_conveyor",
+    "roller-conveyor": "roller_conveyor", "konveyor roller": "roller_conveyor",
+    "other": "others", "others": "others", "lainnya": "others",
+    "lain-lain": "others", "misc": "others",
+}
+for _c in CATEGORIES:
+    _CATEGORY_SYNONYMS.setdefault(_c, _c)
+    _CATEGORY_SYNONYMS.setdefault(_c.replace("_", " "), _c)
+
+
+def normalise_category(value: str | None) -> str | None:
+    """One of CATEGORIES, or None when there is nothing that maps.
+
+    None rather than a guess, for the same reason `normalise_uom` returns it:
+    "I could not place this" and "they left it blank" are different answers,
+    and only the caller knows which of the two is a refusal.
+    """
+    key = " ".join((value or "").strip().lower().split())
+    if not key:
+        return None
+    return _CATEGORY_SYNONYMS.get(key)
+
+
+def category_label(value: str | None) -> str | None:
+    """How a stored category reads. Unknown values — legacy free text — are
+    handed back as they are rather than hidden behind a guess."""
+    if not value:
+        return None
+    return CATEGORY_LABELS.get(value, value)
+
+
 class InventoryItem(Base, UUIDPK, TimestampMixin):
     """Stockable item: spare parts, consumables, raw materials, etc."""
 

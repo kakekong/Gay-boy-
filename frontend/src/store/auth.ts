@@ -38,69 +38,101 @@ interface AuthState {
   stopImpersonation: () => void;
 }
 
-// Where to persist the session.
-//  - "session" → sessionStorage, wiped when the tab/window closes (default,
-//    safest on a shared device — pasting the URL into a fresh tab will
-//    hit the login screen, not whoever was logged in before).
-//  - "persistent" → localStorage, survives browser restarts (opt-in via
-//    the "Keep me signed in" checkbox on the login form).
+// Where the session lives.
+//
+// **sessionStorage is the tab's own copy and always wins.** localStorage is
+// only two things: a seed for a tab that has none — which is what "Keep me
+// signed in" restores after a browser restart — and a mirror kept by the
+// tab that opted into it.
+//
+// That split is the whole point. It used to be one or the other, chosen by a
+// flag in localStorage, which made the flag *and* the session browser-global:
+// sign into a second account in a second tab and both tabs were suddenly
+// reading one slot. The second login overwrote the first, and a reload or a
+// sign-out in either tab took the other with it — two accounts open side by
+// side is an ordinary thing to do here (sales raises a request, purchasing
+// costs it) and it could not be done at all. With "Keep me signed in" ticked
+// by default, that was everybody.
 const STORE_NAME = "industria-auth";
+// Per *tab*, deliberately: one tab's choice about a durable copy must not
+// change where another tab reads from.
 const PERSIST_FLAG = "transmisi-persist";
 
-function persistChoice(): "persistent" | "session" {
+function tabKeepsDurableCopy(): boolean {
   try {
-    return localStorage.getItem(PERSIST_FLAG) === "1" ? "persistent" : "session";
+    return sessionStorage.getItem(PERSIST_FLAG) === "1";
   } catch {
-    return "session";
+    return false;
   }
 }
 
 /**
- * Choose whether the next login (and ongoing writes) should persist across
- * browser restarts. Call this BEFORE setTokens so the storage adapter
- * routes the write to the right place. Also wipes any stale data in the
- * other storage so a previous session can't bleed through.
+ * Choose whether THIS TAB also keeps a copy that survives a browser restart.
+ * Call it before setTokens so the first write goes to the right places.
+ *
+ * Unticking clears the durable copy, because that is what the checkbox says:
+ * don't keep me signed in on this device. Another tab signed in as somebody
+ * else keeps working — it reads its own sessionStorage — it just won't be
+ * restored after a restart either. Losing that is the checkbox's promise;
+ * losing the open session was the bug.
  */
 export function setAuthPersistence(persistAcrossRestarts: boolean): void {
   try {
     if (persistAcrossRestarts) {
-      localStorage.setItem(PERSIST_FLAG, "1");
-      sessionStorage.removeItem(STORE_NAME);
+      sessionStorage.setItem(PERSIST_FLAG, "1");
     } else {
-      localStorage.removeItem(PERSIST_FLAG);
+      sessionStorage.removeItem(PERSIST_FLAG);
       localStorage.removeItem(STORE_NAME);
+      // The flag used to live here. Clear it so a browser that has one from
+      // before this change doesn't keep it forever.
+      localStorage.removeItem(PERSIST_FLAG);
     }
   } catch {}
 }
 
-// Storage adapter that switches between sessionStorage and localStorage
-// based on the user's persistence preference.
 const authStorage = {
   getItem: (name: string): string | null => {
     try {
-      return persistChoice() === "persistent"
-        ? localStorage.getItem(name)
-        : sessionStorage.getItem(name);
-    } catch {
-      return null;
-    }
+      const own = sessionStorage.getItem(name);
+      if (own) return own;
+    } catch {}
+    try {
+      const durable = localStorage.getItem(name);
+      if (durable) {
+        // A tab with no session of its own adopts the durable one — that is
+        // "Keep me signed in" working after a restart. It then takes a copy
+        // and stops reading the shared slot, so somebody signing in as a
+        // different user in another tab can never change who this tab is.
+        try {
+          sessionStorage.setItem(name, durable);
+          sessionStorage.setItem(PERSIST_FLAG, "1");
+        } catch {}
+        return durable;
+      }
+    } catch {}
+    return null;
   },
   setItem: (name: string, value: string): void => {
     try {
-      if (persistChoice() === "persistent") {
-        localStorage.setItem(name, value);
-        sessionStorage.removeItem(name);
-      } else {
-        sessionStorage.setItem(name, value);
-        localStorage.removeItem(name);
-      }
+      sessionStorage.setItem(name, value);
     } catch {}
+    if (tabKeepsDurableCopy()) {
+      try {
+        localStorage.setItem(name, value);
+      } catch {}
+    }
   },
   removeItem: (name: string): void => {
     try {
       sessionStorage.removeItem(name);
-      localStorage.removeItem(name);
     } catch {}
+    // Only the tab that keeps the durable copy may remove it. Clearing it
+    // unconditionally is how one tab's sign-out signed the others out.
+    if (tabKeepsDurableCopy()) {
+      try {
+        localStorage.removeItem(name);
+      } catch {}
+    }
   },
 };
 
@@ -119,12 +151,18 @@ export const useAuthStore = create<AuthState>()(
           // eslint-disable-next-line no-console
           console.warn("[auth] logout:", reason);
         }
-        // Clear both storages outright so no stale token can be rehydrated
-        // on next page load.
+        // This tab's copy always goes, so no stale token is rehydrated on the
+        // next page load. The durable copy goes only if this tab is the one
+        // keeping it: clearing it unconditionally signed out every other tab,
+        // including one logged in as somebody else entirely.
         try {
           sessionStorage.removeItem(STORE_NAME);
-          localStorage.removeItem(STORE_NAME);
         } catch {}
+        if (tabKeepsDurableCopy()) {
+          try {
+            localStorage.removeItem(STORE_NAME);
+          } catch {}
+        }
         // Drop the in-app back stack too: after the next login, Back must not
         // be able to walk into the previous user's pages.
         useNavHistory.getState().reset();
