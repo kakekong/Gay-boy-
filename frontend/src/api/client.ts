@@ -27,7 +27,19 @@ let refreshing: Promise<string | null> | null = null;
 // the user-facing logout after TWO in a row, separated by a backoff —
 // the first one might be a transient backend state during an HF Space
 // cold-start where the DB session is briefly unhealthy.
+//
+// "Consecutive" has to mean it. This used to be reset only by a *refresh*
+// succeeding, so a single 401 during a cold start left the counter at 1 for
+// the rest of the session — and the next auth hiccup, hours later and
+// unrelated, was enough on its own to sign the user out. On a machine that
+// drops connections more often, that is the difference between "it logs me
+// out sometimes" and "it never does". Any successful call now clears it,
+// because a call that worked is proof the session is good.
 let consecutiveAuthFailures = 0;
+
+export function noteSessionIsHealthy(): void {
+  consecutiveAuthFailures = 0;
+}
 
 function attemptRefresh(): Promise<string | null> {
   const store = useAuthStore.getState();
@@ -115,7 +127,11 @@ function explain(err: AxiosError): AxiosError {
 }
 
 api.interceptors.response.use(
-  (r) => r,
+  (r) => {
+    // Proof the session is good, whatever happened earlier.
+    noteSessionIsHealthy();
+    return r;
+  },
   async (err: AxiosError) => {
     const original = err.config as AxiosRequestConfig & { _retry?: boolean };
     const status = err.response?.status;

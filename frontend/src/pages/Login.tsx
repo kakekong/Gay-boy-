@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Factory, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
-import { useAuthStore, setAuthPersistence } from "@/store/auth";
+import {
+  useAuthStore, setAuthPersistence, diagnoseMissingSession,
+} from "@/store/auth";
 import { useT, useLangStore, T } from "@/store/lang";
 
 export default function LoginPage() {
@@ -18,6 +20,11 @@ export default function LoginPage() {
   // long-lived credential, not whether to have one. Unticking it still gives
   // the shared-computer behaviour.
   const [rememberMe, setRememberMe] = useState(true);
+  // Why there is no session, when the app itself was never told. Asked once,
+  // on arrival: "it signs me out on its own" is what a browser that keeps
+  // nothing looks like from the outside, and the login form alone cannot say
+  // so. Read at mount rather than on every render — it touches storage.
+  const [storageNote] = useState(() => diagnoseMissingSession());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const setTokens = useAuthStore((s) => s.setTokens);
@@ -183,6 +190,15 @@ export default function LoginPage() {
               >
                 {t("Dismiss", "Tutup")}
               </button>
+            </div>
+          )}
+
+          {storageNote && !lastLogoutReason && !err && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+              <div className="font-semibold mb-0.5">
+                {t("About this browser", "Tentang peramban ini")}
+              </div>
+              <div>{storageNote}</div>
             </div>
           )}
 

@@ -90,6 +90,69 @@ export function setAuthPersistence(persistAcrossRestarts: boolean): void {
   } catch {}
 }
 
+// ── Is this browser keeping anything at all? ─────────────────────────────
+//
+// Every read and write below is wrapped in try/catch, which is right — a
+// browser that refuses storage must not crash the app. But swallowing the
+// failure silently produces the worst symptom there is: the session lives in
+// memory, everything works, and the next reload lands on the login screen
+// with no explanation. It happens on one machine and not another, so it
+// reads as the app being flaky rather than the browser being configured a
+// certain way. A private window, "block all cookies", a full disk, or a
+// profile Safari has decided to purge all look identical from in here.
+//
+// So: ask, once, whether a write survives being read back, and let the login
+// page say so plainly instead of leaving somebody to guess.
+const PROBE_KEY = "transmisi-storage-probe";
+
+export type StorageHealth =
+  | "ok"           // both — a session survives a reload and a restart
+  | "session-only" // per-tab works, durable does not: no "keep me signed in"
+  | "none";        // nothing is kept: signed out on every reload
+
+function retains(store: Storage): boolean {
+  try {
+    const probe = `${Date.now()}`;
+    store.setItem(PROBE_KEY, probe);
+    const back = store.getItem(PROBE_KEY);
+    store.removeItem(PROBE_KEY);
+    return back === probe;
+  } catch {
+    return false;
+  }
+}
+
+export function storageHealth(): StorageHealth {
+  let durable = false;
+  let perTab = false;
+  try { durable = retains(localStorage); } catch {}
+  try { perTab = retains(sessionStorage); } catch {}
+  if (perTab) return durable ? "ok" : "session-only";
+  return "none";
+}
+
+// A mark that somebody was signed in on this browser. It is what tells
+// "the session vanished under us" apart from "nobody has ever signed in
+// here" — two states that otherwise both look like an empty login form.
+// Cleared on a deliberate sign-out, because that one needs no explaining.
+const BREADCRUMB = "transmisi-session-was-here";
+
+function leaveBreadcrumb(): void {
+  try { localStorage.setItem(BREADCRUMB, `${Date.now()}`); } catch {}
+  try { sessionStorage.setItem(BREADCRUMB, `${Date.now()}`); } catch {}
+}
+
+function clearBreadcrumb(): void {
+  try { localStorage.removeItem(BREADCRUMB); } catch {}
+  try { sessionStorage.removeItem(BREADCRUMB); } catch {}
+}
+
+function hadSessionHere(): boolean {
+  try { if (localStorage.getItem(BREADCRUMB)) return true; } catch {}
+  try { if (sessionStorage.getItem(BREADCRUMB)) return true; } catch {}
+  return false;
+}
+
 const authStorage = {
   getItem: (name: string): string | null => {
     try {
@@ -144,7 +207,10 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       lastLogoutReason: null,
       impersonationOrigin: null,
-      setTokens: (a, r) => set({ accessToken: a, refreshToken: r, lastLogoutReason: null }),
+      setTokens: (a, r) => {
+        leaveBreadcrumb();
+        set({ accessToken: a, refreshToken: r, lastLogoutReason: null });
+      },
       setUser: (u) => set({ user: u }),
       logout: (reason) => {
         if (reason) {
@@ -163,6 +229,8 @@ export const useAuthStore = create<AuthState>()(
             localStorage.removeItem(STORE_NAME);
           } catch {}
         }
+        // A deliberate sign-out needs no explaining afterwards.
+        clearBreadcrumb();
         // Drop the in-app back stack too: after the next login, Back must not
         // be able to walk into the previous user's pages.
         useNavHistory.getState().reset();
@@ -206,3 +274,50 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+
+/**
+ * Why is there no session? Answered once, at startup, before anybody has to
+ * guess from an empty login form.
+ *
+ * Three states look identical on screen and are not the same thing at all:
+ * nobody has signed in here yet; the browser is not keeping anything, so
+ * every reload signs you out; or a session existed and something removed it.
+ * The last two are what "it keeps signing me out on its own" means, and they
+ * have different answers.
+ *
+ * Returns a sentence to show, or null when there is nothing to explain.
+ */
+export function diagnoseMissingSession(): string | null {
+  const state = useAuthStore.getState();
+  if (state.accessToken) return null;          // signed in; nothing to say
+  if (state.lastLogoutReason) return null;     // we already know why
+
+  const health = storageHealth();
+  if (health === "none") {
+    return (
+      "This browser isn't saving anything for this site, so you'll be signed "
+      + "out again as soon as the page reloads. It's usually a Private "
+      + "window, or Safari set to block all cookies "
+      + "(Safari → Settings → Privacy). Storage being full does it too."
+    );
+  }
+  if (hadSessionHere()) {
+    const durable = health === "ok";
+    return durable
+      ? "You were signed in on this browser and the saved sign-in has gone. "
+        + "Safari clears saved logins for sites it hasn't seen you open in "
+        + "about a week, which is the usual cause on a machine you use now "
+        + "and then."
+      : "You were signed in on this browser, but it is only keeping things "
+        + "for as long as the tab is open — \"Keep me signed in\" cannot "
+        + "work here. Check Safari → Settings → Privacy.";
+  }
+  if (health === "session-only") {
+    return (
+      "This browser won't keep you signed in after it closes — only for as "
+      + "long as this tab stays open. Check Safari → Settings → Privacy."
+    );
+  }
+  return null;
+}
