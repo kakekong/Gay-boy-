@@ -341,8 +341,7 @@ async def create_customer_po(
         po.decided_by = user.id
         from datetime import UTC, datetime as _dt
         po.decided_at = _dt.now(UTC)
-        # Attaches if the deal has already been Won; otherwise the PO is
-        # simply on file and the job waits for the win.
+        # Attaches if the deal has already been Won, mints the job if not.
         await _spawn_project(db, po, user)
         await db.flush()
     else:
@@ -503,6 +502,75 @@ async def reject_customer_po(
             "Please give a reason for rejecting — the requester will see it.",
         )
     return await _decide_customer_po(po_id, False, payload.notes, db, user)
+
+
+@router.post("/{po_id}/create-project", response_model=CustomerPOOut)
+async def create_project_for_customer_po(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_director_only),
+):
+    """Start the job by hand. Director only, and only when nothing else has.
+
+    Approval mints the project and so does Won, which covers every order
+    filed from here on. It does not cover the ones already sitting approved
+    from before that was true, and it will not cover whatever the pipeline
+    turns out not to model — an order that has to start against paperwork
+    that is not a quotation, a deposit released on a phone call. Those are
+    rare and real, and the alternative to a button is somebody editing the
+    database.
+
+    Director-only because it is the one way to make a project without the
+    evidence the other doors check for. Everything else about it is ordinary:
+    the job is linked to this PO and its quotation exactly as an automatic
+    one would be, so nothing downstream can tell which door it came through.
+
+    Never makes a second job. If one already exists — named by this PO, or
+    raised against its quotation and never linked here — it is linked and
+    returned, which is the same outcome the caller wanted.
+    """
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+
+    from app.services.project_factory import project_for_quotation
+
+    # Either the PO already names one, or one exists against its quotation and
+    # was never joined to this PO. Both mean "do not make a second job" — and
+    # the second is itself a thing worth fixing, so link it and return happy
+    # rather than refusing. The ask was "this order has no project", and after
+    # this it has one; which of the two ways that happened is not the caller's
+    # problem. It must not be a 4xx: the session rolls back on any exception,
+    # which would undo the very link the message claimed to have made.
+    existing = await db.get(Project, po.project_id) if po.project_id else None
+    if existing is None or existing.is_deleted:
+        existing = await project_for_quotation(db, po.quotation_id)
+    if existing is not None and not existing.is_deleted:
+        po.project_id = existing.id
+        await db.flush()
+        return await _enrich(db, po)
+
+    if po.status in ("pending_approval", "pending_finance", "rejected", "cancelled"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"A '{po.status}' order has not been agreed yet. Approve it first — "
+            "that starts the job on its own.",
+        )
+
+    project = await _spawn_project(db, po, user, create_if_missing=True)
+    if project is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Could not start a project for this order.",
+        )
+    from app.core.audit import record as audit_record
+    await audit_record(
+        db, actor=user, action="project_created_manually",
+        entity="customer_po", entity_id=po.id,
+        after={"project_id": str(project.id), "project_code": project.code},
+    )
+    await db.flush()
+    return await _enrich(db, po)
 
 
 # ─── Down-payment (DP) sub-flow ──────────────────────────────────────────────
@@ -918,19 +986,35 @@ async def _spawn_project(
     db: AsyncSession, po: CustomerPO, user: User,
     *, create_if_missing: bool = False,
 ) -> Project | None:
-    """Link this customer PO to its project. Does **not** normally make one.
+    """Give this customer PO its project — attaching to one, or making it.
 
-    Filing or approving a PO is not what starts a job — marking the
-    quotation Won is. The PO comes first and is the evidence Won needs; the
-    director's signature on it says the paperwork is right, not that the
-    work has begun. So this attaches to the project Won already made, and
-    returns None when the deal has not been Won yet: the PO is approved and
-    simply waits, which is the whole point of the order.
+    An approved customer PO is the customer's own order with the director's
+    signature on it. There is nothing left to wait for before the work has
+    somewhere to live, so approval mints the job when Won has not already.
 
-    `create_if_missing` is for the one caller that *is* the starting gun:
-    sales confirming a down-payment landed. A deposit order deliberately
-    does not start at Won — not beginning work before the money arrives is
-    what a deposit is for — so that step mints the job instead.
+    That is a change. It used to attach only: the job started at Won and the
+    PO's approval merely joined it, on the reasoning that the signature says
+    the paperwork is right rather than that work has begun. The reasoning was
+    sound and the result was not — an approved order sat with a dash where its
+    project belonged, and the step that would have fixed it (marking the
+    quotation Won, on a different page) had nothing pointing at it. Won still
+    does everything it did; it is no longer the only door.
+
+    Order does not matter and neither does the count. Won first, approval
+    first, two POs against one quotation, the same PO approved twice — every
+    path looks for the existing project before making one, so there is exactly
+    one job.
+
+    **What this deliberately does not do is mark the deal Won.** Won posts
+    revenue to the ledger and moves the sales figures, and a PO can be
+    approved for part of a quotation — inferring the full quoted total from
+    that would overstate what was sold. Starting the work early costs nothing
+    if the deal turns; posting revenue early is a correction.
+
+    One order keeps its gate. A **down-payment** PO does not start a job on
+    approval — not beginning work before the deposit arrives is the entire
+    point of a deposit — so it waits, and `create_if_missing` is how the
+    caller that *is* that gate (finance recording the payment) overrides it.
     """
     from app.ai.orchestrator import emit
     from app.services.project_factory import create_project, project_for_quotation
@@ -947,7 +1031,7 @@ async def _spawn_project(
             project.po_value = po.total
         po.project_id = project.id
         await db.flush()
-    elif create_if_missing:
+    elif create_if_missing or (po.status == "approved" and not po.is_downpayment):
         # Carry the approved price request through (via the linked quotation)
         # so purchasing knows exactly what order it's sourcing.
         price_request_id = None

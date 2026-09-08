@@ -8,13 +8,24 @@ used to wait for the director to approve the customer PO as well, which put
 a second signature between "we won this" and "we can start", and left sales
 looking at a won deal with no project against it.
 
-The customer PO's own approval still matters; it just is not what mints the
-project any more. When it lands it attaches to the project already there.
+**An approved customer PO starts one too**, when Won has not already — see
+`customer_pos._spawn_project`. Won and the PO's approval are two doors onto
+the same room, and whichever is reached first opens it; the other then
+attaches to the job that exists. Requiring both, in order, left an approved
+order with no project and no visible way to get one.
+
+They are not equivalent, though, and only one of them is about money: Won
+posts revenue, and approving an order does not.
 
 One exception, and it is deliberate: a **down-payment order** keeps its
 gate. The whole point of a DP is that we do not start until the deposit
-arrives, so for those the project appears when sales confirm the money
-landed — see `customer_pos.confirm_dp_received`.
+arrives, so for those the project appears when finance records the money
+landing — see `customer_pos.confirm_dp_received`.
+
+**A director can also mint one by hand** —
+`POST /customer-pos/{id}/create-project` — for the orders that fall outside
+all of it: a PO approved before this rule existed, or a job that has to start
+against paperwork the pipeline does not model.
 """
 
 from sqlalchemy import select

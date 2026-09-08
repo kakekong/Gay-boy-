@@ -1,22 +1,30 @@
-"""The job starts at Won, not at the PO's second signature.
+"""Two doors onto one job: Won, and the customer PO's approval.
 
-A project used to be minted when the director approved the customer PO.
-Won already means the customer said yes *and* their order is on file — that
-is enforced, it is what the word means here — so waiting for a second
-signature left sales looking at a won deal with nowhere to put the drawing,
-and purchasing unable to raise anything against it.
+This started as "Won mints the project, the PO attaches" — a correction to
+the older rule where only the PO's approval minted it, which left sales
+looking at a won deal with nowhere to put the drawing. Won already means the
+customer said yes *and* their order is on file, so making it wait for a
+second signature was making it wait for evidence it had.
 
-Now Won mints the job. The customer PO's approval still happens and still
-matters; it attaches to the project already there instead of creating one.
+The correction went one step too far the other way. An order could be filed
+and approved without anybody marking the quotation Won, and then it sat
+approved, correct, and with no project — the step that would have fixed it
+living on another page with nothing pointing at it. So both now open the
+door, and whichever happens first does it.
 
-The thing that has to hold either way is that there is exactly **one** job.
-Approving the PO after Won, approving it twice, or filing a second PO
-against the same quotation must all land on the same project — the old code
-spawned a duplicate on a re-approval and had to grow a guard for it.
+The thing that has to hold under either rule, and is most of what is checked
+here, is that there is exactly **one** job. Won then approve, approve then
+Won, approving twice, a second PO against the same quotation — all one
+project. An early version spawned a duplicate on re-approval and had to grow
+a guard for it.
 
-One case keeps the old timing on purpose: a **down-payment order**. The
-whole point of a deposit is that we don't start until it arrives, so those
-still wait for sales to confirm the money landed.
+Two things stay as they were:
+
+* A **down-payment order** does not start on approval. The whole point of a
+  deposit is that we don't begin until it arrives, so those wait for finance
+  to record the money landing.
+* **Approving an order does not post revenue.** Won moves the sales figures;
+  a signature on an order that may cover part of a quotation must not.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -129,12 +137,14 @@ async def main():
     check("...and nothing was minted by the attempt",
           len(await projects_for(quote)) == 1)
 
-    # ══ the PO on its own must not start anything ════════════════════════════
-    # The reported symptom: file the PO and the job appeared, with no Won in
-    # between. It happened on every route into an approved PO — the director
-    # filing one directly (which applies on the spot), the director signing
-    # off someone else's, and a rejected one being resubmitted.
-    print("\n── an approved PO with no Won behind it starts nothing ──")
+    # ══ the PO on its own starts the job too ═════════════════════════════════
+    # Checked on every route into an approved PO, because they are separate
+    # code paths: the director filing one directly (which applies on the spot),
+    # and the director signing off somebody else's through the approvals queue.
+    # Approving an order used to start nothing — the job waited for Won, and an
+    # approved PO sat with a dash where its project belonged. Approval is a
+    # door now too. Won is unchanged; it is just no longer the only one.
+    print("\n── an approved PO starts the job even with no Won behind it ──")
     cust4, quote4 = await quoted(4)
     direct = J(await c.post("/customer-pos", headers=d, json={
         "customer_id": cust4, "quotation_id": quote4, "number": f"CPO-D{tag}",
@@ -144,24 +154,27 @@ async def main():
           str(direct)[:140])
     check("...which is approved on the spot", direct.get("status") == "approved",
           str(direct.get("status")))
-    check("...and still starts no job, because nothing was won yet",
-          not await projects_for(quote4),
+    check("...and that starts the job, with nothing won yet",
+          len(await projects_for(quote4)) == 1,
           str([(x.get('project') or {}).get('code')
                for x in await projects_for(quote4)]))
-    check("...so the PO has no project on it either",
-          J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")
-          is None,
-          str(J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")))
-
-    # Now win it — that is the step that was missing.
-    r = await c.post(f"/quotations/{quote4}/won", headers=d)
-    check("marking it Won afterwards is what starts the job",
-          r.status_code == 200 and len(await projects_for(quote4)) == 1,
-          f"{r.status_code} {len(await projects_for(quote4))}")
-    check("...and the PO now points at it",
+    check("...with the PO pointing at it",
           J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")
           is not None,
-          str(J(await c.get(f"/customer-pos/{direct['id']}", headers=d))))
+          str(J(await c.get(f"/customer-pos/{direct['id']}", headers=d)).get("project_id")))
+    check("...while the deal itself is still only 'approved' — no revenue posted",
+          J(await c.get(f"/quotations/{quote4}", headers=d))["status"] == "approved",
+          J(await c.get(f"/quotations/{quote4}", headers=d))["status"])
+
+    # Winning it afterwards must land on the job that exists, not make a second.
+    before = [(x.get("project") or {}).get("code") for x in await projects_for(quote4)]
+    r = await c.post(f"/quotations/{quote4}/won", headers=d)
+    check("marking it Won afterwards changes nothing about the job",
+          r.status_code == 200 and len(await projects_for(quote4)) == 1,
+          f"{r.status_code} {len(await projects_for(quote4))}")
+    check("...it is the same one",
+          [(x.get("project") or {}).get("code") for x in await projects_for(quote4)] == before,
+          str(before))
 
     # Same again through the director's approvals queue rather than a direct
     # filing, since that is a separate code path.
@@ -170,16 +183,18 @@ async def main():
         "customer_id": cust5, "quotation_id": quote5, "number": f"CPO-Q{tag}",
         "items": [{"description": f"CHAIN {tag}", "qty": 2, "unit_price": 1000}],
         "is_downpayment": False}))
+    check("a rep's PO starts nothing while it is only filed",
+          not await projects_for(quote5), "pending is not approved")
     r = await c.post(f"/customer-pos/{filed['id']}/approve", headers=d,
                      json={"notes": ""})
     check("the director approves a rep's PO", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:140])
-    check("...and that approval starts no job either",
-          not await projects_for(quote5),
+    check("...and that approval starts the job too",
+          len(await projects_for(quote5)) == 1,
           str([(x.get('project') or {}).get('code')
                for x in await projects_for(quote5)]))
     r = await c.post(f"/quotations/{quote5}/won", headers=d)
-    check("...until the quotation is marked Won",
+    check("...and marking it Won still leaves exactly one",
           r.status_code == 200 and len(await projects_for(quote5)) == 1,
           f"{r.status_code} {len(await projects_for(quote5))}")
 

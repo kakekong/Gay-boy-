@@ -179,6 +179,30 @@ export default function CustomerPODetailPage() {
     }),
   });
 
+  // The escape hatch. Approving an order starts its job, so this is for the
+  // ones approved before that was true — and for whatever the pipeline turns
+  // out not to model. Director only; the server enforces that, this only
+  // decides whether the button is worth showing.
+  const startProject = useMutation({
+    mutationFn: () => api.post(`/customer-pos/${id}/create-project`).then((r) => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["customer-po", id] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-all"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      setFlash({
+        kind: "ok",
+        text: tt(`Project ${data?.project_code ?? ""} is open for this order.`,
+                 `Proyek ${data?.project_code ?? ""} dibuka untuk pesanan ini.`),
+      });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? tt("Could not start the project", "Gagal membuat proyek"),
+    }),
+  });
+
   const dpFinanceApprove = useMutation({
     mutationFn: () => api.post(`/customer-pos/${id}/dp/finance-approve`,
       { notes: reason.trim() || null }),
@@ -679,7 +703,13 @@ export default function CustomerPODetailPage() {
                 {p.project_code ?? p.project_id.slice(0, 8)}
               </Link>
             ) : (
-              <NoProjectYet po={p} quoteStatus={quote.data?.status ?? null} />
+              <NoProjectYet
+                po={p}
+                quoteStatus={quote.data?.status ?? null}
+                canStart={me?.role === "director"}
+                onStart={() => startProject.mutate()}
+                starting={startProject.isPending}
+              />
             )}
           </Meta>
           <Meta label={t("PO date", "Tanggal PO")} icon={<Calendar size={12} />}>
@@ -799,54 +829,81 @@ export default function CustomerPODetailPage() {
 /**
  * Why this order has no job yet — and what to do about it.
  *
- * Approving a PO does not start a project. Marking the quotation **Won** does;
- * the PO is the evidence Won requires, and its own approval says the paperwork
- * is right, not that the work has begun. The order can therefore sit approved
- * and correct with no project against it, which is the ordinary case and looks
- * exactly like a bug.
+ * Approving an order now starts its project, so for anything filed from here
+ * on this field is a project code. What is left are the states where there
+ * genuinely is no job yet, and each of them has a different answer:
  *
- * It used to look like one because this field printed a bare "—" for every
- * state except pending and rejected. A dash where a project number belongs is
- * read as "it should be here and isn't" — and there was nothing on the page to
- * read instead, so the next move was to go looking for the fault rather than
- * for the Won button.
+ * - waiting on a signature, which is a matter of somebody signing;
+ * - a deposit order, which is *supposed* to have no project — not starting
+ *   before the money lands is the whole point of a deposit;
+ * - an order approved before approval started jobs, which is stranded and
+ *   needs the director's button.
  *
- * So: name the step that is missing, and link to the document it happens on.
+ * The field used to print a bare "—" for all of them. A dash where a project
+ * number belongs reads as "this should be here and isn't", with nothing on the
+ * page to read instead — so the next move was to go looking for a fault rather
+ * than for the step that was missing.
  */
-function NoProjectYet({ po, quoteStatus }: { po: any; quoteStatus: string | null }) {
+function NoProjectYet({
+  po, quoteStatus, canStart, onStart, starting,
+}: {
+  po: any;
+  quoteStatus: string | null;
+  canStart: boolean;
+  onStart: () => void;
+  starting: boolean;
+}) {
   const t = useT();
-  const line = (text: string, to?: string, cta?: string) => (
+  const line = (text: string, extra?: React.ReactNode) => (
     <span className="muted text-xs">
-      {text}
-      {to && cta && (
-        <>
-          {" "}
-          <Link to={to} className="text-brand-700 hover:underline">{cta}</Link>
-        </>
-      )}
+      {text}{extra ? <> {extra}</> : null}
     </span>
   );
 
   if (po.status === "pending_approval")
-    return line(t("Awaiting director approval", "Menunggu persetujuan direktur"));
+    return line(t("Starts when the director approves this order",
+                  "Dimulai saat direktur menyetujui pesanan ini"));
+  if (po.status === "pending_finance")
+    return line(t("Awaiting finance approval", "Menunggu persetujuan keuangan"));
   if (po.status === "rejected")
     return line(t("PO was rejected", "PO ditolak"));
-  // The deposit path deliberately withholds the job until the money lands —
-  // not starting work before the deposit arrives is the point of a DP order.
+  // The deposit path deliberately withholds the job until the money lands.
   if (po.status === "pending_payment_confirm")
     return line(t("Starts when the down payment is recorded",
                   "Dimulai saat uang muka dicatat"));
-  if (!po.quotation_id)
-    return line(t("No quotation linked, so there is nothing to win yet",
-                  "Belum ada penawaran terkait, jadi belum ada yang bisa dimenangkan"));
-  if (quoteStatus && quoteStatus !== "won")
+
+  // Approved with no job: either this order predates approval-starts-the-job,
+  // or something went wrong. Either way the director can open one.
+  const quoteLink = po.quotation_id ? (
+    <Link to={`/quotations/${po.quotation_id}`} className="text-brand-700 hover:underline">
+      {quoteStatus === "won"
+        ? t("Open the quotation", "Buka penawaran")
+        : t("or mark the quotation Won", "atau tandai penawaran Menang")}
+    </Link>
+  ) : null;
+
+  if (canStart)
     return line(
-      t("The job starts when the quotation is marked Won — the PO is the evidence for it.",
-        "Proyek dimulai saat penawaran ditandai Menang — PO ini buktinya."),
-      `/quotations/${po.quotation_id}`,
-      t("Open the quotation", "Buka penawaran"),
+      t("This order has no project.", "Pesanan ini belum punya proyek."),
+      <>
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={starting}
+          className="text-brand-700 hover:underline disabled:opacity-50"
+        >
+          {starting
+            ? t("Starting…", "Membuat…")
+            : t("Start it now", "Buat sekarang")}
+        </button>
+        {quoteLink ? <> · {quoteLink}</> : null}
+      </>,
     );
-  return line("—");
+  return line(
+    t("No project yet — a director can start one.",
+      "Belum ada proyek — direktur dapat membuatnya."),
+    quoteLink,
+  );
 }
 
 function Meta({

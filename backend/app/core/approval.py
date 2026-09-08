@@ -297,10 +297,10 @@ async def apply_to_target(
                         from app.models.user import User as _UserModel
                         actor = await db.get(_UserModel, req.requested_by)
                     if actor is not None:
-                        # Attaches to the job the Won already started. If the
-                        # quotation has not been Won yet, the PO is approved
-                        # and waits — approving paperwork is not the same as
-                        # starting work.
+                        # Attaches to the job Won already started, or mints it
+                        # here when Won has not happened yet — an approved
+                        # order is reason enough to have somewhere to work.
+                        # Down-payment orders still wait for the deposit.
                         project = await _spawn_project(db, po, actor)
                         if project is not None:
                             applied["project_id"] = str(project.id)
