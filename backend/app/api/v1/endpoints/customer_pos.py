@@ -508,9 +508,12 @@ async def reject_customer_po(
 # ─── Down-payment (DP) sub-flow ──────────────────────────────────────────────
 #
 # The DP path is: sales files DP PO → finance approves it → finance issues
-# the DP invoice AGAINST THE PO (no project exists yet) → customer pays →
-# sales confirms the deposit landed → project spawns and the DP invoice is
-# re-linked to it. Rejection at either pending stage goes through
+# the DP invoice AGAINST THE PO (no project exists yet) → finance records
+# the payment when it lands → project spawns and the DP invoice is
+# re-linked to it. The confirmation used to be sales', which asked the desk
+# that cannot see the bank whether the money had arrived; it is finance's
+# now, and falls out of recording the payment rather than being its own
+# button. Rejection at either pending stage goes through
 # dp/finance-reject. Every DP action also closes the ApprovalRequest that
 # was filed at submission so no stale live-fire request lingers in the
 # director's queue.
