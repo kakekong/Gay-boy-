@@ -52,6 +52,20 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     delivery_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Import-document checklist: {key: {collected: bool, attachment_id, note}}
     import_docs:          Mapped[dict]            = mapped_column(JSONB, default=dict, nullable=False)
+    # ── Drawing skipped ────────────────────────────────────────────────────
+    # Not every job has a drawing. A catalogue part ordered off the shelf has
+    # nothing to draw and nothing for the customer to approve, and the pipeline
+    # used to hold those at the drawing gate until somebody uploaded a sheet
+    # that did not exist — so people invented one, which is worse than not
+    # having it: the file says a drawing was approved when none ever was.
+    #
+    # Skipping is the director's call and is recorded like any other decision:
+    # who, when, and why. `_drawing_cleared` reads these alongside a real
+    # approval, so everything downstream asks one question — "is the drawing
+    # settled?" — rather than each gate growing its own exception.
+    drawing_skipped_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    drawing_skipped_by:   Mapped[UUID | None]     = mapped_column(PG_UUID(as_uuid=True))
+    drawing_skip_reason:  Mapped[str | None]      = mapped_column(Text)
     # ── Operations QC + customer handover ──────────────────────────────────
     # Operations runs a final check; passing QC hands the project to admin to
     # issue the delivery order + invoice. Failing parks it with findings.

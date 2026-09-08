@@ -434,6 +434,9 @@ async def project_full(project_id: UUID,
             "qc_findings": (p.meta or {}).get("qc_findings"),
             "customer_received_at": p.customer_received_at,
             "created_at": p.created_at,
+            # So the drawings card can say "skipped, by the director, because
+            # …" instead of showing an empty shelf that reads as work missing.
+            **_skip_payload(p),
         },
         "price_request": price_request,
         # Null for anyone outside procurement, which is how the page knows to
@@ -875,6 +878,23 @@ async def _has_approved_drawing(db: AsyncSession, project_id: UUID) -> bool:
     return d is not None
 
 
+async def _drawing_cleared(db: AsyncSession, p: Project) -> bool:
+    """Is the drawing question settled — approved, or deliberately skipped?
+
+    The two are different facts and the same answer to everything downstream,
+    which is why this exists rather than each gate testing both. A catalogue
+    part ordered off the shelf has no drawing to approve; holding it at the
+    drawing gate teaches people to upload a placeholder, and then the file says
+    a drawing was approved when none ever was.
+
+    The skip is the director's, recorded with a reason — see
+    `Project.drawing_skipped_at`.
+    """
+    if p.drawing_skipped_at is not None:
+        return True
+    return await _has_approved_drawing(db, p.id)
+
+
 @router.post("/projects/{project_id}/drawings", status_code=201)
 async def upload_drawing(
     project_id: UUID,
@@ -1029,6 +1049,144 @@ async def decide_drawing(
     return {"ok": True, "drawing_id": str(d.id), "status": d.status}
 
 
+class SkipDrawingIn(BaseModel):
+    reason: str | None = None
+
+
+def _skip_payload(p: Project) -> dict:
+    return {
+        "drawing_skipped": p.drawing_skipped_at is not None,
+        "drawing_skipped_at": p.drawing_skipped_at,
+        "drawing_skipped_by": str(p.drawing_skipped_by) if p.drawing_skipped_by else None,
+        "drawing_skip_reason": p.drawing_skip_reason,
+    }
+
+
+@router.post("/projects/{project_id}/skip-drawing")
+async def skip_drawing(
+    project_id: UUID,
+    payload: SkipDrawingIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Declare that this job has no drawing to wait for.
+
+    A catalogue part bought off the shelf has nothing to draw and nothing for
+    the customer to approve, and the pipeline held those at the drawing gate
+    regardless. The way round it was to upload something — a photo, the
+    supplier's page, anything — and approve that, which does not merely waste
+    a minute: it puts an approved drawing on the record for a job that never
+    had one, and the next person reading the file cannot tell the difference.
+
+    So the skip is a decision in its own right, with a reason attached, and it
+    is **the director's** — the same signature that approves a real drawing.
+    Anyone else on the logistics or ops side may ask for it; the request lands
+    in the director's queue like every other one, and this returns 202.
+
+    It is not a status. `drawing_skipped_at` records the decision; the project
+    advances to `drawing_approved` because that is the milestone now settled,
+    and every gate asks `_drawing_cleared` rather than testing for a file.
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    role = Role(user.role)
+    # Who may ASK. Who may decide is director, checked below — the two are
+    # different questions and this is the looser one.
+    if role not in (_LOGISTICS_ROLES | _OPS_ROLES | {Role.DIRECTOR}):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Purchasing, operations or management only")
+    if p.drawing_skipped_at is not None:
+        return {"ok": True, "already": True, **_skip_payload(p)}
+    if await _has_approved_drawing(db, project_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This job already has an approved drawing — there is nothing to skip.",
+        )
+
+    reason = (payload.reason or "").strip()
+    if role != Role.DIRECTOR:
+        existing = await db.scalar(
+            select(ApprovalRequest).where(
+                ApprovalRequest.target_type == "project_skip_drawing",
+                ApprovalRequest.target_id == project_id,
+                ApprovalRequest.status == ApprovalStatus.PENDING.value,
+            )
+        )
+        if not existing:
+            await request_approval(
+                db,
+                target_type="project_skip_drawing",
+                target_id=project_id,
+                requested_by=user.id,
+                required_role=Role.DIRECTOR,
+                reason=(f"Skip the drawing stage on {p.code}"
+                        + (f" — {reason}" if reason else "")),
+                payload={"project_code": p.code, "reason": reason},
+            )
+        await db.flush()
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={"status": "pending_approval",
+                     "message": "Sent to the director to approve skipping the drawing."},
+        )
+
+    apply_drawing_skip(p, actor_id=user.id, reason=reason)
+    await db.flush()
+    return {"ok": True, **_skip_payload(p), "project_status": p.status}
+
+
+def apply_drawing_skip(p: Project, *, actor_id, reason: str | None) -> None:
+    """Stamp the decision onto the project. Shared with the approvals queue,
+    so a skip signed off there is indistinguishable from one done directly."""
+    p.drawing_skipped_at = datetime.now(UTC)
+    p.drawing_skipped_by = actor_id
+    p.drawing_skip_reason = (reason or "").strip() or None
+    advance_project_status(p, "drawing_approved")
+
+
+@router.post("/projects/{project_id}/unskip-drawing")
+async def unskip_drawing(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Undo the skip, while undoing it still means anything.
+
+    Once delivery is confirmed the goods are on their way and the drawing
+    question is moot — reopening it then would put a gate behind work that has
+    already passed it. The record of the skip is not erased quietly either:
+    the reason is kept so the file still shows the decision was made and then
+    withdrawn.
+    """
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can undo a skipped drawing")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if p.drawing_skipped_at is None:
+        return {"ok": True, "already": True, **_skip_payload(p)}
+    if p.delivery_confirmed_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Delivery is already confirmed on this job — the drawing stage "
+            "is behind it now.",
+        )
+    p.drawing_skipped_at = None
+    p.drawing_skipped_by = None
+    p.drawing_skip_reason = (
+        f"[withdrawn by {user.full_name}] {p.drawing_skip_reason}"
+        if p.drawing_skip_reason else None
+    )
+    await db.flush()
+    return {"ok": True, **_skip_payload(p)}
+
+
 @router.post("/drawings/{drawing_id}/reupload")
 async def reupload_drawing(
     drawing_id: UUID,
@@ -1153,10 +1311,11 @@ async def update_logistics(project_id: UUID, payload: LogisticsPatch,
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if not await _has_approved_drawing(db, project_id):
+    if not await _drawing_cleared(db, p):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Set logistics only after the drawing is approved.",
+            "Set logistics only after the drawing is approved — or the "
+            "director skips the drawing for this job.",
         )
     if payload.delivery_mode is not None:
         if payload.delivery_mode not in REQUIRED_DOCS:
@@ -2165,6 +2324,225 @@ def _assert_wo_allowed_for_project(p: "Project", stage: str) -> None:
             "first — advance the previous stages (purchasing → drawing → "
             "drawing_approved → production …) before jumping ahead.",
         )
+
+
+# ─── Receiving: what turned up, and what the shelf says ──────────────────────
+#
+# A purchase order puts its goods into stock the moment it opens, so the count
+# reads "what we have plus what is on its way" — which is the figure somebody
+# promising a delivery date needs. The gap it leaves is the one everybody hits:
+# order ten, five arrive, and the shelf still says ten until a person notices.
+#
+# Receiving closes it. The receiving work order lists every line on every
+# supplier PO feeding this job, with what was ordered and what has been
+# counted in so far; you tick the lines that arrived, correct the quantities,
+# and sync. Stock moves to what is actually in the building — see
+# `stock_sync.sync_received`, which computes the difference rather than adding
+# a second time.
+
+_RECEIVING_ROLES = {Role.PURCHASING, Role.ADMIN, Role.MANAGER, Role.DIRECTOR}
+
+
+async def _pos_for_project(db: AsyncSession, project_id: UUID) -> list:
+    """Every supplier PO feeding this job — single-job and shared alike."""
+    from app.models.purchasing import SupplierPO
+
+    rows = (await db.scalars(
+        select(SupplierPO).where(SupplierPO.project_id == project_id)
+    )).all()
+    seen = {p.id for p in rows}
+    # A vendor order covering several jobs names them all in `project_ids`; it
+    # still has to appear on each one's receiving list, or half a shipment
+    # becomes invisible to the job waiting for it.
+    shared = (await db.scalars(
+        select(SupplierPO).where(
+            SupplierPO.project_ids.contains([str(project_id)])
+        )
+    )).all()
+    return list(rows) + [p for p in shared if p.id not in seen]
+
+
+@router.get("/projects/{project_id}/receiving")
+async def receiving_lines(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """What this job ordered, what has been counted in, and where stock stands.
+
+    One row per purchase-order line. `received` is what the shelf currently
+    credits to this order for that part — which is the ordered quantity until
+    somebody says otherwise, because that is what opening the order did. So
+    the form opens pre-filled with the ordered figure and the common case
+    (everything arrived) is one press with nothing to type.
+    """
+    from app.services.stock_sync import po_contribution
+
+    if Role(user.role) not in _RECEIVING_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Purchasing, operations or management only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+
+    from app.models.inventory import InventoryItem
+    from app.models.purchasing import GoodsReceipt, Supplier
+
+    out = []
+    for po in await _pos_for_project(db, project_id):
+        if po.status in ("cancelled", "draft"):
+            continue
+        supplier = await db.get(Supplier, po.supplier_id)
+        contribution = await po_contribution(db, po)
+        receipts = (await db.scalars(
+            select(GoodsReceipt).where(GoodsReceipt.po_id == po.id)
+            .order_by(GoodsReceipt.created_at.desc())
+        )).all()
+        # The most recent receipt's own figures, so re-opening the form shows
+        # what was entered last time rather than starting blank.
+        last_by_line: dict[int, float] = {}
+        for gr in reversed(receipts):
+            for row in (gr.items or []):
+                try:
+                    last_by_line[int(row.get("line_no"))] = float(row.get("qty") or 0)
+                except (TypeError, ValueError):
+                    continue
+
+        lines = []
+        for idx, line in enumerate(po.items or [], start=1):
+            sku = (line.get("sku") or "").strip()
+            item = None
+            if sku:
+                item = await db.scalar(
+                    select(InventoryItem).where(InventoryItem.sku == sku).limit(1))
+            ordered = float(line.get("qty") or 0)
+            lines.append({
+                "line_no": idx,
+                "description": line.get("description") or line.get("name"),
+                "sku": sku or None,
+                "uom": line.get("uom"),
+                "ordered": ordered,
+                # What the shelf currently credits to this order for the part.
+                "counted_in": contribution.get(item.id) if item else None,
+                "last_received": last_by_line.get(idx),
+                "stock_now": float(item.current_stock or 0) if item else None,
+            })
+        out.append({
+            "po_id": str(po.id), "number": po.number, "status": po.status,
+            "supplier_name": supplier.name if supplier else None,
+            "eta": po.eta,
+            "receipts": [
+                {"id": str(g.id), "received_at": g.received_at,
+                 "items": g.items, "status": g.status, "created_at": g.created_at}
+                for g in receipts
+            ],
+            "lines": lines,
+        })
+    return {"project_id": str(project_id), "purchase_orders": out}
+
+
+class ReceiveLineIn(BaseModel):
+    line_no: int
+    qty: float
+
+
+class ReceiveIn(BaseModel):
+    po_id: UUID
+    lines: list[ReceiveLineIn] = []
+    received_at: str | None = None
+    notes: str | None = None
+
+
+@router.post("/projects/{project_id}/receiving")
+async def record_receiving(
+    project_id: UUID,
+    payload: ReceiveIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Record what arrived on the ticked lines, and move stock to match.
+
+    Two things happen and they are not the same thing. A **goods receipt** is
+    filed, which is the document saying what was counted in and when — it is
+    evidence, and it accumulates: a second delivery against the same order is a
+    second receipt, not an edit of the first. And **stock is corrected** to the
+    quantity in the building, which is a single figure per line however many
+    receipts it took to get there.
+
+    Only the lines sent are touched. A line left out is not "zero received", it
+    is "nothing said yet", and treating those as the same would empty the shelf
+    of everything nobody has got round to counting.
+    """
+    from datetime import date as date_t
+
+    from app.models.purchasing import GoodsReceipt, SupplierPO
+    from app.services.stock_sync import sync_received
+
+    if Role(user.role) not in _RECEIVING_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Purchasing, operations or management only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    po = await db.get(SupplierPO, payload.po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
+    if po.project_id != project_id and str(project_id) not in (po.project_ids or []):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "That purchase order isn't on this project")
+    if po.status in ("cancelled", "draft"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A '{po.status}' order has nothing to receive against.")
+    if not payload.lines:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Pick at least one line that arrived.")
+
+    count = len(po.items or [])
+    received: dict[int, float] = {}
+    for row in payload.lines:
+        if not (1 <= row.line_no <= count):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"There is no line {row.line_no} on {po.number}")
+        if row.qty < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "A received quantity cannot be negative")
+        received[row.line_no] = float(row.qty)
+
+    when = None
+    if payload.received_at:
+        try:
+            when = date_t.fromisoformat(payload.received_at)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "received_at must be YYYY-MM-DD")
+
+    moved = await sync_received(db, po, received, user)
+
+    gr = GoodsReceipt(
+        po_id=po.id,
+        received_at=when or date_t.today(),
+        items=[{"line_no": m["line_no"], "sku": m["sku"], "name": m["name"],
+                "ordered": m["ordered"], "qty": m["received"]} for m in moved],
+        status="received",
+    )
+    db.add(gr)
+    # The board should show the order has started arriving. A partial delivery
+    # is still an arrival — what is outstanding is visible on the lines.
+    if po.status in ("open", "pending_approval"):
+        po.status = "received"
+    await db.flush()
+
+    from app.core.audit import record as audit_record
+    await audit_record(
+        db, actor=user, action="received", entity="supplier_po", entity_id=po.id,
+        after={"project_id": str(project_id), "goods_receipt_id": str(gr.id),
+               "lines": [{"line_no": m["line_no"], "received": m["received"],
+                          "delta": m["delta"]} for m in moved]},
+    )
+    return {"ok": True, "goods_receipt_id": str(gr.id), "po_number": po.number,
+            "lines": moved,
+            "stock_changed": [m for m in moved if abs(m["delta"]) > 1e-9]}
 
 
 @router.post("/projects/{project_id}/work-orders", status_code=201)

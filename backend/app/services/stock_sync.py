@@ -11,12 +11,15 @@ figure nobody maintains is worse than no stock figure: people check it once,
 find it wrong, and stop checking — and the page that says "check what's in
 stock before promising delivery" is then a page that helps you promise wrong.
 
-Three documents, three different jobs:
+Four documents, four different jobs:
 
 * a **submitted price request** puts the *product* in the catalogue and no
   quantity at all — a customer wanting something is not us having it;
 * an **open supplier PO** puts its lines into stock, creating the item — with
   a generated SKU — if the price request has not already;
+* **receiving** corrects that to what actually turned up: order ten, five
+  arrive, and the shelf loses five. Not a second addition — see `sync_received`
+  — because the order already counted them;
 * a **delivery order** takes them out again.
 
 Three decisions worth stating.
@@ -29,6 +32,13 @@ order, so there is never a question of whether a number was counted twice.
 files sits at `pending_approval` until the director releases it, and may be
 cancelled instead. Counting goods from an order nobody approved would put
 stock on the shelf that no supplier was ever told to send.
+
+**An open order is a commitment, and receiving is the correction.** The count
+therefore reads "what we have plus what is on its way", which is the figure
+somebody promising a delivery date actually needs. What it must never do is
+stay at ten when five arrived, so receiving moves each line to the quantity in
+the building — a correction against the same PO number, never a second
+addition on top of the order's own.
 
 **Nothing is invented on the way back.** Cancelling a PO or withdrawing a
 delivery order reverses exactly the movements that reference it, so a
@@ -239,6 +249,132 @@ async def receive_purchase_order(db: AsyncSession, po, user: User | None = None)
         po.items = lines
     await db.flush()
     return touched
+
+
+async def po_contribution(db: AsyncSession, po) -> dict[UUID, float]:
+    """What this purchase order currently contributes to each item's count.
+
+    The net of every movement carrying the PO's number — the original `po_in`,
+    any reversal, and every receiving correction since. Reading the net rather
+    than tracking a separate figure is what makes syncing idempotent: run it
+    twice and the second run computes a delta of zero, because the first run's
+    movement is already part of the answer.
+    """
+    rows = (await db.execute(
+        select(InventoryMovement.item_id,
+               func.coalesce(func.sum(InventoryMovement.delta), 0))
+        .where(InventoryMovement.reference == po.number)
+        .group_by(InventoryMovement.item_id)
+    )).all()
+    return {r[0]: float(r[1] or 0) for r in rows}
+
+
+async def sync_received(db: AsyncSession, po, received: dict[int, float],
+                        user: User | None = None) -> list[dict]:
+    """Correct the count to what actually turned up.
+
+    A purchase order puts its goods on the shelf the moment it opens — see the
+    module docstring; that is deliberate and it is what makes the count reflect
+    what has been *committed*. It is also a promise the supplier may not keep.
+    Order ten and five arrive, and the shelf says ten until somebody notices.
+
+    So receiving is a correction, not a second addition. `received` maps a PO
+    line number to the quantity actually in the building, and this moves each
+    item to exactly that: `delta = received − whatever this PO has contributed
+    so far`. Ordered ten, received five, and the shelf loses five. A later
+    delivery of the missing five adds them back. Receiving all ten moves
+    nothing at all, which is the common case and should cost nothing.
+
+    Lines absent from `received` are left alone — that is the difference
+    between "five arrived" and "nothing has been said about this line yet", and
+    conflating them would zero out every line somebody has not got to yet.
+
+    Returns one row per line touched, saying what it did, because the caller
+    has to show a person why their stock figure changed.
+    """
+    contribution = await po_contribution(db, po)
+    lines = [dict(i) for i in (po.items or [])]
+    out: list[dict] = []
+    changed = False
+
+    for idx, line in enumerate(lines, start=1):
+        if idx not in received:
+            continue
+        qty_in = float(received[idx] or 0)
+        if qty_in < 0:
+            continue
+        name = line.get("description") or line.get("name")
+        if not (name or "").strip():
+            continue
+        item = await _item_for(
+            db, name=name, uom=line.get("uom"),
+            unit_cost=line.get("unit_price") or line.get("unit_cost"),
+            category=line.get("category"), sku=line.get("sku"),
+            link=line.get("link"),
+        )
+        # A line whose part the PO has not moved yet contributes nothing, which
+        # is the right starting point: the delta is then the whole receipt.
+        have = contribution.get(item.id, 0.0)
+        delta = qty_in - have
+        if abs(delta) > 1e-9:
+            await _move(
+                db, item, delta=delta, reason="gr_sync", reference=po.number,
+                user=user,
+                notes=(f"Received {qty_in:g} of {float(line.get('qty') or 0):g} "
+                       f"on {po.number}"),
+            )
+            # Keep the running figure right for a second line pointing at the
+            # same part — two lines of the same item on one order is ordinary.
+            contribution[item.id] = qty_in
+        if line.get("sku") != item.sku:
+            line["sku"] = item.sku
+            changed = True
+        out.append({
+            "line_no": idx, "sku": item.sku, "name": item.name,
+            "ordered": float(line.get("qty") or 0), "received": qty_in,
+            "delta": delta, "stock_now": float(item.current_stock or 0),
+        })
+
+    if changed:
+        po.items = lines
+    await db.flush()
+    return out
+
+
+async def withdraw_purchase_order(db: AsyncSession, po,
+                                  user: User | None = None) -> int:
+    """Take back everything this order put on the shelf — however much arrived.
+
+    Cancelling used to reverse the `po_in` movements alone, which was exact
+    while an order's only effect was its ordered quantity. It is not any more:
+    order ten, receive five, cancel, and reversing the ten against a shelf
+    holding five drives the count to minus five.
+
+    So this reverses the *net*: whatever the order currently contributes, it
+    contributes nothing afterwards. Written as its own movement per item, like
+    everything else here, so the ledger says the order was withdrawn rather
+    than the number quietly changing.
+
+    Reopening the order re-adds the ordered quantity (`receive_purchase_order`)
+    and not the receiving corrections, which are a fact about a delivery rather
+    than about the order. Syncing receiving again restores them — it computes
+    its delta from the net, so it lands on the right figure from wherever it
+    starts.
+    """
+    contribution = await po_contribution(db, po)
+    done = 0
+    for item_id, net in contribution.items():
+        if abs(net) < 1e-9:
+            continue
+        item = await db.get(InventoryItem, item_id)
+        if item is None:
+            continue
+        await _move(db, item, delta=-net, reason="po_in_reversed",
+                    reference=po.number, user=user,
+                    notes=f"Reversed — {po.number} withdrawn")
+        done += 1
+    await db.flush()
+    return done
 
 
 async def issue_delivery_order(db: AsyncSession, do, user: User | None = None) -> list[str]:

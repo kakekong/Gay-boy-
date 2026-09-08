@@ -483,6 +483,28 @@ async def apply_to_target(
                 db.add(act)
                 await db.flush()
                 applied["activity_id"] = str(act.id)
+    elif req.target_type == "project_skip_drawing":
+        # Purchasing or ops asked to declare a job as having no drawing to
+        # wait for. The decision is the director's, so it lands here; applying
+        # it goes through the same helper the director's direct path uses, so
+        # a skip signed off in this queue is indistinguishable from one done
+        # on the project page.
+        from app.api.v1.endpoints.operation import apply_drawing_skip
+        from app.models.operation import Project as _Project
+        proj = await db.get(_Project, req.target_id)
+        if proj is None:
+            applied["skipped"] = "the project is gone — decision recorded only"
+        elif proj.drawing_skipped_at is not None:
+            applied["skipped"] = "the drawing was already skipped on this job"
+        elif approve:
+            apply_drawing_skip(
+                proj, actor_id=req.decided_by or req.requested_by,
+                reason=(req.payload or {}).get("reason"),
+            )
+            applied["drawing_skipped"] = True
+            applied["new_status"] = proj.status
+        else:
+            applied["drawing_skipped"] = False
     elif req.target_type == "quotation_won":
         # Marking a deal Won is director-gated. On approval the quotation flips
         # to 'won' and posts to the ledger (idempotent, best-effort).

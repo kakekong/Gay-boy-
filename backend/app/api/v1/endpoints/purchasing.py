@@ -1473,10 +1473,13 @@ async def update_po(
         # off the shelf, and reopening a cancelled one puts them back. Each is
         # written as its own movement against the PO number, so the ledger
         # reads as what happened rather than as a number that shifted.
-        from app.services.stock_sync import receive_purchase_order
-        from app.services.stock_sync import reverse as _stock_reverse
+        from app.services.stock_sync import receive_purchase_order, withdraw_purchase_order
         if po.status == "cancelled" and was_status != "cancelled":
-            await _stock_reverse(db, po.number, "po_in", user)
+            # The net, not just the ordered quantity — an order that was
+            # partly received has already been corrected downward, and
+            # reversing the original ten against a shelf holding five would
+            # drive the count negative.
+            await withdraw_purchase_order(db, po, user)
         elif po.status == "open" and was_status in ("cancelled", "pending_approval"):
             await receive_purchase_order(db, po, user)
     if "items" in data and data["items"] is not None:

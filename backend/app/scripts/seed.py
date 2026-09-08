@@ -336,6 +336,13 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS delivery_confirmed_at TIMESTAMPTZ',
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS import_docs JSONB NOT NULL DEFAULT '{}'::jsonb",
 
+    # The director's decision that a job has no drawing to wait for. Nullable
+    # throughout: every project on file predates the decision and none of them
+    # skipped anything, which is exactly what NULL says.
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_skipped_at TIMESTAMPTZ',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_skipped_by UUID',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_skip_reason TEXT',
+
     # Operations QC + customer handover.
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS qc_decision VARCHAR(20)',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS qc_passed_at TIMESTAMPTZ',

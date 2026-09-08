@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Briefcase, Building2, FileText, Calendar, Truck, Receipt,
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
   Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight, Link2,
-  Pencil, Save, FileDown, Stamp,
+  Pencil, Save, FileDown, Stamp, PackageCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -339,6 +339,13 @@ export default function ProjectDetailPage() {
       ?? tt("Operation failed", "Operasi gagal")
   );
 
+  // Skipping the drawing has two outcomes that look identical on screen —
+  // done, and sent to the director — so it is the one action here that has to
+  // say which happened rather than just refreshing under the reader.
+  const [skipNote, setSkipNote] = useState<string | null>(null);
+  // Which receiving work order has its counting panel open, if any.
+  const [receivingWo, setReceivingWo] = useState<string | null>(null);
+
   // Project files live behind the authenticated API. A plain <a href> opens a
   // new tab with no auth token (and, in prod, hits the frontend origin instead
   // of the API), which bounces to login. We used to fetch the blob ourselves
@@ -461,6 +468,36 @@ export default function ProjectDetailPage() {
   const deleteDrawing = useMutation({
     mutationFn: (drawingId: string) => api.delete(`/operation/drawings/${drawingId}`),
     onSuccess: refresh, onError: onErr,
+  });
+
+  // Some jobs have no drawing. A catalogue part bought off the shelf has
+  // nothing to draw and nothing for the customer to approve, and the drawing
+  // gate held those anyway — so people uploaded a placeholder and approved it,
+  // which puts an approved drawing on the record for a job that never had one.
+  // The director declares it instead; everyone else asks and it goes to the
+  // approvals queue (202).
+  const skipDrawing = useMutation({
+    mutationFn: (reason: string) =>
+      api.post(`/operation/projects/${id}/skip-drawing`, { reason })
+        .then((r) => r.data),
+    onSuccess: (res: any) => {
+      refresh();
+      setSkipNote(res?.status === "pending_approval"
+        ? tt("Sent to the director to approve skipping the drawing.",
+             "Dikirim ke direktur untuk menyetujui melewati gambar.")
+        : tt("Drawing skipped — logistics can start.",
+             "Gambar dilewati — logistik bisa dimulai."));
+    },
+    onError: onErr,
+  });
+  const unskipDrawing = useMutation({
+    mutationFn: () => api.post(`/operation/projects/${id}/unskip-drawing`),
+    onSuccess: () => {
+      refresh();
+      setSkipNote(tt("The drawing stage is back on this job.",
+                     "Tahap gambar dikembalikan pada proyek ini."));
+    },
+    onError: onErr,
   });
 
   // Post-drawing logistics (purchasing)
@@ -698,6 +735,13 @@ export default function ProjectDetailPage() {
   // payload — a second copy of the matrix in the client is how the two drift
   // apart. Sales are readers of the customer drawing, never its author.
   const mayUpload: Record<string, boolean> = data.data.may_upload_drawing ?? {};
+  // Who may ASK to skip the drawing, which is wider than who may decide it.
+  // The server holds the real rule both ways; this only decides whether the
+  // row is worth rendering.
+  const isDirector = role === "director";
+  const canAskSkipDrawing = ["purchasing", "director", "manager", "admin"].includes(role);
+  // Same set the server allows to receive goods (_RECEIVING_ROLES).
+  const canReceive = ["purchasing", "admin", "manager", "director"].includes(role);
   // A drawing this role was served is a drawing it may open; the filtering
   // already happened upstream.
   const canViewDrawing = true;
@@ -740,6 +784,21 @@ export default function ProjectDetailPage() {
                 )}
             </div>
           </div>
+
+          {/* Not every job has a drawing. Only on the customer card: the
+              supplier's sheet is an internal reference and nothing gates on
+              it, so there is nothing to skip there. */}
+          {kind === "customer" && <SkipDrawingRow
+            project={p}
+            canAsk={canAskSkipDrawing}
+            isDirector={isDirector}
+            hasApproved={customerDrawings.some((x: any) => x.status === "approved")}
+            note={skipNote}
+            dismissNote={() => setSkipNote(null)}
+            onSkip={(reason) => skipDrawing.mutate(reason)}
+            onUnskip={() => unskipDrawing.mutate()}
+            busy={skipDrawing.isPending || unskipDrawing.isPending}
+          />}
 
           {mayUpload[kind] && (
             <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 flex flex-wrap items-end gap-3">
@@ -1385,7 +1444,8 @@ export default function ProjectDetailPage() {
             </thead>
             <tbody>
               {wos.map((w: any) => (
-                <tr key={w.id} className="border-t border-ink-100">
+                <Fragment key={w.id}>
+                <tr className="border-t border-ink-100">
                   <td className="td font-mono text-xs">{w.code}</td>
                   <td className="td">
                     <span className="chip bg-ink-100 text-ink-700 capitalize">{t(w.stage, WO_STAGE_LABEL_ID[w.stage] ?? w.stage)}</span>
@@ -1396,7 +1456,19 @@ export default function ProjectDetailPage() {
                       ? <span className="text-emerald-700">{new Date(w.completed_at).toLocaleDateString(locale())}</span>
                       : "—"}
                   </td>
-                  <td className="td text-right">
+                  <td className="td text-right whitespace-nowrap">
+                    {/* The receiving work order is where somebody stands with
+                        the delivery note in hand, so it is where the counting
+                        belongs — and the stock correction with it. */}
+                    {w.stage === "receiving" && canReceive && (
+                      <button className="btn-ghost"
+                        onClick={() => setReceivingWo(receivingWo === w.id ? null : w.id)}>
+                        <PackageCheck size={13} />{" "}
+                        {receivingWo === w.id
+                          ? t("Hide goods received", "Sembunyikan barang diterima")
+                          : t("Goods received", "Barang diterima")}
+                      </button>
+                    )}
                     {!w.completed_at && (
                       isAdmin ? (
                         <button className="btn-ghost text-emerald-700"
@@ -1411,6 +1483,14 @@ export default function ProjectDetailPage() {
                     )}
                   </td>
                 </tr>
+                {w.stage === "receiving" && canReceive && receivingWo === w.id && (
+                  <tr className="border-t border-ink-100">
+                    <td className="td bg-ink-50/40 p-0" colSpan={5}>
+                      <ReceivingPanel projectId={id!} onDone={refresh} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -2932,6 +3012,312 @@ function Stat({ label, value, tone }: {
         {T(label)}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * "This job has no drawing" — said once, on the record, by the director.
+ *
+ * A catalogue part bought off the shelf has nothing to draw and nothing for
+ * the customer to approve, but logistics cannot be set until the drawing is
+ * settled. The way through used to be to upload something — a photo, the
+ * supplier's web page — and approve that. It costs a minute and it costs the
+ * record: the file then says a drawing was approved on a job that never had
+ * one, and nobody reading it later can tell which approvals were real.
+ *
+ * So the skip is its own decision, with a reason, and it is the director's.
+ * Anyone else on the procurement or ops side may ask; theirs goes to the
+ * approvals queue, and this row says so rather than looking like it worked.
+ */
+function SkipDrawingRow({
+  project, canAsk, isDirector, hasApproved, note, dismissNote,
+  onSkip, onUnskip, busy,
+}: {
+  project: any;
+  canAsk: boolean;
+  isDirector: boolean;
+  hasApproved: boolean;
+  note: string | null;
+  dismissNote: () => void;
+  onSkip: (reason: string) => void;
+  onUnskip: () => void;
+  busy: boolean;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const skipped = !!project?.drawing_skipped;
+
+  if (!skipped && (!canAsk || hasApproved)) return note ? (
+    <div className="px-5 py-2 border-b border-ink-100 text-xs text-emerald-800 bg-emerald-50 flex items-start gap-2">
+      <span className="flex-1">{note}</span>
+      <button onClick={dismissNote} className="opacity-60 hover:opacity-100">×</button>
+    </div>
+  ) : null;
+
+  return (
+    <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 text-xs">
+      {note && (
+        <div className="mb-2 rounded-lg bg-emerald-50 text-emerald-800 px-3 py-2 flex items-start gap-2">
+          <span className="flex-1">{note}</span>
+          <button onClick={dismissNote} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
+
+      {skipped ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="chip bg-amber-50 text-amber-800">
+            {t("Drawing skipped", "Gambar dilewati")}
+          </span>
+          <span className="muted">
+            {project.drawing_skip_reason
+              ? project.drawing_skip_reason
+              : t("No reason recorded", "Tanpa alasan tercatat")}
+          </span>
+          {isDirector && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onUnskip}
+              className="text-brand-700 hover:underline disabled:opacity-50"
+            >
+              {t("Put the drawing stage back", "Kembalikan tahap gambar")}
+            </button>
+          )}
+        </div>
+      ) : open ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[220px]">
+            <label className="block text-[11px] uppercase muted mb-1">
+              {t("Why does this job need no drawing?", "Kenapa proyek ini tanpa gambar?")}
+            </label>
+            <input
+              className="input" value={reason} autoFocus
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={t("Catalogue part, nothing to draw",
+                             "Barang katalog, tidak ada yang digambar")}
+            />
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            className="btn-primary text-xs"
+            onClick={() => { onSkip(reason.trim()); setOpen(false); setReason(""); }}
+          >
+            {isDirector
+              ? t("Skip the drawing", "Lewati gambar")
+              : t("Ask the director", "Minta ke direktur")}
+          </button>
+          <button type="button" className="btn-ghost text-xs"
+                  onClick={() => setOpen(false)}>
+            {t("Cancel", "Batal")}
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="muted">
+            {t("Nothing to draw on this job?",
+               "Tidak ada yang perlu digambar di proyek ini?")}
+          </span>
+          <button type="button" className="text-brand-700 hover:underline"
+                  onClick={() => setOpen(true)}>
+            {isDirector
+              ? t("Skip the drawing stage", "Lewati tahap gambar")
+              : t("Ask the director to skip it", "Minta direktur melewatinya")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What arrived, ticked off against what was ordered.
+ *
+ * A supplier order puts its goods into stock the moment it opens, so the count
+ * reads "what we have plus what is on its way" — the figure somebody promising
+ * a delivery date needs. The gap that leaves is the one everybody hits: order
+ * ten, five turn up, and the shelf still says ten until a person notices.
+ *
+ * This is where the person notices. Every line on every supplier order feeding
+ * the job, with what was ordered and what the shelf currently credits to it.
+ * Tick the lines that arrived, correct the quantity, sync. Stock moves to what
+ * is actually in the building — a correction, not a second addition, so
+ * pressing it when everything arrived moves nothing.
+ *
+ * Quantities start at the ordered figure because that is the common case: the
+ * whole delivery turned up and there is nothing to type. A short delivery is
+ * the one that needs a person, and it is the one thing this makes easy.
+ */
+function ReceivingPanel({ projectId, onDone }: {
+  projectId: string; onDone: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [flash, setFlash] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const q = useQuery({
+    queryKey: ["receiving", projectId],
+    queryFn: () => api.get(`/operation/projects/${projectId}/receiving`)
+      .then((r) => r.data as any),
+  });
+
+  const sync = useMutation({
+    mutationFn: (body: { po_id: string; lines: { line_no: number; qty: number }[] }) =>
+      api.post(`/operation/projects/${projectId}/receiving`, body).then((r) => r.data),
+    onSuccess: (res: any) => {
+      const moved = res?.stock_changed?.length ?? 0;
+      setErr(null);
+      setFlash(moved
+        ? tt(`Recorded. ${moved} item(s) corrected in stock.`,
+             `Tercatat. ${moved} barang dikoreksi di stok.`)
+        : tt("Recorded. Stock already matched — nothing to correct.",
+             "Tercatat. Stok sudah sesuai — tidak ada koreksi."));
+      qc.invalidateQueries({ queryKey: ["receiving", projectId] });
+      qc.invalidateQueries({ queryKey: ["inventory"] });
+      onDone();
+    },
+    onError: (e: any) => {
+      setFlash(null);
+      setErr(e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? tt("Could not record it", "Gagal mencatat"));
+    },
+  });
+
+  if (q.isLoading) {
+    return <div className="px-5 py-4 text-xs muted">{t("Loading…", "Memuat…")}</div>;
+  }
+  const pos: any[] = q.data?.purchase_orders ?? [];
+  if (!pos.length) {
+    return (
+      <div className="px-5 py-4 text-xs muted">
+        {t("No supplier order is feeding this job yet, so there is nothing to receive against.",
+           "Belum ada pesanan supplier untuk proyek ini, jadi belum ada yang bisa diterima.")}
+      </div>
+    );
+  }
+
+  const key = (poId: string, lineNo: number) => `${poId}:${lineNo}`;
+  const valueFor = (poId: string, line: any) => {
+    const k = key(poId, line.line_no);
+    if (qty[k] !== undefined) return qty[k];
+    // Pre-filled with the ordered figure: everything arriving is the common
+    // case, and it should cost nothing to confirm.
+    return String(line.last_received ?? line.ordered ?? 0);
+  };
+
+  return (
+    <div className="px-5 py-4 space-y-4">
+      {flash && (
+        <div className="rounded-lg bg-emerald-50 text-emerald-800 px-3 py-2 text-xs flex items-start gap-2">
+          <span className="flex-1">{flash}</span>
+          <button onClick={() => setFlash(null)} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
+      {err && (
+        <div className="rounded-lg bg-red-50 text-red-800 px-3 py-2 text-xs flex items-start gap-2">
+          <span className="flex-1">{err}</span>
+          <button onClick={() => setErr(null)} className="opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
+
+      {pos.map((po) => {
+        const chosen = po.lines.filter((l: any) => picked[key(po.po_id, l.line_no)]);
+        return (
+          <div key={po.po_id} className="rounded-lg border border-ink-200 bg-white overflow-hidden">
+            <div className="px-3 py-2 border-b border-ink-100 flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-mono font-medium">{po.number}</span>
+              <span className="chip bg-ink-100 text-ink-700">{po.status}</span>
+              {po.supplier_name && <span className="muted">{po.supplier_name}</span>}
+              {po.receipts?.length > 0 && (
+                <span className="muted">
+                  · {po.receipts.length} {t("receipt(s) on file", "penerimaan tercatat")}
+                </span>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-ink-50/60 text-[11px] uppercase muted">
+                  <tr>
+                    <th className="px-3 py-2 text-left w-8"></th>
+                    <th className="px-3 py-2 text-left">{t("Item", "Barang")}</th>
+                    <th className="px-3 py-2 text-right">{t("Ordered", "Dipesan")}</th>
+                    <th className="px-3 py-2 text-right">{t("In stock now", "Stok saat ini")}</th>
+                    <th className="px-3 py-2 text-right w-28">{t("Received", "Diterima")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {po.lines.map((l: any) => {
+                    const k = key(po.po_id, l.line_no);
+                    return (
+                      <tr key={k} className="border-t border-ink-100">
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`${t("Receive", "Terima")} ${l.description ?? l.line_no}`}
+                            checked={!!picked[k]}
+                            onChange={(e) =>
+                              setPicked((s) => ({ ...s, [k]: e.target.checked }))}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <div>{l.description ?? "—"}</div>
+                          {l.sku && <div className="font-mono text-[11px] muted">{l.sku}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {l.ordered}{l.uom ? ` ${l.uom}` : ""}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums muted">
+                          {l.stock_now ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            className="input text-right py-1"
+                            type="number" min="0" step="any"
+                            aria-label={`${t("Quantity received", "Jumlah diterima")} ${l.line_no}`}
+                            disabled={!picked[k]}
+                            value={valueFor(po.po_id, l)}
+                            onChange={(e) => setQty((s) => ({ ...s, [k]: e.target.value }))}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-3 py-2 border-t border-ink-100 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] muted">
+                {t("Ticked lines are set to the quantity you enter — the stock figure is corrected to match, not added to.",
+                   "Baris yang dicentang disetel ke jumlah yang Anda isi — stok dikoreksi agar sesuai, bukan ditambah.")}
+              </span>
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                disabled={!chosen.length || sync.isPending}
+                onClick={() => sync.mutate({
+                  po_id: po.po_id,
+                  lines: chosen.map((l: any) => ({
+                    line_no: l.line_no,
+                    qty: Number(valueFor(po.po_id, l)) || 0,
+                  })),
+                })}
+              >
+                {sync.isPending
+                  ? t("Syncing…", "Menyinkronkan…")
+                  : t("Record & sync stock", "Catat & sinkronkan stok")}
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
