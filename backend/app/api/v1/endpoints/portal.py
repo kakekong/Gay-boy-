@@ -368,7 +368,8 @@ async def supplier_upload(
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
     storage_path = await storage.save(data, filename=safe, label=kind,
-                                      owner_type="supplier_po", owner_id=po.id)
+                                      owner_type="supplier_po", owner_id=po.id,
+                                      db=db)
 
     a = Attachment(
         owner_type="supplier_po", owner_id=po.id,

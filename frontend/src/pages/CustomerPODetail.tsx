@@ -679,13 +679,7 @@ export default function CustomerPODetailPage() {
                 {p.project_code ?? p.project_id.slice(0, 8)}
               </Link>
             ) : (
-              <span className="muted">
-                {p.status === "pending_approval"
-                  ? t("Awaiting director approval", "Menunggu persetujuan direktur")
-                  : p.status === "rejected"
-                    ? t("PO was rejected", "PO ditolak")
-                    : "—"}
-              </span>
+              <NoProjectYet po={p} quoteStatus={quote.data?.status ?? null} />
             )}
           </Meta>
           <Meta label={t("PO date", "Tanggal PO")} icon={<Calendar size={12} />}>
@@ -800,6 +794,59 @@ export default function CustomerPODetailPage() {
       <CommentThread ownerType="customer_po" ownerId={p.id} />
     </div>
   );
+}
+
+/**
+ * Why this order has no job yet — and what to do about it.
+ *
+ * Approving a PO does not start a project. Marking the quotation **Won** does;
+ * the PO is the evidence Won requires, and its own approval says the paperwork
+ * is right, not that the work has begun. The order can therefore sit approved
+ * and correct with no project against it, which is the ordinary case and looks
+ * exactly like a bug.
+ *
+ * It used to look like one because this field printed a bare "—" for every
+ * state except pending and rejected. A dash where a project number belongs is
+ * read as "it should be here and isn't" — and there was nothing on the page to
+ * read instead, so the next move was to go looking for the fault rather than
+ * for the Won button.
+ *
+ * So: name the step that is missing, and link to the document it happens on.
+ */
+function NoProjectYet({ po, quoteStatus }: { po: any; quoteStatus: string | null }) {
+  const t = useT();
+  const line = (text: string, to?: string, cta?: string) => (
+    <span className="muted text-xs">
+      {text}
+      {to && cta && (
+        <>
+          {" "}
+          <Link to={to} className="text-brand-700 hover:underline">{cta}</Link>
+        </>
+      )}
+    </span>
+  );
+
+  if (po.status === "pending_approval")
+    return line(t("Awaiting director approval", "Menunggu persetujuan direktur"));
+  if (po.status === "rejected")
+    return line(t("PO was rejected", "PO ditolak"));
+  // The deposit path deliberately withholds the job until the money lands —
+  // not starting work before the deposit arrives is the point of a DP order.
+  if (po.status === "pending_payment_confirm")
+    return line(t("Starts when the down payment is recorded",
+                  "Dimulai saat uang muka dicatat"));
+  if (!po.quotation_id)
+    return line(t("No quotation linked, so there is nothing to win yet",
+                  "Belum ada penawaran terkait, jadi belum ada yang bisa dimenangkan"));
+  if (quoteStatus && quoteStatus !== "won")
+    return line(
+      t("The job starts when the quotation is marked Won — the PO is the evidence for it.",
+        "Proyek dimulai saat penawaran ditandai Menang — PO ini buktinya."),
+      `/quotations/${po.quotation_id}`,
+      t("Open the quotation", "Buka penawaran"),
+    );
+  return line("—");
 }
 
 function Meta({

@@ -441,7 +441,8 @@ async def upload_attachment(
 
     safe_name = _safe_filename(file.filename or "file")
     storage_path = await storage.save(data, filename=safe_name,
-                                      owner_type=owner_type, owner_id=owner_id)
+                                      owner_type=owner_type, owner_id=owner_id,
+                                      db=db)
 
     a = Attachment(
         owner_type=owner_type,

@@ -937,7 +937,8 @@ async def upload_drawing(
         safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                        for ch in (file.filename or "file"))[:200]
         storage_path = await storage.save(data, filename=safe, label="drawing",
-                                          owner_type="project", owner_id=p.id)
+                                          owner_type="project", owner_id=p.id,
+                                          db=db)
 
         a = Attachment(
             owner_type="project", owner_id=p.id,
@@ -1069,7 +1070,7 @@ async def reupload_drawing(
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
     storage_path = await storage.save(data, filename=safe, label="drawing",
-                                      owner_type="project", owner_id=p.id)
+                                      owner_type="project", owner_id=p.id, db=db)
 
     a = Attachment(
         owner_type="project", owner_id=p.id,
@@ -1244,7 +1245,8 @@ async def upload_import_doc(
         safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                        for ch in (file.filename or "file"))[:200]
         storage_path = await storage.save(data, filename=safe, label=key,
-                                          owner_type="project", owner_id=p.id)
+                                          owner_type="project", owner_id=p.id,
+                                          db=db)
 
         a = Attachment(
             owner_type="project", owner_id=p.id,
@@ -1433,7 +1435,8 @@ async def _save_attachment(
     safe = "".join(ch if (ch.isalnum() or ch in "._- ") else "_"
                    for ch in (file.filename or "file"))[:200]
     storage_path = await storage.save(data, filename=safe, label=label,
-                                      owner_type=owner_type, owner_id=owner_id)
+                                      owner_type=owner_type, owner_id=owner_id,
+                                      db=db)
     a = Attachment(
         owner_type=owner_type, owner_id=owner_id,
         filename=safe, content_type=file.content_type, size=len(data),

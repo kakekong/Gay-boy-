@@ -263,6 +263,23 @@ It is idempotent — rows already on R2 are skipped, so a re-run is safe. Files
 that vanished with an old Space rebuild are reported as `MISSING` and their
 rows left alone, so the audit trail still shows something was once attached.
 
+**Tidying the bucket by document number.** Objects are filed under the document
+they belong to — `attachments/supplier_po/PO-2026-0043/…`,
+`attachments/price_request/PR-2026-0117/…` — so opening the bucket and finding
+the scans for one order is a matter of clicking the folder with that number on
+it. Anything uploaded before that change sits under the month it arrived
+instead. Both download fine; only a person browsing R2 can tell. To bring the
+old ones into line:
+
+```bash
+python -m app.scripts.migrate_storage --relayout           # dry run
+python -m app.scripts.migrate_storage --relayout --apply   # re-files them
+```
+
+It copies each object to its new key, commits the row, and only then deletes
+the old object — so an interrupted run leaves duplicates at worst, never a
+missing file. Re-running skips anything already in place.
+
 **Instance size.** Starter (512 MB RAM, 0.5 CPU) is enough, measured rather
 than guessed: the app settles around 150 MB after boot and peaked at 214 MB
 while generating a quotation PDF and an Excel export back to back — the

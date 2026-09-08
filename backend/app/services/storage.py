@@ -17,6 +17,10 @@ every file uploaded before the flip still downloads, with no migration and no
 downtime. `scripts/migrate_storage.py` moves the old ones across afterwards, at
 your leisure.
 
+The same dispatch-on-what-is-stored rule is what lets the *key layout* change
+without a migration: see `build_key`, which now files objects under the
+document's number rather than the month it was uploaded.
+
 boto3 is synchronous, so every call goes through a worker thread. Blocking the
 event loop on a network round-trip would stall every other request on the
 process, and there is only one process.
@@ -30,6 +34,8 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
+
+from collections.abc import Sequence
 
 from anyio import to_thread
 
@@ -103,23 +109,33 @@ def build_key(
     *,
     owner_type: str | None = None,
     owner_id: object | None = None,
+    owner_ref: str | Sequence[str] | None = None,
 ) -> str:
     """A collision-proof object key that says what the file is.
 
-    The old layout was `attachments/<year>/<month>/<uuid>_<name>`, which put
-    every upload in the company into one folder per month — fine for a program
-    reading a path out of the database, useless for a person opening the bucket
-    to find the scans for one purchase order.
+    The shape is::
 
-    The shape is now::
+        attachments/<owner_type>/<owner_ref>/<uuid8>_<label>_<name>
 
-        attachments/<owner_type>/<year>/<month>/<owner_id>/<uuid8>_<label>_<name>
+    Owner type first, because "show me every delivery order" is a question
+    people actually ask; then the document, so everything belonging to one of
+    them sits together::
 
-    Owner type first, because "show me every drawing" is the question people
-    actually ask; then the date, so a lifecycle rule or a spot-check by month
-    still works; then the owner, so everything belonging to one document sits
-    together. Callers that have no owner land under `misc/`, unchanged in
-    spirit from before.
+        attachments/supplier_po/PO-2026-0043/1a2b3c4d_invoice_scan.pdf
+        attachments/price_request/PR-2026-0117/9f8e7d6c_spec_sheet.pdf
+
+    `owner_ref` is what the document is *called* — its number, or a name where
+    it has no number — resolved by `services.doc_ref` from the owner row. When
+    it cannot be resolved the UUID stands in, so a file always has somewhere to
+    go; it is just filed somewhere less convenient.
+
+    **The date used to be in here** — `.../<year>/<month>/<owner_id>/...` — and
+    it was the wrong axis twice over. Nobody looks for the scans on a purchase
+    order by the month somebody happened to upload them, and the documents'
+    own numbers already carry the year (`PR-2026-0117`), so sorting by name
+    sorts by time anyway. It survives in exactly one place: a file with no
+    owner at all has nothing else to be filed under, so `misc/` keeps
+    `<year>/<month>`.
 
     The uuid keeps its collision-proofing but is trimmed to 8 hex characters —
     at these volumes that is still far more than enough, and it leaves the
@@ -128,9 +144,9 @@ def build_key(
 
     **Existing rows are untouched.** Each row stores its own full
     `s3://bucket/key`, and reads dispatch on that string, so files written
-    under the old layout keep downloading forever. Only new uploads use this.
+    under the old layout keep downloading forever. Only new uploads use this;
+    `scripts/migrate_storage.py --relayout` moves the old ones across.
     """
-    now = datetime.now(UTC)
     safe = "".join(
         ch if (ch.isalnum() or ch in "._- ") else "_"
         for ch in (filename or "file")
@@ -140,9 +156,23 @@ def build_key(
     stem = f"{uuid4().hex[:8]}_{_slug(label, fallback='')}_{safe}" if label \
         else f"{uuid4().hex[:8]}_{safe}"
 
-    parts = ["attachments", scope, f"{now.year}", f"{now.month:02d}"]
-    if owner_id is not None:
+    parts = ["attachments", scope]
+    if owner_ref:
+        # A reference may name more than one level — a contact is filed as
+        # `(company, person)`. It says so by being a sequence; a plain string
+        # is always exactly one folder. That distinction is the whole reason
+        # this is not "split the string on `/`": a customer PO number is the
+        # customer's own, and Indonesian ones look like `001/PO/IX/2026`.
+        # Inferring folders from those slashes would scatter one document type
+        # across a directory tree shaped like a date nobody asked for.
+        segs = [owner_ref] if isinstance(owner_ref, str) else list(owner_ref)
+        parts += [s for s in (_slug(x, fallback="", limit=80) for x in segs) if s]
+    elif owner_id is not None:
         parts.append(_slug(str(owner_id), fallback="unknown", limit=64))
+    else:
+        # Nothing to file it under but the clock.
+        now = datetime.now(UTC)
+        parts += [f"{now.year}", f"{now.month:02d}"]
     parts.append(stem)
     return "/".join(parts)
 
@@ -161,6 +191,7 @@ async def save(
     label: str | None = None,
     owner_type: str | None = None,
     owner_id: object | None = None,
+    db=None,
 ) -> str:
     """Store `data` and return the value to persist in `Attachment.storage_path`.
 
@@ -168,10 +199,23 @@ async def save(
     to; they only shape the key (see `build_key`) and are optional so a caller
     without that context still works.
 
+    Pass `db` as well and the key is filed under the document's *number*
+    instead of its UUID. The lookup lives here rather than at each call site
+    on purpose: there are a dozen places that upload a file, and a layout that
+    depends on every one of them remembering to resolve a name is a layout
+    that is half-applied within a year. Omitting `db` is not an error — the
+    key falls back to the UUID.
+
     Local returns an absolute filesystem path, S3 an `s3://bucket/key` URI.
     Both use the same key, so the disk and the bucket browse identically.
     """
-    key = build_key(filename, label, owner_type=owner_type, owner_id=owner_id)
+    owner_ref = None
+    if db is not None and owner_type and owner_id is not None:
+        from app.services.doc_ref import document_ref
+        owner_ref = await document_ref(db, owner_type, owner_id)
+
+    key = build_key(filename, label, owner_type=owner_type, owner_id=owner_id,
+                    owner_ref=owner_ref)
 
     if not using_s3():
         path = Path(settings.STORAGE_LOCAL_DIR) / key

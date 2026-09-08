@@ -9,8 +9,9 @@ backend does not strand what is already stored: a file written to disk before
 the flip must still download after it, because that is the entire migration
 plan.
 
-Skips itself (as a pass) when moto is not installed, so the suite still runs on
-a machine without the dev extra.
+Requires moto (`pip install -r requirements-dev.txt`) and says so by failing
+rather than skipping: a driver that could not run has not passed, and reporting
+it as one is how the bucket went untested without anybody noticing.
 """
 import asyncio, os, sys, uuid, threading, socket
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -44,9 +45,14 @@ def start_moto():
 async def main():
     srv, endpoint = start_moto()
     if endpoint is None:
-        print("moto not installed — skipping the S3 backend checks")
-        print("\n0 passed, 0 failed")
-        return
+        # This used to report "0 passed, 0 failed", which run_all.sh reads as a
+        # green line — so the whole S3/R2 backend sat untested for as long as
+        # moto happened not to be installed, and said nothing. A driver that
+        # cannot run has not passed.
+        print("moto is not installed, so none of the S3/R2 checks below ran.")
+        print("Install it:  pip install -r requirements-dev.txt")
+        print("\n0 passed, 1 failed")
+        sys.exit(1)
 
     BUCKET=f"transmisi-test-{uuid.uuid4().hex[:8]}"
     # R2 wants S3_REGION="auto"; moto emulates AWS and rejects that on
@@ -111,7 +117,8 @@ async def main():
     key=s3_path.split("/",3)[3]
     got=storage._client().get_object(Bucket=BUCKET,Key=key)["Body"].read()
     check("the bucket holds the exact bytes", got==s3_body, f"{got[:40]!r}")
-    check("the key keeps the year/month foldering", key.startswith("attachments/"), key)
+    check("the key files it under the customer's name, not the month",
+          key.startswith(f"attachments/customer/PT-Storage-{tag}/"), key)
 
     # ---------- 3. THE POINT: the pre-switch file still downloads ----------
     r=await c.get(f"/attachments/{local_id}/download",headers=H["d"])
@@ -165,6 +172,53 @@ async def main():
     r=await c.get(f"/attachments/{local_id}/download",headers=H["d"])
     check("the migrated file downloads with its original bytes",
           r.status_code==200 and r.content==local_body, f"{r.status_code} {r.content[:40]!r}")
+
+    # ---------- 8. --relayout re-files objects already in the bucket ----------
+    # Objects written before the key layout changed sit under the month they
+    # arrived. They download fine, so nothing is broken — but half the bucket
+    # is sorted one way and half the other, which is the whole problem the
+    # layout was meant to solve.
+    stale_body=b"filed under the old year/month layout"
+    stale_key=f"attachments/customer/2024/03/{cust}/{uuid.uuid4().hex}_stale.txt"
+    storage._client().put_object(Bucket=BUCKET,Key=stale_key,Body=stale_body)
+    async with SessionLocal() as db:
+        row=Attachment(owner_type="customer",owner_id=uuid.UUID(cust),
+                       filename="stale.txt",content_type="text/plain",
+                       size=len(stale_body),storage_path=f"s3://{BUCKET}/{stale_key}")
+        db.add(row); await db.commit(); stale_id=str(row.id)
+
+    sys.argv.append("--relayout")
+    await migrate()                      # dry run — must not move anything
+    async with SessionLocal() as db:
+        db.expire_all()
+        row=await db.get(Attachment, uuid.UUID(stale_id))
+        check("relayout dry run leaves the row alone",
+              row.storage_path==f"s3://{BUCKET}/{stale_key}", row.storage_path)
+    sys.argv.append("--apply")
+    await migrate()
+    sys.argv.remove("--apply"); sys.argv.remove("--relayout")
+
+    async with SessionLocal() as db:
+        db.expire_all()
+        row=await db.get(Attachment, uuid.UUID(stale_id))
+        new_key=row.storage_path.split("/",3)[3]
+    check("relayout moved the object under the customer's name",
+          new_key.startswith(f"attachments/customer/PT-Storage-{tag}/"), new_key)
+    r=await c.get(f"/attachments/{stale_id}/download",headers=H["d"])
+    check("...and it still downloads, byte for byte",
+          r.status_code==200 and r.content==stale_body, f"{r.status_code} {r.content[:40]!r}")
+    gone=storage._client().list_objects_v2(Bucket=BUCKET,Prefix=stale_key).get("KeyCount",0)
+    check("...with the object at the old key cleaned up", gone==0, f"KeyCount={gone}")
+
+    # Idempotent: a second pass has nothing left to do.
+    sys.argv+=["--relayout","--apply"]
+    await migrate()
+    sys.argv.remove("--apply"); sys.argv.remove("--relayout")
+    async with SessionLocal() as db:
+        db.expire_all()
+        row=await db.get(Attachment, uuid.UUID(stale_id))
+        check("running relayout twice does not move the file again",
+              row.storage_path.split("/",3)[3]==new_key, row.storage_path)
 
     await c.aclose()
     settings.STORAGE_BACKEND="local"

@@ -123,9 +123,16 @@ locale — otherwise an Indonesian UI still prints "Wednesday, August 5".
 
 **File storage goes through `app/services/storage.py`** — never write to disk
 directly. Keys are built by `build_key()` as
-`attachments/<owner_type>/<year>/<month>/<owner_id>/<uuid8>_<label>_<name>`, so
-pass `owner_type`/`owner_id` to `storage.save()` when the caller knows them —
-without it the file still saves, just under `misc/`. `STORAGE_BACKEND` picks local disk or an S3-compatible bucket
+`attachments/<owner_type>/<owner_ref>/<uuid8>_<label>_<name>`, where
+`<owner_ref>` is the document's **number** — `PO-2026-0043`, `PRJ-BUKIT-7`,
+`PT Bukit Asam` — resolved from the owner row by
+`app/services/doc_ref.py`. So pass `owner_type`/`owner_id` **and `db=db`** to
+`storage.save()`; without `db` the file still saves, just under the UUID, and
+without an owner at all it lands in `misc/<year>/<month>/`. The date used to be
+the top-level axis and was the wrong one — nobody looks for a PO's scans by the
+month they were uploaded, and the numbers carry the year already. Old keys are
+never rewritten in place; `migrate_storage.py --relayout` moves them.
+`STORAGE_BACKEND` picks local disk or an S3-compatible bucket
 (Cloudflare R2 in production). Crucially, **reads dispatch on the stored path,
 not the current setting**: a row whose `storage_path` starts with `s3://` is
 fetched from the bucket, anything else from disk. That is what lets the backend
@@ -208,7 +215,8 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_write_read_symmetry.py` | the property behind that bug: across every (role × owner type) pair, nobody may write where they cannot read — attachments, discussions and chat |
 | `test_sales_sees_own_files.py` | a rep can read back the files they filed on their own customer / quotation / customer PO — and still not another rep's |
 | `test_storage_layout.py` | bucket key layout: grouped by owner type / month / document, user-supplied names can't traverse, and files written under the **old** flat layout still download |
-| `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration |
+| `test_storage_s3.py` | the S3/R2 backend against a real moto server, incl. the disk→bucket migration and `--relayout` |
+| `test_storage_layout.py` | object keys are filed under the document's number, and old keys still download |
 | `test_mentions.py` | discussion access control + @mentions granting the thread and nothing else |
 | `test_reply_forward.py` | quoted replies + forwarding: same-thread-only quotes, forward permissions both ways, forwarding across departments, chained attribution |
 | `test_customer_import.py` | importing the customer list out of Accurate a batch at a time: preview writes nothing, `Kategori` resolves to a sales account, the same company written two ways lands once, and re-running continues instead of duplicating |

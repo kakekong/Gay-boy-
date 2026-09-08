@@ -1,0 +1,16 @@
+# Extras the end-to-end suite needs and production must not carry.
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# pytest and pypdf live in requirements.txt because they are small and were
+# already there. moto is not: `[server]` pulls Flask and Werkzeug in to run a
+# real S3 service on localhost, and a fake AWS has no business inside the
+# deployed image.
+#
+# It is not optional for the suite, though. Without it `test_storage_s3.py`
+# skips itself and reports "0 passed, 0 failed" — which the runner reads as a
+# green line, so the entire S3/R2 backend quietly stops being tested. Install
+# this file before believing a clean run.
+-r requirements.txt
+
+moto[s3,server]==5.2.3

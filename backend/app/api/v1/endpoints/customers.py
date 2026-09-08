@@ -1117,7 +1117,8 @@ async def request_stage_move(
                 for ch in f.filename
             )[:200]
             storage_path = await storage.save(data, filename=safe,
-                                              owner_type="approval_request", owner_id=req.id)
+                                              owner_type="approval_request", owner_id=req.id,
+                                              db=db)
             db.add(Attachment(
                 owner_type="approval_request",
                 owner_id=req.id,

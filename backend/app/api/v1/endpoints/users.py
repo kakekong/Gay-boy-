@@ -687,7 +687,7 @@ async def upload_signature(
     old = u.signature_path
     u.signature_path = await storage.save(
         data, filename=file.filename or "signature.png", label="signature",
-        owner_type="user", owner_id=u.id,
+        owner_type="user", owner_id=u.id, db=db,
     )
     # Replacing one should not leave the old file behind; failing to delete
     # it must not fail the upload, which has already succeeded.
