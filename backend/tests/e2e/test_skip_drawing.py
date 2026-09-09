@@ -142,6 +142,29 @@ async def main():
     check("the drawings list is still empty", not (full.get("drawings") or []),
           str(len(full.get("drawings") or [])))
 
+    # ══ BOTH stages, not just the first ══════════════════════════════════
+    # "Skip the drawing" has to mean the approval too, or the job trades one
+    # gate for another: nothing to approve, and a stage still waiting for an
+    # approval of it. The status walk is forward-only and lands directly on
+    # drawing_approved, so `drawing` and `drawing_approved` are both behind
+    # the job in one move — this pins that rather than trusting it.
+    print("\n── and the approval stage is skipped with it, not left waiting ──")
+    ORDER = ["new", "purchasing", "drawing", "drawing_approved",
+             "production", "qc", "packaging", "invoiced", "delivered",
+             "paid", "closed"]
+    here = ORDER.index((await proj(p1))["status"])
+    check("the job is past 'drawing'", here > ORDER.index("drawing"),
+          (await proj(p1))["status"])
+    check("...and past 'drawing_approved' too — neither is still pending",
+          here >= ORDER.index("drawing_approved"), (await proj(p1))["status"])
+
+    queue = J(await c.get("/approvals/pending-documents", headers=d))
+    rows = queue if isinstance(queue, list) else (queue.get("items") or [])
+    check("nothing is waiting in the director's drawing sign-off queue for it",
+          not [x for x in rows
+               if x.get("kind") == "drawing" and p1 in str(x.get("link") or "")],
+          str([x.get("title") for x in rows if x.get("kind") == "drawing"])[:200])
+
     # ══ the director's own direct path ═══════════════════════════════════
     print("\n── the director can also just do it ──")
     p2 = await a_project("Langsung")
