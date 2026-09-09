@@ -46,8 +46,15 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
       qc.invalidateQueries({ queryKey: ["activities", customerId] });
       qc.invalidateQueries({ queryKey: ["calendar-events"] });
       qc.invalidateQueries({ queryKey: ["approvals"] });
-      // Sales follow-ups are held for director approval — keep the modal open
-      // and show why nothing appeared in the timeline yet.
+      // A follow-up used to be held for the director when sales logged it, and
+      // this kept the modal open to explain why the timeline had not changed.
+      // It is written immediately now — the call already happened and this is
+      // the note saying so — so the timeline is the confirmation.
+      //
+      // The branch stays because the server can still answer 202 for a request
+      // filed before that change: leave it out and such a reply would close
+      // the modal as if the note had been saved, which is the one outcome that
+      // loses what somebody typed.
       if (data?.status === "pending_approval") {
         setInfo(data?.message ?? tt(
           "Follow-up sent to the director for approval.",

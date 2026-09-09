@@ -438,9 +438,17 @@ async def apply_to_target(
             applied["created_skus"] = created
             applied["skipped_skus"] = skipped
     elif req.target_type == "followup":
-        # Sales-initiated follow-ups are deferred: on approval we materialise
-        # the activity (and a reminder, for the quotation flow) using the
-        # original requester as the author. Rejection leaves nothing behind.
+        # **Nothing files these any more.** Logging a follow-up no longer needs
+        # the director — the call already happened and the note is the record
+        # of it, so it is written when it is logged.
+        #
+        # This stays for the backlog: requests filed before that change are
+        # still sitting in the queue, and deleting the branch would leave them
+        # undecidable — approving one would close the request and silently
+        # write nothing, losing the note somebody typed. Approving materialises
+        # the activity (and the reminder, for the quotation flow) with the
+        # original requester as the author; rejection leaves nothing behind.
+        # Once the queue is clear this can go.
         if approve:
             from app.models.crm import Activity, Reminder
             p = req.payload or {}

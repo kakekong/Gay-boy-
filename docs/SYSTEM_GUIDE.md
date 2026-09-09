@@ -187,7 +187,7 @@ Around the PR:
 - **Mark lost**: requires a written reason (feeds the Lost-deals report); blocked while a Mark-won request is pending and on won/closed quotes — the two outcomes are mutually exclusive, enforced in UI and API.
 - **Exports**: PDF and Excel with the company header, PIC addressing and totals. **Every export writes an `export` activity** to the customer timeline (who, which quote, which format, when).
 - **Quote import**: line items can be imported from an existing Excel/PDF quotation document instead of typed by hand.
-- **Follow-ups**: logged on the quote; they route to the director for approval before being recorded; approved follow-ups can schedule the next reminder.
+- **Follow-ups**: logged on the quote or the customer, and recorded immediately by whoever logged them — the call has already happened, and the note is the record of it. A follow-up can schedule the next reminder at the same time. They used to route to the director; nothing was being decided, and holding the record back only made it late.
 
 ### 6.2 Revisions
 
@@ -315,7 +315,7 @@ A single `ApprovalRequest` table (target type + id, requester, required role, re
 
 | Decision | Approver |
 |---|---|
-| Quotation submit, Mark-won, customer PO (regular), supplier PO, price-request pricing, shipping/delivery date changes, sales follow-ups, quotation edits | **Director only** |
+| Quotation submit, Mark-won, customer PO (regular), supplier PO, price-request pricing, shipping/delivery date changes, quotation edits | **Director only** |
 | DP customer PO, faktur pajak, payment verification | **Finance** (director backstop) |
 | Manual CRM stage moves, manager-tier data changes | **Manager or director** |
 

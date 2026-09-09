@@ -682,35 +682,11 @@ async def create_activity(
     if not can_view_customer(user, obj.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
 
-    # Sales follow-ups need the director's sign-off — the activity is only
-    # written once approved (see core/approval.py). Other activity types and
-    # other roles log directly.
-    if payload.type == "follow_up" and Role(user.role) == Role.SALES:
-        req = await request_approval(
-            db,
-            target_type="followup",
-            target_id=customer_id,
-            requested_by=user.id,
-            required_role=Role.DIRECTOR,
-            reason="Follow-up activity",
-            payload={
-                "source": "customer",
-                "type": payload.type,
-                "direction": payload.direction,
-                "notes": payload.notes,
-                "meta": payload.meta or {},
-            },
-        )
-        await db.flush()
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={
-                "status": "pending_approval",
-                "approval_request_id": str(req.id),
-                "message": "Follow-up sent to the director for approval.",
-            },
-        )
-
+    # A follow-up by sales used to need the director's sign-off before it was
+    # written down. Every other activity type, and every other role, logged
+    # directly — and there was nothing being decided here either: the call has
+    # already happened and this is the note saying so. See the same change in
+    # quotations.log_followup.
     a = Activity(
         customer_id=customer_id,
         user_id=user.id,

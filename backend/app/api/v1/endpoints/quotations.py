@@ -1568,35 +1568,18 @@ async def log_followup(
     if not payload.notes or not payload.notes.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Notes required.")
 
-    # Sales follow-ups are routed through the director: the activity + reminder
-    # are only created once the request is approved (see core/approval.py).
-    if Role(user.role) == Role.SALES:
-        req = await request_approval(
-            db,
-            target_type="followup",
-            target_id=q.customer_id,
-            requested_by=user.id,
-            required_role=Role.DIRECTOR,
-            reason=f"Follow-up on quotation {q.number}",
-            payload={
-                "source": "quotation",
-                "quotation_id": str(q_id),
-                "quotation_number": q.number,
-                "notes": payload.notes,
-                "next_at": payload.next_at.isoformat() if payload.next_at else None,
-                "next_channel": payload.next_channel,
-            },
-        )
-        await db.flush()
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={
-                "status": "pending_approval",
-                "approval_request_id": str(req.id),
-                "message": "Follow-up sent to the director for approval.",
-            },
-        )
-
+    # Logging a follow-up used to go to the director for approval when sales
+    # did it. Nothing was being decided: the call had already happened, and the
+    # note is the record of it. Holding that behind a signature does not make
+    # the follow-up any more or less real — it only delays the record, and a
+    # record written days late is one nobody trusts to be complete. It also
+    # buried the queue that exists for decisions that *are* decisions (a price,
+    # a Won, an order) under a stream of "rang the customer, will call Tuesday".
+    #
+    # So it is written when it is logged, by whoever made the call. What the
+    # director gets instead is what they actually wanted from it: the activity
+    # and the reminder are visible on the customer, and the follow-up cadence
+    # feeds the lead score and the stalled-deal detection either way.
     activity = Activity(
         customer_id=q.customer_id,
         user_id=user.id,
