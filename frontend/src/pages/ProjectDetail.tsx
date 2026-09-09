@@ -390,6 +390,17 @@ export default function ProjectDetailPage() {
     onSuccess: refresh,
     onError: onErr,
   });
+  // A card filed by mistake — wrong stage, wrong project, added twice. Without
+  // this the only way off the board is to tick it complete, which says work
+  // was done that nobody did. Deleting is not undoing: the project's stage
+  // stays where it got to and received goods stay received (the server's
+  // docstring explains why), so the confirm text says so rather than letting
+  // somebody expect a rollback.
+  const deleteWO = useMutation({
+    mutationFn: (woId: string) => api.delete(`/operation/work-orders/${woId}`),
+    onSuccess: refresh,
+    onError: onErr,
+  });
   const uploadDeliveryProof = useMutation({
     mutationFn: (body: { doId: string; file: File; courier?: string; tracking?: string }) => {
       const fd = new FormData();
@@ -742,6 +753,8 @@ export default function ProjectDetailPage() {
   const canAskSkipDrawing = ["purchasing", "director", "manager", "admin"].includes(role);
   // Same set the server allows to receive goods (_RECEIVING_ROLES).
   const canReceive = ["purchasing", "admin", "manager", "director"].includes(role);
+  // Same set the server lets file and remove a work order (_WO_MUTATOR_ROLES).
+  const canEditWo = ["purchasing", "admin", "director"].includes(role);
   // A drawing this role was served is a drawing it may open; the filtering
   // already happened upstream.
   const canViewDrawing = true;
@@ -1480,6 +1493,22 @@ export default function ProjectDetailPage() {
                           {t("admin/director only", "hanya admin/direktur")}
                         </span>
                       )
+                    )}
+                    {canEditWo && (!w.completed_at || role === "director") && (
+                      <button
+                        className="btn-ghost text-red-700"
+                        title={t("Remove a work order added by mistake",
+                                 "Hapus work order yang salah dibuat")}
+                        onClick={() => {
+                          if (!confirm(tt(
+                            `Remove ${w.code}? The project stays at its current stage and any goods already received stay received — this only takes the card off the board.`,
+                            `Hapus ${w.code}? Tahap proyek tidak berubah dan barang yang sudah diterima tetap tercatat — ini hanya menghapus kartunya dari papan.`,
+                          ))) return;
+                          deleteWO.mutate(w.id);
+                        }}
+                      >
+                        <Trash2 size={13} /> {t("Remove", "Hapus")}
+                      </button>
                     )}
                   </td>
                 </tr>

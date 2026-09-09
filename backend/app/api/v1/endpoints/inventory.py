@@ -138,6 +138,53 @@ def _status(item: InventoryItem) -> str:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
+# Declared above `/{item_id}` — "reconcile" is a valid-looking UUID path
+# segment as far as the router is concerned, and the first match wins.
+
+@router.get("/reconcile")
+async def reconcile_preview(
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_can_add),
+):
+    """What in the stock list no longer follows from its own history.
+
+    Read-only. Reports three faults separately, because they have three
+    different answers — see `services/stock_reconcile`: a running total that
+    disagrees with the movements behind it, a quantity with no movements at
+    all, and a live supplier order whose goods were never counted in.
+    """
+    from app.services.stock_reconcile import reconcile
+
+    return await reconcile(db, apply=False)
+
+
+@router.post("/reconcile")
+async def reconcile_apply(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require(Role.DIRECTOR)),
+):
+    """Fix what the preview found. Director only.
+
+    Director only because it rewrites stock figures across the whole list at
+    once, which is not something to discover afterwards. It is not
+    destructive — no quantity is deleted, opening balances are explained
+    rather than erased, and orders are replayed through the ordinary path —
+    but it is wide, and wide is its own kind of risk.
+
+    Run `GET /inventory/reconcile` first: it computes the same findings
+    without writing, so what you approve is what runs.
+    """
+    from app.core.audit import record as audit_record
+    from app.services.stock_reconcile import reconcile
+
+    out = await reconcile(db, apply=True, user=user)
+    await audit_record(
+        db, actor=user, action="reconciled", entity="inventory", entity_id=None,
+        after=out["summary"],
+    )
+    return out
+
+
 @router.get("")
 async def list_items(
     db: AsyncSession = Depends(get_db),

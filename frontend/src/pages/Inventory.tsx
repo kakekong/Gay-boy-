@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package, Plus, Search, AlertTriangle, CheckCircle2, ShoppingCart, Loader2,
-  Pencil, ArrowDownUp, Boxes, Wrench, Trash2,
+  Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -11,7 +11,7 @@ import { Modal } from "@/components/Modal";
 import { InventoryItemForm } from "@/components/forms/InventoryItemForm";
 import { AdjustStockForm } from "@/components/forms/AdjustStockForm";
 import { useAuthStore } from "@/store/auth";
-import { T } from "@/store/lang";
+import { T, useT } from "@/store/lang";
 
 interface Item {
   id: string;
@@ -48,6 +48,7 @@ export default function InventoryPage() {
   const canEdit = user && (user.role === "admin" || user.role === "director");
   const canAdd = user && ["purchasing", "admin", "manager", "director"].includes(user.role);
   const isDirector = user?.role === "director";
+  const [openReconcile, setOpenReconcile] = useState(false);
   // What stock cost us is procurement's figure. Admin run the customer side
   // and sales quote the sell price — neither is shown the buy price
   // anywhere else in the app, and the server sends them null for it, so the
@@ -117,8 +118,16 @@ export default function InventoryPage() {
             <button className="btn-ghost" onClick={() => setOpenBulk(true)}>
               <Plus size={14} /> {T("New item")}</button>
           )}
+          {canAdd && (
+            <button className="btn-ghost" onClick={() => setOpenReconcile(true)}>
+              <RefreshCw size={14} /> {T("Check against the paperwork")}</button>
+          )}
         </div>
       </div>
+
+      {openReconcile && (
+        <ReconcilePanel isDirector={!!isDirector} onClose={() => setOpenReconcile(false)} />
+      )}
 
       {/* Stat strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -595,6 +604,188 @@ function Card({ label, value, Icon, tone }: {
         </div>
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+
+/**
+ * Why the stock figures no longer follow from the paperwork — and the fix.
+ *
+ * Stock here is a ledger: every change is a movement naming the document that
+ * caused it, and the figure on the item is a running total of those. Things
+ * predate that rule. Items were typed in with an opening quantity and nothing
+ * behind it, numbers were edited straight onto the row, orders went through
+ * mechanisms since replaced. What is left is a count that cannot be traced,
+ * which is when people stop trusting it and start keeping their own list.
+ *
+ * The three faults are shown separately because they have three different
+ * answers, and the panel says which is which rather than offering one
+ * undifferentiated "fix everything" — the reader should be able to see that a
+ * quantity somebody counted by hand is not about to be deleted.
+ *
+ * Preview first, always. The server computes the report and the fix by the
+ * same path, so what is listed here is exactly what running it will do.
+ */
+function ReconcilePanel({ isDirector, onClose }: {
+  isDirector: boolean; onClose: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [done, setDone] = useState<any | null>(null);
+
+  const preview = useQuery({
+    queryKey: ["inventory-reconcile"],
+    queryFn: () => api.get("/inventory/reconcile").then((r) => r.data as any),
+  });
+
+  const apply = useMutation({
+    mutationFn: () => api.post("/inventory/reconcile").then((r) => r.data),
+    onSuccess: (res: any) => {
+      setDone(res);
+      qc.invalidateQueries({ queryKey: ["inventory"] });
+      qc.invalidateQueries({ queryKey: ["inventory-stats"] });
+      qc.invalidateQueries({ queryKey: ["inventory-reconcile"] });
+    },
+  });
+
+  const rep = done ?? preview.data;
+  const sum = rep?.summary;
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-ink-100 flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <RefreshCw size={15} className="text-brand-600" />
+            {t("Stock against the paperwork", "Stok dibanding dokumen")}
+          </div>
+          <div className="text-[11px] text-ink-500 mt-1 max-w-2xl leading-relaxed">
+            {t("Every stock figure should follow from a movement naming the document behind it. This finds the ones that do not — totals that drift from their own history, quantities carried over with nothing explaining them, and orders whose goods were never counted in. A quantity somebody counted by hand is left alone.",
+               "Setiap angka stok seharusnya berasal dari pergerakan yang menyebut dokumennya. Ini mencari yang tidak — total yang menyimpang dari riwayatnya, jumlah warisan tanpa penjelasan, dan pesanan yang barangnya belum pernah dihitung masuk. Jumlah hasil hitung fisik tidak disentuh.")}
+          </div>
+        </div>
+        <button className="btn-ghost text-xs" onClick={onClose}>{t("Close", "Tutup")}</button>
+      </div>
+
+      {preview.isLoading && !done ? (
+        <div className="px-5 py-4 text-xs muted">{t("Checking…", "Memeriksa…")}</div>
+      ) : !rep ? (
+        <div className="px-5 py-4 text-xs text-red-700">
+          {t("Could not read the stock list.", "Gagal membaca daftar stok.")}
+        </div>
+      ) : (
+        <div className="px-5 py-4 space-y-4 text-sm">
+          {done && (
+            <div className="rounded-lg bg-emerald-50 text-emerald-800 px-3 py-2 text-xs">
+              {t("Done. Everything below has been applied.",
+                 "Selesai. Semua di bawah ini sudah diterapkan.")}
+            </div>
+          )}
+
+          {sum?.nothing_to_do ? (
+            <div className="text-xs muted">
+              {t("Every stock figure already follows from its movements. Nothing to do.",
+                 "Semua angka stok sudah sesuai riwayatnya. Tidak ada yang perlu diperbaiki.")}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <Finding
+                title={t("Totals that drifted from their own history",
+                         "Total yang menyimpang dari riwayatnya")}
+                note={t("The movements are the record, so the total is set to what they add up to. No stock is invented.",
+                        "Pergerakan adalah catatannya, jadi total disetel sesuai jumlahnya. Tidak ada stok yang dibuat-buat.")}
+                rows={(rep.drift ?? []).map((x: any) => ({
+                  key: x.id,
+                  left: `${x.sku} · ${x.name}`,
+                  right: `${x.was} → ${x.now}`,
+                }))}
+              />
+              <Finding
+                title={t("Quantities with nothing explaining them",
+                         "Jumlah tanpa penjelasan")}
+                note={t("Treated as an opening balance: the figure stays and a movement is written to explain it. Deleting these would throw away real stock.",
+                        "Dianggap saldo awal: angkanya tetap dan dibuatkan pergerakan sebagai penjelasan. Menghapusnya berarti membuang stok yang nyata.")}
+                rows={(rep.opening_balances ?? []).map((x: any) => ({
+                  key: x.id,
+                  left: `${x.sku} · ${x.name}`,
+                  right: `${x.qty}`,
+                }))}
+              />
+              <Finding
+                title={t("Orders whose goods were never counted in",
+                         "Pesanan yang barangnya belum dihitung masuk")}
+                note={t("Replayed through the ordinary path, so they land exactly as an order that worked first time. Orders still waiting on the director are left alone.",
+                        "Diproses ulang lewat jalur biasa, sehingga sama persis dengan pesanan yang berhasil sejak awal. Pesanan yang masih menunggu direktur tidak disentuh.")}
+                rows={(rep.replayed_orders ?? []).map((x: any) => ({
+                  key: x.po_id,
+                  left: `${x.number} · ${x.status}`,
+                  right: `${x.lines} ${t("line(s)", "baris")}, ${x.qty}`,
+                }))}
+              />
+            </div>
+          )}
+
+          {!done && !sum?.nothing_to_do && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-ink-100">
+              <span className="text-[11px] muted">
+                {isDirector
+                  ? t("Nothing above is written until you run it.",
+                      "Tidak ada yang ditulis sampai Anda menjalankannya.")
+                  : t("Only the director can apply this — it rewrites figures across the whole list.",
+                      "Hanya direktur yang dapat menerapkannya — ini mengubah angka di seluruh daftar.")}
+              </span>
+              {isDirector && (
+                <button className="btn-primary text-xs" disabled={apply.isPending}
+                        onClick={() => apply.mutate()}>
+                  {apply.isPending
+                    ? t("Applying…", "Menerapkan…")
+                    : t("Apply these fixes", "Terapkan perbaikan")}
+                </button>
+              )}
+            </div>
+          )}
+          {apply.isError && (
+            <div className="rounded-lg bg-red-50 text-red-800 px-3 py-2 text-xs">
+              {(apply.error as any)?.response?.data?.errors?.[0]?.message
+                ?? t("Could not apply it", "Gagal menerapkan")}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Finding({ title, note, rows }: {
+  title: string; note: string;
+  rows: { key: string; left: string; right: string }[];
+}) {
+  const t = useT();
+  return (
+    <div>
+      <div className="flex items-baseline gap-2">
+        <span className="font-medium text-xs">{title}</span>
+        <span className="chip bg-ink-100 text-ink-700 text-[10px]">{rows.length}</span>
+      </div>
+      <div className="text-[11px] muted mt-0.5 max-w-2xl leading-relaxed">{note}</div>
+      {rows.length === 0 ? (
+        <div className="text-[11px] muted mt-1">{t("None.", "Tidak ada.")}</div>
+      ) : (
+        <ul className="mt-1.5 divide-y divide-ink-100 rounded-lg border border-ink-200 overflow-hidden">
+          {rows.slice(0, 25).map((r) => (
+            <li key={r.key} className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+              <span className="truncate">{r.left}</span>
+              <span className="tabular-nums font-mono shrink-0">{r.right}</span>
+            </li>
+          ))}
+          {rows.length > 25 && (
+            <li className="px-3 py-1.5 text-[11px] muted">
+              {t(`…and ${rows.length - 25} more`, `…dan ${rows.length - 25} lainnya`)}
+            </li>
+          )}
+        </ul>
+      )}
     </div>
   );
 }

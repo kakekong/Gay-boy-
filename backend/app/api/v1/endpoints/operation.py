@@ -2624,6 +2624,62 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
             "completed_at": w.completed_at}
 
 
+@router.delete("/work-orders/{wo_id}", status_code=204)
+async def delete_work_order(
+    wo_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a work order filed by mistake.
+
+    A work order is a task card, not a record of something that happened, so
+    one added by accident — wrong stage, wrong project, added twice — is just
+    clutter on the board and there was no way to take it off. The alternative
+    people reach for is completing it, which is worse: the board then says
+    work was done that nobody did.
+
+    **A completed one is a different thing.** Somebody ticked it, which is a
+    claim that the work happened; removing that is editing history rather than
+    tidying a mistake. Only the director may, and only they can weigh whether
+    the tick was itself the accident.
+
+    Two things this does not do, both deliberate:
+
+    * **The project's stage does not move back.** Filing the work order may
+      have advanced it, but the stage records the furthest point the job has
+      reached and other things are already resting on it — logistics, invoice
+      gates, the ops board. Un-advancing on a deleted card would drag those
+      backwards for a reason that has nothing to do with them.
+    * **Stock is untouched.** Deleting a receiving work order does not
+      un-receive anything: the goods arrived, and what recorded that is the
+      goods receipt and its movements, not the card that reminded somebody to
+      go and count. Correct a wrong quantity by syncing receiving again.
+    """
+    w = await db.get(WorkOrder, wo_id)
+    if not w:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Work order not found")
+    role = Role(user.role)
+    if role not in _WO_MUTATOR_ROLES:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only purchasing, admin or director can remove a work order.")
+    if w.completed_at and role != Role.DIRECTOR:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This work order is marked complete — somebody recorded the work "
+            "as done. Only the director can remove it.")
+
+    from app.core.audit import record as audit_record
+    await audit_record(
+        db, actor=user, action="deleted", entity="work_order", entity_id=w.id,
+        before={"code": w.code, "stage": w.stage,
+                "project_id": str(w.project_id) if w.project_id else None,
+                "completed_at": w.completed_at.isoformat() if w.completed_at else None},
+    )
+    await db.delete(w)
+    return None
+
+
 @router.get("/work-orders")
 async def list_work_orders(
     db: AsyncSession = Depends(get_db),
