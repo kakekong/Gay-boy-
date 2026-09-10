@@ -245,6 +245,49 @@ async def main():
           f"{await stock_of(opening_sku)}/{await stock_of(counted_sku)}")
 
     # ══ what it refuses to count ═════════════════════════════════════════
+    # ══ a partly-delivered order that lost its movements ═════════════════
+    # The trap: replaying an order puts back what was ORDERED. If only five of
+    # ten arrived and a receipt says so, replaying alone would overwrite the
+    # receipt with the order — and do it while calling itself a
+    # reconciliation. The receipts have to be re-applied on top.
+    print("\n── an order that lost its movements but kept its receipts ──")
+    po4 = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup, "project_id": proj, "po_date": "2026-09-08",
+        "items": [{"description": f"Partial Part {TAG}", "qty": 10,
+                   "unit_price": 800, "uom": "pcs"}]}))
+    r = await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
+        "po_id": po4["id"], "lines": [{"line_no": 1, "qty": 4}]})
+    check("four of the ten are recorded as received", r.status_code == 200,
+          f"{r.status_code} {why(r)}")
+    partial_sku = None
+    async with SessionLocal() as db:
+        item = await db.scalar(select(InventoryItem).where(
+            InventoryItem.name == f"Partial Part {TAG}"))
+        partial_sku = item.sku
+        check("...and the shelf says four", float(item.current_stock) == 4,
+              str(item.current_stock))
+        # Now lose every movement, as a migration or an old mechanism would.
+        for m in (await db.scalars(select(InventoryMovement).where(
+                InventoryMovement.reference == po4["number"]))).all():
+            await db.delete(m)
+        item.current_stock = 0
+        await db.commit()
+    check("the movements are gone and the shelf reads zero",
+          await stock_of(partial_sku) == 0, str(await stock_of(partial_sku)))
+
+    rep4 = J(await c.get("/inventory/reconcile", headers=d))
+    row4 = next((x for x in rep4["replayed_orders"]
+                 if x["number"] == po4["number"]), None)
+    check("the order is offered for replay", row4 is not None, str(row4))
+    check("...and the preview says it will land on what arrived, not what was "
+          "ordered", row4 and row4["qty"] == 4 and row4["ordered"] == 10,
+          str(row4))
+
+    r = await c.post("/inventory/reconcile", headers=d)
+    check("it applies", r.status_code == 200, f"{r.status_code} {why(r)}")
+    check("...and the shelf lands on four — the receipt won, not the order",
+          await stock_of(partial_sku) == 4, str(await stock_of(partial_sku)))
+
     print("\n── an order nobody released is not goods on a shelf ──")
     po3 = J(await c.post("/purchasing/po", headers=pur, json={
         "supplier_id": sup, "project_id": proj, "po_date": "2026-09-08",

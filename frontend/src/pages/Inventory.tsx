@@ -715,12 +715,17 @@ function ReconcilePanel({ isDirector, onClose }: {
               <Finding
                 title={t("Orders whose goods were never counted in",
                          "Pesanan yang barangnya belum dihitung masuk")}
-                note={t("Replayed through the ordinary path, so they land exactly as an order that worked first time. Orders still waiting on the director are left alone.",
-                        "Diproses ulang lewat jalur biasa, sehingga sama persis dengan pesanan yang berhasil sejak awal. Pesanan yang masih menunggu direktur tidak disentuh.")}
+                note={t("Replayed through the ordinary path, so they land exactly as an order that worked first time. Where goods receipts exist the shelf ends at what actually arrived, not at what was ordered. Orders still waiting on the director are left alone.",
+                        "Diproses ulang lewat jalur biasa, sehingga sama persis dengan pesanan yang berhasil sejak awal. Bila ada bukti penerimaan, stok berakhir pada yang benar-benar datang, bukan yang dipesan. Pesanan yang masih menunggu direktur tidak disentuh.")}
                 rows={(rep.replayed_orders ?? []).map((x: any) => ({
                   key: x.po_id,
                   left: `${x.number} · ${x.status}`,
-                  right: `${x.lines} ${t("line(s)", "baris")}, ${x.qty}`,
+                  // The two figures differ exactly when the order was partly
+                  // delivered, and that is the case worth seeing before
+                  // pressing anything.
+                  right: x.ordered !== undefined && x.ordered !== x.qty
+                    ? `${x.qty} ${t("of", "dari")} ${x.ordered}`
+                    : `${x.lines} ${t("line(s)", "baris")}, ${x.qty}`,
                 }))}
               />
             </div>

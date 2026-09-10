@@ -147,6 +147,31 @@ async def reconcile(db: AsyncSession, *, apply: bool = False,
     }
 
 
+async def _receipted_quantities(db: AsyncSession, po) -> dict[int, float]:
+    """What the goods receipts on this order say actually turned up, per line.
+
+    Receipts accumulate — a second delivery is a second receipt, not an edit of
+    the first — and each one carries the running total for the lines it covers,
+    so the latest mention of a line wins. Same rule the receiving screen uses to
+    pre-fill the form, and it has to be the same or the two disagree about what
+    has arrived.
+    """
+    from app.models.purchasing import GoodsReceipt
+
+    receipts = (await db.scalars(
+        select(GoodsReceipt).where(GoodsReceipt.po_id == po.id)
+        .order_by(GoodsReceipt.created_at.asc())
+    )).all()
+    out: dict[int, float] = {}
+    for gr in receipts:
+        for row in (gr.items or []):
+            try:
+                out[int(row.get("line_no"))] = float(row.get("qty") or 0)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 async def _replay_missing_pos(db: AsyncSession, *, apply: bool,
                               user: User | None) -> list[dict]:
     """Supplier orders that are live but whose goods were never counted in.
@@ -156,8 +181,18 @@ async def _replay_missing_pos(db: AsyncSession, *, apply: bool,
     — which is why replaying goes through `receive_purchase_order` rather than
     writing movements here. A second mechanism for putting goods on a shelf is
     a second mechanism to keep in step.
+
+    **Then the receipts are re-applied on top.** Replaying alone puts back what
+    was *ordered*, and for an order that was only partly delivered that is the
+    wrong number — it would overwrite a receipt saying five arrived with the
+    ten somebody asked for, and do it while claiming to be a reconciliation.
+    So if there are goods receipts on file, the same correction the receiving
+    screen makes is made here: the shelf ends at what the receipts say, not at
+    what the order asked for.
     """
-    from app.services.stock_sync import _already_moved, receive_purchase_order
+    from app.services.stock_sync import (
+        _already_moved, receive_purchase_order, sync_received,
+    )
 
     pos = (await db.scalars(
         select(SupplierPO).where(SupplierPO.status.in_(LIVE_PO_STATES))
@@ -176,11 +211,27 @@ async def _replay_missing_pos(db: AsyncSession, *, apply: bool,
         if not lines:
             # An order with nothing countable on it is not missing anything.
             continue
+
+        ordered = sum(float(i.get("qty") or 0) for i in lines)
+        receipted = await _receipted_quantities(db, po)
+        # What the shelf will hold afterwards: the receipts where a line has
+        # one, the ordered figure where it does not (nothing has been said
+        # about that line yet, which is not the same as "none arrived").
+        landing = sum(
+            receipted.get(idx, float(line.get("qty") or 0))
+            for idx, line in enumerate(po.items or [], start=1)
+            if float(line.get("qty") or 0) > 0
+            and ((line.get("description") or line.get("name") or "").strip())
+        )
         out.append({
             "po_id": str(po.id), "number": po.number, "status": po.status,
             "lines": len(lines),
-            "qty": sum(float(i.get("qty") or 0) for i in lines),
+            "qty": landing,
+            "ordered": ordered,
+            "receipted_lines": len(receipted),
         })
         if apply:
             await receive_purchase_order(db, po, user)
+            if receipted:
+                await sync_received(db, po, receipted, user)
     return out
