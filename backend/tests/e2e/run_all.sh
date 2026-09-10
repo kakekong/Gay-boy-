@@ -82,8 +82,12 @@ done
 
 echo
 echo "=== pytest unit suites ==="
+# Named one by one, not `pytest tests/`: the e2e drivers in this directory are
+# scripts that sys.exit(), and collecting them turns the whole run into errors.
+# A new unit suite has to be added here or it is silently never run.
 PYTHONPATH=. python -m pytest tests/test_permissions.py tests/test_discount_rules.py \
-  tests/test_financials.py tests/test_depreciation.py -q 2>&1 | tail -2
+  tests/test_financials.py tests/test_depreciation.py \
+  tests/test_quotation_pdf_columns.py -q 2>&1 | tail -2
 echo "=== DP flow ==="
 dp=$(python tests/e2e_dp_flow.py 2>&1)
 echo "$dp" | grep RESULT || echo "DP flow: NO RESULT"

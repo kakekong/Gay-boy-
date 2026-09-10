@@ -22,6 +22,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     BaseDocTemplate, Flowable, Frame, KeepTogether, PageTemplate, Paragraph,
     Spacer, Table, TableStyle,
@@ -337,19 +338,44 @@ def build_quotation_pdf(*, number: str, issued: str, customer_name: str,
 
     # ── Items ───────────────────────────────────────────────────────────
     item_name = ParagraphStyle("itemname", parent=body, fontSize=7.4, leading=9.4)
+    # The code column is measured, not guessed. It used to be a flat 20mm
+    # holding a plain string, and ReportLab does not wrap a plain string — it
+    # lets it run straight over the neighbouring cell. A code like
+    # `DUS-CLP-RC-0001` needs 27mm with its padding, so it printed on top of
+    # NAMA BARANG and the two columns read as one smear. The *header* needed
+    # 23mm, so it overflowed on every quotation ever printed, whatever the
+    # codes were.
+    #
+    # So: fit the column to the widest thing that has to go in it, and give
+    # what is left to the name. Clamped at both ends — the floor keeps a
+    # quotation full of short SKUs from looking lopsided, and the ceiling
+    # stops one pathological code from eating the column people actually
+    # read. Beyond the ceiling the code wraps rather than overflows, which is
+    # what the Paragraph below is for: a wrapped code is ugly, an overlapping
+    # one is unreadable.
+    item_code = ParagraphStyle("itemcode", parent=body, fontSize=7.4,
+                               leading=9.4, alignment=1)  # 1 = centre
+    CODE_MIN, CODE_MAX = 20 * mm, 42 * mm
+    CELL_PAD = 12          # ReportLab's default 6pt each side
+    widest = max(
+        [stringWidth("KODE BARANG", "Helvetica-Bold", 7.4)]
+        + [stringWidth(str(r["code"] or ""), "Helvetica", 7.4) for r in rows]
+    )
+    code_w = min(max(widest + CELL_PAD, CODE_MIN), CODE_MAX)
+
     head = ["KODE BARANG", "NAMA BARANG", "SATUAN", "UNIT",
             "@HARGA (IDR)", "TOTAL HARGA (IDR)"]
     data = [head]
     for r in rows:
         data.append([
-            r["code"],
+            Paragraph(str(r["code"] or ""), item_code),
             Paragraph(r["name"], item_name),
             r["qty"],
             r["uom"],
             _idr_plain(r["unit_price"]),
             _idr_plain(r["line_total"]),
         ])
-    col = [20 * mm, content_w - 20 * mm - 15 * mm - 14 * mm - 25 * mm - 30 * mm,
+    col = [code_w, content_w - code_w - 15 * mm - 14 * mm - 25 * mm - 30 * mm,
            15 * mm, 14 * mm, 25 * mm, 30 * mm]
     items = Table(data, colWidths=col, repeatRows=1)
     items.setStyle(TableStyle([

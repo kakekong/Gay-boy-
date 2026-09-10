@@ -1387,6 +1387,24 @@ async def upload_import_doc(
     if key not in DOC_LABELS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown document '{key}'")
 
+    # Uploading again REPLACES the entry and resets it to pending, which is
+    # right while the director has not looked at it yet and wrong the moment
+    # they have: an approved import document is what the delivery was confirmed
+    # against, and swapping the file underneath it changes what that signature
+    # was given for. The button sat there offering exactly that, after
+    # approval, with nothing to stop it.
+    #
+    # The director keeps the ability, because a document approved in error has
+    # to be replaceable by somebody and it should be the account that approved
+    # it.
+    existing = (p.import_docs or {}).get(key) or {}
+    if existing.get("status") == "approved" and Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"The {DOC_LABELS.get(key, key)} is already approved — the "
+            "delivery was confirmed against this file. Ask the director to "
+            "replace it.")
+
     stamp = f"[import-doc:{key}] {note or ''}".strip()
     if link_url and (link_url or "").strip():
         a = await _link_attachment(

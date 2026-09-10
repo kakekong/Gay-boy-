@@ -161,8 +161,15 @@ export function AttachmentsSection({ ownerType, ownerId, title }: Props) {
     setPreview(att);
   }
 
+  // The director may remove anything; everybody else — admin included — only
+  // what they attached themselves. The server also refuses a file whose
+  // document has been signed off (a Won quotation, an approved price request
+  // or customer PO, an approved import document); that one is not mirrored
+  // here because it depends on state this component does not load, so the
+  // button shows and the refusal explains itself. Guessing it locally would
+  // mean two copies of the rule drifting apart.
   const canDelete = (att: AttachmentRow) =>
-    !!me && (att.uploaded_by === me.id || me.role === "admin" || me.role === "director");
+    !!me && (att.uploaded_by === me.id || me.role === "director");
 
   return (
     <div className="card p-5">

@@ -586,12 +586,98 @@ async def delete_attachment(
     a = await db.get(Attachment, attachment_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    # Only uploader, admin, or director can delete
-    if (
-        a.uploaded_by != me.id
-        and Role(me.role) not in (Role.ADMIN, Role.DIRECTOR)
-    ):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only uploader or admin/director can delete")
+
+    # The director may remove anything. Everyone else — admin included — may
+    # remove only what they attached themselves.
+    #
+    # Admin used to sit with the director here, which made the desk that files
+    # most of the paperwork also the desk that could quietly unfile anybody
+    # else's. "I uploaded it" is a claim only one person can make about a given
+    # file, so it is the cleanest boundary available, and it leaves exactly one
+    # account able to override it.
+    if Role(me.role) != Role.DIRECTOR and a.uploaded_by != me.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This file was attached by somebody else — only they or the "
+            "director can remove it.")
+
+    # And past a certain point a file stops being your working copy and starts
+    # being evidence for a decision somebody made on it.
+    if Role(me.role) != Role.DIRECTOR:
+        locked = await _attachment_locked(db, a)
+        if locked:
+            raise HTTPException(status.HTTP_409_CONFLICT, locked)
+
     await storage.delete(a.storage_path)  # best-effort; never blocks the row delete
     await db.delete(a)
+    return None
+
+
+async def _attachment_locked(db: AsyncSession, a: Attachment) -> str | None:
+    """Has the document this file hangs on been settled? Returns why, or None.
+
+    A file attached to a live quotation is a working document — the wrong
+    revision, a duplicate, a scan that came out blank — and removing it is
+    tidying. The moment the deal is Won, the price request approved or the
+    customer's order signed off, the same file is part of what those decisions
+    were made on, and removing it edits the record behind a decision rather
+    than tidying a shelf.
+
+    The director is not asked this question: somebody has to be able to remove
+    a file that should never have been there, and that is the account whose
+    signature the lock exists to protect.
+
+    Anything not named here is unlocked. This is a rule about the handful of
+    documents that carry a sign-off, not a blanket freeze on the filing
+    cabinet — a customer's own record, a supplier's paperwork and a daily log
+    have no such moment and should not pretend to.
+    """
+    owner, oid = a.owner_type, a.owner_id
+
+    if owner == "quotation":
+        from app.models.quotation import Quotation
+        q = await db.get(Quotation, oid)
+        if q and q.status == "won":
+            return (f"Quotation {q.number} is marked Won — its files are part "
+                    "of the record now. Ask the director to remove one.")
+        return None
+
+    if owner == "price_request":
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, oid)
+        if pr and pr.status == "approved":
+            return (f"Price request {pr.number} is approved — its files are "
+                    "part of the record now. Ask the director to remove one.")
+        return None
+
+    if owner == "customer_po":
+        from app.models.customer_po import CustomerPO
+        po = await db.get(CustomerPO, oid)
+        if po and po.status not in ("pending_approval", "pending_finance",
+                                    "rejected", "draft"):
+            return (f"Customer PO {po.number} is approved — its files are part "
+                    "of the record now. Ask the director to remove one.")
+        return None
+
+    if owner == "project":
+        # Import documents live on the project as ordinary attachments, keyed
+        # from `Project.import_docs`. An approved one is what the director
+        # signed to let the delivery be confirmed, so it is exactly the kind of
+        # file this rule is about. Project files that are NOT import documents
+        # — drawings' backing files, a photo somebody added to the shelf — are
+        # not, and stay removable by whoever put them there.
+        from app.models.operation import Project
+        p = await db.get(Project, oid)
+        for key, entry in ((p.import_docs or {}) if p else {}).items():
+            if str((entry or {}).get("attachment_id") or "") != str(a.id):
+                continue
+            if (entry or {}).get("status") == "approved":
+                from app.api.v1.endpoints.operation import DOC_LABELS
+                label = DOC_LABELS.get(key, key)
+                return (f"The {label} on this project is approved — the "
+                        "delivery was confirmed against it. Ask the director "
+                        "to remove it.")
+            return None
+        return None
+
     return None
