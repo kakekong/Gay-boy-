@@ -26,7 +26,8 @@ const emptyLine = () => ({
   // has priced this yet". Rows loaded from an existing request carry theirs,
   // which is what lets a description be reworded without losing its price.
   line_no: undefined as number | undefined,
-  sku: "", description: "", category: "", qty: 1, uom: "", link: "", spec: "",
+  sku: "", description: "", category: "", category_note: "",
+  qty: 1, uom: "", link: "", spec: "",
 });
 
 /**
@@ -375,6 +376,18 @@ function CreateForm({
                   label={`Category ${i + 1}`}
                   value={it.category}
                   onChange={(v) => setItem(i, "category", v)} />
+                {/* "Others" is the one category that says nothing about the
+                    part. Purchasing costing this line would otherwise learn
+                    only that it is none of the other five. */}
+                {it.category === "others" && (
+                  <input
+                    className="input w-52"
+                    aria-label={`What is this other ${i + 1}`}
+                    placeholder={t("What is it? e.g. gearbox seal",
+                                   "Barang apa? mis. seal gearbox")}
+                    value={it.category_note ?? ""}
+                    onChange={(e) => setItem(i, "category_note", e.target.value)} />
+                )}
                 <input className="input w-20" type="number"
                   placeholder={t("Qty", "Jml")} aria-label={`Qty ${i + 1}`}
                   value={it.qty}
@@ -512,7 +525,8 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   // Line-item editing. `null` = not editing; otherwise the working copy.
   const [editItems, setEditItems] = useState<
     { line_no?: number; sku: string; description: string; category: string;
-      qty: number | string; uom: string; link: string; spec: string }[] | null
+      category_note: string; qty: number | string; uom: string; link: string;
+      spec: string }[] | null
   >(null);
   // "edit" writes straight to the request (draft, or the director overriding).
   // "propose" files a revision for the director to decide — the negotiation path.
@@ -537,6 +551,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         sku: row.sku.trim() || null,
         description: row.description.trim(),
         category: row.category.trim() || null,
+        category_note: row.category_note?.trim() || null,
         qty: Number(row.qty) || 0,
         uom: row.uom.trim() || null,
         link: row.link.trim() || null,
@@ -562,6 +577,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         sku: row.sku.trim() || null,
         description: row.description.trim(),
         category: row.category.trim() || null,
+        category_note: row.category_note?.trim() || null,
         qty: Number(row.qty) || 0,
         uom: row.uom.trim() || null,
         link: row.link.trim() || null,
@@ -859,6 +875,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 sku: it.sku ?? "",
                 description: it.description ?? "",
                 category: it.category ?? "",
+                category_note: it.category_note ?? "",
                 qty: it.qty ?? 1,
                 uom: it.uom ?? "",
                 link: it.link ?? "",
@@ -876,7 +893,8 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 setEditItems((pr.items ?? []).map((it: any) => ({
                   line_no: it.line_no,
                   sku: it.sku ?? "", description: it.description ?? "",
-                  category: it.category ?? "", qty: it.qty ?? 1,
+                  category: it.category ?? "",
+                  category_note: it.category_note ?? "", qty: it.qty ?? 1,
                   uom: it.uom ?? "", link: it.link ?? "",
                   spec: it.spec ?? "",
                 })));
@@ -962,6 +980,15 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                   label={`Edit category ${i + 1}`}
                   value={row.category}
                   onChange={(v) => set("category", v)} />
+                {row.category === "others" && (
+                  <input
+                    className="input col-span-12 sm:col-span-4"
+                    aria-label={`Edit what is this other ${i + 1}`}
+                    placeholder={t("What is it? e.g. gearbox seal",
+                                   "Barang apa? mis. seal gearbox")}
+                    value={row.category_note ?? ""}
+                    onChange={(e) => set("category_note", e.target.value)} />
+                )}
                 <input
                   className="input col-span-3 sm:col-span-2 text-right" type="number" min="0"
                   placeholder={t("Qty", "Jml")}
@@ -1068,6 +1095,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 </td>
                 <td className="td muted text-xs">
                   {categoryLabel(it.category, categories)}
+                  {/* On an "others" line the label alone says nothing, so the
+                      note is what the reader is actually after. */}
+                  {it.category_note && (
+                    <div className="text-ink-700">{it.category_note}</div>
+                  )}
                 </td>
                 <td className="td text-right tabular-nums">{it.qty}</td>
                 <td className="td muted">{it.uom || "—"}</td>

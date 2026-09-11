@@ -115,6 +115,11 @@ class ItemIn(BaseModel):
     # numbering scheme.
     sku: str | None = None
     category: str | None = None
+    # What the "other" actually is. `others` is the honest escape hatch on a
+    # six-item list, and it is also the one value that tells the reader
+    # nothing — purchasing costing a line marked `others` learns only that it
+    # is none of the other five. This is where the answer goes.
+    category_note: str | None = None
     link: str | None = None
 
 
@@ -234,6 +239,11 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             # anything about price.
             "sku": it.get("sku"),
             "category": it.get("category"),
+            # What the "other" is. Same audience as the category itself —
+            # purchasing is the desk it exists for, since they are the ones
+            # costing a line that would otherwise say only "not one of the
+            # other five".
+            "category_note": it.get("category_note"),
             "link": it.get("link"),
         }
         if see_cost:
@@ -371,6 +381,27 @@ def _clean_category(value: str | None, old: dict | None = None) -> str | None:
         + ", ".join(CATEGORY_LABELS[c] for c in CATEGORIES) + ".")
 
 
+def _clean_category_note(value: str | None, category: str | None) -> str | None:
+    """The note saying what an "other" is — and only where that question exists.
+
+    `others` is on the list deliberately: a list without an escape hatch gets
+    the nearest wrong answer picked instead, and then the wrong answer is what
+    you filter on. The cost of having it is that `others` is the one value
+    carrying no information, so a note beside it is how the line stays
+    readable to whoever costs it.
+
+    It is cleared on any other category rather than kept. A note explaining
+    the "other" is meaningless on a line that has since been called a
+    sprocket, and leaving it there would mean the screen showing a category
+    and an explanation that contradict each other — which is worse than the
+    blank it replaces. Change your mind back and you retype one short phrase.
+    """
+    if (category or "") != "others":
+        return None
+    text = (value or "").strip()
+    return text[:200] or None
+
+
 def _clean_link(value: str | None) -> str | None:
     """A link that a browser will actually open, or nothing.
 
@@ -444,6 +475,10 @@ def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list
         else:
             pool = by_desc.get((it.description or "").strip().casefold())
             old = pool.pop(0) if pool else None
+        # The note about an "other" depends on what the category resolved to,
+        # so the category has to be settled before it is cleaned.
+        category = _carried(it, old, "category",
+                            lambda v: _clean_category(v, old))
         row = {
             "line_no": i + 1,
             "description": it.description,
@@ -456,8 +491,9 @@ def _norm_items(items: list[ItemIn], previous: list[dict] | None = None) -> list
             # old edit form quietly wiped the supplier a cost came from. A
             # field explicitly sent as blank still clears it; one simply not
             # mentioned is left alone.
-            "category": _carried(it, old, "category",
-                                 lambda v: _clean_category(v, old)),
+            "category": category,
+            "category_note": _clean_category_note(
+                _carried(it, old, "category_note", lambda v: v), category),
             "link": _carried(it, old, "link", _clean_link),
             # Blank until submit issues one. Losing the SKU here would let
             # the same part be introduced twice under two numbers.
