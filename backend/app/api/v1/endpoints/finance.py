@@ -136,6 +136,16 @@ async def approve_invoice(
     journal. Revenue/AR recognition stays driven by the quotation posting and
     payment flows, so invoicing and the ledger remain decoupled.
     """
+    # Signing an invoice is finance's, with the director as backstop. The
+    # router lets admin and a manager reach this desk because they read and
+    # issue here, and reading is not signing — the stage guide has said
+    # "Who: Finance (the director is the backstop)" the whole time while the
+    # code let two more roles do it.
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only finance (or the director) can approve an invoice.")
+
     fp_no = (faktur_pajak_no or "").strip()
 
     inv = await db.get(Invoice, invoice_id)

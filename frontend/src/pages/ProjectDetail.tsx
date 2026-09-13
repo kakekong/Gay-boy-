@@ -252,7 +252,9 @@ export default function ProjectDetailPage() {
   const canEditDelivery = ["admin", "director", "manager"].includes(role);
   // Releasing the document itself is the director's signature on company
   // paperwork; the manager stands in.
-  const canApproveDelivery = ["director", "manager"].includes(role);
+  // Matches _DO_APPROVERS on the server: finance signs the delivery order,
+  // the director is the backstop.
+  const canApproveDelivery = ["finance", "director"].includes(role);
   // Who the server lets browse the project's file shelf — mirrors
   // `_attachment_visible_to("project")` minus the roles barred from it.
   const canSeeProjectShelf = ["director", "manager", "purchasing"].includes(role);
@@ -2014,12 +2016,12 @@ export default function ProjectDetailPage() {
             );
           })}
 
-          {/* Two documents, two signatures — the director's on the delivery
-              order, finance's on the invoice. On a small order that is two
-              people waiting on each other, so the director (who outranks
-              both) can give both at once. Only shown when something is
-              actually waiting. */}
-          {role === "director"
+          {/* Both signatures are finance's — the goods and the bill leave
+              together, and the desk reconciling one against the other signs
+              both. Doing them in one press is that desk doing its own job
+              twice, so finance sees this as well as the director. Only shown
+              when something is actually waiting. */}
+          {(role === "director" || role === "finance")
             && (inv.some((iv: any) => iv.status === "pending_finance")
                 || dos.some((x: any) => !x.approved_at && x.status !== "delivered")) && (
             <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3 space-y-2">
@@ -2086,11 +2088,11 @@ export default function ProjectDetailPage() {
                   the record, the way the PO and the price request already
                   are. Each is produced once the document has been signed off
                   — the invoice when finance enters the faktur pajak number,
-                  the delivery order when the director approves it. */}
+                  the delivery order when finance releases it. */}
               <p className="text-[11px] muted">
                 {t(
-                  "Admin or finance issues these. The system generates both sheets — the invoice once finance signs it off with the faktur pajak number, the delivery order once the director approves it. Nothing to upload.",
-                  "Admin atau keuangan yang menerbitkan. Sistem membuat kedua lembarnya — faktur setelah keuangan mengesahkan dengan nomor faktur pajak, surat jalan setelah direktur menyetujui. Tidak perlu mengunggah apa pun.",
+                  "Admin or finance issues these. The system generates both sheets — the invoice once finance signs it off with the faktur pajak number, the delivery order once finance releases it. Nothing to upload.",
+                  "Admin atau keuangan yang menerbitkan. Sistem membuat kedua lembarnya — faktur setelah keuangan mengesahkan dengan nomor faktur pajak, surat jalan setelah keuangan merilisnya. Tidak perlu mengunggah apa pun.",
                 )}
               </p>
               {/* The delivery order goes first: the goods leave under it and

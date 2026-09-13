@@ -1699,9 +1699,9 @@ class DeliveryLineIn(BaseModel):
 
 async def _file_do_approval(db: AsyncSession, do: DeliveryOrder, *,
                             requester: User, project: Project | None = None):
-    """Put this delivery order in front of the director for release.
+    """Put this delivery order in front of finance for release.
 
-    Filed for everybody, the director included: the signature and the sheet
+    Filed for everybody, finance included: the signature and the sheet
     are the same event, so a delivery order that nobody signed is a delivery
     order that does not exist on paper. One pending request per document —
     withdrawing an approval files a new one, and issuing twice never queues
@@ -1722,7 +1722,7 @@ async def _file_do_approval(db: AsyncSession, do: DeliveryOrder, *,
         target_type="delivery_order",
         target_id=do.id,
         requested_by=requester.id,
-        required_role=Role.DIRECTOR,
+        required_role=Role.FINANCE,
         reason=(f"Delivery order {do.number}{where}"
                 + (f" ({n} line(s))" if n else "")),
         payload={"action": "issue", "number": do.number,
@@ -1735,9 +1735,9 @@ async def _settle_do_approval(db: AsyncSession, do_id: UUID, *,
                               drop: bool = False) -> int:
     """Close any request still waiting on this delivery order.
 
-    The director can release a delivery order from the project page or from
-    the inbox, and either way the other one must stop asking. Deleting the
-    document drops the request outright — there is nothing left to decide.
+    A delivery order can be released from the project page or from the
+    approvals inbox, and either way the other one must stop asking. Deleting
+    the document drops the request outright — nothing left to decide.
     """
     from app.models.approval import ApprovalRequest, ApprovalStatus
     rows = (await db.scalars(select(ApprovalRequest).where(
@@ -2008,8 +2008,9 @@ async def issue_invoice(
     a delivery order that already exists.
 
     The invoice parks at `pending_finance` regardless of type: finance signs
-    it off with its faktur pajak number, which is a different signature from
-    the director's on the delivery order.
+    it off with its faktur pajak number, and finance releases the delivery
+    order beside it — the goods and the bill leave together and are signed
+    off by the desk that reconciles one against the other.
     """
     if Role(user.role) not in _INVOICE_ISSUER_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Finance/admin/director only")
@@ -2123,28 +2124,29 @@ async def approve_documents(
 ):
     """Sign off the delivery order and the invoice in one action.
 
-    The two documents normally take two signatures from two people — the
-    director releases the delivery order, finance signs the invoice with its
-    faktur pajak number — and for a job of any size that separation is the
-    point of having both.
+    Both signatures are finance's now — the goods and the bill leave together,
+    and the desk reconciling one against the other signs both. So doing them
+    in one press is finance doing its own job twice rather than a shortcut
+    past anybody, and this is open to finance as well as the director.
 
-    But the same pair, on the same small order, on the same afternoon, is two
-    people waiting on each other for a decision neither of them disagrees
-    with. The director outranks both signatures, so this lets them give both
-    at once. It is deliberately director-only: finance signing the delivery
-    order, or admin signing either, would be a person approving their own
-    paperwork.
+    It used to be director-only, on the reasoning that the delivery order was
+    the director's and the invoice finance's, so one person giving both
+    signatures needed to outrank both. That reasoning went with the change.
+
+    Worth being plain about what it costs: with both signatures on one desk
+    there is no second pair of eyes between issuing a document and approving
+    it. Admin still cannot use this, and the director can still sign either
+    on its own, but the separation that used to exist between the two
+    signatures is gone by design rather than by accident.
 
     Everything still pending on the project is signed. Anything already
     signed is left exactly as it is rather than re-stamped with today's date
     and this person's name.
     """
-    if Role(user.role) is not Role.DIRECTOR:
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only the director can sign both documents at once — otherwise "
-            "the delivery order is the director's and the invoice is "
-            "finance's, each signed on its own.",
+            "Only finance or the director can sign both documents at once.",
         )
     # Optional, like everywhere else now: the number comes out of e-Faktur on
     # its own schedule, and finance types it in afterwards. Signing both
@@ -3016,9 +3018,19 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
             "tracking_no": d.tracking_no}
 
 
-# Who releases a delivery order for issue. The director signs the company's
-# outgoing paperwork; the manager stands in when they are not there.
-_DO_APPROVERS = {Role.DIRECTOR, Role.MANAGER}
+# Who releases a delivery order for issue.
+#
+# Finance, with the director as backstop. It used to be the director with the
+# manager standing in, which split the two signatures on one shipment across
+# two desks: the delivery order was the director's and the invoice beside it
+# was finance's, so a small order waited on two people who never disagreed
+# about it. The goods and the bill go out together and are now signed off by
+# the same desk — the one that is already reconciling what was shipped against
+# what was billed.
+#
+# The director stays able to sign, everywhere, as they do on every other
+# finance-addressed approval.
+_DO_APPROVERS = {Role.FINANCE, Role.DIRECTOR}
 
 
 @router.get("/deliveries/{do_id}/pdf")
@@ -3115,7 +3127,7 @@ async def approve_delivery(do_id: UUID,
     """
     if Role(user.role) not in _DO_APPROVERS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the director (or a manager) can approve a "
+                            "Only finance (or the director) can approve a "
                             "delivery order for issue.")
     d = await db.get(DeliveryOrder, do_id)
     if not d:
@@ -3152,7 +3164,7 @@ async def unapprove_delivery(do_id: UUID,
     """
     if Role(user.role) not in _DO_APPROVERS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the director (or a manager) can withdraw a "
+                            "Only finance (or the director) can withdraw a "
                             "delivery order's approval.")
     d = await db.get(DeliveryOrder, do_id)
     if not d:

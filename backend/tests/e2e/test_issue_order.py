@@ -1,26 +1,29 @@
 """Which document comes first, and who signs which.
 
-Asked for: the delivery order first, then the invoice; the invoice signed by
-finance and the delivery order by the director; and an option to do both at
-once, signed by the director.
+Asked for: the delivery order first, then the invoice; and an option to sign
+both at once.
 
 The order is not bureaucracy. You bill for goods you have sent, so a final
 invoice on a project with no delivery order is a bill for nothing
 identifiable — and when the customer's accounts department queries it, the DO
-number is the thing that answers them. The signatures are not bureaucracy
-either: the delivery order says goods in this condition left our building,
-which is the director's to say, and the invoice carries a faktur pajak number
-into the tax record, which is finance's.
+number is the thing that answers them.
+
+**Both signatures are finance's.** The delivery order used to be the
+director's, with a manager standing in, while the invoice beside it was
+finance's — two desks on one shipment, waiting on each other over a decision
+neither disagreed with. The goods and the bill leave together, so the desk
+that reconciles one against the other signs both. The director remains the
+backstop on either, as on every other finance-addressed approval.
 
 The exception, and it is a real one: a **down-payment** invoice is billed
 before delivery by definition. Nothing has gone out, so there is no delivery
 order for it to follow, and requiring one would make the deposit unbillable.
 
-And the shortcut: on a small order, two documents needing two people is two
-people waiting on each other over a decision neither disagrees with. The
-director outranks both signatures, so they can give both in one action —
-director-only, because finance signing the delivery order, or admin signing
-either, is a person approving their own paperwork.
+And the shortcut: signing both in one action. Open to finance and the
+director, not to admin — admin issues these documents, and issuing is not
+approving. What that costs is worth saying plainly: with both signatures on
+one desk there is no second pair of eyes between issuing a document and
+approving it.
 
 One thing that fell out of putting the delivery order first: pressing Issue
 twice no longer duplicates the shipment. The second press bills against the
@@ -127,16 +130,27 @@ async def main():
           f"{len(f1['deliveries'])}/{len(f1['invoices'])}")
     inv1 = f1["invoices"][0]["id"]
 
+    # Both signatures on a shipment are finance's: the goods and the bill leave
+    # together, so the desk reconciling one against the other signs both. The
+    # delivery order used to be the director's with a manager standing in,
+    # which put two desks on one shipment.
     print("\n── who signs which ──")
-    r = await c.post(f"/operation/deliveries/{do1['id']}/approve", headers=fin)
-    check("finance cannot release the delivery order", r.status_code == 403,
+    r = await c.post(f"/operation/deliveries/{do1['id']}/approve", headers=adm)
+    check("admin cannot release the delivery order", r.status_code == 403,
           str(r.status_code))
+    r = await c.post(f"/operation/deliveries/{do1['id']}/approve", headers=mgr)
+    check("...nor a manager, who used to stand in for the director",
+          r.status_code == 403, str(r.status_code))
+    r = await c.post(f"/finance/invoices/{inv1}/approve", headers=adm,
+                     data={"faktur_pajak_no": f"010.000-26.{tag}"})
+    check("admin cannot sign the invoice either — issuing is not approving",
+          r.status_code == 403, str(r.status_code))
     r = await c.post(f"/finance/invoices/{inv1}/approve", headers=fin,
                      data={"faktur_pajak_no": f"010.000-26.{tag}"})
     check("finance signs the invoice", r.status_code < 300,
           f"{r.status_code} {J(r)}"[:150])
-    r = await c.post(f"/operation/deliveries/{do1['id']}/approve", headers=d)
-    check("the director releases the delivery order", r.status_code == 200,
+    r = await c.post(f"/operation/deliveries/{do1['id']}/approve", headers=fin)
+    check("finance releases the delivery order beside it", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
     check("...and each document knows who signed it",
           (await full(p1))["deliveries"][0]["approved_by_name"] is not None,
@@ -180,24 +194,24 @@ async def main():
     dupe = J(r)["invoice"]["id"]
     await c.delete(f"/finance/invoices/{dupe}", headers=adm)
 
-    print("\n── the director signs both at once ──")
+    # Both signatures are finance's now — the delivery order and the invoice
+    # beside it — so signing them in one press is finance doing its own job
+    # twice rather than a shortcut past anybody. It used to be director-only,
+    # back when the two signatures sat on two desks.
+    print("\n── finance signs both at once ──")
     fp3 = f"010.000-26.C{tag}"
-    r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=fin,
-                     data={"faktur_pajak_no": fp3})
-    check("finance cannot sign both", r.status_code == 403,
-          f"{r.status_code} {J(r)}"[:170])
     r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=adm,
                      data={"faktur_pajak_no": fp3})
-    check("...nor admin, on their own paperwork", r.status_code == 403,
+    check("admin cannot sign their own paperwork", r.status_code == 403,
           str(r.status_code))
     r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=mgr,
                      data={"faktur_pajak_no": fp3})
     check("...nor a manager", r.status_code == 403, str(r.status_code))
     # The faktur pajak number is finance's, entered when e-Faktur produces it
     # (see test_faktur_pajak_manual), so it does not hold up this signature.
-    r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=d,
+    r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=fin,
                      data={"faktur_pajak_no": fp3})
-    check("the director signs both in one action", r.status_code == 200,
+    check("finance signs both in one action", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:170])
     done = J(r)
     check("...naming what it signed",

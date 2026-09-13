@@ -439,8 +439,10 @@ const ROLES: RoleSection[] = [
       "DP customer POs come straight to you (bell + Customer PO page), not the director. Approving one moves it to sales' 'confirm deposit received' step — you don't spawn the project yourself.",
       "You record every payment yourself, on Payment verification or on the project's invoice card — one step, already verified. Customers cannot submit payments any more; the record of money arriving starts with the bank statement in front of you. Fully paying an invoice auto-advances its project to paid → closed.",
       "You can delete a duplicate/mistaken invoice and its faktur pajak record — but not once a payment has been verified against it.",
+      "Both signatures on a shipment are yours: you approve the invoice AND release the delivery order beside it. The goods and the bill leave together, so the desk reconciling one against the other signs both. The director can sign either as backstop.",
       "Your sidebar: Customer PO, Projects, Finance, Financial reports, Payment verification, Chart of Accounts, Recent ledgers, Attendance, Chat.",
       "Reject a payment proof or a DP PO with a clear reason — sales and the customer see it.",
+      "A delivery order waiting on you shows in Approvals and on the project. Release it before the sheet can be printed — an unreleased one prints stamped DRAFT.",
     ],
     rules_id: [
       "Anda sekarang yang menerbitkan faktur — kedua jenisnya. Faktur DP diterbitkan dari halaman PO PELANGGAN (sebelum proyek ada); faktur akhir dari halaman proyek setelah QC lulus, dengan DO.",

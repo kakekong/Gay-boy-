@@ -13,7 +13,7 @@
  * rename, the same line editor, the same files and the same discussion.
  *
  * The one thing this screen has that they don't: the sheet itself, before it
- * is released, stamped DRAFT. That is what the director is being asked about.
+ * is released, stamped DRAFT. That is what finance is being asked about.
  */
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -135,8 +135,8 @@ export default function DeliveryOrderDetailPage() {
       refresh();
       setFlash({
         kind: "ok",
-        text: t("Approval withdrawn — it is editable again and back with the director.",
-                "Persetujuan ditarik — bisa diubah lagi dan kembali ke direktur."),
+        text: t("Approval withdrawn — it is editable again and back with finance.",
+                "Persetujuan ditarik — bisa diubah lagi dan kembali ke keuangan."),
       });
     },
     onError: onErr,
@@ -247,7 +247,7 @@ export default function DeliveryOrderDetailPage() {
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <div>
             <div className="font-medium">
-              {t("The director sent this back", "Direktur mengembalikan surat jalan ini")}
+              {t("This was sent back", "Surat jalan ini dikembalikan")}
             </div>
             <div className="text-xs mt-0.5">
               {d.approval?.notes

@@ -144,8 +144,8 @@ async def main():
     check("...saying finance signs it with the faktur pajak number",
           "faktur pajak" in str(J(r)).lower(), str(J(r))[:170])
 
-    # ══ the director releases the delivery order ═════════════════════════════
-    print("\n── the director releases the delivery order ──")
+    # ══ finance releases the delivery order ══════════════════════════════════
+    print("\n── finance releases the delivery order ──")
     r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=adm)
     check("admin cannot release it themselves", r.status_code == 403,
           f"{r.status_code} {J(r)}"[:150])
@@ -270,8 +270,8 @@ async def main():
         "remarks": "BARANG DI KIRIM KE: GUDANG SITE"})
     check("...so admin types what is going", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
-    r = await c.post(f"/operation/deliveries/{empty}/approve", headers=mgr)
-    check("...and the manager can then release it", r.status_code == 200,
+    r = await c.post(f"/operation/deliveries/{empty}/approve", headers=fin)
+    check("...and finance can then release it", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
     sheet = pdf_text((await c.get(f"/operation/deliveries/{empty}/pdf",
                                   headers=adm)).content)

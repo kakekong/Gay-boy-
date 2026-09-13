@@ -120,12 +120,15 @@ async def main():
     rows = await inbox()
     mine = [x for x in rows if x["target_type"] == "delivery_order"
             and x["target_id"] == do_id]
-    check("...and lands in the director's approval inbox", len(mine) == 1,
+    check("...and lands in the approval inbox", len(mine) == 1,
           str([x["target_type"] for x in rows])[:200])
     req = mine[0] if mine else {}
     check("...labelled with its number", req.get("target_label") == do_no,
           str(req.get("target_label")))
-    check("...addressed to the director", req.get("required_role") == "director",
+    # Finance owns both signatures on a shipment now — the invoice and the
+    # delivery order beside it. decide() reads a finance-addressed request as
+    # "finance or the director", so the director stays a backstop.
+    check("...addressed to finance", req.get("required_role") == "finance",
           str(req.get("required_role")))
     check("...naming who raised it", (req.get("requester_name") or "").strip() != "",
           str(req.get("requester_name")))

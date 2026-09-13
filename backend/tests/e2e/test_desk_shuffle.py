@@ -204,7 +204,12 @@ async def main():
     check("the director can", r.status_code == 200, f"{r.status_code} {J(r)}"[:120])
 
     # ══ 4. admin runs the close-out ══════════════════════════════════════════
-    print("\n── admin issues the invoice and signs the faktur pajak ──")
+    # Admin ISSUES; finance signs. Admin used to be able to approve here too,
+    # which the stage guide never claimed — it has said "Who: Finance (the
+    # director is the backstop)" the whole time. Issuing is not approving, and
+    # that is the one separation left now both signatures on a shipment sit on
+    # finance's desk.
+    print("\n── admin issues the invoice, finance signs the faktur pajak ──")
     r = await c.post(f"/operation/projects/{proj}/issue-invoice", headers=adm,
                      data={"invoice_type": "dp", "amount": "5000000",
                            "create_delivery_order": "false"})
@@ -218,7 +223,11 @@ async def main():
         fp = f"010.000-26.{tag}"
         r = await c.post(f"/finance/invoices/{iv}/approve", headers=adm,
                          data={"faktur_pajak_no": fp})
-        check("...and admin puts the faktur pajak number on it",
+        check("...but admin cannot sign it off", r.status_code == 403,
+              f"{r.status_code} {J(r)}"[:140])
+        r = await c.post(f"/finance/invoices/{iv}/approve", headers=fin,
+                         data={"faktur_pajak_no": fp})
+        check("...finance does, with the faktur pajak number",
               r.status_code == 200, f"{r.status_code} {J(r)}"[:140])
         after = next((x for x in (await full(adm)).get("invoices") or []
                       if x["id"] == iv), None)
