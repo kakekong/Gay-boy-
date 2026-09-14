@@ -2,14 +2,14 @@
 
 A precise, phase-by-phase script to test the whole system end to end, with exact **roles**, **screens**, **actions**, **status transitions**, and — woven in — every recent change. Format for each step: what to do, then **✓ Expect:** what you should see.
 
-> Legend: **status → x** means the record's status becomes `x`. Anything marked **(NEW)** or **(CHANGED)** is recent and needs the Space rebuild (Phase 0).
+> Legend: **status → x** means the record's status becomes `x`. Anything marked **(NEW)** or **(CHANGED)** is recent — confirm the deploy carrying it is live first (Phase 0).
 
 ---
 
 ## Phase 0 — Pre-flight
 
-* **Rebuild the Hugging Face Space.** Every backend change below (daily log, dateless stage tasks, instant push, the AI-dashboard crash fix, push hardening) is only live after a rebuild. Frontend (Vercel) is already live.
-* While the Space rebuilds, **watch the build log** for `pywebpush` installing cleanly — if push fails later, check this first.
+* **Check the deploy went out.** Both halves deploy on a push now — Vercel for the frontend, Render for the backend — so there is nothing to rebuild by hand; give Render a few minutes and confirm the latest commit in its dashboard.
+* While Render builds, **watch the build log** for `pywebpush` installing cleanly — if push fails later, check this first.
 * **Create one login per role** (director → Admin → Users): a **sales**, a **second sales**, a **purchasing**, an **admin**, a **finance**. Keep your **director** login.
 * Have **two devices/browsers** ready (send push from one, receive on the other). Keep **director** open on one screen so you can watch approvals land live.
   * ✓ Expect: after rebuild, hard-refresh (⌘/Ctrl-Shift-R) loads the site with no errors.
@@ -178,4 +178,4 @@ A precise, phase-by-phase script to test the whole system end to end, with exact
 ---
 
 ### If something fails
-Note the **role**, the **screen**, the **status** it was at, and the exact **error text** (or a screenshot). For push issues, first confirm you're on the **rebuilt Space** and **Device notifications** are on for that specific device.
+Note the **role**, the **screen**, the **status** it was at, and the exact **error text** (or a screenshot). For push issues, first confirm the deploy under test is the one Render actually shipped, and that **Device notifications** are on for that specific device.

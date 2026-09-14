@@ -49,15 +49,17 @@ answering and building the same way. For *what the product does*, read
 | GitHub repo | `kakekong/Gay-boy-` (the only repo in session scope) |
 | **Working branch** | **`claude/enterprise-crm-erp-ai-IMGRg`** — all work goes here |
 | Frontend host | Vercel — **auto-deploys on every push**, no action needed |
-| Backend host | Hugging Face Space (Docker) — **requires a manual rebuild** |
+| Backend host | **Render** (Docker, `render.yaml` + `infra/render/Dockerfile`) — **auto-deploys on every push**, and its start command runs `python -m app.scripts.seed`, so schema migrations apply on each deploy. The Hugging Face Space it replaced is gone; `infra/hfspace/Dockerfile` remains only as dead fallback |
 | Database | Neon serverless Postgres |
-| File storage | `/tmp/storage` on the Space — **ephemeral, wiped on every rebuild**. Being replaced by Cloudflare R2 (`docs/DEPLOY_RENDER.md`) |
+| File storage | Cloudflare R2 (`STORAGE_BACKEND=s3`), set in `render.yaml`. Render mounts no disk, so uploads live in the bucket and survive deploys |
 | Live site | `transmisisuplindo.com` |
 
-**The branch matters.** `infra/hfspace/Dockerfile:21` pins
-`ARG GIT_BRANCH=claude/enterprise-crm-erp-ai-IMGRg`; the Space clones *that*
-branch at build time, and it is also the repo's default branch. Pushing
-anywhere else deploys nothing.
+**The branch matters, differently now.** The Space cloned a branch pinned in
+its Dockerfile, so pushing anywhere else deployed nothing. Render checks the
+repo out itself and builds whatever branch the service is connected to — set
+once in the Render dashboard, and it is the same
+`claude/enterprise-crm-erp-ai-IMGRg` that Vercel and the repo default agree on.
+Confirm in the dashboard before assuming a push went live.
 
 **A session that opens on some other `claude/...` branch should check out IMGRg
 and work there — the user confirmed this explicitly, so don't ask again.**
@@ -65,12 +67,11 @@ Those auto-generated per-session branches (e.g. `claude/agent-handoff-…`) are
 left where they are; nothing is deleted, and no PR is needed. Just
 `git checkout claude/enterprise-crm-erp-ai-IMGRg` and commit onto it.
 
-**Always tell the user when a change is backend-side**, because a push alone
-does not deploy it: they must open the Space and hit rebuild. The Dockerfile
-has a cache-bust `ADD` against the GitHub commits API so a *normal* rebuild
-picks up new code — a "Factory rebuild" is not needed.
-
-Frontend-only changes are live within a minute or two of the push.
+**Both halves now deploy themselves on a push** — Vercel for the frontend,
+Render for the backend — so a change is usually live a few minutes after the
+push, schema migrations included (the Render start command seeds first). Still
+say when a change is backend-side, but say it as "give Render a few minutes",
+not as a chore the user has to go and perform.
 
 ---
 
@@ -209,6 +210,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_batch_fixes.py` | stage-task retirement, approval gates, scoping, tax period |
 | `test_partial_payment_ar.py` | a partially-paid invoice is owed only its remainder, on all four AR surfaces |
 | `test_payment_reversal.py` | the director takes a receipt back off an invoice: negative payment row, mirror ledger entry, invoice unpaid again, project off `closed`, no double-reversal |
+| `test_cash_adjust.py` | correcting what a cash/bank account holds: posts a balanced `adjustment` journal entry rather than writing over the derived total; finance + director only; refuses non-cash, headings, no-op corrections and cash-on-both-sides |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -838,8 +840,12 @@ Chat messages and discussion comments both push instantly.
   sales2. There is **no** `purchasing@demo.local` or `finance@demo.local`;
   `run_all.sh --fresh` creates them itself. Any new driver needing those roles
   must do the same.
-- **Ephemeral storage.** Files uploaded to the live Space vanish on rebuild.
-  Never suggest the user "just re-upload" as a fix without saying why.
+- **Storage used to be ephemeral, and no longer is.** On the old Space,
+  uploads went to `/tmp` and vanished on every rebuild. On Render they go to
+  the Cloudflare R2 bucket (`STORAGE_BACKEND=s3`) and survive deploys. Files
+  uploaded during the Space era are gone for good, though — if something old
+  is missing, that is why, and "just re-upload" is the answer rather than a bug
+  to chase.
 - **Write access and read access must be the same question.** `/attachments`
   gated reading by owner type and role but gated writing for external portal
   accounts only. One hole, two bugs: sales could upload a customer file and get
@@ -1076,20 +1082,23 @@ admin moved to the customer side of that wall.
 - **This sandbox cannot reach production.** The proxy returns 000/403 for
   `onrender.com`, `vercel.app` and the Neon database. Anything that has to
   touch live data is the user's to run; never claim to have verified it.
-- **The Hugging Face Space still needs a manual rebuild.** A large batch of
-  backend fixes (security lockdown, money integrity, stale queues, approval
-  gates, outstanding-AR netting) is pushed but **not live** until the user
-  rebuilds. Remind them. The newest batch also carries **schema work**, which
-  only lands on that rebuild because `seed.py` runs it at boot: new tables
-  `supplier_contacts` and `supplier_price_requests`, and new columns on
-  `suppliers` (addresses, phone/whatsapp/email),
-  `supplier_price_requests.source_pr_ids`, `supplier_pos.eta`,
-  `supplier_pos.project_ids`, `supplier_pos.currency`, and `drawings.kind` /
-  `drawings.source_drawing_id` (whose backfill classifies existing drawings by
-  who uploaded them). Until it happens the purchasing price request and the
-  shipments card 500 in production, and every drawing stays in one pile.
+- **The backend is on Render now, and deploys itself.** The Hugging Face
+  Space is gone, and with it the whole "pushed but not live until somebody
+  rebuilds" hazard that dominated this list. Render redeploys on every push to
+  the connected branch, and its start command runs `python -m app.scripts.seed`
+  before uvicorn — so `Base.metadata.create_all` plus every entry in
+  `COLUMN_MIGRATIONS` applies on each deploy, and a schema change ships with
+  the code that needs it rather than waiting on a manual step. Two things this
+  does not do: it does not help if the service is connected to a different
+  branch than the one you pushed (check the dashboard), and the seed is
+  deliberately best-effort (`;` not `&&` in the Dockerfile CMD) so a database
+  hiccup during it lets the API boot anyway — meaning a migration *can* be
+  skipped silently on a bad night. If a new column looks missing in production,
+  read the deploy log for the `! migration skipped:` line before assuming the
+  code is wrong.
 - **`COMPANY_WAREHOUSE_ADDRESS` is not set anywhere yet.** Until the user puts
-  the real goods-inwards address in the Space's environment, every supplier PO
+  the real goods-inwards address in the Render dashboard's environment
+  variables, every supplier PO
   prints "delivery address not set, please confirm with us" where the ship-to
   goes. That is the intended behaviour — the value it replaced was invented in
   code — but it needs the real address to stop being a placeholder.
@@ -1117,6 +1126,6 @@ admin moved to the customer side of that wall.
 |---|---|
 | `docs/SYSTEM_GUIDE.md` | the complete product reference — every module and workflow, ~440 lines |
 | `docs/TEST_WORKFLOW.md` | manual end-to-end test script, Phases A–H |
-| `docs/DEPLOY_RENDER.md` | migrating the backend off the HF Space onto Render (persistent disk, auto-deploy) |
+| `docs/DEPLOY_RENDER.md` | how the backend got onto Render — R2 bucket, blueprint, env vars, auto-deploy. The move is done; this is now the reference for the live setup |
 | `docs/ROLE_GUIDES.md` | per-role usage guides (mirrored in-app) |
 | `docs/01-architecture.md` … `07-deployment.md` | original design docs |

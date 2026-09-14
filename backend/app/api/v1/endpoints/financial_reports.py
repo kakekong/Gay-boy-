@@ -22,6 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +35,7 @@ from app.models.finance import LedgerEntry
 from app.models.quotation import Quotation
 from app.models.user import User
 from app.services import financials as fin
+from app.services import journal as journal_svc
 from app.services.ledger import compute_amounts
 
 router = APIRouter(
@@ -378,10 +380,152 @@ async def transactions(
 async def cash(
     period: str | None = None,
     frm: date | None = Query(None, alias="from"), to: date | None = None,
-    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db), u: User = Depends(get_current_user),
 ):
     start, end, label = _window(period, frm, to)
-    return {"period": label, "start": start, "end": end, **await _r_cash(db, start, end)}
+    return {
+        "period": label, "start": start, "end": end,
+        # Correcting the cash figure is bookkeeping, so it is finance's and
+        # the director's. The panel asks rather than deciding from the role
+        # itself, so there is one rule and the screen cannot drift from it.
+        "may_adjust": Role(u.role) in (Role.FINANCE, Role.DIRECTOR),
+        "counter_account_no": CASH_COUNTER_DEFAULT,
+        **await _r_cash(db, start, end),
+    }
+
+
+# The account a cash correction balances against by default. Saying the cash
+# figure was wrong is saying the starting point was wrong, and that is what
+# the opening-balance equity account is for — the same one the chart of
+# accounts balances against when it is first written down.
+CASH_COUNTER_DEFAULT = journal_svc.OPENING_EQUITY
+
+
+class CashAdjustIn(BaseModel):
+    account_no: str
+    new_balance: float
+    memo: str | None = None
+    counter_account_no: str | None = None
+    as_of: date | None = None
+
+
+@router.post("/cash/adjust", status_code=201)
+async def adjust_cash(
+    payload: CashAdjustIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(require(Role.FINANCE, Role.DIRECTOR)),
+):
+    """Set what a cash or bank account actually holds.
+
+    The cash figure on the dashboard is not a number anybody typed — it is
+    the sum of the Cash & Bank balances, and each of those is the sum of
+    everything ever posted to it. So "make it editable" cannot mean writing
+    over the total: the ledger that explains it would stay where it was, and
+    the next report run would contradict the screen.
+
+    What it means instead is this: say what the account really holds, and the
+    difference is posted as an ordinary journal entry — the cash account on
+    one side, opening-balance equity (or an account you name) on the other.
+    Balanced, dated, numbered, and visible in the general journal like
+    everything else, so six months later the account ledger can explain why
+    the figure moved rather than showing a balance nothing accounts for.
+
+    Which makes this reversible in the ordinary way, too: the entry it writes
+    can be reversed from the journal if the correction was itself wrong.
+    """
+    from app.services.journal import JournalError
+
+    acc = await db.scalar(
+        select(Account).where(Account.account_no == payload.account_no.strip())
+    )
+    if not acc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            f"No account {payload.account_no}.")
+    if acc.account_type not in fin.CASH_TYPES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{acc.account_no} {acc.name} is not a cash or bank account — "
+            "this corrects what is held, not what is owed or owned. Use the "
+            "general journal for anything else.",
+        )
+    if acc.is_parent:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{acc.account_no} is a heading — it is the sum of the accounts "
+            "under it. Correct one of those.",
+        )
+
+    current = round(float(acc.balance or 0), 2)
+    target = round(float(payload.new_balance or 0), 2)
+    delta = round(target - current, 2)
+    if abs(delta) < 0.01:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{acc.name} already holds that — nothing to correct.",
+        )
+
+    counter_no = (payload.counter_account_no or CASH_COUNTER_DEFAULT).strip()
+    counter = await db.scalar(
+        select(Account).where(Account.account_no == counter_no)
+    )
+    if not counter:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            f"No account {counter_no} to balance against.")
+    if counter.account_type in fin.CASH_TYPES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Both sides are cash accounts, which is money moving between two "
+            "of ours — that is a transfer, on the Cash & bank page, not a "
+            "correction.",
+        )
+
+    memo = (payload.memo or "").strip() or (
+        f"Cash correction — {acc.name} set to {_idr(target)}"
+    )
+    when = payload.as_of or _today()
+    up = delta > 0
+    rows = [
+        {"account_no": acc.account_no,
+         "debit": abs(delta) if up else 0, "credit": 0 if up else abs(delta),
+         "memo": memo},
+        {"account_no": counter.account_no,
+         "debit": 0 if up else abs(delta), "credit": abs(delta) if up else 0,
+         "memo": memo},
+    ]
+    try:
+        entry = await journal_svc.create_entry(
+            db, entry_date=when, rows=rows, memo=memo,
+            source_type="adjustment", source_ref=acc.account_no,
+            created_by=me.id, post=True, posted_by=me.id,
+        )
+    except JournalError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+    from app.core.audit import record as audit_record
+    await audit_record(
+        db, actor=me, action="adjust_cash", entity="account", entity_id=acc.id,
+        before={"account_no": acc.account_no, "balance": current},
+        after={"balance": target, "delta": delta, "journal": entry.number,
+               "counter_account_no": counter.account_no, "memo": memo},
+    )
+
+    total_held = float(await db.scalar(
+        select(func.coalesce(func.sum(Account.balance), 0)).where(
+            Account.account_type.in_(fin.CASH_TYPES),
+            Account.is_parent.is_(False),
+        )
+    ) or 0)
+    return {
+        "ok": True,
+        "account_no": acc.account_no, "account_name": acc.name,
+        "previous_balance": current, "new_balance": round(float(acc.balance or 0), 2),
+        "delta": delta,
+        "counter_account_no": counter.account_no,
+        "counter_account_name": counter.name,
+        "journal_number": entry.number, "journal_id": str(entry.id),
+        "entry_date": when,
+        "total_held": total_held,
+    }
 
 
 @router.get("/profit-loss")

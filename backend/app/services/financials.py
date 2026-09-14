@@ -259,6 +259,15 @@ async def cash_summary(db: AsyncSession, start: date, end: date) -> dict:
         for a in accounts if float(a.balance or 0)
     ]
     total_held = sum(h["balance"] for h in held)
+    # `held` is the report: what has money in it. `accounts` is the editor:
+    # every cash account there is, empty ones included — an account showing
+    # nothing is exactly the one somebody needs to correct when the figure is
+    # wrong because a balance never got carried in.
+    all_accounts = [
+        {"account_no": a.account_no, "name": a.name,
+         "balance": float(a.balance or 0), "suspended": bool(a.is_suspended)}
+        for a in accounts
+    ]
 
     money_in = float(await db.scalar(
         select(func.coalesce(func.sum(LedgerEntry.cash_delta), 0)).where(
@@ -274,6 +283,7 @@ async def cash_summary(db: AsyncSession, start: date, end: date) -> dict:
     ) or 0)
     return {
         "held": held,
+        "accounts": all_accounts,
         "total_held": total_held,
         "money_in": money_in,
         "money_out": -money_out,   # report as a positive outflow

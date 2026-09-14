@@ -38,9 +38,9 @@ The design philosophy: **every consequential action is gated, scoped, and leaves
 | Layer | Technology | Hosting |
 |---|---|---|
 | Frontend | React 18 + Vite + TypeScript, TanStack Query, Tailwind CSS, Zustand, lucide-react | Vercel (auto-deploys on every push) |
-| Backend | FastAPI (Python 3.11) + SQLAlchemy 2 async + Pydantic v2 | Hugging Face Space (Docker; clones the GitHub repo at build) |
+| Backend | FastAPI (Python 3.11) + SQLAlchemy 2 async + Pydantic v2 | Render (Docker, `render.yaml`; auto-deploys on every push and seeds the schema at boot) |
 | Database | PostgreSQL | Neon (serverless Postgres) |
-| File storage | Local disk `/tmp/storage` on the Space (**ephemeral — wiped on rebuild**, see §16) | — |
+| File storage | Cloudflare R2 (S3-compatible), filed by document number — see §16 | — |
 | Push delivery | Web Push (VAPID) direct to each browser/phone | keys auto-generated, stored in the DB |
 
 ### 2.2 Repository layout
@@ -72,19 +72,19 @@ docs/                   # this document + design docs + ROLE_GUIDES.md
 ### 2.3 Request flow
 
 1. The browser (or installed phone app) loads the React app from Vercel.
-2. Every API call goes to the Space's FastAPI under `/api/v1/...` with a JWT bearer token (12 h access token, 30-day refresh, argon2 password hashing).
+2. Every API call goes to the FastAPI service on Render under `/api/v1/...` with a JWT bearer token (12 h access token, 30-day refresh, argon2 password hashing).
 3. FastAPI resolves the current user, applies role/scope guards per endpoint, talks to Neon via async SQLAlchemy, and returns JSON (errors in a uniform `{data, errors, meta}` envelope).
 4. TanStack Query caches responses client-side and invalidates after mutations, so pages refresh without reloads.
 
 ### 2.4 Boot sequence (backend)
 
 On every container start:
-1. The Space Dockerfile runs `python -m app.scripts.seed` (best-effort), then `uvicorn app.main:app`.
+1. The Render Dockerfile runs `python -m app.scripts.seed` (best-effort — `;` not `&&`, so a database hiccup during the seed cannot brick the boot), then `uvicorn app.main:app`.
 2. The app's lifespan runs `ensure_schema()`: `create_all` for missing tables plus ~90 idempotent `ALTER TABLE … IF NOT EXISTS` migrations and forward-only data repairs, capped at 90 s × 3 attempts with loud `[boot]` log lines — a hung database delays boot instead of bricking it.
 3. The **web-push sweeper** starts: a background loop that every ~90 seconds recomputes each user's notifications and pushes new high/medium-severity items to their subscribed devices (§10.3).
 4. Prod-safety check: the app refuses to boot in `APP_ENV=prod` with default secrets or `CORS_ORIGINS=["*"]`.
 
-**Deployment note:** the Space clones GitHub *at build time* — backend changes require a Space rebuild; the frontend deploys automatically via Vercel on every push.
+**Deployment note:** both halves deploy themselves on a push — Vercel for the frontend, Render for the backend (it builds the checkout of whichever branch the service is connected to). Because the seed runs before uvicorn on every deploy, a schema change ships with the code that needs it and there is no manual migration step. If a column looks missing in production, read the Render deploy log for a `! migration skipped:` line before suspecting the code.
 
 ### 2.5 The phone app (PWA)
 
@@ -223,7 +223,7 @@ The director still sees DP POs in the approvals feed for visibility; a decision 
 
 `new → purchasing → drawing → drawing_approved → production → qc → packaging → invoiced → delivered → paid → closed`
 
-- Advancement is **one stage at a time, forward-only**; boot-time repairs guarantee a Space restart can never regress a project's stage.
+- Advancement is **one stage at a time, forward-only**; boot-time repairs guarantee a restart can never regress a project's stage.
 - **Every stage carries a "how to move on" guide.** The card under the stage chips names the exact action that advances the project, who may do it, where the button lives, and any hard prerequisite the API enforces (e.g. import documents must be director-approved before Confirm delivery). It follows the project's own stage by default; clicking any chip reads that stage's guide instead, so you can look ahead without changing anything.
 - The project header links the whole traceability chain: customer → quotation → customer PO → **PR number** — all clickable (role-permitting).
 - Only the **director can delete a project** (soft-delete; the PO/quotation/invoice history stays; the customer PO is unlinked for potential re-approval).
@@ -290,7 +290,9 @@ Nothing is deleted: both rows stay on the invoice — the receipt struck through
 
 ### 9.3 The journal & chart of accounts
 
-Every financial movement (quotation posting, payments, payroll) writes signed journal lines against the 109 pre-seeded Indonesian chart of accounts (admin/director can extend it). Reversals are matching journal entries, never deletes. **Recent ledgers** shows the live feed of the latest postings; the **Linked Accounts** panel on each quotation shows exactly which accounts that deal touches.
+Every financial movement (quotation posting, payments, payroll) writes signed journal lines against the 109 pre-seeded Indonesian chart of accounts (admin/director can extend it). Reversals are matching journal entries, never deletes.
+
+**Correcting the cash figure.** "Cash on hand" on Financial reports is the sum of the Cash & Bank balances, each of which is the sum of everything ever posted to it — so it is corrected, not typed over. Finance or the director clicks the figure and gets every cash and bank account with what the books say; type what an account **actually** holds and the difference posts as an ordinary journal entry (`source_type: adjustment`) — the cash account one side, **Equitas Saldo Awal (300001)** the other, or another account if one is named (a bank charge belongs on the charge account, and then the expense rises as the bank falls). Dated, numbered `JU-…`, visible in the general journal, and reversible there. It refuses a non-cash account, a heading, a figure already on the books, and cash on both sides — that last one is money moving between two of our own accounts, which is a transfer on the Cash & bank page. **Recent ledgers** shows the live feed of the latest postings; the **Linked Accounts** panel on each quotation shows exactly which accounts that deal touches.
 
 ### 9.4 Financial reports suite
 
@@ -439,10 +441,10 @@ A month grid aggregating the same material with identical role routing and purch
 | Topic | What to know |
 |---|---|
 | **Frontend deploys** | automatic on every git push (Vercel), live in ~1 minute |
-| **Backend deploys** | require a **Hugging Face Space rebuild** (it clones the repo at build time) |
-| **Uploaded files** | live on the Space's `/tmp/storage` — **a Factory rebuild wipes them** (old uploads 404). Mitigation: move to object storage (e.g. Cloudflare R2) or a host with a persistent disk |
+| **Backend deploys** | automatic on every git push (Render builds the repo it checked out), live in a few minutes |
+| **Uploaded files** | live in the Cloudflare R2 bucket and survive deploys. Anything uploaded during the old Hugging Face Space era is gone — that storage was wiped on every rebuild |
 | **Database** | Neon Postgres; suspends when idle — first request after a quiet period is slow; boot logs `[boot]…` progress and never hangs silently |
-| **Migrations** | none to run by hand — every boot runs the idempotent `seed.py` (create-all + `IF NOT EXISTS` column adds + forward-only data repairs) |
+| **Migrations** | none to run by hand — the Render start command runs the idempotent `seed.py` before uvicorn on every deploy (create-all + `IF NOT EXISTS` column adds + forward-only data repairs), so a schema change ships with the code that needs it |
 | **Push keys (VAPID)** | auto-generated on first use, stored in the DB — nothing to configure |
 | **Key env vars** | `DATABASE_URL`, `JWT_SECRET`, `APP_ENV` (`prod` enforces safety checks), `CORS_ORIGINS`, `STORAGE_LOCAL_DIR`, optional `OPENAI_API_KEY` (AI features), `DEMO_SEED_PASSWORD` (dev-only demo users) |
 | **Demo users** | seeded only in dev when `DEMO_SEED_PASSWORD` is set: director/manager/admin/hr/sales1/sales2 `@demo.local` |

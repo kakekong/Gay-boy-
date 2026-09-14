@@ -58,6 +58,7 @@ const SOURCE_CHIP: Record<string, string> = {
   payment:      "bg-cyan-50 text-cyan-700",
   salary:       "bg-violet-50 text-violet-700",
   cash:         "bg-amber-50 text-amber-700",
+  adjustment:   "bg-orange-50 text-orange-700",
   depreciation: "bg-ink-100 text-ink-700",
 };
 

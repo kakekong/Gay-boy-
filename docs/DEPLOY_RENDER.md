@@ -1,7 +1,9 @@
 # Deploying the backend to Render
 
-Moving the API off the Hugging Face Space onto Render. Two things get fixed by
-the move:
+**This move is done — Render is where the API runs now.** What follows is the
+walkthrough it was done from, kept as the reference for the live setup: what
+each environment variable is, where the R2 credentials came from, and how to
+redo any of it. Two things the move fixed:
 
 - **Uploaded files stop disappearing.** They go to a Cloudflare R2 bucket
   instead of the Space's `/tmp`, which was wiped on every rebuild.

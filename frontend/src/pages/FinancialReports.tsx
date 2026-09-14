@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Banknote, ArrowDownLeft, ArrowUpRight, Wallet, FileBarChart2,
   Scale, Building2, CreditCard, ListOrdered, Users, FileDown, FileSpreadsheet,
-  ArrowLeft,
+  ArrowLeft, Pencil, X, Loader2, Save, BookOpen,
 } from "lucide-react";
 import clsx from "clsx";
+import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
-import { T } from "@/store/lang";
+import { T, t } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -40,6 +41,7 @@ export default function FinancialReportsPage() {
   const [period, setPeriod] = useState("this_month");
   const [tab, setTab] = useState<TabId>("profit-loss");
   const [salesId, setSalesId] = useState<string | null>(null);
+  const [editingCash, setEditingCash] = useState(false);
 
   const cash = useQuery({
     queryKey: ["fin-cash", period],
@@ -63,7 +65,9 @@ export default function FinancialReportsPage() {
       {/* Cash KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Kpi label={T("Cash on hand")} tone="brand" icon={<Wallet size={15} />}
-          value={idr(cash.data?.total_held)} sub="across all bank + cash accounts" />
+          value={idr(cash.data?.total_held)} sub="across all bank + cash accounts"
+          onEdit={cash.data?.may_adjust ? () => setEditingCash((v) => !v) : undefined}
+          editing={editingCash} />
         <Kpi label={T("Money in")} tone="emerald" icon={<ArrowDownLeft size={15} />}
           value={idr(cash.data?.money_in)} sub={cash.data?.period} />
         <Kpi label={T("Money out")} tone="red" icon={<ArrowUpRight size={15} />}
@@ -72,6 +76,10 @@ export default function FinancialReportsPage() {
           icon={<Banknote size={15} />}
           value={idr(cash.data?.net_flow)} sub={cash.data?.period} />
       </div>
+
+      {editingCash && cash.data?.may_adjust && (
+        <CashEditor data={cash.data} onClose={() => setEditingCash(false)} />
+      )}
 
       {/* Report tabs */}
       <div className="flex flex-wrap gap-1.5">
@@ -375,21 +383,232 @@ function SalespersonReport({ userId, period, onBack }: {
   );
 }
 
-function Kpi({ label, value, sub, tone, icon }: {
+function Kpi({ label, value, sub, tone, icon, onEdit, editing }: {
   label: string; value: string; sub?: string;
   tone: "brand" | "emerald" | "amber" | "red"; icon?: any;
+  /** Given for a figure that can be corrected — the tile becomes clickable. */
+  onEdit?: () => void; editing?: boolean;
 }) {
   const cls = {
     brand: "bg-brand-50 text-brand-700", emerald: "bg-emerald-50 text-emerald-700",
     amber: "bg-amber-50 text-amber-700", red: "bg-red-50 text-red-700",
   }[tone];
-  return (
-    <div className="card p-4">
+  const body = (
+    <>
       <div className={clsx("inline-flex items-center gap-1 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded", cls)}>
         {icon} {T(label)}
       </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      <div className="mt-1 text-xl font-semibold tabular-nums flex items-center gap-2">
+        {value}
+        {onEdit && (
+          <Pencil size={13}
+            className={clsx("shrink-0 transition-opacity",
+              editing ? "opacity-100 text-brand-600"
+                      : "opacity-0 group-hover:opacity-60")} />
+        )}
+      </div>
       {sub && <div className="text-[11px] muted mt-0.5">{sub}</div>}
+    </>
+  );
+  if (!onEdit) return <div className="card p-4">{body}</div>;
+  return (
+    <button type="button" onClick={onEdit}
+      title={t("Correct this figure", "Koreksi angka ini")}
+      className={clsx("card p-4 text-left group hover:border-brand-300",
+                      editing && "border-brand-400 ring-1 ring-brand-200")}>
+      {body}
+    </button>
+  );
+}
+
+/**
+ * Correcting what the company actually holds.
+ *
+ * The figure above is not a number anybody typed — it is the sum of the
+ * Cash & Bank balances, and each of those is the sum of everything ever
+ * posted to it. So this cannot write over the total: it would leave the
+ * ledger explaining a different number, and the next report run would
+ * contradict the screen.
+ *
+ * What it does instead is ask what each account really holds. The
+ * difference is posted as an ordinary journal entry — the cash account one
+ * side, opening-balance equity the other — so the correction is dated,
+ * numbered, visible in the general journal, and reversible there like
+ * anything else. Six months from now the account ledger can still say why
+ * the figure moved.
+ */
+function CashEditor({ data, onClose }: { data: any; onClose: () => void }) {
+  const qc = useQueryClient();
+  const accounts: any[] = data?.accounts ?? [];
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [memo, setMemo] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string[]>([]);
+
+  // "11.100.000.000" is how the figure is read here, so it is how it may be
+  // typed — the separators come straight back out of the display.
+  const parse = (s: string) => Number(String(s ?? "").replace(/[^\d-]/g, ""));
+  const typed = (a: any) => draft[a.account_no];
+  const changed = accounts.filter((a) => {
+    const v = typed(a);
+    return v !== undefined && v.trim() !== ""
+      && Math.abs(parse(v) - Number(a.balance || 0)) >= 1;
+  });
+  const newTotal = accounts.reduce((s, a) => {
+    const v = typed(a);
+    const use = v !== undefined && v.trim() !== "" ? parse(v) : Number(a.balance || 0);
+    return s + use;
+  }, 0);
+  const diff = newTotal - Number(data?.total_held || 0);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const numbers: string[] = [];
+      // One entry per account, in order, so a refusal on the third leaves
+      // the first two posted and named rather than silently half-applied.
+      for (const a of changed) {
+        const r = await api.post("/finance/reports/cash/adjust", {
+          account_no: a.account_no,
+          new_balance: parse(typed(a)),
+          memo: memo.trim() || undefined,
+        });
+        numbers.push(r.data?.journal_number);
+      }
+      return numbers;
+    },
+    onSuccess: (numbers) => {
+      setErr(null);
+      setSaved(numbers.filter(Boolean));
+      setDraft({});
+      setMemo("");
+      qc.invalidateQueries({ queryKey: ["fin-cash"] });
+      qc.invalidateQueries({ queryKey: ["fin-report"] });
+      qc.invalidateQueries({ queryKey: ["journal"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+      ?? e?.message ?? t("That correction was not accepted.",
+                         "Koreksi itu tidak diterima."),
+    ),
+  });
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-ink-100 flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Wallet size={15} className="text-brand-600" />
+            {t("What the accounts actually hold", "Saldo sebenarnya tiap akun")}
+          </div>
+          <div className="text-xs muted max-w-2xl">
+            {t("Cash on hand is the sum of these, so it is corrected here rather than typed over. Type what an account really holds and the difference is posted as a dated journal entry against opening-balance equity — visible in the general journal, and reversible there.",
+               "Kas di tangan adalah jumlah dari akun-akun ini, jadi dikoreksi di sini, bukan ditimpa. Isi saldo sebenarnya dan selisihnya diposting sebagai jurnal bertanggal ke ekuitas saldo awal — terlihat di jurnal umum, dan bisa dibalik di sana.")}
+          </div>
+        </div>
+        <button className="btn-ghost text-xs" onClick={onClose}>
+          <X size={14} /> {T("Close")}
+        </button>
+      </div>
+
+      {err && (
+        <div className="px-5 py-2 bg-red-50 text-xs text-red-700 border-b border-red-100">{err}</div>
+      )}
+      {saved.length > 0 && (
+        <div className="px-5 py-2 bg-emerald-50 text-xs text-emerald-800 border-b border-emerald-100
+                        flex items-center gap-2 flex-wrap">
+          <BookOpen size={13} />
+          {t("Posted:", "Diposting:")} <span className="font-mono">{saved.join(", ")}</span>
+          <Link to="/journals" className="underline hover:no-underline">
+            {t("see it in the journal", "lihat di jurnal umum")}
+          </Link>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
+          <thead className="bg-ink-50/60">
+            <tr>
+              <th className="th">{T("Account")}</th>
+              <th className="th text-right">{t("On the books", "Di pembukuan")}</th>
+              <th className="th text-right">{t("Actually holds", "Saldo sebenarnya")}</th>
+              <th className="th text-right">{t("Difference", "Selisih")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((a) => {
+              const v = typed(a);
+              const has = v !== undefined && v.trim() !== "";
+              const d = has ? parse(v) - Number(a.balance || 0) : 0;
+              return (
+                <tr key={a.account_no} className="border-t border-ink-100">
+                  <td className="td">
+                    <span className="font-mono text-xs">{a.account_no}</span>
+                    <span className="muted"> · {a.name}</span>
+                  </td>
+                  <td className="td text-right tabular-nums muted">{idr(a.balance)}</td>
+                  <td className="td text-right">
+                    <input
+                      className="input w-44 text-right tabular-nums"
+                      inputMode="numeric"
+                      placeholder={idr(a.balance)}
+                      value={v ?? ""}
+                      onChange={(e) => setDraft({ ...draft, [a.account_no]: e.target.value })} />
+                  </td>
+                  <td className={clsx("td text-right tabular-nums",
+                                      Math.abs(d) < 1 ? "muted"
+                                        : d > 0 ? "text-emerald-700" : "text-red-700")}>
+                    {Math.abs(d) < 1 ? "—" : (d > 0 ? "+" : "") + idr(d)}
+                  </td>
+                </tr>
+              );
+            })}
+            {accounts.length === 0 && (
+              <tr><td className="td muted text-center" colSpan={4}>
+                {t("No cash or bank accounts on the chart of accounts yet.",
+                   "Belum ada akun kas atau bank di bagan akun.")}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-5 py-3 border-t border-ink-100 flex items-end justify-between gap-3 flex-wrap">
+        <label className="text-xs muted flex-1 min-w-[240px]">
+          {t("Why (goes on the journal entry)", "Alasan (tercatat di jurnal)")}
+          <input className="input mt-1" value={memo}
+            onChange={(e) => setMemo(e.target.value)}
+            placeholder={t("e.g. reconciled against the June bank statement",
+                           "mis. dicocokkan dengan rekening koran Juni")} />
+        </label>
+        <div className="text-right">
+          <div className="text-[11px] uppercase tracking-wider muted">
+            {t("Cash on hand becomes", "Kas di tangan menjadi")}
+          </div>
+          <div className="text-lg font-semibold tabular-nums">{idr(newTotal)}</div>
+          {Math.abs(diff) >= 1 && (
+            <div className={clsx("text-[11px] tabular-nums",
+                                 diff > 0 ? "text-emerald-700" : "text-red-700")}>
+              {(diff > 0 ? "+" : "") + idr(diff)} {t("against the books", "terhadap pembukuan")}
+            </div>
+          )}
+        </div>
+        <button className="btn-primary" disabled={!changed.length || save.isPending}
+          onClick={() => {
+            const lines = changed
+              .map((a) => `· ${a.name}: ${idr(a.balance)} → ${idr(parse(typed(a)))}`)
+              .join("\n");
+            if (window.confirm(t(
+              `Post ${changed.length} correction(s)?\n\n${lines}\n\nEach one is a dated journal entry against opening-balance equity. Nothing is overwritten — the entry can be reversed from the general journal.`,
+              `Posting ${changed.length} koreksi?\n\n${lines}\n\nMasing-masing menjadi jurnal bertanggal ke ekuitas saldo awal. Tidak ada yang ditimpa — jurnalnya bisa dibalik dari Jurnal Umum.`)))
+              save.mutate();
+          }}>
+          {save.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          {changed.length
+            ? t(`Post ${changed.length} correction(s)`, `Posting ${changed.length} koreksi`)
+            : t("Nothing changed yet", "Belum ada perubahan")}
+        </button>
+      </div>
     </div>
   );
 }
