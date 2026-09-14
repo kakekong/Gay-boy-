@@ -136,10 +136,17 @@ async def _recompute_invoice_status(db: AsyncSession, invoice_id: UUID) -> str:
 @router.get("/open-invoices")
 async def open_invoices(
     db: AsyncSession = Depends(get_db),
-    _me: User = Depends(_finance),
+    me: User = Depends(_finance),
 ):
     """Invoices that can still receive a payment — the picker for the
-    manual-payment form. Returns outstanding = total - verified payments."""
+    manual-payment form. Returns outstanding = total - verified payments.
+
+    Each row also says whether *this* reader may delete the invoice, so the
+    screen listing them can offer the bin on a duplicate without guessing at
+    a rule the delete endpoint would then refuse. Same rule, one place: it is
+    finance's or the director's call, and only while nothing has been paid
+    against it.
+    """
     from app.models.crm import Customer
 
     rows = (await db.scalars(
@@ -164,6 +171,7 @@ async def open_invoices(
             select(Customer).where(Customer.id.in_(cust_ids))
         )).all():
             cust_names[c.id] = c.company_name
+    may_delete_at_all = Role(me.role) in (Role.FINANCE, Role.DIRECTOR)
     out = []
     for inv in rows:
         total = float(inv.total or 0)
@@ -176,6 +184,13 @@ async def open_invoices(
             "customer_name": cust_names.get(inv.customer_id),
             "total": total, "paid": paid, "outstanding": outstanding,
             "due_date": inv.due_date,
+            "status": inv.status,
+            "project_id": str(inv.project_id) if inv.project_id else None,
+            # Nothing paid against it yet, so deleting it loses no money —
+            # which is exactly the duplicate case this is here for. Once a
+            # payment lands the row goes read-only and the way out is the
+            # director's reversal, then the bin.
+            "may_delete": may_delete_at_all and paid <= 0,
         })
     return out
 

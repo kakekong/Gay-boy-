@@ -175,6 +175,59 @@ async def main():
     check("...approving it without a number is fine", r.status_code < 300,
           f"{r.status_code} {why(r)}")
 
+    # ══ binning one from the list where it is spotted ════════════════════
+    #
+    # A duplicate is noticed on the money-in list, two rows apart, for the
+    # same customer and the same figure. The bin belongs there, so the list
+    # has to say who may press it — otherwise the screen offers a button the
+    # server will refuse.
+    print("\n── the duplicate is deleted from the list it is spotted on ──")
+    mgr = await login("manager@demo.local")
+    async def money_in(hdr):
+        return J(await c.get("/payments/open-invoices", headers=hdr))
+    rows = await money_in(fin)
+    row_a = next((x for x in rows if x["id"] == a_id), None)
+    row_b = next((x for x in rows if x["id"] == b_id), None)
+    check("both unpaid invoices are on the money-in list",
+          row_a is not None and row_b is not None, str(len(rows)))
+    check("...and finance is told they may bin one",
+          row_b and row_b.get("may_delete") is True, str(row_b)[:200])
+    check("...as is the director",
+          next((x for x in await money_in(d) if x["id"] == b_id), {})
+          .get("may_delete") is True, "director")
+    check("...but the manager, who only watches the money, is not",
+          next((x for x in await money_in(mgr) if x["id"] == b_id), {})
+          .get("may_delete") is False, "manager")
+    check("...and the row carries the invoice to open before binning it",
+          row_b and row_b.get("status") == "approved"
+          and row_b.get("project_id") == p1, str(row_b)[:200])
+
+    r = await c.delete(f"/finance/invoices/{b_id}", headers=mgr)
+    check("the manager's press would be refused anyway",
+          r.status_code == 403, f"HTTP{r.status_code}")
+    r = await c.delete(f"/finance/invoices/{b_id}", headers=fin)
+    check("finance bins the duplicate", r.status_code == 204,
+          f"{r.status_code} {why(r)}")
+    check("...and it leaves the money-in list",
+          not any(x["id"] == b_id for x in await money_in(fin)), "still listed")
+    check("...leaving the one that is actually being collected on",
+          any(x["id"] == a_id for x in await money_in(fin)), "the real one went")
+
+    # Money against it is what closes the door — and the row says so before
+    # the button is drawn, not after it is pressed.
+    r = await c.post("/payments/manual", headers=fin, json={
+        "invoice_id": a_id, "amount": 1000, "reference": f"PART-{TAG}"})
+    check("a part payment lands on the survivor", r.status_code == 201,
+          f"{r.status_code} {why(r)}")
+    row_a = next((x for x in await money_in(fin) if x["id"] == a_id), {})
+    check("...and the bin is no longer offered on it",
+          row_a.get("may_delete") is False, str(row_a)[:200])
+    r = await c.delete(f"/finance/invoices/{a_id}", headers=fin)
+    check("...nor would it be allowed", r.status_code == 409,
+          f"{r.status_code} {why(r)}")
+    check("...the refusal pointing at the reversal instead",
+          "reverse" in why(r), why(r)[:160])
+
     # ══ finance and the PO price ═════════════════════════════════════════
     print("\n── finance corrects a price on a supplier PO ──")
     sup = J(await c.post("/purchasing/suppliers", headers=pur, json={

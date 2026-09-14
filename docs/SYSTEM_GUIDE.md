@@ -271,7 +271,7 @@ Lane ownership:
   - **DP invoice** — issued from the *customer PO page* before any project exists; re-linked to the project at sales-confirm.
   - **Final invoice** — issued from the project page after QC passes, together with the delivery order.
 - **Faktur pajak** is entered at the *approval* step, not at issue: Finance → Pending invoices → enter FP number + upload the FP file → Approve.
-- Finance can **delete** a duplicate/mistaken invoice with its FP record — blocked once any payment is verified against it.
+- Finance can **delete** a duplicate/mistaken invoice with its FP record — blocked once any payment is verified against it. The bin sits in three places, all the same delete: the project's invoice card, the invoice's own screen, and — because a duplicate announces itself as two rows for the same customer and the same figure — **Finance → Money in**, where each row carries its own Delete beside Record. The row only offers it when the server would allow it (finance or director, nothing paid against the invoice), and the invoice number on the row opens the invoice so you can check which of the pair you are binning. Once money has landed the row goes read-only: the way out is the director's payment reversal, then the bin.
 
 ### 9.2 Payments — two paths, one outcome
 

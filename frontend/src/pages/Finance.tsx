@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   Banknote, BarChart3, CheckCircle, FileText, Loader2, XCircle,
-  Download, ReceiptText,
+  Download, ReceiptText, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -102,10 +102,34 @@ function EFakturExport() {
  * a proxy for: whose money has not arrived yet.
  */
 function MoneyIn() {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
   const open = useQuery({
     queryKey: ["open-invoices", "finance-dashboard"],
     queryFn: () => api.get("/payments/open-invoices").then((r) => r.data as any[]),
+  });
+
+  // Two invoices for the same job, for the same money, is how a duplicate
+  // announces itself — and this list, side by side, is where it is spotted.
+  // So the bin is here rather than three clicks away on the invoice's own
+  // screen. It is the same delete as everywhere else: it takes the faktur
+  // pajak record with it, and the server refuses once any money has been
+  // recorded against the invoice.
+  const remove = useMutation({
+    mutationFn: (invoiceId: string) => api.delete(`/finance/invoices/${invoiceId}`),
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["open-invoices"] });
+      qc.invalidateQueries({ queryKey: ["ar-aging"] });
+      qc.invalidateQueries({ queryKey: ["pending-invoices"] });
+      qc.invalidateQueries({ queryKey: ["project-full"] });
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+      ?? e?.message ?? t("That invoice could not be deleted.",
+                         "Faktur itu tidak bisa dihapus."),
+    ),
   });
   // Only ever shrinks, and is empty on a clean system — but a claim a
   // customer submitted before the change still has to be settled, so it is
@@ -154,6 +178,12 @@ function MoneyIn() {
         </div>
       )}
 
+      {err && (
+        <div className="px-5 py-2 bg-red-50 text-xs text-red-700 border-b border-red-100">
+          {err}
+        </div>
+      )}
+
       {open.isLoading ? (
         <div className="p-6 text-center text-sm muted flex items-center justify-center gap-2">
           <Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
@@ -167,7 +197,11 @@ function MoneyIn() {
           {rows.slice(0, 5).map((r: any) => (
             <li key={r.id} className="p-4 flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm min-w-0">
-                <span className="font-mono font-medium">{r.number ?? "—"}</span>
+                {/* The number opens the invoice — look at it before binning
+                    one of a matching pair. */}
+                <Link to={`/invoices/${r.id}`}
+                      className="font-mono font-medium hover:underline">
+                  {r.number ?? "—"}</Link>
                 <span className="muted"> · {r.customer_name ?? "—"}</span>
                 {r.due_date && <span className="muted"> · {T("Due:")} {r.due_date}</span>}
               </div>
@@ -175,6 +209,21 @@ function MoneyIn() {
                 <div className="text-sm font-semibold tabular-nums">{idr(r.outstanding)}</div>
                 <Link to="/finance/payment-verification" className="btn-primary text-xs">
                   <CheckCircle size={12} /> {t("Record", "Catat")}</Link>
+                {r.may_delete && (
+                  <button
+                    className="btn-ghost text-xs text-red-600"
+                    title={t("Delete this invoice — for a duplicate",
+                             "Hapus faktur ini — untuk duplikat")}
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (window.confirm(t(
+                        `Delete ${r.number}? It bills ${idr(r.total)} to ${r.customer_name ?? "this customer"}.\n\nThe invoice and its faktur pajak record go for good. Nothing has been paid against it, so no money is lost — but check you are binning the duplicate and not the one you are collecting on.`,
+                        `Hapus ${r.number}? Faktur ini menagih ${idr(r.total)} ke ${r.customer_name ?? "pelanggan ini"}.\n\nFaktur beserta catatan faktur pajaknya hilang permanen. Belum ada pembayaran atasnya, jadi tidak ada uang yang hilang — tapi pastikan yang dihapus adalah duplikatnya, bukan yang sedang ditagih.`)))
+                        remove.mutate(r.id);
+                    }}>
+                    <Trash2 size={12} /> {T("Delete")}
+                  </button>
+                )}
               </div>
             </li>
           ))}
