@@ -1299,6 +1299,66 @@ async def export_po_excel(
     )
 
 
+def _non_price_change(old_items: list, new_items: list) -> str | None:
+    """What finance tried to change other than a price, if anything.
+
+    Returns a phrase naming the first offending difference, or None when the
+    only thing that moved is money. The point is to let finance fix a figure
+    they can see is wrong on the vendor's invoice without letting them rewrite
+    what was ordered: a quantity, a description or an extra line is the
+    agreement with the supplier, and that stays purchasing's.
+
+    Compared positionally, because a supplier PO line has no identity of its
+    own — the list IS the order. So adding, removing or reordering lines all
+    read as a change to the order, which is exactly right.
+
+    **A field the client did not send is not a field it changed.** Opening a
+    PO writes a SKU back onto every line (`stock_sync.receive_purchase_order`),
+    and no edit form renders it, so treating "absent" as "cleared" refused
+    every honest price correction. This is the same rule the price-request
+    editor learned: not mentioned means leave it alone.
+    """
+    if len(old_items) != len(new_items):
+        return (f"the order has {len(old_items)} line(s) and this sends "
+                f"{len(new_items)}")
+    for i, (was, now) in enumerate(zip(old_items, new_items), start=1):
+        was, now = dict(was or {}), dict(now or {})
+        for field, label in (("description", "description"), ("name", "name"),
+                             ("qty", "quantity"), ("uom", "unit"),
+                             ("sku", "SKU")):
+            if field not in now:
+                continue
+            a, b = was.get(field), now.get(field)
+            if field == "qty":
+                if abs(float(a or 0) - float(b or 0)) > 1e-9:
+                    return f"line {i}'s {label} changed"
+            elif (a or "") != (b or ""):
+                return f"line {i}'s {label} changed"
+    return None
+
+
+def _prices_merged(old_items: list, new_items: list) -> list[dict]:
+    """The order as it stands, with only the unit prices replaced.
+
+    The apply path writes `po.items` wholesale from what was sent, so taking
+    finance's list verbatim would drop every field their form does not render
+    — the SKU, most obviously. Rebuilding each line from the stored one and
+    moving only the price means nothing else *can* change here, whatever
+    arrives. `_non_price_change` above still refuses an attempt, so somebody
+    who tried is told rather than silently ignored; this is what makes the
+    outcome safe either way.
+    """
+    out = []
+    for was, now in zip(old_items, new_items):
+        row = dict(was or {})
+        incoming = dict(now or {})
+        for field in ("unit_price", "unit_cost", "price"):
+            if field in incoming:
+                row[field] = incoming[field]
+        out.append(row)
+    return out
+
+
 class POPatch(BaseModel):
     number: str | None = None
     po_date: str | None = None        # ISO YYYY-MM-DD
@@ -1338,14 +1398,39 @@ async def update_po(
 
     data = payload.model_dump(exclude_unset=True)
 
-    # Finance is here for the exchange rate and nothing else. They read POs
-    # so they can pay them; what was agreed with the vendor is not theirs to
-    # rewrite.
-    if Role(user.role) == Role.FINANCE and set(data) - {"fx_rate"}:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Finance may set the exchange rate on a PO, nothing else",
-        )
+    # What finance may touch on a supplier PO: the exchange rate, and the
+    # prices.
+    #
+    # The rate has always been theirs. The prices are new, and they are a
+    # narrower thing than "the order": finance is the desk that sees the
+    # vendor's invoice when it arrives, so they are the ones who find out the
+    # agreed figure was typed wrong, and routing that correction back through
+    # purchasing to retype only added a day and a game of telephone.
+    #
+    # It is *prices* and not the order. A quantity, a description, a line
+    # added or removed is what was agreed with the vendor, and changing that
+    # is purchasing's — so finance sending `items` has to leave everything
+    # except the unit price exactly as it was. And like every other
+    # non-director edit here, it does not apply on the spot: it goes to the
+    # director's queue below, same as purchasing's own.
+    if Role(user.role) == Role.FINANCE:
+        extra = set(data) - {"fx_rate", "items", "total"}
+        if extra:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Finance may set the exchange rate and the prices on a PO — "
+                f"not {', '.join(sorted(extra))}.",
+            )
+        if "items" in data and data["items"] is not None:
+            changed = _non_price_change(po.items or [], data["items"])
+            if changed:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    f"Finance may correct a price, not the order itself — "
+                    f"{changed}. Ask purchasing to change that.",
+                )
+            # Only the prices move, whatever the form sent.
+            data["items"] = _prices_merged(po.items or [], data["items"])
 
     # Validate without mutating — same checks regardless of approval path,
     # so we never queue a doomed approval the director can't apply later.

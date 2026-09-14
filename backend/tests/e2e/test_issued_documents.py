@@ -151,7 +151,7 @@ async def main():
           f"{r.status_code} {J(r)}"[:150])
     r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=s1)
     check("...nor sales", r.status_code in (401, 403), str(r.status_code))
-    r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=d)
+    r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=fin)
     check("the director can", r.status_code == 200, f"{r.status_code} {J(r)}"[:150])
     row = next(x for x in (await full())["deliveries"] if x["id"] == do_id)
     check("...and the project page says who and when",
@@ -189,8 +189,8 @@ async def main():
     r = await c.post(f"/operation/deliveries/{do_id}/unapprove", headers=adm)
     check("admin cannot withdraw the approval", r.status_code == 403,
           str(r.status_code))
-    r = await c.post(f"/operation/deliveries/{do_id}/unapprove", headers=d)
-    check("the director can withdraw it", r.status_code == 200,
+    r = await c.post(f"/operation/deliveries/{do_id}/unapprove", headers=fin)
+    check("finance can withdraw it", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
     r = await c.patch(f"/operation/deliveries/{do_id}", headers=adm,
                       json={"courier": "JNE Trucking"})
@@ -199,7 +199,7 @@ async def main():
     r = await c.get(f"/operation/deliveries/{do_id}/pdf", headers=adm)
     check("...and stops the sheet printing again", r.status_code == 409,
           str(r.status_code))
-    await c.post(f"/operation/deliveries/{do_id}/approve", headers=d)
+    await c.post(f"/operation/deliveries/{do_id}/approve", headers=fin)
     sheet = pdf_text((await c.get(f"/operation/deliveries/{do_id}/pdf",
                                   headers=adm)).content)
     check("re-approving reissues it with the correction on it",
@@ -229,8 +229,10 @@ async def main():
 
     # A corrected amount the order lines no longer explain.
     print("\n── an invoice whose figure was corrected ──")
+    # A second invoice on a project that already has one: deliberate here, so
+    # it says so. A repeat press is refused.
     r = await c.post(f"/operation/projects/{proj}/issue-invoice", headers=adm,
-                     data={"invoice_type": "final"})
+                     data={"invoice_type": "final", "additional": "true"})
     inv2 = J(r)["invoice"]["id"]
     await c.patch(f"/finance/invoices/{inv2}", headers=adm,
                   json={"amount": 1_234_567, "tax_amount": 0})
@@ -262,7 +264,7 @@ async def main():
     print("\n── a delivery order with no lines ──")
     empty = J(await c.post(f"/operation/projects/{proj}/delivery", headers=adm,
                            json={"number": f"DO-MANUAL-{tag}", "split_index": 2}))["id"]
-    r = await c.post(f"/operation/deliveries/{empty}/approve", headers=d)
+    r = await c.post(f"/operation/deliveries/{empty}/approve", headers=fin)
     check("it can't be released — there is nothing to sign for",
           r.status_code == 409, f"{r.status_code} {J(r)}"[:150])
     r = await c.patch(f"/operation/deliveries/{empty}", headers=adm, json={

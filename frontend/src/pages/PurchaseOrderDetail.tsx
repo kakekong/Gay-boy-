@@ -87,8 +87,11 @@ export default function PurchaseOrderDetailPage() {
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
   const isDirector = me?.role === "director";
-  // Finance is here for the exchange rate alone — the backend refuses any
-  // other field from them, so the rest of the page is read-only.
+  // Finance is here for the exchange rate and the prices. They read the
+  // vendor's invoice when it lands, so they are who finds out an agreed figure
+  // was typed wrong — but the order itself (what, how many, in what unit) is
+  // purchasing's, and the server refuses anything else from them. The item
+  // editor below locks every field except the price for this role.
   const isFinance = me?.role === "finance";
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editingNumber, setEditingNumber] = useState(false);
@@ -563,6 +566,7 @@ export default function PurchaseOrderDetailPage() {
                   <span className="text-[10px] uppercase muted">{T("Description")}</span>
                   <input
                     className="input"
+                    disabled={isFinance}
                     value={it.description ?? ""}
                     onChange={(e) =>
                       setDraftItems((cur) =>
@@ -578,6 +582,7 @@ export default function PurchaseOrderDetailPage() {
                     min={0}
                     step="any"
                     className="input"
+                    disabled={isFinance}
                     value={it.qty ?? 0}
                     onChange={(e) =>
                       setDraftItems((cur) =>
@@ -617,23 +622,31 @@ export default function PurchaseOrderDetailPage() {
                     {money(lineAmount(it), p.currency)}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="col-span-1 text-red-600 hover:bg-red-50 rounded p-2"
-                  onClick={() => setDraftItems((cur) => cur.filter((_, j) => j !== i))}
-                  title={T("Remove")}
-                >
-                  <Trash2 size={14} />
-                </button>
+                {!isFinance && (
+                  <button
+                    type="button"
+                    className="col-span-1 text-red-600 hover:bg-red-50 rounded p-2"
+                    onClick={() => setDraftItems((cur) => cur.filter((_, j) => j !== i))}
+                    title={T("Remove")}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             ))}
             <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1, unit_price: 0 }])}
-              >
-                <Plus size={13} /> {T("Add line")}</button>
+              {isFinance ? (
+                <span className="text-[11px] muted">
+                  {T("You can correct a price here. What was ordered — the item, the quantity, the unit — is purchasing's to change.")}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1, unit_price: 0 }])}
+                >
+                  <Plus size={13} /> {T("Add line")}</button>
+              )}
               <div className="text-sm">
                 <span className="muted">{T("Lines add up to")}{" "}</span>
                 <span className="font-semibold tabular-nums">

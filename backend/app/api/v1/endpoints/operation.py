@@ -1975,6 +1975,14 @@ async def issue_invoice(
     due_date: str | None = Form(None),
     courier: str | None = Form(None),
     create_delivery_order: bool = Form(True),
+    additional: bool = Form(
+        False,
+        description=(
+            "Deliberately raise ANOTHER invoice of this type on a project "
+            "that already has one — a second shipment, a staged instalment. "
+            "Without it a repeat press is refused."
+        ),
+    ),
     invoice_type: str = Form(
         "final",
         description=(
@@ -2031,6 +2039,36 @@ async def issue_invoice(
         )
     if not p.customer_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project has no customer.")
+
+    # One press, one bill.
+    #
+    # The delivery order already refused to duplicate itself — a second press
+    # bills against the sheet that exists. The invoice had no such guard, so
+    # pressing Issue twice produced two invoices for the same amount on the
+    # same project, which is what the pairs in the screenshots were. It is
+    # worse than clutter: both are real documents, both can be approved, and
+    # a customer can end up with two bills for one shipment.
+    #
+    # A genuine second invoice is a real thing — a part shipment billed on its
+    # own, a staged instalment — so this refuses the repeat rather than the
+    # idea. `additional=true` says "I mean another one", which a double-click
+    # never does.
+    existing_inv = (await db.scalars(
+        select(Invoice).where(
+            Invoice.project_id == project_id,
+            Invoice.type == itype,
+            Invoice.status != "rejected",
+        ).order_by(Invoice.created_at.asc())
+    )).all()
+    if existing_inv and not additional:
+        first = existing_inv[0]
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This project already has a {itype} invoice — {first.number} for "
+            f"{float(first.total or 0):,.0f}. Use it, or delete it first. "
+            "If you really need a second one (a part shipment, an "
+            "instalment), tick 'additional'.",
+        )
 
     # The delivery order comes first. A down-payment invoice is billed before
     # delivery by definition, so it is the one exception.
@@ -2143,10 +2181,10 @@ async def approve_documents(
     signed is left exactly as it is rather than re-stamped with today's date
     and this person's name.
     """
-    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+    if Role(user.role) is not Role.FINANCE:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only finance or the director can sign both documents at once.",
+            "Signing both documents is finance's.",
         )
     # Optional, like everywhere else now: the number comes out of e-Faktur on
     # its own schedule, and finance types it in afterwards. Signing both
@@ -2944,10 +2982,11 @@ async def delivery_order_detail(do_id: UUID,
             "unapprove": (role in _DO_APPROVERS and bool(d.approved_at)
                           and not d.verified_at and d.status != "delivered"),
             "upload_proof": role in (_DO_DESK | {Role.FINANCE}),
-            # Sending it back is the other half of the decision, and it only
-            # existed in the inbox. The director looking at the document
-            # itself is exactly the person who wants it.
-            "send_back": (role is Role.DIRECTOR and not d.approved_at
+            # Sending it back is the other half of the decision — approve or
+            # reject — and it only existed in the inbox. It belongs to
+            # whoever holds the decision, which is finance, and it belongs on
+            # the document they are reading rather than in a list of rows.
+            "send_back": (role is Role.FINANCE and not d.approved_at
                           and (approval or {}).get("status") == "pending"),
         },
         "locked_because": locked,
@@ -3020,17 +3059,23 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
 
 # Who releases a delivery order for issue.
 #
-# Finance, with the director as backstop. It used to be the director with the
-# manager standing in, which split the two signatures on one shipment across
-# two desks: the delivery order was the director's and the invoice beside it
-# was finance's, so a small order waited on two people who never disagreed
-# about it. The goods and the bill go out together and are now signed off by
-# the same desk — the one that is already reconciling what was shipped against
-# what was billed.
+# Finance. Not the director, not a manager — finance.
 #
-# The director stays able to sign, everywhere, as they do on every other
-# finance-addressed approval.
-_DO_APPROVERS = {Role.FINANCE, Role.DIRECTOR}
+# It used to be the director with a manager standing in, which split the two
+# signatures on one shipment across two desks: the delivery order was the
+# director's and the invoice beside it was finance's, so a small order waited
+# on two people who never disagreed about it. The goods and the bill go out
+# together and are signed off by the desk already reconciling one against the
+# other.
+#
+# The director was kept as a backstop at first and then taken out deliberately:
+# a backstop that is never the right person to ask is just a second answer to
+# "whose job is this". The cost is real and worth knowing — with finance away,
+# nothing here gets signed. The one door left open is the generic approvals
+# inbox, where the director can still decide any pending request; that is a
+# property of the approval system as a whole rather than a rule about
+# shipments, and a queue nobody can clear is worse than this rule bent once.
+_DO_APPROVERS = {Role.FINANCE}
 
 
 @router.get("/deliveries/{do_id}/pdf")
@@ -3127,8 +3172,7 @@ async def approve_delivery(do_id: UUID,
     """
     if Role(user.role) not in _DO_APPROVERS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only finance (or the director) can approve a "
-                            "delivery order for issue.")
+                            "Releasing a delivery order is finance's.")
     d = await db.get(DeliveryOrder, do_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")
@@ -3164,8 +3208,8 @@ async def unapprove_delivery(do_id: UUID,
     """
     if Role(user.role) not in _DO_APPROVERS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only finance (or the director) can withdraw a "
-                            "delivery order's approval.")
+                            "Withdrawing a delivery order's approval is "
+                            "finance's.")
     d = await db.get(DeliveryOrder, do_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Delivery order not found")

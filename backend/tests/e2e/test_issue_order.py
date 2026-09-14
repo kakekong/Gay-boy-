@@ -189,10 +189,8 @@ async def main():
     f3 = await full(p3)
     check("pressing it twice no longer duplicates the shipment",
           len(f3["deliveries"]) == 1, str(len(f3["deliveries"])))
-    check("...though it does bill twice, which is deletable",
-          len(f3["invoices"]) == 2, str(len(f3["invoices"])))
-    dupe = J(r)["invoice"]["id"]
-    await c.delete(f"/finance/invoices/{dupe}", headers=adm)
+    check("...and no longer bills twice either",
+          len(f3["invoices"]) == 1, str(len(f3["invoices"])))
 
     # Both signatures are finance's now — the delivery order and the invoice
     # beside it — so signing them in one press is finance doing its own job
@@ -230,7 +228,7 @@ async def main():
           and (await c.get(f"/finance/invoices/{f3['invoices'][0]['id']}/pdf",
                            headers=adm)).status_code == 200,
           "one of them refused")
-    r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=d,
+    r = await c.post(f"/operation/projects/{p3}/approve-documents", headers=fin,
                      data={"faktur_pajak_no": fp3})
     check("signing again says there is nothing left waiting",
           r.status_code == 409, f"{r.status_code} {J(r)}"[:150])
@@ -243,7 +241,7 @@ async def main():
                                  "create_delivery_order": "true"}))
     await c.post(f"/finance/invoices/{both4['invoice']['id']}/approve", headers=fin,
                  data={"faktur_pajak_no": f"010.000-26.D{tag}"})
-    r = await c.post(f"/operation/projects/{p4}/approve-documents", headers=d,
+    r = await c.post(f"/operation/projects/{p4}/approve-documents", headers=fin,
                      data={"faktur_pajak_no": f"010.000-26.DD{tag}"})
     check("the combined press signs only what was still waiting",
           r.status_code == 200 and J(r)["invoices"] == []

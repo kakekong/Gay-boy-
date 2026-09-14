@@ -228,12 +228,12 @@ async def main():
 
     # ══ withdrawing it puts it back ══════════════════════════════════════════
     print("\n── withdrawing the release ──")
-    r = await c.post(f"/operation/deliveries/{do_id}/unapprove", headers=d)
-    check("the director can withdraw it", r.status_code == 200, str(r.status_code))
+    r = await c.post(f"/operation/deliveries/{do_id}/unapprove", headers=fin)
+    check("finance can withdraw it", r.status_code == 200, str(r.status_code))
     back = [x for x in await inbox() if x["target_id"] == do_id]
     check("...and it is back in the inbox, because it needs releasing again",
           len(back) == 1, str(len(back)))
-    r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=d)
+    r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=fin)
     check("releasing it on the project page works too", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
     check("...and closes the inbox card, so nobody signs it twice",
@@ -317,12 +317,15 @@ async def main():
           v2["may"]["edit"] and v2["may"]["delete"], str(v2.get("may")))
     check("...but not theirs to release",
           v2["may"]["approve"] is False, str(v2.get("may")))
-    vd = J(await c.get(f"/operation/deliveries/{do2['id']}", headers=d))
-    check("...and it is the director's to release", vd["may"]["approve"] is True,
+    vd = J(await c.get(f"/operation/deliveries/{do2['id']}", headers=fin))
+    check("...and it is finance's to release", vd["may"]["approve"] is True,
           str(vd.get("may")))
-    # Sending it back is the other half of the decision, and it used to exist
-    # only in the inbox — the director reading the document is exactly the
-    # person who wants it.
+    vdd = J(await c.get(f"/operation/deliveries/{do2['id']}", headers=d))
+    check("...and the director's screen does not offer the button either",
+          vdd["may"]["approve"] is False, str(vdd.get("may")))
+    # Sending it back is the other half of the decision — approve or reject —
+    # so it belongs to whoever holds it, which is finance, and on the document
+    # they are reading rather than in a list of rows.
     check("...theirs to send back from the document too, with the request to "
           "reject named on it",
           vd["may"]["send_back"] is True
@@ -331,7 +334,7 @@ async def main():
     check("...which the admin desk is not offered",
           v2["may"]["send_back"] is False, str(v2.get("may")))
     check("a released one cannot be sent back — withdraw the approval instead",
-          J(await c.get(f"/operation/deliveries/{do_id}", headers=d))
+          J(await c.get(f"/operation/deliveries/{do_id}", headers=fin))
           ["may"]["send_back"] is False, "offered on a released sheet")
 
     print("\n── who may open it ──")

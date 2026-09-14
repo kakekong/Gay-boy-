@@ -37,7 +37,9 @@ async def main():
     from app.main import app
     c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://t/api/v1",timeout=40)
     H={"d":await login(c,"director@demo.local"),"s":await login(c,"sales1@demo.local"),
-       "a":await login(c,"admin@demo.local")}
+       "a":await login(c,"admin@demo.local"),
+       # Approving an invoice is finance's alone now — not the director's.
+       "fin":await login(c,"finance@demo.local")}
     tag=uuid.uuid4().hex[:6]
 
     # ---------- 1. Invoice DPP must be NET, not the tax-inclusive quote total ----------
@@ -66,7 +68,7 @@ async def main():
 
     # ---------- 2. Legacy /finance/payments must post to the ledger ----------
     inv_id=inv.get("id")
-    await c.post(f"/finance/invoices/{inv_id}/approve",headers=H["d"],
+    await c.post(f"/finance/invoices/{inv_id}/approve",headers=H["fin"],
                  data={"faktur_pajak_no":f"010.000-26.{tag}"})
     total=float(inv.get("total") or (amt+tax))
     r=await c.post("/finance/payments",headers=H["d"],

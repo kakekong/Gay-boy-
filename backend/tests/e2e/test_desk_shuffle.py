@@ -285,14 +285,27 @@ async def main():
     check("...and the order reads as rupiah",
           float(got.get("total_idr") or 0) == 1200 * 16250.0, str(got.get("total_idr")))
 
+    # Finance may correct a price — they read the vendor's invoice when it
+    # lands, so they are who finds out the agreed figure was typed wrong. It
+    # is not immediate, though: like every other non-director edit on a PO it
+    # waits for the director. The rate in the same call still applies on the
+    # spot, because a rate is not a change to what was agreed.
     r = await c.patch(f"/purchasing/po/{po['id']}", headers=fin,
-                      json={"fx_rate": 16400, "total": 1})
-    check("finance cannot rewrite what we agreed with the vendor",
-          r.status_code == 403, f"{r.status_code} {J(r)}"[:140])
+                      json={"fx_rate": 16400, "total": 1300})
+    check("finance may propose a corrected price", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+    check("...and it is queued, not applied",
+          J(r).get("pending_approval") is True, str(J(r))[:160])
     got = J(await c.get(f"/purchasing/po/{po['id']}", headers=fin))
-    check("...and the refused edit changed nothing",
-          float(got["total"]) == 1200.0 and float(got["fx_rate"]) == 16250.0,
-          f"{got['total']} / {got['fx_rate']}")
+    check("...so the order still reads the agreed figure",
+          float(got["total"]) == 1200.0, str(got["total"]))
+    check("...while the rate went in straight away",
+          float(got["fx_rate"]) == 16400.0, str(got["fx_rate"]))
+
+    r = await c.patch(f"/purchasing/po/{po['id']}", headers=fin,
+                      json={"number": "PO-FINANCE-RENAMED"})
+    check("but the order itself is still not theirs to rewrite",
+          r.status_code == 403, f"{r.status_code} {J(r)}"[:140])
 
     r = await c.patch(f"/purchasing/po/{po['id']}", headers=fin, json={"fx_rate": 0})
     check("a rate of zero is refused — it would zero the order",

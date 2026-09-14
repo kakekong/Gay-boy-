@@ -110,8 +110,7 @@ const STAGE_GUIDE: Record<string, StageGuide> = {
             "Work order → work order baru, tahap 'pengemasan'"],
   },
   packaging: {
-    who: ["Finance (the director is the backstop)",
-          "Keuangan (direktur sebagai cadangan)"],
+    who: ["Finance", "Keuangan"],
     action: ["Approve the invoice with its faktur pajak number — approval is the trigger, not issuing.",
              "Setujui faktur dengan nomor faktur pajaknya — persetujuan itu pemicunya, bukan penerbitan."],
     where: ["Finance → Pending invoices",
@@ -239,9 +238,11 @@ export default function ProjectDetailPage() {
   const isAdminDesk = role === "admin";
   // "Money viewer" — who may see amounts/totals. NOT who may act on finance forms.
   const isFinance = ["finance", "admin", "manager", "director"].includes(role);
-  // Strict finance approval role — only finance (plus director as backstop)
-  // gets the "Approve invoice + enter faktur pajak" form on the project page.
-  const canFinanceApprove = role === "finance" || role === "director";
+  // Strict finance approval role — finance alone gets the "Approve invoice +
+  // enter faktur pajak" form on the project page. Not the director: a backstop
+  // that is never the right person to ask is a second answer to whose job it
+  // is. They can still clear a queued request from the approvals inbox.
+  const canFinanceApprove = role === "finance";
   // The customer-facing close-out: issue the invoice + delivery order, then
   // put the faktur pajak number on it. Admin shares this with finance — it is
   // the paperwork end of their own job. What stays finance-only is the money
@@ -252,9 +253,9 @@ export default function ProjectDetailPage() {
   const canEditDelivery = ["admin", "director", "manager"].includes(role);
   // Releasing the document itself is the director's signature on company
   // paperwork; the manager stands in.
-  // Matches _DO_APPROVERS on the server: finance signs the delivery order,
-  // the director is the backstop.
-  const canApproveDelivery = ["finance", "director"].includes(role);
+  // Matches _DO_APPROVERS on the server: the delivery order is finance's,
+  // and finance's alone.
+  const canApproveDelivery = role === "finance";
   // Who the server lets browse the project's file shelf — mirrors
   // `_attachment_visible_to("project")` minus the roles barred from it.
   const canSeeProjectShelf = ["director", "manager", "purchasing"].includes(role);
@@ -554,19 +555,42 @@ export default function ProjectDetailPage() {
        *  False means "bill against the DO already on the project", which is
        *  the two-step path and what the server insists on otherwise. */
       createDeliveryOrder?: boolean;
+      /** Deliberately raise ANOTHER invoice of this type — a part shipment,
+       *  an instalment. Without it the server refuses a repeat press, which
+       *  is what produced pairs of identical invoices on one project. */
+      additional?: boolean;
     }) => {
       const fd = new FormData();
       if (body.amount != null) fd.append("amount", String(body.amount));
       if (body.invoiceFile) fd.append("invoice_file", body.invoiceFile);
       if (body.doFile) fd.append("delivery_order_file", body.doFile);
       fd.append("invoice_type", body.invoiceType ?? "final");
+      if (body.additional) fd.append("additional", "true");
       // A DP invoice is billed BEFORE delivery, so it never carries a DO.
       const withDo = (body.invoiceType ?? "final") !== "dp"
         && body.createDeliveryOrder === true;
       fd.append("create_delivery_order", withDo ? "true" : "false");
       return api.post(`/operation/projects/${id}/issue-invoice`, fd);
     },
-    onSuccess: refresh, onError: onErr,
+    onSuccess: refresh,
+    onError: (e: any, vars: any) => {
+      // The server refuses a second invoice of the same type unless it is
+      // asked for deliberately. Offer that here rather than making the
+      // refusal a dead end — and ask, because the whole reason the guard
+      // exists is that a double-click is not an intention.
+      const msg: string = e?.response?.data?.errors?.[0]?.message ?? "";
+      if (e?.response?.status === 409 && msg.includes("already has")
+          && !vars?.additional) {
+        if (confirm(`${msg}\n\n${tt(
+          "Raise another one anyway?",
+          "Tetap buat satu lagi?",
+        )}`)) {
+          issueInvoice.mutate({ ...vars, additional: true });
+        }
+        return;
+      }
+      onErr(e);
+    },
   });
   // The delivery order on its own — the first of the two documents.
   const issueDeliveryOrder = useMutation({
@@ -2021,7 +2045,7 @@ export default function ProjectDetailPage() {
               both. Doing them in one press is that desk doing its own job
               twice, so finance sees this as well as the director. Only shown
               when something is actually waiting. */}
-          {(role === "director" || role === "finance")
+          {role === "finance"
             && (inv.some((iv: any) => iv.status === "pending_finance")
                 || dos.some((x: any) => !x.approved_at && x.status !== "delivered")) && (
             <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3 space-y-2">

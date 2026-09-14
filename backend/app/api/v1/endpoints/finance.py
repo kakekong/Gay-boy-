@@ -141,10 +141,10 @@ async def approve_invoice(
     # issue here, and reading is not signing — the stage guide has said
     # "Who: Finance (the director is the backstop)" the whole time while the
     # code let two more roles do it.
-    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+    if Role(user.role) is not Role.FINANCE:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only finance (or the director) can approve an invoice.")
+            "Approving an invoice is finance's.")
 
     fp_no = (faktur_pajak_no or "").strip()
 
@@ -158,6 +158,18 @@ async def approve_invoice(
     from app.models.operation import Project, advance_project_status
 
     if fp_no:
+        # One faktur pajak number belongs to one invoice. `set_faktur_pajak`
+        # has always checked this; approving with a number never did, so the
+        # same number could be signed onto two invoices through this door —
+        # which on a pair of duplicates is exactly the door people use.
+        clash = await db.scalar(select(Invoice).where(
+            Invoice.faktur_pajak_no == fp_no, Invoice.id != inv.id))
+        if clash:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"'{fp_no}' is already on invoice {clash.number} — one faktur "
+                "pajak number belongs to one invoice.",
+            )
         inv.faktur_pajak_no = fp_no
         inv.faktur_pajak_status = "issued"
     else:
@@ -209,10 +221,10 @@ async def set_faktur_pajak(
     Sending an empty value clears it back to pending, which is what a number
     typed onto the wrong invoice needs.
     """
-    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+    if Role(user.role) is not Role.FINANCE:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only finance (or the director) enters the faktur pajak number.",
+            "The faktur pajak number is finance's to enter.",
         )
     inv = await db.get(Invoice, invoice_id)
     if not inv:

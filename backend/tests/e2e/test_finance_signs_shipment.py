@@ -13,19 +13,21 @@ What that changes, and what it does not:
   standing in for a director who is no longer the addressee, and leaving them
   on the button while `decide()` refused them in the inbox would mean the two
   routes disagreed about who may sign.
-* **The invoice is finance's too, properly this time.** The stage guide has
-  said "Who: Finance (the director is the backstop)" all along while the code
-  let admin and a manager approve as well, because they reach the invoice desk
-  to read and issue. Reading is not signing.
-* **The director stays the backstop on both**, as on every other
-  finance-addressed approval — `decide()` reads `required_role=finance` as
-  "finance or the director".
+* **The invoice is finance's too, properly this time.** The code let admin
+  and a manager approve as well, because they reach the invoice desk to read
+  and to issue. Reading is not signing.
+* **The director is not a second answer.** A backstop that is never the
+  right person to ask is just another version of "whose job is this", so the
+  direct buttons are finance's alone. The generic approvals inbox still lets
+  the director decide any pending request — that is a property of the
+  approval system, not a rule about shipments, and a queue nobody can clear
+  is worse. The cost is real: with finance away, nothing here gets signed.
 * **Admin still issues and still cannot approve.** Issuing is not approving,
   and that is the one separation left.
 
-Which is worth stating plainly, because it is the cost: with both signatures on
-one desk there is no second pair of eyes between a document being issued and
-being approved. That is deliberate, not an oversight.
+Worth stating plainly, because it is the cost: with both signatures on one
+desk there is no second pair of eyes between a document being issued and being
+approved. That is deliberate, not an oversight.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -121,8 +123,11 @@ async def main():
     r = await c.post(f"/operation/deliveries/{do1}/unapprove", headers=fin)
     check("finance can", r.status_code == 200, f"{r.status_code} {why(r)}")
     r = await c.post(f"/operation/deliveries/{do1}/approve", headers=d)
-    check("...and the director is still a backstop on it", r.status_code == 200,
+    check("...and not even the director, on the button", r.status_code == 403,
           f"{r.status_code} {why(r)}")
+    r = await c.post(f"/operation/deliveries/{do1}/approve", headers=fin)
+    check("...finance signs it again after the withdrawal",
+          r.status_code == 200, f"{r.status_code} {why(r)}")
 
     # ══ the approvals inbox ══════════════════════════════════════════════
     print("\n── a waiting delivery order reaches finance's inbox ──")
@@ -161,11 +166,13 @@ async def main():
                      data={"faktur_pajak_no": f"010.000-26.{TAG}"})
     check("finance signs it", r.status_code < 300, f"{r.status_code} {why(r)}")
 
-    print("\n── the director is the backstop there as well ──")
+    print("\n── and not the director's either ──")
     p3, do3, inv3 = await a_shipment("C")
     r = await c.post(f"/finance/invoices/{inv3}/approve", headers=d)
-    check("the director can sign an invoice", r.status_code < 300,
+    check("the director cannot sign an invoice", r.status_code == 403,
           f"{r.status_code} {why(r)}")
+    r = await c.post(f"/finance/invoices/{inv3}/approve", headers=fin)
+    check("...finance does", r.status_code < 300, f"{r.status_code} {why(r)}")
 
     # ══ both at once ═════════════════════════════════════════════════════
     print("\n── and both signatures in one press, by the desk that owns them ──")
@@ -193,7 +200,21 @@ async def main():
 
     p5, do5, inv5 = await a_shipment("E")
     r = await c.post(f"/operation/projects/{p5}/approve-documents", headers=d)
-    check("the director can still do both too", r.status_code == 200,
+    check("the director cannot use it either", r.status_code == 403,
+          f"{r.status_code} {why(r)}")
+
+    # The one door left open, deliberately: a pending request in the generic
+    # approvals inbox is still decidable by the director. That is how the
+    # approval system works everywhere, and a queue nobody can clear when
+    # finance is away is worse than this rule bent once.
+    print("\n── except the approvals inbox, which is everyone's backstop ──")
+    p6, do6, inv6 = await a_shipment("F")
+    rows = J(await c.get("/approvals", headers=d))
+    req = [x for x in (rows if isinstance(rows, list) else [])
+           if x.get("target_type") == "delivery_order" and x.get("target_id") == do6]
+    check("the director sees the waiting sheet", len(req) == 1, str(len(req)))
+    r = await c.post(f"/approvals/{req[0]['id']}/approve", headers=d)
+    check("...and can still clear it from there", r.status_code == 200,
           f"{r.status_code} {why(r)}")
 
     await c.aclose()

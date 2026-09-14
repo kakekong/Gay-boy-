@@ -818,6 +818,21 @@ async def issue_dp_invoice(
             "use the project page.",
         )
 
+    # One deposit order, one deposit invoice. Same guard as the project page:
+    # pressing Issue twice used to produce two real invoices for the same
+    # amount against the same order, and both could be approved.
+    dupe = await db.scalar(select(Invoice).where(
+        Invoice.customer_po_id == po.id,
+        Invoice.type == "dp",
+        Invoice.status != "rejected",
+    ).order_by(Invoice.created_at.asc()))
+    if dupe:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This order already has a DP invoice — {dupe.number} for "
+            f"{float(dupe.total or 0):,.0f}. Use it, or delete it first.",
+        )
+
     parsed_due = None
     if due_date:
         try:

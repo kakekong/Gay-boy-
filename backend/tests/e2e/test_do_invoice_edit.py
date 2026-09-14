@@ -108,8 +108,12 @@ async def main():
     print("\n── admin presses Issue twice ──")
     first = J(await c.post(f"/operation/projects/{proj}/issue-invoice",
                            headers=adm, data={"invoice_type": "final"}))
+    # A repeat press is refused now — that is the point of the guard. This
+    # driver is about correcting a duplicate that exists, so it asks for the
+    # second one deliberately to get into that state.
     second = J(await c.post(f"/operation/projects/{proj}/issue-invoice",
-                            headers=adm, data={"invoice_type": "final"}))
+                            headers=adm, data={"invoice_type": "final",
+                                               "additional": "true"}))
     f0 = await full(proj)
     check("the project now carries two invoices", len(f0["invoices"]) == 2,
           str(len(f0["invoices"])))

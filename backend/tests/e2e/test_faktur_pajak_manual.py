@@ -179,7 +179,7 @@ async def main():
     # ══ the director's combined sign-off ═════════════════════════════════════
     print("\n── signing both documents at once ──")
     proj4, inv4 = await a_project("D")
-    r = await c.post(f"/operation/projects/{proj4}/approve-documents", headers=d,
+    r = await c.post(f"/operation/projects/{proj4}/approve-documents", headers=fin,
                      data={})
     check("the director signs both without a number too", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:170])
@@ -190,7 +190,7 @@ async def main():
     f4 = J(await c.get(f"/operation/projects/{proj4}/full", headers=d))
     check("...and the delivery order released with it",
           bool(f4["deliveries"][0]["approved_at"]), str(f4["deliveries"][0])[:170])
-    r = await c.post(f"/finance/invoices/{inv4}/faktur-pajak", headers=d,
+    r = await c.post(f"/finance/invoices/{inv4}/faktur-pajak", headers=fin,
                      json={"faktur_pajak_no": f"010.000-26.D{tag}"})
     check("the director can enter one as the backstop", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])

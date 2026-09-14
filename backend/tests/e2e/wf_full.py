@@ -226,8 +226,12 @@ async def main():
     if r.status_code==403: bad("ADMIN cannot issue invoice, but workflow doc + error message say admin can (role set excludes admin)")
 
     step("H1b finance issues the invoice + DO")
+    # H1a above is a permission probe that really does issue one, so this is a
+    # SECOND invoice on the project and has to say so — a repeat press is
+    # refused now, which is the point of that guard.
     r=await c.post(f"/operation/projects/{proj}/issue-invoice",headers=H["finance"],
-                   data={"invoice_type":"single","amount":3000000,"create_delivery_order":"true"}); b=J(r)
+                   data={"invoice_type":"single","amount":3000000,
+                         "create_delivery_order":"true","additional":"true"}); b=J(r)
     inv=b.get("invoice",{}).get("id") or b.get("id") or b.get("invoice_id")
     ok(f"HTTP{r.status_code} invoice={inv} status={b.get('invoice',{}).get('status') or b.get('status')}") \
         if r.status_code==201 else bad(f"HTTP{r.status_code} {b}")
