@@ -72,6 +72,16 @@ class Payment(Base, UUIDPK, TimestampMixin):
     method: Mapped[str | None] = mapped_column(String(40))
     reference: Mapped[str | None] = mapped_column(String(120))
     notes: Mapped[str | None] = mapped_column(Text)
+    # A reversal is itself a payment row, for a negative amount, pointing at
+    # the receipt it undoes. Money that arrived and then didn't is two facts,
+    # not the absence of one — and every `SUM(payments.amount)` in the system
+    # (AR aging, the KPI outstanding figure, the invoice screen, the delete
+    # guard) nets out on its own, with no query anywhere needing to learn
+    # about reversals. Set only on the reversing row; NULL on a real receipt.
+    reverses_payment_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), index=True
+    )
+    reversed_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
 class LedgerEntry(Base, UUIDPK, TimestampMixin):

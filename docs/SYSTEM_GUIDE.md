@@ -280,6 +280,14 @@ Lane ownership:
 
 Both paths: create a Payment row, post cash-up/receivable-down to the journal (attributed to the customer's sales rep), recompute the invoice status (`partial` until covered), and **when fully paid, auto-advance the project `paid → closed`**.
 
+### 9.2b Reversing a payment (director only)
+
+"Paid" is not a field anybody edits — it is derived from the sum of the payments recorded against the invoice. So taking it back acts on the money, not on the word: on the invoice's own screen, the director gets a **Reverse** button beside each receipt (nobody else does, finance included — recording the money and taking it back off are not the same authority). It asks for a reason, which goes on the record.
+
+What it does: writes a **second payment row for the negative amount** pointing at the receipt it undoes, and posts the mirror entry to the ledger (cash down, receivable back up — reversing the lines that were actually posted, so a receipt booked to a non-default bank account unwinds correctly). Everything else falls out of arithmetic that was already there: the invoice drops to `partial` if something else still stands against it or back to `approved` if nothing does, it reappears in the collections queue and the manual-payment picker, and the project that payment had walked to `paid → closed` comes back to **`delivered`** — the goods went out, the money didn't arrive. (`advance_project_status` is forward-only and cannot do this, so the reversal sets it explicitly, and only from `paid`/`closed`.)
+
+Nothing is deleted: both rows stay on the invoice — the receipt struck through and marked *taken back*, the reversal beside it in amber with who did it and why. A receipt cannot be reversed twice, and a reversal row cannot itself be reversed (record a fresh payment instead). This is also the door the delete guard has always pointed at: an invoice with a payment against it refuses to be deleted "until the payment is reversed" — now that is something you can actually do. Reversing the deposit that started a job deliberately does **not** unwind the project, the work done since, or the documents filed against it; that is a bigger decision than a mis-keyed receipt.
+
 ### 9.3 The journal & chart of accounts
 
 Every financial movement (quotation posting, payments, payroll) writes signed journal lines against the 109 pre-seeded Indonesian chart of accounts (admin/director can extend it). Reversals are matching journal entries, never deletes. **Recent ledgers** shows the live feed of the latest postings; the **Linked Accounts** panel on each quotation shows exactly which accounts that deal touches.

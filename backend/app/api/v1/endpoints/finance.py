@@ -331,13 +331,22 @@ async def invoice_detail(invoice_id: UUID,
         select(func.coalesce(func.sum(Payment.amount), 0))
         .where(Payment.invoice_id == inv.id)
     ) or 0)
+    pay_rows = (await db.scalars(
+        select(Payment).where(Payment.invoice_id == inv.id)
+        .order_by(Payment.paid_at.asc().nullslast())
+    )).all()
+    # Which receipts have already been taken back, so the screen can strike
+    # them through instead of offering to reverse them twice.
+    _undone = {p.reverses_payment_id for p in pay_rows
+               if p.reverses_payment_id is not None}
     payments = [{
         "id": str(p.id), "amount": float(p.amount or 0), "paid_at": p.paid_at,
         "method": p.method, "reference": p.reference, "notes": p.notes,
-    } for p in (await db.scalars(
-        select(Payment).where(Payment.invoice_id == inv.id)
-        .order_by(Payment.paid_at.asc().nullslast())
-    )).all()]
+        "is_reversal": p.reverses_payment_id is not None,
+        "reverses_payment_id": (str(p.reverses_payment_id)
+                                if p.reverses_payment_id else None),
+        "reversed": p.id in _undone,
+    } for p in pay_rows]
     claims = [{
         "id": str(cl.id), "amount": float(cl.amount or 0), "paid_at": cl.paid_at,
         "method": cl.method, "reference": cl.reference, "notes": cl.notes,
@@ -399,6 +408,9 @@ async def invoice_detail(invoice_id: UUID,
                                 and not unsigned,
             "delete": unpaid and (role in (Role.FINANCE, Role.DIRECTOR)
                                   or (role is Role.ADMIN and unsigned)),
+            # Taking a receipt back off the invoice — and with it the "paid"
+            # status derived from it. The director's alone.
+            "reverse_payment": role is Role.DIRECTOR,
             "download": not unsigned,
         },
         "locked_because": (

@@ -30,7 +30,12 @@ import { useT, T, locale } from "@/store/lang";
 
 interface Money { id: string; amount: number; paid_at: string | null;
   method: string | null; reference: string | null; notes: string | null;
-  status?: string; }
+  status?: string;
+  /** True on the negative row that undoes another receipt. */
+  is_reversal?: boolean;
+  reverses_payment_id?: string | null;
+  /** True on a receipt that has already been taken back. */
+  reversed?: boolean; }
 
 interface Inv {
   id: string; number: string; status: string; type: string;
@@ -49,6 +54,7 @@ interface Inv {
   may: {
     edit: boolean; approve: boolean; reject: boolean;
     set_faktur_pajak: boolean; delete: boolean; download: boolean;
+    reverse_payment?: boolean;
   };
   locked_because: string | null;
 }
@@ -143,6 +149,27 @@ export default function InvoiceDetailPage() {
     },
     onError: onErr,
   });
+  // Taking a receipt back off the invoice. The director's alone, and it does
+  // not flip a word — it records the negative payment, which is what makes
+  // the invoice stop saying "paid" and the ledger agree with it.
+  const reversePayment = useMutation({
+    mutationFn: ({ paymentId, reason }: { paymentId: string; reason: string }) =>
+      api.post(`/payments/${paymentId}/reverse`, { reason }),
+    onSuccess: (r: any) => {
+      refresh();
+      const kept = r?.data?.project_kept_open;
+      setFlash({
+        kind: "ok",
+        text: kept
+          ? t("Payment reversed. The project the deposit started is left as it is — reversing the money does not undo the work.",
+              "Pembayaran dibalik. Proyek yang dimulai oleh uang muka dibiarkan apa adanya — membalik uangnya tidak membatalkan pekerjaannya.")
+          : t("Payment reversed. The invoice is unpaid again and the ledger has been corrected.",
+              "Pembayaran dibalik. Faktur kembali belum lunas dan buku besar sudah dikoreksi."),
+      });
+    },
+    onError: onErr,
+  });
+
   const remove = useMutation({
     mutationFn: () => api.delete(`/finance/invoices/${id}`),
     onSuccess: () => {
@@ -536,6 +563,7 @@ export default function InvoiceDetailPage() {
                 <th className="th">{t("Reference", "Referensi")}</th>
                 <th className="th">{T("Status")}</th>
                 <th className="th text-right">{T("Amount")}</th>
+                {v.may.reverse_payment && <th className="th" />}
               </tr>
             </thead>
             <tbody>
@@ -547,11 +575,44 @@ export default function InvoiceDetailPage() {
                   <td className="td">{p.method ?? "—"}</td>
                   <td className="td font-mono text-xs">{p.reference ?? "—"}</td>
                   <td className="td">
-                    <span className="chip bg-emerald-50 text-emerald-700">
-                      {t("verified", "terverifikasi")}
-                    </span>
+                    {p.is_reversal ? (
+                      <span className="chip bg-amber-50 text-amber-700"
+                            title={p.notes ?? undefined}>
+                        {t("reversed", "dibalik")}
+                      </span>
+                    ) : p.reversed ? (
+                      <span className="chip bg-ink-100 text-ink-500">
+                        {t("taken back", "ditarik kembali")}
+                      </span>
+                    ) : (
+                      <span className="chip bg-emerald-50 text-emerald-700">
+                        {t("verified", "terverifikasi")}
+                      </span>
+                    )}
                   </td>
-                  <td className="td text-right tabular-nums">{idr(p.amount)}</td>
+                  <td className={clsx("td text-right tabular-nums",
+                                      p.is_reversal && "text-amber-700",
+                                      p.reversed && "line-through text-ink-400")}>
+                    {idr(p.amount)}
+                  </td>
+                  {v.may.reverse_payment && (
+                    <td className="td text-right">
+                      {!p.is_reversal && !p.reversed && p.amount > 0 && (
+                        <button
+                          className="btn-ghost text-xs text-red-600"
+                          disabled={reversePayment.isPending}
+                          onClick={() => {
+                            const reason = window.prompt(t(
+                              "Reverse this payment? It stays on the record — the negative entry is written beside it and the ledger is corrected. Why is it being reversed?",
+                              "Balik pembayaran ini? Catatannya tetap ada — entri negatif ditulis di sampingnya dan buku besar dikoreksi. Apa alasannya?"));
+                            if (reason && reason.trim())
+                              reversePayment.mutate({ paymentId: p.id, reason: reason.trim() });
+                          }}>
+                          {t("Reverse", "Balikkan")}
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
               {v.claims.filter((c) => c.status !== "verified").map((cl) => (
@@ -567,6 +628,7 @@ export default function InvoiceDetailPage() {
                     </span>
                   </td>
                   <td className="td text-right tabular-nums">{idr(cl.amount)}</td>
+                  {v.may.reverse_payment && <td className="td" />}
                 </tr>
               ))}
             </tbody>

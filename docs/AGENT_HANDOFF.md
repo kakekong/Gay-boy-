@@ -208,6 +208,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_stale_approvals.py` | approval requests whose target already moved on |
 | `test_batch_fixes.py` | stage-task retirement, approval gates, scoping, tax period |
 | `test_partial_payment_ar.py` | a partially-paid invoice is owed only its remainder, on all four AR surfaces |
+| `test_payment_reversal.py` | the director takes a receipt back off an invoice: negative payment row, mirror ledger entry, invoice unpaid again, project off `closed`, no double-reversal |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -499,6 +500,27 @@ over the outstanding statuses counts a half-paid invoice at full value — that
 bug lived in `/reports/ar-aging-detail`, `/kpi/finance` and the customer
 summary card while `/finance/ar/aging` was already netting correctly.
 `test_partial_payment_ar.py` pins all four to the same number.
+
+**A reversed payment is a negative `Payment` row, not a flag.** The director
+can take a receipt back off an invoice (`POST /payments/{id}/reverse`,
+director-only, reason required). It writes a second `Payment` for the negative
+amount carrying `reverses_payment_id`, and posts the mirror ledger entry via
+`ledger.reverse_payment()` — which reads back the original journal lines by
+`source_id` and undoes each against its own account, falling back to the
+default cash/receivable pair for pre-ledger "ghost" payments.
+
+That shape is deliberate: there are **eleven** `SUM(Payment.amount)` call
+sites (payments ×2, finance ×4, kpi ×2, reports, reports_multi, operation),
+and a `reversed_at` flag would have had to be threaded through every one of
+them, with anything missed silently reporting reversed money as still
+received. A negative row nets out everywhere for free. Two consequences to
+keep in mind when touching this code: `Payment.amount` can be negative, so
+never assume `> 0`; and `_recompute_invoice_status()` now regresses as well as
+advances (`paid`/`partial` → `approved` when nothing stands against the
+invoice), because it is the only thing that can. The project walk-back
+(`paid`/`closed` → `delivered`) is set explicitly in the endpoint —
+`advance_project_status` is forward-only and will not do it.
+`test_payment_reversal.py` covers the lot (41/41).
 
 **Project stages are order-independent going forward.**
 `advance_project_status()` in `app/models/operation.py` jumps straight to the

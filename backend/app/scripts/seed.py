@@ -545,6 +545,16 @@ COLUMN_MIGRATIONS: list[str] = [
     # SKU the request issued never left the building, and the first line of
     # each document read "001".
     "ALTER TABLE quotation_items ADD COLUMN IF NOT EXISTS sku VARCHAR(60)",
+
+    # ── Reversing a payment ───────────────────────────────────────────────
+    # The director can take a receipt back off an invoice when it was
+    # recorded in error. The reversal is a second payment row for the
+    # negative amount pointing at the first, so every existing
+    # SUM(payments.amount) nets out untouched, and both facts survive.
+    "ALTER TABLE payments ADD COLUMN IF NOT EXISTS reverses_payment_id UUID",
+    "ALTER TABLE payments ADD COLUMN IF NOT EXISTS reversed_by UUID",
+    "CREATE INDEX IF NOT EXISTS ix_payments_reverses "
+    "ON payments (reverses_payment_id) WHERE reverses_payment_id IS NOT NULL",
     # Quotations already sent were built before the line carried one. Their
     # price request still knows it, matched by line number, so the number
     # can be put back rather than left as a position forever. Only fills

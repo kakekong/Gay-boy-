@@ -36,6 +36,10 @@ router = APIRouter()
 # Admin is out of the finance verification loop — projects/ops/inventory
 # only. Finance verifies payment claims; manager sees; director backstop.
 _finance = require(Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
+# Reversing a receipt is the one thing on this desk finance cannot do to its
+# own entry. Recording the money and taking it back off the books are not the
+# same authority, so the reversal is the director's alone.
+_director = require(Role.DIRECTOR)
 
 
 class DecisionIn(BaseModel):
@@ -99,7 +103,14 @@ async def list_claims(
 
 
 async def _recompute_invoice_status(db: AsyncSession, invoice_id: UUID) -> str:
-    """Sum verified payments vs invoice total → update invoice.status."""
+    """Sum verified payments vs invoice total → update invoice.status.
+
+    The sum is the truth and the status is derived from it, in both
+    directions. A reversal writes a negative payment row, so the sum can go
+    down as well as up, and an invoice that is no longer covered has to stop
+    saying it is paid — otherwise the one number on the screen everybody
+    reads would be the one number the ledger disagrees with.
+    """
     inv = await db.get(Invoice, invoice_id)
     if not inv:
         return ""
@@ -114,6 +125,11 @@ async def _recompute_invoice_status(db: AsyncSession, invoice_id: UUID) -> str:
         inv.status = "paid"
     elif paid_sum > 0:
         inv.status = "partial"
+    elif inv.status in ("paid", "partial"):
+        # Everything against it has been reversed — it is an unpaid,
+        # finance-approved invoice again, which puts it back in the
+        # collections queue and back in the manual-payment picker.
+        inv.status = "approved"
     return inv.status
 
 
@@ -388,6 +404,158 @@ async def reject_claim(
         after={"claim_id": str(c.id), "notes": payload.notes},
     )
     return await _serialize(db, c)
+
+
+class ReversalIn(BaseModel):
+    reason: str
+
+
+@router.post("/{payment_id}/reverse", status_code=201)
+async def reverse_payment_entry(
+    payment_id: UUID,
+    payload: ReversalIn,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(_director),
+):
+    """Take a payment back off an invoice. The director's call, and only his.
+
+    "Paid" is not a switch anybody can flip. It is derived — the sum of the
+    payments recorded against the invoice, measured against its total — and
+    it has to stay derived, because the same rows are what the ledger, the AR
+    aging, the KPI outstanding figure and the customer's statement are all
+    reading. Flipping the word back to unpaid while the money is still
+    recorded as received would make the invoice screen lie to the one desk
+    that has to reconcile it against the bank.
+
+    So a reversal acts on the money. It writes a second payment row for the
+    negative amount, pointing at the receipt it undoes, and posts the mirror
+    entry to the ledger: cash down, receivable back up. The invoice status
+    then falls out of the arithmetic on its own — back to 'partial' if
+    something else is still standing against it, back to 'approved' if
+    nothing is — and the project, which payment had walked to paid/closed,
+    comes back to 'delivered': the goods went out, the money didn't arrive.
+
+    Nothing is deleted. Both facts stay on the record — it was received on
+    the 3rd and taken back on the 11th, by name, with a reason — because a
+    payment that quietly vanishes is indistinguishable from one that was
+    never entered, and those are not the same story to tell an auditor.
+    """
+    reason = (payload.reason or "").strip()
+    if not reason:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Say why the payment is being reversed — it goes on the record.",
+        )
+
+    p = await db.get(Payment, payment_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment not found")
+    if p.reverses_payment_id is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "That row is itself a reversal — reversing it would be recording "
+            "the money a second time. Enter a fresh payment instead.",
+        )
+    if float(p.amount or 0) <= 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Nothing to reverse — this payment is not a positive receipt.",
+        )
+    existing = await db.scalar(
+        select(Payment).where(Payment.reverses_payment_id == payment_id)
+    )
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This payment has already been reversed.",
+        )
+
+    inv = await db.get(Invoice, p.invoice_id)
+    if not inv:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "The invoice this payment belongs to is gone.")
+
+    now = datetime.now(UTC)
+    amount = float(p.amount or 0)
+    prev_status = inv.status
+    reversal = Payment(
+        invoice_id=p.invoice_id,
+        amount=-amount,
+        paid_at=now,
+        method=p.method,
+        reference=p.reference,
+        notes=(f"Reversal of the payment recorded "
+               f"{p.paid_at.date().isoformat() if p.paid_at else 'earlier'}"
+               f" ({p.reference or p.method or 'no reference'}), by "
+               f"{me.full_name}. Reason: {reason}"),
+        reverses_payment_id=p.id,
+        reversed_by=me.id,
+    )
+    db.add(reversal)
+    await db.flush()
+
+    sales_pic_id = None
+    if inv.customer_id:
+        from app.models.crm import Customer
+        cust = await db.get(Customer, inv.customer_id)
+        sales_pic_id = cust.sales_pic_id if cust else None
+    from app.services.ledger import reverse_payment
+    await reverse_payment(
+        db,
+        payment_id=p.id,
+        amount=amount,
+        entry_date=now.date(),
+        invoice_number=inv.number,
+        customer_id=inv.customer_id,
+        sales_pic_id=sales_pic_id,
+        reversal_payment_id=reversal.id,
+        created_by=me.id,
+        memo_suffix=reason,
+    )
+
+    new_inv_status = await _recompute_invoice_status(db, p.invoice_id)
+
+    # Payment is what walked the project to paid → closed. If the invoice no
+    # longer stands paid, neither does the project: it goes back to
+    # 'delivered', the stage before money. `advance_project_status` is
+    # forward-only by design and will not do this, so it is set explicitly —
+    # and only from paid/closed, so a project somebody has since moved on
+    # elsewhere is left where it is.
+    project_status = None
+    if inv.project_id:
+        from app.models.operation import Project
+        project = await db.get(Project, inv.project_id)
+        if project:
+            if new_inv_status != "paid" and project.status in ("paid", "closed"):
+                project.status = "delivered"
+            project_status = project.status
+
+    # The deposit that started a job is deliberately not unwound here.
+    # Reversing it takes the money back off the books, which is what was
+    # asked; it does not delete the project the deposit created, the work
+    # done since, or the documents filed against it. That is a bigger
+    # decision than a mis-keyed receipt and is not made by a button.
+    dp_note = (inv.type == "dp" and inv.project_id is not None)
+
+    await audit_record(
+        db, actor=me, action="reverse_payment", entity="invoice",
+        entity_id=p.invoice_id,
+        before={"payment_id": str(p.id), "amount": amount,
+                "invoice_status": prev_status},
+        after={"reversal_id": str(reversal.id), "amount": -amount,
+               "new_status": new_inv_status, "reason": reason,
+               "project_status": project_status},
+    )
+    return {
+        "ok": True,
+        "reversal_id": str(reversal.id),
+        "payment_id": str(p.id),
+        "amount": -amount,
+        "invoice_id": str(p.invoice_id),
+        "invoice_status": new_inv_status,
+        "project_status": project_status,
+        "project_kept_open": dp_note,
+    }
 
 
 @router.get("/claims/counts")

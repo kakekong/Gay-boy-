@@ -207,3 +207,68 @@ async def post_payment(
         )
         moves.append({**m, "role": role})
     return moves
+
+
+async def reverse_payment(
+    db: AsyncSession,
+    *,
+    payment_id: UUID,
+    amount: float,
+    entry_date: date,
+    invoice_number: str | None = None,
+    customer_id: UUID | None = None,
+    sales_pic_id: UUID | None = None,
+    reversal_payment_id: UUID | None = None,
+    created_by: UUID | None = None,
+    memo_suffix: str | None = None,
+) -> list[dict]:
+    """Take a received payment back off the books: cash down, receivable up.
+
+    It reverses *what was actually posted* rather than what the defaults say
+    should have been — the original journal lines are read back by
+    `source_id`, and each one is undone against its own account. That matters
+    for a receipt booked into a different bank account, and for the old
+    "ghost" payments recorded before this service existed, which have no
+    journal lines at all: those fall back to the standard cash/receivable
+    pair so the balances still move.
+
+    Nothing is deleted. The original lines stay exactly where they are and
+    the reversal is written beside them, which is what makes the journal
+    readable a year later: the money arrived, and then it didn't.
+    """
+    if amount <= 0:
+        return []
+    originals = (await db.scalars(
+        select(LedgerEntry).where(
+            LedgerEntry.source_type == "payment",
+            LedgerEntry.source_id == payment_id,
+        )
+    )).all()
+    pairs: list[tuple[str, float, str]] = []
+    if originals:
+        for e in originals:
+            pairs.append((e.account_no, -float(e.amount or 0),
+                          "cash" if float(e.amount or 0) > 0 else "receivable"))
+    else:
+        pairs = [(PAYMENT_CASH_DEFAULT, -amount, "cash"),
+                 (PAYMENT_RECEIVABLE, amount, "receivable")]
+
+    tail = f" — {memo_suffix}" if memo_suffix else ""
+    moves: list[dict] = []
+    for account_no, delta, role in pairs:
+        m = await _bump(db, account_no, delta)
+        if not m:
+            continue
+        await journal_post(
+            db, entry_date=entry_date, account_no=m["account_no"],
+            account_type=m["account_type"], account_name=m["name"],
+            amount=m["delta"], source_type="payment",
+            source_id=reversal_payment_id or payment_id,
+            source_ref=invoice_number,
+            memo=(f"Payment reversed for {invoice_number or 'invoice'} "
+                  f"({role}){tail}"),
+            customer_id=customer_id, sales_pic_id=sales_pic_id,
+            created_by=created_by,
+        )
+        moves.append({**m, "role": role, "reversed": True})
+    return moves
