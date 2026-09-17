@@ -211,6 +211,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_partial_payment_ar.py` | a partially-paid invoice is owed only its remainder, on all four AR surfaces |
 | `test_payment_reversal.py` | the director takes a receipt back off an invoice: negative payment row, mirror ledger entry, invoice unpaid again, project off `closed`, no double-reversal |
 | `test_cash_adjust.py` | correcting what a cash/bank account holds: posts a balanced `adjustment` journal entry rather than writing over the derived total; finance + director only; refuses non-cash, headings, no-op corrections and cash-on-both-sides |
+| `test_po_money_with_lines.py` | a supplier PO's currency + rate now travel with its lines in one save: the pair queues together for the director (never a new rate against an old currency), each still behaves as before alone, and finance keeps the rate but not the currency |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -502,6 +503,19 @@ over the outstanding statuses counts a half-paid invoice at full value — that
 bug lived in `/reports/ar-aging-detail`, `/kpi/finance` and the customer
 summary card while `/finance/ar/aging` was already netting correctly.
 `test_partial_payment_ar.py` pins all four to the same number.
+
+**A supplier PO's currency and rate belong to its lines.** They are edited in
+the items editor (`PurchaseOrderDetail.tsx`), go up in the same PATCH as
+`items` + `total`, and the header renders them read-only. Two asymmetries in
+`update_po` that this put in the same request for the first time, and that any
+future edit here has to preserve: `fx_rate` applies immediately (it is not a
+decision anybody approves) while `currency` queues for the director — *unless*
+both arrive together, in which case the rate rides in the approval payload so
+the pair lands as one, because a new rate against an old currency is the one
+combination that is certainly wrong. And a currency change drops the old rate
+(`1` for IDR, `None` otherwise) only when no rate came with it — the same rule
+now mirrored in `approval.py`'s apply path, which previously `setattr`'d the
+currency and left a yuan rate sitting on a dollar order.
 
 **A reversed payment is a negative `Payment` row, not a flag.** The director
 can take a receipt back off an invoice (`POST /payments/{id}/reverse`,

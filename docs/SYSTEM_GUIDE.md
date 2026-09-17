@@ -242,6 +242,17 @@ Work orders progress through **Receiving → Warehousing → QC → Packaging �
 - Only the **customer** drawing's approval advances the project to `drawing_approved`; signing off a supplier sheet is an internal step and moves nothing.
 - Submitted drawings are approved internally (manager/director/admin) and/or by the customer on their portal. Drawing approval advances the project (`drawing → drawing_approved`).
 
+### 8.3b Supplier PO money — the lines own it
+
+A supplier PO's money lives with its **items**, not in the header above them. Open **Edit items** and the editor carries, beside the lines: the **currency**, the **rate (Rp per unit of it)**, and a live "lines add up to" with its rupiah equivalent. Save once and the lines, the currency and the rate go up together; the header's Currency / Total / Rate then read back what the lines say.
+
+It was the other way around, and on an order with several lines that is the wrong end of the document: switching currency in the header silently re-labelled every price further down, out of sight, and the total typed there could disagree with the lines that summed to something else — a PO could read `TOTAL (CNY) 355` over lines adding to CNY 115,259,228.
+
+Rules worth knowing:
+- **Nothing is converted.** Switching currency re-denominates what was agreed with the vendor; the editor says so in amber and clears the rate box, because a rate belongs to the currency it was quoted against.
+- **A rate alone still applies immediately** (it is not a decision anyone approves — it moves when the bank says so). **A currency alone still waits for the director**, and dropping the old rate with it. **Submitted together they queue together and land together**, so a PO is never left reading a new rate against an old currency.
+- **Finance** may set the rate and correct prices here; the currency selector is disabled for them — what was agreed with the vendor is purchasing's.
+
 ### 8.4 Logistics & imports
 
 For import orders, purchasing maintains the required import documents (invoice, packing list, B/L, PIB, …) per delivery mode on the project's logistics card — expected complete before goods land. Document scans go through a director check.

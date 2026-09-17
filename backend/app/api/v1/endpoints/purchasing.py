@@ -1460,6 +1460,12 @@ async def update_po(
             date_t.fromisoformat(data["eta"])
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "eta must be YYYY-MM-DD")
+    # Normalised here rather than in the apply path below, so the queued copy
+    # the director approves later is the same value the direct path would have
+    # written — otherwise "usd" reached the PO through one door and "USD"
+    # through the other.
+    if "currency" in data and data["currency"]:
+        data["currency"] = data["currency"].strip().upper()[:8]
 
     # The vendor's promised arrival applies straight away, unlike everything
     # else on this PO. It is not a money decision — it moves whenever the
@@ -1485,20 +1491,32 @@ async def update_po(
     # only what those numbers are worth in rupiah, and it moves when the bank
     # says so, not when a director gets to the approvals queue. Audited, and
     # refused outright if it would make an order worth nothing.
-    if "fx_rate" in data:
-        raw = data.pop("fx_rate")
+    #
+    # The exception is a rate that arrives *with* a new currency. A rate is
+    # only meaningful against the currency it was typed for, so splitting the
+    # pair — applying the rate now, queuing the currency — would leave the PO
+    # reading the new rate against the old currency for as long as the
+    # approval sits in the queue, which is the one combination that is
+    # certainly wrong. Submitted together, they travel together.
+    is_director = Role(user.role) == Role.DIRECTOR
+    rate_given = "fx_rate" in data
+    if rate_given:
+        raw = data["fx_rate"]
         rate = None if raw in (None, "") else float(raw)
         if rate is not None and rate <= 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Exchange rate must be greater than zero")
-        before = None if po.fx_rate is None else float(po.fx_rate)
-        po.fx_rate = rate
-        await audit_record(
-            db, actor=user, action="update", entity="supplier_po", entity_id=po.id,
-            before={"fx_rate": before}, after={"fx_rate": rate},
-        )
+        if "currency" in data and not is_director:
+            data["fx_rate"] = rate          # rides along with the currency
+        else:
+            data.pop("fx_rate")
+            before = None if po.fx_rate is None else float(po.fx_rate)
+            po.fx_rate = rate
+            await audit_record(
+                db, actor=user, action="update", entity="supplier_po", entity_id=po.id,
+                before={"fx_rate": before}, after={"fx_rate": rate},
+            )
 
-    is_director = Role(user.role) == Role.DIRECTOR
     # `data` can be empty now if the ETA was the only change — filing an
     # approval for "no fields" would put a meaningless row in the director's
     # queue, so fall through to the apply path and return the updated PO.
@@ -1543,11 +1561,16 @@ async def update_po(
         po.quoted_lead_days = data["quoted_lead_days"]
     if "currency" in data and data["currency"]:
         was = (po.currency or "IDR").upper()
-        po.currency = data["currency"].strip().upper()[:8]
-        if po.currency != was:
+        po.currency = data["currency"]
+        if po.currency != was and not rate_given:
             # The old rate belonged to the old currency. Carrying it over
             # would leave a dollar order quietly claiming 1 USD = 1 IDR, so
             # rupiah goes back to 1 and anything else waits for a real rate.
+            #
+            # Unless a rate came with the change: whoever switched the
+            # currency said in the same breath what it is worth, and throwing
+            # that away to demand it again would be the screen arguing with
+            # what it was just told.
             po.fx_rate = 1 if po.currency == "IDR" else None
     if "total" in data and data["total"] is not None:
         po.total = data["total"]

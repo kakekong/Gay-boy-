@@ -351,11 +351,22 @@ async def apply_to_target(
                         advance_project_status(project, "purchasing")
             elif action == "update" and approve:
                 changes = (req.payload or {}).get("changes") or {}
+                was_currency = (po.currency or "IDR").upper()
                 for k, v in changes.items():
                     if k == "po_date":
                         po.po_date = None if v in (None, "") else date_t.fromisoformat(v)
                     elif hasattr(po, k):
                         setattr(po, k, v)
+                # Same rule the direct path applies: a rate belongs to the
+                # currency it was quoted against, so switching the currency
+                # drops a rate that came from the old one. A change that
+                # carries its own rate keeps it — purchasing said what the new
+                # currency is worth when they asked for the switch, and this
+                # is the moment that answer takes effect.
+                if ("currency" in changes
+                        and "fx_rate" not in changes
+                        and (po.currency or "IDR").upper() != was_currency):
+                    po.fx_rate = 1 if (po.currency or "IDR").upper() == "IDR" else None
                 applied["applied_changes"] = list(changes.keys())
     elif req.target_type == "delivery_order":
         # The director's release of a delivery order, taken from the inbox

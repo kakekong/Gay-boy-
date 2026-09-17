@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Truck, Building2, Briefcase, Calendar, Loader2, Save,
   Pencil, Check, X, AlertCircle, Plus, Trash2, FileText, FileSpreadsheet,
+  Coins,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -98,6 +99,14 @@ export default function PurchaseOrderDetailPage() {
   const [draftNumber, setDraftNumber] = useState("");
   const [editingItems, setEditingItems] = useState(false);
   const [draftItems, setDraftItems] = useState<POItem[]>([]);
+  // The currency and the rate are edited with the lines they price, not in
+  // the header above them. A PO's money is its lines — the header total is
+  // their sum — so the one screen that shows every line is the one place
+  // where changing the currency shows you what it lands on. They are drafts
+  // until Save, and they go up in the same request as the lines.
+  const [draftCurrency, setDraftCurrency] = useState("IDR");
+  const [draftRate, setDraftRate] = useState<string>("");
+  const itemsRef = useRef<HTMLDivElement | null>(null);
 
   const q = useQuery({
     queryKey: ["po", id],
@@ -210,6 +219,14 @@ export default function PurchaseOrderDetailPage() {
   const p = q.data;
   const draftTotal = draftItems.reduce((s, it) => s + lineAmount(it), 0);
   const foreign = (p.currency ?? "IDR").toUpperCase() !== "IDR";
+  // While the editor is open every money label below follows the draft, not
+  // what is saved — pick a currency and the lines re-label as you look at
+  // them, which is the whole reason the control sits down there.
+  const curNow = editingItems ? draftCurrency : (p.currency ?? "IDR");
+  const draftForeign = draftCurrency.toUpperCase() !== "IDR";
+  const draftRateNum = draftRate.trim() === "" ? null : Number(draftRate);
+  const currencyChanged =
+    draftCurrency.toUpperCase() !== (p.currency ?? "IDR").toUpperCase();
 
   function startNumberEdit() {
     setDraftNumber(p.number);
@@ -226,7 +243,17 @@ export default function PurchaseOrderDetailPage() {
 
   function startItemsEdit() {
     setDraftItems(p.items.map((i) => ({ ...i })));
+    setDraftCurrency((p.currency ?? "IDR").toUpperCase());
+    setDraftRate(p.fx_rate == null ? "" : String(p.fx_rate));
     setEditingItems(true);
+  }
+  /** Open the editor from the header summary and put it on screen. */
+  function editFromHeader() {
+    startItemsEdit();
+    window.setTimeout(
+      () => itemsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
+    );
   }
   function commitItems() {
     // Each line carries its own amount, and the PO total is their sum. Saving
@@ -235,10 +262,21 @@ export default function PurchaseOrderDetailPage() {
     const keep = draftItems
       .filter((it) => (it.description ?? "").trim() || (it.qty ?? 0) > 0)
       .map((it) => ({ ...it, amount: lineAmount(it) }));
-    patch.mutate(
-      { items: keep, total: keep.reduce((s, it) => s + lineAmount(it), 0) },
-      { onSuccess: () => { refresh(); setEditingItems(false); } },
-    );
+    const body: Record<string, any> = {
+      items: keep,
+      total: keep.reduce((s, it) => s + lineAmount(it), 0),
+    };
+    // Sent only when actually moved. An unchanged currency in the payload
+    // would be a change the server has to police (finance may not touch it)
+    // and, from anyone but the director, a row in the approvals queue for a
+    // decision nobody made.
+    if (currencyChanged) body.currency = draftCurrency;
+    // A rupiah order has no rate to send — rupiah per rupiah is 1, and the
+    // server writes that itself. Sending null here would talk it out of its
+    // own rule and leave an IDR order with no rate at all.
+    const rateBefore = p.fx_rate == null ? null : Number(p.fx_rate);
+    if (draftForeign && draftRateNum !== rateBefore) body.fx_rate = draftRateNum;
+    patch.mutate(body, { onSuccess: () => { refresh(); setEditingItems(false); } });
   }
 
   return (
@@ -453,34 +491,21 @@ export default function PurchaseOrderDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm border-t border-ink-100 pt-4">
-          {/* The currency the vendor is being asked to invoice in. It prints
-              on every money column of the PO, so it belongs beside the total
-              rather than buried in the create form. */}
+          {/* Currency, total and rate all read from the lines below now, and
+              are shown here rather than set here.
+
+              They used to be editable in this header, which put them a long
+              way from the thing they price. On an order with several lines
+              that is the wrong end: switching the currency up here re-labels
+              every figure further down the page, out of sight, and the total
+              typed here could disagree with the lines that add up to
+              something else — which is exactly what it did. One place owns
+              the money now, and it is the place that shows the money. */}
           <Meta label={T("Currency")}>
-            <select
-              value={p.currency ?? "IDR"}
-              onChange={(e) => patch.mutate({ currency: e.target.value })}
-              disabled={patch.isPending}
-              className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c.code} value={c.code}>{c.code} — {T(c.name)}</option>
-              ))}
-            </select>
+            <span className="tabular-nums">{p.currency ?? "IDR"}</span>
           </Meta>
           <Meta label={`${T("Total")} (${p.currency ?? "IDR"})`}>
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              defaultValue={p.total}
-              onBlur={(e) => {
-                const v = Number(e.target.value);
-                if (v !== p.total) patch.mutate({ total: v });
-              }}
-              disabled={patch.isPending || isFinance}
-              className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full disabled:opacity-60"
-            />
+            <span className="tabular-nums">{money(p.total, p.currency)}</span>
           </Meta>
           {/* What the order is worth in rupiah. Kept on the PO rather than
               looked up live, because the rate that matters is the one the
@@ -488,20 +513,9 @@ export default function PurchaseOrderDetailPage() {
               March order cost. Finance corrects it once the bank confirms. */}
           {foreign && (
             <Meta label={`${T("Rate")} (Rp / ${p.currency})`}>
-              <input
-                type="number"
-                min={0}
-                step="any"
-                defaultValue={p.fx_rate ?? ""}
-                placeholder={T("not set")}
-                onBlur={(e) => {
-                  const raw = e.target.value.trim();
-                  const v = raw === "" ? null : Number(raw);
-                  if (v !== (p.fx_rate ?? null)) patch.mutate({ fx_rate: v });
-                }}
-                disabled={patch.isPending}
-                className="bg-transparent border-0 border-b border-dashed border-ink-200 hover:border-brand-300 focus:border-brand-500 focus:outline-none text-ink-900 text-sm w-full"
-              />
+              {p.fx_rate == null
+                ? <span className="text-amber-700 text-xs">{T("not set")}</span>
+                : <span className="tabular-nums">{p.fx_rate}</span>}
             </Meta>
           )}
           {foreign && (
@@ -521,6 +535,18 @@ export default function PurchaseOrderDetailPage() {
             {p.project_actual_delivery ?? "—"}
           </Meta>
         </div>
+
+        <div className="text-xs muted flex items-center gap-1.5 flex-wrap">
+          <Coins size={12} className="text-brand-600 shrink-0" />
+          {tt("The currency, the rate and the total come from the items below — set them there and this reads back what they say.",
+              "Mata uang, kurs, dan total berasal dari item di bawah — atur di sana dan bagian ini mengikuti.")}
+          {!editingItems && (
+            <button className="underline hover:no-underline text-brand-700"
+                    onClick={editFromHeader}>
+              {tt("Edit items", "Ubah item")}
+            </button>
+          )}
+        </div>
       </div>
 
       <ShippingPanel
@@ -532,11 +558,20 @@ export default function PurchaseOrderDetailPage() {
       />
 
       {/* Items */}
-      <div className="card overflow-hidden">
+      <div className="card overflow-hidden" ref={itemsRef}>
         <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-2">
           <div>
-            <div className="font-semibold">{T("Items")}</div>
-            <div className="text-xs muted">{T("What this PO covers.")}</div>
+            <div className="font-semibold flex items-center gap-2">
+              {T("Items")}
+              <span className="chip bg-ink-100 text-ink-700 text-[11px]">
+                {curNow}
+              </span>
+            </div>
+            <div className="text-xs muted">
+              {T("What this PO covers.")}{" "}
+              {tt("What they add up to, in the currency set here, is the PO total.",
+                  "Jumlahnya, dalam mata uang yang diatur di sini, adalah total PO.")}
+            </div>
           </div>
           {!editingItems ? (
             <button className="btn-ghost" onClick={startItemsEdit}>
@@ -557,6 +592,78 @@ export default function PurchaseOrderDetailPage() {
             </div>
           )}
         </header>
+
+        {/* The money settings, beside the lines they apply to. */}
+        {editingItems && (
+          <div className="px-5 py-3 bg-ink-50/50 border-b border-ink-100
+                          flex items-end gap-5 flex-wrap">
+            <label className="text-[10px] uppercase tracking-wider muted">
+              {T("Currency")}
+              <select
+                className="input mt-1 w-56 text-sm"
+                value={draftCurrency}
+                disabled={isFinance}
+                title={isFinance
+                  ? tt("The currency is part of what was agreed with the vendor — purchasing's to change.",
+                       "Mata uang adalah bagian dari kesepakatan dengan pemasok — hak pembelian untuk mengubahnya.")
+                  : undefined}
+                onChange={(e) => {
+                  const next = e.target.value.toUpperCase();
+                  setDraftCurrency(next);
+                  // A rate belongs to the currency it was quoted against —
+                  // the same rule the server applies on save. Leaving 3000
+                  // sitting in the box after CNY → USD would offer a yuan
+                  // rate as if it were a dollar one. Switching back restores
+                  // what is actually on the order.
+                  setDraftRate(
+                    next === (p.currency ?? "IDR").toUpperCase()
+                      ? (p.fx_rate == null ? "" : String(p.fx_rate))
+                      : "",
+                  );
+                }}>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} — {T(c.name)}</option>
+                ))}
+              </select>
+            </label>
+            {draftForeign && (
+              <label className="text-[10px] uppercase tracking-wider muted">
+                {T("Rate")} (Rp / {draftCurrency})
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  className="input mt-1 w-40 text-sm tabular-nums"
+                  placeholder={T("not set")}
+                  value={draftRate}
+                  onChange={(e) => setDraftRate(e.target.value)} />
+              </label>
+            )}
+            <div className="ml-auto text-right">
+              <div className="text-[10px] uppercase tracking-wider muted">
+                {T("Lines add up to")}
+              </div>
+              <div className="font-semibold tabular-nums">
+                {money(draftTotal, draftCurrency)}
+              </div>
+              {draftForeign && (
+                <div className="text-[11px] muted tabular-nums">
+                  {draftRateNum && draftRateNum > 0
+                    ? `≈ ${idr(draftTotal * draftRateNum)}`
+                    : tt("set a rate to see this in rupiah",
+                         "isi kurs untuk melihatnya dalam rupiah")}
+                </div>
+              )}
+            </div>
+            {currencyChanged && (
+              <div className="w-full text-[11px] text-amber-700 flex items-start gap-1.5">
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                {tt(`The figures below are not converted — they are what was agreed with the vendor, and saving makes them read as ${draftCurrency}. Change the prices too if the deal itself changed.`,
+                    `Angka di bawah tidak dikonversi — itu yang disepakati dengan pemasok, dan setelah disimpan akan terbaca sebagai ${draftCurrency}. Ubah harganya juga kalau kesepakatannya memang berubah.`)}
+              </div>
+            )}
+          </div>
+        )}
 
         {editingItems ? (
           <div className="p-4 space-y-2">
@@ -598,7 +705,7 @@ export default function PurchaseOrderDetailPage() {
                     and the lines kept saying the old price. */}
                 <div className="col-span-2">
                   <span className="text-[10px] uppercase muted">
-                    {T("Unit price")} ({p.currency ?? "IDR"})
+                    {T("Unit price")} ({draftCurrency})
                   </span>
                   <input
                     type="number"
@@ -619,7 +726,7 @@ export default function PurchaseOrderDetailPage() {
                   <span className="text-[10px] uppercase muted">{T("Amount")}</span>
                   <div className="input bg-ink-50/60 text-right tabular-nums truncate"
                        title={String(lineAmount(it))}>
-                    {money(lineAmount(it), p.currency)}
+                    {money(lineAmount(it), draftCurrency)}
                   </div>
                 </div>
                 {!isFinance && (
@@ -650,9 +757,9 @@ export default function PurchaseOrderDetailPage() {
               <div className="text-sm">
                 <span className="muted">{T("Lines add up to")}{" "}</span>
                 <span className="font-semibold tabular-nums">
-                  {money(draftTotal, p.currency)}
+                  {money(draftTotal, draftCurrency)}
                 </span>
-                {Math.abs(draftTotal - (p.total ?? 0)) > 0.5 && (
+                {(Math.abs(draftTotal - (p.total ?? 0)) > 0.5 || currencyChanged) && (
                   <span className="ml-2 text-[11px] text-amber-700">
                     {T("· saving will set the PO total to this")}</span>
                 )}
