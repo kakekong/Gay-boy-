@@ -126,6 +126,13 @@ async def _apply_quotation_changes(db: AsyncSession, q: Quotation, changes: dict
         items = list(q.items)
     _recalc(q, items)
     await db.flush()
+    # Approving a queued line edit is the same act as making one directly, so
+    # the price request follows it the same way. Without this, the one edit
+    # path that *needs* the director's signature was the one that left the two
+    # documents disagreeing.
+    if new_items is not None:
+        from app.services.price_request_sync import sync_from_quotation
+        await sync_from_quotation(db, q, None, items)
 
 
 def _recalc(q: Quotation, items: list[QuotationItem]) -> None:
@@ -467,6 +474,11 @@ async def update_quotation(
     q.updated_by = user.id
     _recalc(q, items)
     await db.flush()
+    # The request behind it follows the deal. Only when the lines moved —
+    # changing a validity date or a note says nothing about what was ordered.
+    if new_items is not None:
+        from app.services.price_request_sync import sync_from_quotation
+        await sync_from_quotation(db, q, user, items)
     await audit_record(db, actor=user, action="update", entity="quotation",
                        entity_id=q.id)
     return await _load(q.id, db)

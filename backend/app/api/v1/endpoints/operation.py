@@ -408,7 +408,27 @@ async def project_full(project_id: UUID,
                 if show_money:
                     row["sell_price"] = it.get("sell_price")
                 pr_items.append(row)
-            price_request = {"id": str(pr.id), "number": pr.number, "items": pr_items}
+            price_request = {"id": str(pr.id), "number": pr.number,
+                             "items": pr_items}
+            # Does the order on this page still say what the deal says?
+            #
+            # The card reads the request live, so it is right whenever the
+            # request is. What it cannot see on its own is the quotation the
+            # deal was actually negotiated on — and an order placed before
+            # quotation edits started reaching the request can be sitting
+            # here describing something nobody agreed to any more. So it
+            # asks, and says so, with the button to pull it across.
+            if show_money:
+                from app.services.price_request_sync import (
+                    diff_against_quotation, quotation_for_request,
+                )
+                quote = await quotation_for_request(db, pr)
+                if quote is not None:
+                    drift = diff_against_quotation(pr, quote)
+                    price_request["quotation_id"] = str(quote.id)
+                    price_request["quotation_number"] = quote.number
+                    price_request["quotation_status"] = quote.status
+                    price_request["drift"] = drift
     # Sales rep in charge (the customer's account owner) so the detail page can
     # show who owns the deal.
     sales_rep = None
@@ -1060,6 +1080,79 @@ def _skip_payload(p: Project) -> dict:
         "drawing_skipped_by": str(p.drawing_skipped_by) if p.drawing_skipped_by else None,
         "drawing_skip_reason": p.drawing_skip_reason,
     }
+
+
+@router.post("/projects/{project_id}/sync-order")
+async def sync_order_from_quotation(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Bring the order on this project up to date with the deal.
+
+    A quotation edit reaches its price request on its own now, so on anything
+    agreed from here the two already agree and this button finds nothing to
+    do — which is the answer it should give, plainly, rather than pretending
+    to have worked.
+
+    It exists for the jobs that were already running when that started, where
+    the customer moved a quantity or a price on the quotation weeks ago and
+    the request behind it — the thing this page shows as the order, and the
+    thing purchasing buys against — never heard. Pressing it is somebody
+    saying the deal is the authority, which on a live job is a decision worth
+    a name against it rather than something that happens quietly overnight.
+    """
+    from app.services.price_request_sync import (
+        quotation_for_request, sync_from_quotation,
+    )
+    from app.models.price_request import PriceRequest
+
+    if Role(user.role) not in (Role.DIRECTOR, Role.MANAGER, Role.SALES):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "The deal is sales' and the director's — they are who can say the "
+            "quotation is what the order should read.",
+        )
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if not p.price_request_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project has no price request behind it, so there is no "
+            "order on it to bring into line.",
+        )
+    pr = await db.get(PriceRequest, p.price_request_id)
+    if not pr:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "The price request this project fulfils is gone.")
+    quote = await quotation_for_request(db, pr)
+    if quote is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{pr.number} has no live quotation to read the order off.",
+        )
+    from app.core.audit import record as audit_record
+
+    result = await sync_from_quotation(db, quote, user)
+    if not result:
+        return {"ok": True, "changed": False,
+                "quotation_number": quote.number,
+                "detail": f"The order already matches {quote.number}."}
+    await audit_record(
+        db, actor=user, action="sync_order", entity="project", entity_id=p.id,
+        after={"price_request": pr.number, "quotation": quote.number,
+               "lines_changed": result["lines_changed"]},
+    )
+    # Whoever is buying against it needs to know their list moved, and the
+    # supplier requests already out are the ones that will not notice.
+    from app.api.v1.endpoints.supplier_price_requests import _touching
+    touched = await _touching(db, pr.id)
+    return {"ok": True, "changed": True, **result,
+            "supplier_requests_to_review": [
+                {"id": str(s.id), "number": s.number, "status": s.status}
+                for s in touched if s.status in ("draft", "sent", "quoted")
+            ]}
 
 
 @router.post("/projects/{project_id}/skip-drawing")

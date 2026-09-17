@@ -212,6 +212,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_payment_reversal.py` | the director takes a receipt back off an invoice: negative payment row, mirror ledger entry, invoice unpaid again, project off `closed`, no double-reversal |
 | `test_cash_adjust.py` | correcting what a cash/bank account holds: posts a balanced `adjustment` journal entry rather than writing over the derived total; finance + director only; refuses non-cash, headings, no-op corrections and cash-on-both-sides |
 | `test_po_money_with_lines.py` | a supplier PO's currency + rate now travel with its lines in one save: the pair queues together for the director (never a new rate against an old currency), each still behaves as before alone, and finance keeps the rate but not the currency |
+| `test_order_sync_back.py` | the reverse sync: a quotation edit rewrites the price request behind it (cost untouched), the supplier request is told but never rewritten, and the project's order card reports drift with a button to clear it |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -503,6 +504,25 @@ over the outstanding statuses counts a half-paid invoice at full value — that
 bug lived in `/reports/ar-aging-detail`, `/kpi/finance` and the customer
 summary card while `/finance/ar/aging` was already netting correctly.
 `test_partial_payment_ar.py` pins all four to the same number.
+
+**Sync between the order documents runs in three modes, and the mode is the
+design.** `quotation_sync.sync_from_price_request` pushes request → quotation
+(only onto `draft`/`rejected`; anything else gets a note).
+`price_request_sync.sync_from_quotation` pushes the other way and always
+applies — hooked into `update_quotation` **and** `_apply_quotation_changes`,
+which is the approvals-applied path, so a director-approved line edit lands
+too. The supplier price request is never written to automatically: it reports
+`source_drift` on every read and moves only on
+`POST /purchasing/price-requests/{id}/refresh-from-source`.
+
+Two traps if you touch this. **`q.items` is stale right after an edit** — the
+new `QuotationItem` rows are built with `quotation_id=` and added to the
+session, never appended to the relationship, so `sync_from_quotation` takes an
+explicit `items` list the way `_recalc` does; read `q.items` instead and the
+sync compares the old lines with themselves and silently does nothing (it did,
+until a driver caught it). And **the two services must never call each other**
+— request→quotation writes quotation rows directly and quotation→request
+writes `pr.items` directly, which is what keeps this from looping.
 
 **A supplier PO's currency and rate belong to its lines.** They are edited in
 the items editor (`PurchaseOrderDetail.tsx`), go up in the same PATCH as

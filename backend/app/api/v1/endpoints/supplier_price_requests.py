@@ -53,6 +53,13 @@ router = APIRouter(dependencies=[Depends(require(
 ))])
 
 _OPEN = ("draft", "sent")
+# Pulling the customer request's lines across again is allowed for longer than
+# editing them by hand is. A request that has been answered is exactly the one
+# where the drift matters — the quantities the vendor priced are no longer the
+# quantities we need — so purchasing can bring it up to date and go back to
+# them. What is finished (closed, cancelled) stays as the record of what was
+# actually asked and answered.
+_REFRESHABLE = ("draft", "sent", "quoted")
 
 
 # ─── payloads ────────────────────────────────────────────────────────────────
@@ -173,10 +180,17 @@ def _line_total(it: dict) -> float:
 
 def _out(spr: SupplierPriceRequest, supplier: Supplier | None,
          pr: PriceRequest | None = None,
-         sources: list[dict] | None = None) -> dict:
+         sources: list[dict] | None = None,
+         drift: list[dict] | None = None) -> dict:
     items = [dict(i) for i in (spr.items or [])]
     quoted = [i for i in items if i.get("quoted_price") is not None]
     return {
+        # What has moved on the customer request since these lines were
+        # copied off it, and whether pulling it across is still allowed. The
+        # screen shows the first and offers the second; neither happens on
+        # its own.
+        "source_drift": drift or [],
+        "may_refresh": spr.status in _REFRESHABLE,
         "id": str(spr.id),
         "number": spr.number,
         "status": spr.status,
@@ -247,7 +261,7 @@ async def _decorate(db: AsyncSession, rows: list[SupplierPriceRequest]) -> list[
                                     x for x in lines if x is not None)})
         out.append(_out(r, sups.get(r.supplier_id),
                         prs.get(r.price_request_id) if r.price_request_id else None,
-                        sources))
+                        sources, _source_drift(r, prs)))
     return out
 
 
@@ -285,6 +299,52 @@ def _copy_line(pr: PriceRequest, it: dict, line_no: int) -> dict:
         "source_pr_number": pr.number,
         "source_line_no": it.get("line_no"),
     }
+
+
+def _source_drift(spr: SupplierPriceRequest,
+                  prs: dict[UUID, PriceRequest]) -> list[dict]:
+    """Where this request's lines no longer match the ones they were copied
+    from. Read-only — it reports, it does not touch anything.
+
+    The copy is taken when the request is built and never refreshed, which is
+    right: a supplier has been sent a list and may have priced it, so quietly
+    rewriting it under them would be a different question than the one they
+    answered. But saying nothing is how the two screens in front of purchasing
+    end up disagreeing about the same order with no clue which is current.
+    Each line remembers `source_pr_id` + `source_line_no`, so this is a lookup,
+    not a guess.
+    """
+    out: list[dict] = []
+    for it in (spr.items or []):
+        src_id, src_no = it.get("source_pr_id"), it.get("source_line_no")
+        if not src_id or src_no is None:
+            continue
+        try:
+            pr = prs.get(UUID(str(src_id)))
+        except (ValueError, TypeError):
+            continue
+        if pr is None:
+            continue
+        origin = _pr_line(pr, int(src_no))
+        if origin is None:
+            out.append({"line_no": it.get("line_no"), "change": "source_gone",
+                        "description": it.get("description"),
+                        "source_number": it.get("source_pr_number")})
+            continue
+        fields = []
+        for k in ("description", "qty", "uom"):
+            if k == "qty":
+                was, now = float(it.get(k) or 0), float(origin.get(k) or 0)
+            else:
+                was, now = (it.get(k) or ""), (origin.get(k) or "")
+            if was != now:
+                fields.append({"field": k, "on_request": was, "on_source": now})
+        if fields:
+            out.append({"line_no": it.get("line_no"), "change": "differs",
+                        "description": it.get("description"),
+                        "source_number": it.get("source_pr_number"),
+                        "fields": fields})
+    return out
 
 
 async def _touching(db: AsyncSession, pr_id: UUID) -> list[SupplierPriceRequest]:
@@ -591,6 +651,152 @@ async def update_request(
                        after={"number": spr.number, "fields": sorted(data)})
     await db.flush()
     return (await _decorate(db, [spr]))[0]
+
+
+class RefreshIn(BaseModel):
+    # Lines added to the customer request after this one was built. Left
+    # unset, it decides for itself: a request holding every line of a single
+    # source takes them, a split or joint one does not — somebody chose which
+    # lines this vendor gets, and filling the gap back in would quietly undo
+    # that choice.
+    add_new_lines: bool | None = None
+
+
+@router.post("/{spr_id}/refresh-from-source")
+async def refresh_from_source(
+    spr_id: UUID,
+    payload: RefreshIn | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Pull the customer request's lines across again, by hand.
+
+    The lines here were copied when this was built and never refreshed since,
+    which is the right default: the supplier is holding this list, and
+    rewriting it under them would make their answer say something they never
+    agreed to. But the customer request does move — a quantity goes up, a line
+    is reworded, the customer adds an item — and then two screens describe the
+    same order differently with nothing to say which one is current.
+
+    So the drift is reported on the request itself, and this is the button
+    that acts on it. What the supplier said is kept: their price is per unit,
+    so it still means what it meant when the quantity changes, and the line
+    total simply follows. Only what we asked for moves.
+
+    A line whose source has been deleted is left exactly as it is and named in
+    the reply — it may be the one thing on this request the vendor priced, and
+    throwing it away to tidy up would lose the quote with it.
+    """
+    spr = await _load(spr_id, db)
+    if spr.status not in _REFRESHABLE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This request is '{spr.status}' — it is the record of what was "
+            "asked and answered now. Raise a new one for a changed order.",
+        )
+
+    pr_ids: set[UUID] = set()
+    if spr.price_request_id:
+        pr_ids.add(spr.price_request_id)
+    for sid in (spr.source_pr_ids or []):
+        try:
+            pr_ids.add(UUID(str(sid)))
+        except (ValueError, TypeError):
+            continue
+    prs = {p.id: p for p in (await db.scalars(
+        select(PriceRequest).where(PriceRequest.id.in_(pr_ids)))).all()} if pr_ids else {}
+    if not prs:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This request wasn't built from a customer price request, so "
+            "there is nothing to refresh it from.",
+        )
+
+    held = {(str(i.get("source_pr_id")), int(i.get("source_line_no")))
+            for i in (spr.items or [])
+            if i.get("source_pr_id") and i.get("source_line_no") is not None}
+    # Does it hold every line of exactly one request? Then it is the "ask them
+    # all" shape, and a line added to that request belongs on it too.
+    single = len(prs) == 1 and spr.price_request_id is not None
+    covers_all = single and all(
+        (str(pr.id), int(it.get("line_no") or 0)) in held
+        for pr in prs.values() for it in (pr.items or [])
+    )
+    want_new = (payload.add_new_lines if payload and payload.add_new_lines is not None
+                else covers_all)
+
+    updated: list[dict] = []
+    orphaned: list[dict] = []
+    items: list[dict] = []
+    for it in (spr.items or []):
+        row = dict(it)
+        src_id, src_no = row.get("source_pr_id"), row.get("source_line_no")
+        origin = None
+        if src_id and src_no is not None:
+            try:
+                pr = prs.get(UUID(str(src_id)))
+            except (ValueError, TypeError):
+                pr = None
+            if pr is not None:
+                origin = _pr_line(pr, int(src_no))
+                if origin is None:
+                    orphaned.append({"line_no": row.get("line_no"),
+                                     "description": row.get("description")})
+        if origin is not None:
+            fields = []
+            for k in ("description", "qty", "uom"):
+                if k == "qty":
+                    was, now = float(row.get(k) or 0), float(origin.get(k) or 0)
+                else:
+                    was, now = (row.get(k) or ""), (origin.get(k) or "")
+                if was != now:
+                    fields.append({"field": k, "was": was, "now": now})
+                row[k] = now
+            row["spec"] = origin.get("spec") or {}
+            if fields:
+                updated.append({"line_no": row.get("line_no"),
+                                "description": row.get("description"),
+                                "fields": fields})
+        items.append(row)
+
+    added: list[dict] = []
+    if want_new:
+        next_no = max([int(i.get("line_no") or 0) for i in items] or [0]) + 1
+        for pr in prs.values():
+            for it in (pr.items or []):
+                key = (str(pr.id), int(it.get("line_no") or 0))
+                if key in held:
+                    continue
+                row = _copy_line(pr, it, next_no)
+                items.append(row)
+                added.append({"line_no": next_no,
+                              "description": row.get("description"),
+                              "source_number": pr.number})
+                next_no += 1
+
+    if not (updated or added):
+        return {"ok": True, "changed": False,
+                "detail": "Already matches the customer request.",
+                "updated": [], "added": [], "orphaned": orphaned,
+                "request": (await _decorate(db, [spr]))[0]}
+
+    spr.items = items
+    note = ("[system] Refreshed from "
+            + ", ".join(sorted({p.number for p in prs.values()}))
+            + f" by {user.full_name}: {len(updated)} line(s) updated"
+            + (f", {len(added)} added" if added else "")
+            + (f", {len(orphaned)} with no source left" if orphaned else "") + ".")
+    spr.notes = f"{(spr.notes or '').rstrip()}\n{note}".strip()
+    await db.flush()
+    await audit_record(
+        db, actor=user, action="refresh_from_source",
+        entity="supplier_price_request", entity_id=spr.id,
+        after={"updated": len(updated), "added": len(added),
+               "orphaned": len(orphaned)},
+    )
+    return {"ok": True, "changed": True,
+            "updated": updated, "added": added, "orphaned": orphaned,
+            "request": (await _decorate(db, [spr]))[0]}
 
 
 @router.post("/{spr_id}/send")

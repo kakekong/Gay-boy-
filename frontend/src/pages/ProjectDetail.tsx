@@ -6,6 +6,7 @@ import {
   ShoppingCart, Wrench, Plus, CheckCircle, XCircle, ShieldCheck,
   Loader2, Hammer, User as UserIcon, Trash2, Tag, HelpCircle, ArrowRight, Link2,
   Pencil, Save, FileDown, Stamp, PackageCheck,
+  Check, AlertCircle, RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -1332,6 +1333,7 @@ export default function ProjectDetailPage() {
             </div>
             <div className="text-xs muted">{t("The approved price request this project fulfils.", "Permintaan harga yang disetujui dan dipenuhi proyek ini.")}</div>
           </div>
+          <OrderDrift pr={priceReq} projectId={p.id} />
           <table className="w-full text-sm">
             <thead className="bg-ink-50/60">
               <tr>
@@ -3067,6 +3069,109 @@ function Stat({ label, value, tone }: {
         {T(label)}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Does the order on this page still say what the deal says?
+ *
+ * The card below reads the price request live, so it is right whenever the
+ * request is — and a quotation edit now reaches the request on its own, so on
+ * anything agreed from here the two simply agree and this shows nothing.
+ *
+ * It is here for the jobs that were already running before that existed,
+ * where a quantity or a price moved on the quotation weeks ago and the order
+ * purchasing buys against never heard. Silence would be the worst answer:
+ * the page would keep showing a number somebody could act on with nothing to
+ * say it had been overtaken.
+ */
+function OrderDrift({ pr, projectId }: { pr: any; projectId: string }) {
+  const qc = useQueryClient();
+  const t = useT();
+  const role = useAuthStore((s) => s.user?.role) ?? "";
+  const maySync = role === "director" || role === "manager" || role === "sales";
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const drift: any[] = pr?.drift ?? [];
+
+  const sync = useMutation({
+    mutationFn: () => api.post(`/operation/projects/${projectId}/sync-order`),
+    onSuccess: (r: any) => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["project-full"] });
+      qc.invalidateQueries({ queryKey: ["price-request"] });
+      const n = r?.data?.lines_changed;
+      setDone(r?.data?.changed
+        ? t(`${n} line(s) brought into line with ${r?.data?.quotation_number}.`,
+             `${n} baris disamakan dengan ${r?.data?.quotation_number}.`)
+        : t("Already matches the quotation.", "Sudah sama dengan penawaran."));
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+      ?? e?.message ?? t("That didn't sync.", "Gagal menyamakan."),
+    ),
+  });
+
+  if (!pr?.quotation_number) return null;
+  if (!drift.length) {
+    return (
+      <div className="mt-2 text-[11px] muted flex items-center gap-1.5 flex-wrap">
+        <Check size={12} className="text-emerald-600 shrink-0" />
+        {t(`Matches ${pr.quotation_number}.`, `Sama dengan ${pr.quotation_number}.`)}
+        {done && <span className="text-emerald-700">· {done}</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2
+                    text-[11px] text-amber-900 space-y-1">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <AlertCircle size={12} className="shrink-0" />
+        <span className="font-medium">
+          {t(`This order no longer matches ${pr.quotation_number}`,
+             `Pesanan ini tidak lagi sama dengan ${pr.quotation_number}`)}
+        </span>
+        <span>
+          {t("— the deal moved after the order was placed.",
+             "— kesepakatan berubah setelah pesanan dibuat.")}
+        </span>
+      </div>
+      <ul className="pl-4 list-disc space-y-0.5">
+        {drift.slice(0, 6).map((d: any, i: number) => (
+          <li key={i}>
+            {t("Line", "Baris")} {d.line_no}
+            {d.change === "only_on_quotation"
+              ? ` · ${t("on the quotation only", "hanya ada di penawaran")}`
+              : d.change === "only_on_request"
+              ? ` · ${t("not on the quotation any more", "sudah tidak ada di penawaran")}`
+              : ": " + (d.fields ?? []).map((f: any) =>
+                  `${f.field} ${f.was} → ${f.now}`).join(", ")}
+          </li>
+        ))}
+        {drift.length > 6 && <li>+{drift.length - 6}…</li>}
+      </ul>
+      {err && <div className="text-red-700">{err}</div>}
+      {maySync ? (
+        <button className="btn-ghost text-xs text-amber-900 underline hover:no-underline"
+                disabled={sync.isPending}
+                onClick={() => {
+                  if (window.confirm(t(
+                    `Make this order read what ${pr.quotation_number} says? The quotation is the deal, so its lines and prices replace the ones here. Purchasing buys against this, so tell them if a supplier request is already out.`,
+                    `Samakan pesanan ini dengan ${pr.quotation_number}? Penawaran adalah kesepakatannya, jadi baris dan harganya menggantikan yang di sini. Pembelian membeli berdasarkan ini, jadi beri tahu mereka kalau permintaan ke pemasok sudah dikirim.`)))
+                    sync.mutate();
+                }}>
+          {sync.isPending
+            ? <Loader2 size={12} className="animate-spin" />
+            : <RefreshCw size={12} />}
+          {t("Bring it into line with the quotation", "Samakan dengan penawaran")}
+        </button>
+      ) : (
+        <div className="muted">
+          {t("Sales, a manager or the director can bring it into line.",
+             "Sales, manajer, atau direktur yang bisa menyamakannya.")}
+        </div>
+      )}
     </div>
   );
 }

@@ -189,6 +189,18 @@ Around the PR:
 - **Quote import**: line items can be imported from an existing Excel/PDF quotation document instead of typed by hand.
 - **Follow-ups**: logged on the quote or the customer, and recorded immediately by whoever logged them — the call has already happened, and the note is the record of it. A follow-up can schedule the next reminder at the same time. They used to route to the director; nothing was being decided, and holding the record back only made it late.
 
+### 6.1b The order and the deal stay in step
+
+The price request and the quotation made from it are the same order twice, so they are kept in step — but in **three different ways**, and the difference is who is already holding a copy.
+
+| Movement | How | Why |
+|---|---|---|
+| **Price request → quotation** | automatic, but only onto a quotation nobody has acted on (`draft` / `rejected`). Anything submitted, approved, sent or won gets a **note** instead | a quotation in a customer's hands must not silently become a different number |
+| **Quotation → price request** | **automatic, always** | the deal is negotiated on the quotation — a quantity moves, a price moves on a call, a line is reworded — and the price request is what purchasing buys against and what the project page shows as the order. A line edit on a PR-backed quotation has already been through the director (sales cannot make one at all), so by the time it is on the quotation it *is* the decision. Purchasing's **cost** is never touched: a quotation knows the selling price and carries cost only as an estimate |
+| **Price request → supplier price request** | **by hand**, on a button | the vendor has been sent a list and may have priced it. The drift is reported line by line on the supplier request ("line 2: qty 8 → 10"), and **Bring this list up to date** pulls it across. What the supplier quoted is kept — their price is per unit, so a line total simply follows the new quantity. Allowed while `draft` / `sent` / `quoted`; a closed request is the record of what was asked and answered |
+
+**The project needs nothing.** Its Order card reads the price request live, so once the request is right the project is right. The card compares itself against the live quotation and, when they disagree, says which lines and offers **Bring it into line with the quotation** (sales, manager or director) — that button is for jobs that were already running before any of this existed. Running it also lists the supplier requests that will not have noticed.
+
 ### 6.2 Revisions
 
 "Post revision" on an approved/sent/rejected/lost quote clones it into a **new editable draft** numbered `<base>-R<n>` (version bumped, parent linked, items/prices/PR link copied). The revision walks the normal submit → director approval path. **When the revision is approved, the original flips to `superseded`** so only one version of the offer is ever live. One open revision at a time; the header shows the whole revision chain as links.

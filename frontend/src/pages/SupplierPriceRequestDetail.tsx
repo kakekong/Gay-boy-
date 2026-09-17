@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, ClipboardList, Loader2, AlertCircle, Send, Save, CheckCircle2,
-  Archive, Trash2, Truck, Building2, CalendarDays, Pencil, X,
+  Archive, Trash2, Truck, Building2, CalendarDays, Pencil, X, RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
 import { CURRENCIES, money } from "@/lib/currency";
@@ -80,6 +80,19 @@ interface SPR {
   quoted_total: number | null;
   lines_quoted: number;
   lines_total: number;
+  /** Where these lines no longer match the customer request they were copied
+   *  from. Reported, never applied on its own — the supplier is holding this
+   *  list. */
+  source_drift?: {
+    line_no: number;
+    change: "differs" | "source_gone";
+    description?: string | null;
+    source_number?: string | null;
+    fields?: { field: string; on_request: any; on_source: any }[];
+  }[];
+  /** Whether pulling the changes across is still allowed — a closed request
+   *  is the record of what was asked and answered. */
+  may_refresh?: boolean;
 }
 
 export default function SupplierPriceRequestDetailPage() {
@@ -165,6 +178,27 @@ export default function SupplierPriceRequestDetailPage() {
       setEditing(false);
       refresh();
       setFlash({ kind: "ok", text: t("Request updated.", "Permintaan diperbarui.") });
+    },
+    onError: onErr,
+  });
+  // Pull the customer request's lines across again. By hand, on purpose: the
+  // supplier is holding this list and may have priced it, so bringing it up to
+  // date is purchasing deciding to go back to them, not something that should
+  // happen to their document overnight.
+  const refreshSrc = useMutation({
+    mutationFn: () => api.post(
+      `/purchasing/price-requests/${id}/refresh-from-source`, {}),
+    onSuccess: (resp: any) => {
+      refresh();
+      const b = resp?.data ?? {};
+      setFlash({
+        kind: "ok",
+        text: b.changed
+          ? t(`${(b.updated ?? []).length} line(s) updated${(b.added ?? []).length ? `, ${(b.added ?? []).length} added` : ""}. Tell the supplier if they have already priced it.`,
+               `${(b.updated ?? []).length} baris diperbarui${(b.added ?? []).length ? `, ${(b.added ?? []).length} ditambahkan` : ""}. Beri tahu pemasok kalau mereka sudah memberi harga.`)
+          : t("Already matches the customer request.",
+               "Sudah sama dengan permintaan pelanggan."),
+      });
     },
     onError: onErr,
   });
@@ -453,6 +487,54 @@ export default function SupplierPriceRequestDetailPage() {
           </div>
         )}
       </div>
+
+      {/* The customer request moved under this one. */}
+      {(r.source_drift?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3
+                        text-sm text-amber-900 space-y-1.5">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle size={14} className="shrink-0" />
+            {t("The customer request has changed since this list was drawn up",
+               "Permintaan pelanggan sudah berubah sejak daftar ini dibuat")}
+          </div>
+          <div className="text-xs">
+            {t("This is what the supplier is holding, so it is left exactly as they were given it. Pull the changes across when you are ready to go back to them.",
+               "Ini yang dipegang pemasok, jadi dibiarkan persis seperti yang mereka terima. Tarik perubahannya saat Anda siap menghubungi mereka lagi.")}
+          </div>
+          <ul className="text-xs pl-4 list-disc space-y-0.5">
+            {(r.source_drift ?? []).slice(0, 6).map((d: any, i: number) => (
+              <li key={i}>
+                {t("Line", "Baris")} {d.line_no}
+                {d.change === "source_gone"
+                  ? ` · ${t("its line on the customer request is gone", "barisnya di permintaan pelanggan sudah dihapus")}`
+                  : ": " + (d.fields ?? []).map((f: any) =>
+                      `${f.field} ${f.on_request} → ${f.on_source}`).join(", ")}
+              </li>
+            ))}
+            {(r.source_drift ?? []).length > 6 && <li>+{(r.source_drift ?? []).length - 6}…</li>}
+          </ul>
+          {r.may_refresh ? (
+            <button className="btn-ghost text-xs text-amber-900 underline hover:no-underline"
+                    disabled={refreshSrc.isPending}
+                    onClick={() => {
+                      if (window.confirm(t(
+                        "Pull the customer request's lines across? What the supplier quoted stays — their price is per unit, so a line total simply follows the new quantity. Only what we asked for changes.",
+                        "Tarik baris dari permintaan pelanggan? Harga dari pemasok tetap — harganya per satuan, jadi total baris mengikuti jumlah yang baru. Hanya yang kita minta yang berubah.")))
+                        refreshSrc.mutate();
+                    }}>
+              {refreshSrc.isPending
+                ? <Loader2 size={12} className="animate-spin" />
+                : <RefreshCw size={12} />}
+              {t("Bring this list up to date", "Perbarui daftar ini")}
+            </button>
+          ) : (
+            <div className="text-xs">
+              {t("This request is closed — it is the record of what was asked and answered. Raise a new one for the changed order.",
+                 "Permintaan ini sudah ditutup — ini catatan apa yang ditanya dan dijawab. Buat permintaan baru untuk pesanan yang berubah.")}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* What they said, line by line */}
       <div className="card overflow-hidden">
