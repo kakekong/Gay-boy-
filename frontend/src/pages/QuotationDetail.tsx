@@ -367,10 +367,15 @@ export default function QuotationDetailPage() {
               </div>
               {(Q.price_request_number || Q.parent_number || (Q.revisions ?? []).length > 0) && (
                 <div className="mt-1 flex items-center gap-3 flex-wrap text-sm">
+                  {/* It was a link already, coloured like the text around
+                      it — so it read as a caption saying which request this
+                      came from, and people selected it rather than clicked
+                      it. A reference you can follow should look like one,
+                      the way the sales rep's name beside it does. */}
                   {Q.price_request_number && (
                     <Link
                       to={`/price-requests?open=${Q.price_request_id}`}
-                      className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                      className="inline-flex items-center gap-1.5 text-brand-700 hover:underline"
                       title={t("Open the source price request", "Buka permintaan harga sumbernya")}
                     >
                       <Link2 size={14} /> {T("PR")}{" "}{Q.price_request_number}
@@ -511,6 +516,20 @@ export default function QuotationDetailPage() {
                   <Frown size={15} /> {t("Mark lost", "Tandai kalah")}
                 </button>
               </>
+            )}
+            {/* The way back to the request this was built from. The price
+                request has "View quotation" in exactly this spot; the
+                quotation had nothing pointing the other way, so the round
+                trip only worked in one direction. */}
+            {Q.price_request_id && (
+              <button
+                className="btn-ghost"
+                onClick={() => nav(`/price-requests?open=${Q.price_request_id}`)}
+                title={t("Open the price request this quotation was built from",
+                         "Buka permintaan harga yang menjadi dasar penawaran ini")}
+              >
+                <Link2 size={15} /> {t("View price request", "Lihat permintaan harga")}
+              </button>
             )}
             {/* Both exports ask which address to print on first — see
                 ExportAddressDialog. */}
