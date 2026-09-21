@@ -197,6 +197,11 @@ export const ID_STATIC: Record<string, string> = {
     "Centang lebih dari satu untuk mengirim beberapa pekerjaan ke satu pemasok sebagai satu order — barangnya datang satu truk, jadi satu percakapan.",
   "Nothing is waiting for a cost right now.":
     "Tidak ada yang menunggu biaya saat ini.",
+  "No price requests to ask about right now.":
+    "Tidak ada permintaan harga untuk ditanyakan saat ini.",
+  "already priced": "sudah berharga",
+  "Already priced and signed off. Ask about it to buy, or to re-source — applying the quote goes to the director as a cost revision rather than changing the approved cost.":
+    "Sudah dihargai dan disetujui. Tanyakan untuk membeli, atau mencari pemasok lain — menerapkan penawarannya masuk ke direktur sebagai revisi biaya, bukan mengubah biaya yang sudah disetujui.",
   "Or ask about something with no job behind it":
     "Atau tanyakan sesuatu tanpa pekerjaan di belakangnya",
   "Split the lines between suppliers": "Bagi baris antar pemasok",

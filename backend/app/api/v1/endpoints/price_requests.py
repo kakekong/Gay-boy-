@@ -1077,6 +1077,57 @@ def _pending_revision(pr: PriceRequest) -> dict | None:
     return next((r for r in (pr.revisions or []) if r.get("status") == "pending"), None)
 
 
+async def file_revision(
+    db: AsyncSession, pr: PriceRequest, *,
+    kind: str, proposed: list[dict], reason: str | None,
+    notes: str | None, actor: User,
+) -> tuple[int, "UUID"]:
+    """Put a proposed version of a request in front of the director.
+
+    Split out of `propose_revision` so the other place that needs it can use
+    it: a supplier quote that arrives after the request is settled. Applying
+    that quote straight onto the lines would move a cost the director already
+    approved a margin against, and doing it silently is the version of that
+    which nobody catches. Filing it as a revision is the same act the
+    purchasing screen performs by hand, so it lands in the same queue, reads
+    the same way in the log, and is approved with the same button.
+
+    Returns the revision number and the approval request's id.
+    """
+    from app.core.approval import request_approval
+
+    n = len(pr.revisions or []) + 1
+    entry = {
+        "n": n,
+        "kind": kind,
+        "status": "pending",
+        "requested_by": str(actor.id),
+        "requested_by_name": actor.full_name,
+        "requested_at": datetime.now(UTC).isoformat(),
+        "reason": (reason or "").strip() or None,
+        "before_items": list(pr.items or []),
+        "proposed_items": proposed,
+        "proposed_notes": notes,
+        "before_notes": pr.notes,
+    }
+    pr.revisions = list(pr.revisions or []) + [entry]
+    req = await request_approval(
+        db,
+        target_type="price_request_revision",
+        target_id=pr.id,
+        requested_by=actor.id,
+        required_role=Role.DIRECTOR,
+        reason=((f"Cost revision {n} of {pr.number}" if kind == "cost"
+                 else f"Revision {n} of {pr.number}")
+                + (f" — {entry['reason']}" if entry["reason"] else "")),
+        payload={"revision_n": n, "kind": kind},
+    )
+    entry["approval_request_id"] = str(req.id)
+    pr.revisions = list(pr.revisions)      # re-assign so JSONB is flagged dirty
+    await db.flush()
+    return n, req.id
+
+
 @router.post("/{pr_id}/revise")
 async def propose_revision(
     pr_id: UUID,
@@ -1126,39 +1177,14 @@ async def propose_revision(
                             "Costs aren't yours to set on a price request.")
 
     proposed = _norm_items(payload.items, list(pr.items or []))
-    n = len(pr.revisions or []) + 1
-    entry = {
-        "n": n,
-        "kind": kind,
-        "status": "pending",
-        "requested_by": str(user.id),
-        "requested_by_name": user.full_name,
-        "requested_at": datetime.now(UTC).isoformat(),
-        "reason": (payload.reason or "").strip() or None,
-        "before_items": list(pr.items or []),
-        "proposed_items": proposed,
-        "proposed_notes": payload.notes,
-        "before_notes": pr.notes,
-    }
-    pr.revisions = list(pr.revisions or []) + [entry]
-
-    from app.core.approval import request_approval
-    req = await request_approval(
-        db,
-        target_type="price_request_revision",
-        target_id=pr.id,
-        requested_by=user.id,
-        required_role=Role.DIRECTOR,
-        reason=((f"Cost revision {n} of {pr.number}" if kind == "cost"
-                 else f"Revision {n} of {pr.number}")
-                + (f" — {entry['reason']}" if entry["reason"] else "")),
-        payload={"revision_n": n, "kind": kind},
+    n, req_id = await file_revision(
+        db, pr, kind=kind, proposed=proposed,
+        reason=payload.reason, notes=payload.notes, actor=user,
     )
-    entry["approval_request_id"] = str(req.id)
-    pr.revisions = list(pr.revisions)          # re-assign so JSONB is flagged dirty
     await audit_record(db, actor=user, action="propose_revision",
                        entity="price_request", entity_id=pr.id,
-                       after={"revision": n, "reason": entry["reason"]})
+                       after={"revision": n,
+                              "reason": (payload.reason or "").strip() or None})
     await db.flush()
     return {
         "ok": True, "revision": n, "kind": kind,
@@ -1166,7 +1192,7 @@ async def propose_revision(
         # one fewer left would be a lie the UI then repeats.
         "revisions_left": (None if kind == "cost"
                            else MAX_APPLIED_REVISIONS - used),
-        "approval_request_id": str(req.id),
+        "approval_request_id": str(req_id),
         "price_request": await _serialize(db, pr, role),
     }
 

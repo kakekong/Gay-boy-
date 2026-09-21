@@ -234,11 +234,19 @@ export default function SupplierPriceRequestDetailPage() {
     onSuccess: (r: any) => {
       refresh();
       qc.invalidateQueries({ queryKey: ["price-requests"] });
+      // A request the director has already settled does not take the cost
+      // straight on — it is filed as a cost revision for them. Saying "cost
+      // applied" for that would be the screen claiming something that has
+      // not happened yet.
+      const rows: any[] = r.data?.price_requests ?? [];
+      const queued = rows.filter((x) => x.queued_revision);
       setFlash({
         kind: "ok",
-        text: t(
-          `Cost applied to ${r.data?.price_request_number ?? "the price request"} — it is with the director now.`,
-          `Biaya diterapkan ke ${r.data?.price_request_number ?? "permintaan harga"} — sekarang di direktur.`),
+        text: queued.length
+          ? t(`${queued.map((x) => x.price_request_number).join(", ")} is already priced, so this went to the director as a cost revision rather than onto the approved cost.`,
+               `${queued.map((x) => x.price_request_number).join(", ")} sudah berharga, jadi ini dikirim ke direktur sebagai revisi biaya, bukan langsung mengubah biaya yang sudah disetujui.`)
+          : t(`Cost applied to ${r.data?.price_request_number ?? "the price request"} — it is with the director now.`,
+               `Biaya diterapkan ke ${r.data?.price_request_number ?? "permintaan harga"} — sekarang di direktur.`),
       });
     },
     onError: onErr,
@@ -825,6 +833,16 @@ export default function SupplierPriceRequestDetailPage() {
             {t("Writes these prices onto every matching line of the price request and sends it to the director. The quote stays on file as where the number came from.",
                "Menulis harga ini ke setiap baris yang cocok pada permintaan harga lalu mengirimkannya ke direktur. Penawaran ini tetap tersimpan sebagai asal angkanya.")}
           </p>
+          {/* A request that has already been priced and signed off takes a
+              different route, and saying so before the button is pressed is
+              the difference between a considered act and a surprise. */}
+          {(r.source_price_requests ?? []).some((s) => s.status === "approved") && (
+            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200
+                            rounded-lg px-3 py-2">
+              {t("This request is already priced and approved, so the cost is not written straight onto it — the director gets it as a cost revision to approve, because the margin was signed off against the old number.",
+                 "Permintaan ini sudah berharga dan disetujui, jadi biayanya tidak langsung ditulis — direktur menerimanya sebagai revisi biaya untuk disetujui, karena marginnya ditetapkan atas angka yang lama.")}
+            </div>
+          )}
           {!everyLineAnswered && (
             <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               {t(`Only ${r.lines_quoted} of ${r.lines_total} lines have a price. The rest keep whatever cost they already had.`,

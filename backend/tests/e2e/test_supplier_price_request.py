@@ -295,9 +295,23 @@ async def main():
     await c.post(f"{BASE}/{late['id']}/quote", headers=pur, json={
         "items": [{"line_no": 1, "quoted_price": 1, "basis": "unit"}]})
     r = await c.post(f"{BASE}/{late['id']}/apply", headers=pur)
-    check("an approved price request can't be re-costed underneath the director",
-          r.status_code == 409, f"{r.status_code} {J(r)}"[:150])
-    check("...and says why", "approved" in str(J(r)).lower(), str(J(r))[:150])
+    # A late quote on a settled request used to be refused outright, which
+    # left purchasing holding a real answer with nowhere to put it. It is
+    # taken now — and routed to the director as a cost revision, because the
+    # margin was approved against the old cost. The guarantee that matters is
+    # unchanged: the approved cost does not move on its own.
+    check("a late quote on an approved request is taken, not refused",
+          r.status_code == 200, f"{r.status_code} {J(r)}"[:150])
+    _row = (J(r).get("price_requests") or [{}])[0]
+    check("...as a cost revision waiting for the director",
+          bool(_row.get("queued_revision")), str(_row)[:200])
+    _after = J(await c.get(f"/price-requests/{pr['id']}", headers=d))
+    _l1 = next((i for i in _after.get("items") or []
+                if int(i.get("line_no") or 0) == 1), {})
+    check("...with the approved cost still where the director left it",
+          float(_l1.get("cost_price") or 0) != 1, str(_l1.get("cost_price")))
+    check("...and the request still approved", _after.get("status") == "approved",
+          str(_after.get("status")))
 
     # ══ a vendor who answers in their own money ══════════════════════════════
     # Overseas suppliers quote in CNY or USD. The price request is kept in

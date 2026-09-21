@@ -966,14 +966,76 @@ async def apply_to_price_request(
             results.append({"price_request_id": pr_id_str,
                             "skipped": "price request no longer exists"})
             continue
-        if pr.status not in ("pending_purchasing", "pending_director"):
-            results.append({"price_request_id": pr_id_str,
-                            "price_request_number": pr.number,
-                            "skipped": f"status is '{pr.status}'"})
-            continue
-
         want = {int(i.get("source_line_no") or i.get("line_no") or 0):
                 round(float(i["quoted_price"]) * rate, 2) for i in lines}
+
+        # A request the director has already settled does not take a new cost
+        # quietly. The margin was approved against the old one, so moving it
+        # underneath changes a decision without telling the person who made
+        # it — and this used to be a silent skip, which is the same problem
+        # from the other side: purchasing rings three vendors, presses Apply,
+        # and nothing at all happens.
+        #
+        # So it goes where purchasing's own "propose a cost revision" button
+        # already sends it: the director's queue, with the quote named on it.
+        if pr.status not in ("pending_purchasing", "pending_director"):
+            from app.api.v1.endpoints.price_requests import (
+                _pending_revision, file_revision,
+            )
+            if pr.status in ("draft", "rejected"):
+                results.append({"price_request_id": pr_id_str,
+                                "price_request_number": pr.number,
+                                "skipped": f"status is '{pr.status}'"})
+                continue
+            if _pending_revision(pr):
+                results.append({
+                    "price_request_id": pr_id_str,
+                    "price_request_number": pr.number,
+                    "skipped": "a revision is already waiting for the director",
+                })
+                continue
+            proposed = [dict(it) for it in (pr.items or [])]
+            touched = 0
+            for it in proposed:
+                price = want.get(int(it.get("line_no") or 0))
+                if price is None:
+                    continue
+                it["cost_price"] = price
+                it["cost_basis"] = "unit"
+                it["cost_source"] = spr.number
+                it["cost_supplier"] = supplier.name if supplier else None
+                touched += 1
+            if not touched:
+                results.append({"price_request_id": pr_id_str,
+                                "price_request_number": pr.number,
+                                "skipped": "no matching lines"})
+                continue
+            n, req_id = await file_revision(
+                db, pr, kind="cost", proposed=proposed,
+                reason=(f"Cost from {spr.number}"
+                        + (f" ({supplier.name})" if supplier else "")),
+                notes=None, actor=user,
+            )
+            touched_total += touched
+            await audit_record(
+                db, actor=user, action="apply_quote_queued",
+                entity="price_request", entity_id=pr.id,
+                after={"from": spr.number, "lines": touched, "revision": n,
+                       "supplier": supplier.name if supplier else None,
+                       "pr_status": pr.status},
+            )
+            results.append({
+                "price_request_id": pr_id_str,
+                "price_request_number": pr.number,
+                "applied_lines": touched,
+                "queued_revision": n,
+                "approval_request_id": str(req_id),
+                "detail": (f"{pr.number} is already {pr.status} — the cost is "
+                           "waiting for the director as revision "
+                           f"{n}, not written straight onto it."),
+            })
+            continue
+
         items = [dict(it) for it in (pr.items or [])]
         touched = 0
         for it in items:

@@ -817,14 +817,32 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
   const [lines, setLines] = useState([{ description: "", qty: 1, uom: "pcs" }]);
   const [search, setSearch] = useState("");
 
-  // Only requests still waiting on a cost — asking a vendor about a job the
-  // director already priced is answering a question nobody asked.
+  // What can be put in front of a vendor.
+  //
+  // This used to be only the requests still waiting on a cost, on the reasoning
+  // that asking about a job the director had already priced was answering a
+  // question nobody asked. That is wrong about how the work actually runs: the
+  // approved request is the one you buy against. The deal is won, the goods
+  // have to be ordered, the quote that justified the cost has expired, or the
+  // order itself has changed — every one of those is a vendor conversation
+  // about a settled request, and there was no way to start it.
+  //
+  // So a settled request can be asked about too. What it cannot do is quietly
+  // move the cost the director approved a margin against: applying that quote
+  // files a cost revision for them instead of writing it straight on. The rows
+  // are labelled so the difference is visible before anybody picks one.
   const openPrs = useQuery({
     queryKey: ["price-requests-costable"],
     queryFn: () => api.get("/price-requests").then((r) => {
       const rows = Array.isArray(r.data) ? r.data : (r.data?.data ?? []);
-      return rows.filter((x: any) =>
-        ["pending_purchasing", "pending_director"].includes(x.status));
+      const rank = (s: string) =>
+        s === "pending_purchasing" ? 0 : s === "pending_director" ? 1 : 2;
+      return rows
+        // A draft is still being written and a rejected one is a dead deal;
+        // neither is something to put in front of a supplier.
+        .filter((x: any) => ["pending_purchasing", "pending_director",
+                             "approved"].includes(x.status))
+        .sort((a: any, b: any) => rank(a.status) - rank(b.status));
     }),
     retry: false,
   });
@@ -927,11 +945,17 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
                   <span className="text-[11px] muted">
                     {(p.items ?? []).length} {T("lines")}
                   </span>
+                  {p.status === "approved" && (
+                    <span className="chip bg-emerald-50 text-emerald-700 text-[10px]"
+                          title={T("Already priced and signed off. Ask about it to buy, or to re-source — applying the quote goes to the director as a cost revision rather than changing the approved cost.")}>
+                      {T("already priced")}
+                    </span>
+                  )}
                 </label>
               ))}
               {!(openPrs.data ?? []).length && (
                 <div className="py-3 text-center text-sm muted">
-                  {T("Nothing is waiting for a cost right now.")}
+                  {T("No price requests to ask about right now.")}
                 </div>
               )}
             </div>

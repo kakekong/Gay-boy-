@@ -213,6 +213,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_cash_adjust.py` | correcting what a cash/bank account holds: posts a balanced `adjustment` journal entry rather than writing over the derived total; finance + director only; refuses non-cash, headings, no-op corrections and cash-on-both-sides |
 | `test_po_money_with_lines.py` | a supplier PO's currency + rate now travel with its lines in one save: the pair queues together for the director (never a new rate against an old currency), each still behaves as before alone, and finance keeps the rate but not the currency |
 | `test_order_sync_back.py` | the reverse sync: a quotation edit rewrites the price request behind it (cost untouched), the supplier request is told but never rewritten, and the project's order card reports drift with a button to clear it |
+| `test_ask_after_approval.py` | an approved price request can still be sent to a vendor, and the quote that comes back files a cost revision for the director instead of moving the approved cost |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -504,6 +505,18 @@ over the outstanding statuses counts a half-paid invoice at full value — that
 bug lived in `/reports/ar-aging-detail`, `/kpi/finance` and the customer
 summary card while `/finance/ar/aging` was already netting correctly.
 `test_partial_payment_ar.py` pins all four to the same number.
+
+**A settled price request takes a new cost only through a revision.**
+`apply_to_price_request` writes the quote straight onto the lines while the
+request is `pending_purchasing`/`pending_director`, and for anything settled
+calls `price_requests.file_revision(kind="cost")` instead — the same helper
+`propose_revision` uses, so it lands in the director's queue with the same
+shape. It used to skip silently, which read as a dead button. Two things to
+preserve if you touch it: the result rows carry `queued_revision` and the
+frontend branches on it (saying "cost applied" for a queued one would be the
+screen claiming something that has not happened), and `touched_total` counts
+queued lines so the "Nothing to cost" 409 does not fire on a successful queue.
+`_pending_revision` still allows only one at a time.
 
 **Sync between the order documents runs in three modes, and the mode is the
 design.** `quotation_sync.sync_from_price_request` pushes request → quotation
