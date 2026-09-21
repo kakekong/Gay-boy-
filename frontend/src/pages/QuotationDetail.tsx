@@ -244,21 +244,26 @@ export default function QuotationDetailPage() {
     (p: any) => !["rejected", "cancelled"].includes(p.status));
   const canEdit = (isOwner || user?.role === "director") &&
     (Q.status === "draft" || Q.status === "rejected");
-  // Approved/sent quotes can still be edited, but a non-director's edit
+  // Approved/sent/won quotes can still be edited, but a non-director's edit
   // is queued for the director; the button stays available unless an
   // edit is already waiting.
+  //
+  // Won belongs here for the same reason it is not a closed state on the
+  // server: it is the live deal — a project is running against it, and the
+  // price request behind it is kept in step with it — so it is exactly the
+  // one a customer rings up to change.
   const canRequestEdit = (isOwner || user?.role === "director")
-    && (Q.status === "approved" || Q.status === "sent")
+    && ["approved", "sent", "won"].includes(Q.status)
     && !Q.won_pending && !Q.edit_pending;
   const canRevise = (isOwner || ["manager", "director", "admin"].includes(user?.role ?? ""))
     && ["approved", "sent", "rejected", "lost"].includes(Q.status)
     && !Q.won_pending
     && !(Q.revisions ?? []).some((r: any) => ["draft", "pending_approval"].includes(r.status));
   // The full form is locked once the quote is out of draft/rejected, but
-  // meta like Valid until and Notes stays editable up to the closed
-  // states (won / lost / cancelled). Backend enforces the same rule.
+  // meta like Valid until and Notes stays editable right up to the deals
+  // that are actually over. Backend enforces the same rule.
   const canEditMeta = (isOwner || user?.role === "director") &&
-    !["won", "lost", "cancelled"].includes(Q.status);
+    !["lost", "cancelled", "superseded"].includes(Q.status);
 
   return (
     <div className="space-y-6">

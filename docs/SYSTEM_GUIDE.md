@@ -182,9 +182,12 @@ Around the PR:
 - **Approval**: director approves/rejects (inline on the quote or in /approvals). Approval bumps the customer stage to `quotation`.
 - **Editing rules**:
   - `draft` / `rejected`: fully editable by the owner or director.
-  - `approved` / `sent`: pricing edits **queue a `quotation_edit` approval** — changes apply only when the director approves; the quote shows an "Edit awaiting director" chip meanwhile. Director edits apply instantly. `valid_until` and meta notes stay directly editable.
+  - `approved` / `sent` / **`won`**: pricing edits **queue a `quotation_edit` approval** — changes apply only when the director approves; the quote shows an "Edit awaiting director" chip meanwhile. Director edits apply instantly. `valid_until` and meta notes stay directly editable.
   - `pending_approval`: locked — unsubmit first.
+  - `lost` / `cancelled` / `superseded`: locked for good. Nothing is delivered against them and nothing downstream reads them, so an edit would rewrite history and change no reality.
   - PR-backed drafts: line prices are fixed by the approved PR.
+
+  **Why `won` is editable.** It used to sit with lost and cancelled, which read as "the deal is finished". It is the opposite: a won quotation is the *live* deal — a project runs against it, the price request behind it is kept in step with it, and purchasing buys to that request. It is exactly the document a customer rings about to add four more of item eight, and locking it meant that change had nowhere to land: the edit was refused, so nothing reached the price request or the project either. Two consequences ride along — the price request and the project's order card follow the edit automatically (§6.1b), and because winning a quotation **posts revenue to the ledger**, a change to a posted quotation's figures is **reversed and re-posted** so the accounts stop holding the old total. The original entries stay, the reversal sits beside them, the new posting follows.
 - **Mark won**: sales' click files a `quotation_won` request to the director; approval flips the quote to Won, posts revenue to the ledger, and bumps the stage. **Won does not create a project — the customer PO does.**
 - **Mark lost**: requires a written reason (feeds the Lost-deals report); blocked while a Mark-won request is pending and on won/closed quotes — the two outcomes are mutually exclusive, enforced in UI and API.
 - **Exports**: PDF and Excel with the company header, PIC addressing and totals. **Every export writes an `export` activity** to the customer timeline (who, which quote, which format, when).

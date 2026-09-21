@@ -270,8 +270,11 @@ async def main():
     check("...and does not wipe the notes typed on the page",
           after.get("notes") == f"approved note {tag}", str(after.get("notes")))
 
-    # closed is closed, for notes as much as for prices. Winning it needs the
-    # customer's PO on file, so file one.
+    # A won deal is the live one — a project runs against it and the price
+    # request behind it is kept in step with it — so a note about what the
+    # customer said today belongs on it. What is genuinely over (lost,
+    # cancelled, superseded) still refuses. Winning it needs the customer's PO
+    # on file, so file one.
     _po = J(await c.post("/customer-pos", headers=s1, json={
         "customer_id": q6["customer_id"], "quotation_id": q6["id"],
         "number": f"PO-META-{tag}",
@@ -281,12 +284,15 @@ async def main():
         await c.post(f"/customer-pos/{_po['id']}/approve", headers=d, json={"notes": ""})
     await c.post(f"/quotations/{q6['id']}/won", headers=d)
     r = await c.patch(f"/quotations/{q6['id']}", headers=s1,
-                      json={"notes": "too late"})
-    check("a won quotation refuses even a note", r.status_code == 409,
-          str(r.status_code))
-    check("...and keeps the one it had",
+                      json={"notes": f"customer rang {tag}"})
+    check("a won quotation takes a note — the deal is live, not filed away",
+          r.status_code in (200, 202), f"{r.status_code} {J(r)}"[:150])
+    check("...and keeps it",
           J(await c.get(f"/quotations/{q6['id']}", headers=d)).get("notes")
-          == f"approved note {tag}")
+          == f"customer rang {tag}")
+    # (A won deal cannot then be marked lost — the two outcomes are mutually
+    # exclusive — so the refusal on a genuinely closed quotation is pinned in
+    # test_won_quote_edit.py, which can reach that state.)
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

@@ -214,6 +214,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_po_money_with_lines.py` | a supplier PO's currency + rate now travel with its lines in one save: the pair queues together for the director (never a new rate against an old currency), each still behaves as before alone, and finance keeps the rate but not the currency |
 | `test_order_sync_back.py` | the reverse sync: a quotation edit rewrites the price request behind it (cost untouched), the supplier request is told but never rewritten, and the project's order card reports drift with a button to clear it |
 | `test_ask_after_approval.py` | an approved price request can still be sent to a vendor, and the quote that comes back files a cost revision for the director instead of moving the approved cost |
+| `test_won_quote_edit.py` | a won quotation is editable (it is the live deal), the price request and project follow automatically, the ledger is reversed and re-posted, and lost/cancelled stay shut |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -517,6 +518,18 @@ frontend branches on it (saying "cost applied" for a queued one would be the
 screen claiming something that has not happened), and `touched_total` counts
 queued lines so the "Nothing to cost" 409 does not fire on a successful queue.
 `_pending_revision` still allows only one at a time.
+
+**`won` is NOT a closed quotation state.** It used to be grouped with `lost`
+and `cancelled` in `update_quotation`, which made the whole quotation→price
+request sync look broken: by the time a project exists the quotation is won,
+so every edit was refused and nothing synced anywhere. `_CLOSED_STATES` is now
+`{"lost", "cancelled"}` (plus `superseded`), and `won` sits with
+`approved`/`sent` — director edits apply, everyone else's queue as a
+`quotation_edit` approval. The consequence to keep in mind: winning posts to
+the ledger, so `_restate_posting` reverses and re-posts whenever a **posted**
+quotation's total moves. Both edit paths call it, right after the PR sync.
+Don't "simplify" that into an in-place adjustment — reversal-then-repost is
+what makes the correction readable in the account six months later.
 
 **Sync between the order documents runs in three modes, and the mode is the
 design.** `quotation_sync.sync_from_price_request` pushes request → quotation

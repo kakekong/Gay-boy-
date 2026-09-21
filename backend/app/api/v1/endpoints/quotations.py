@@ -88,6 +88,31 @@ def _changed(q: Quotation, field: str, value) -> bool:
     return True
 
 
+async def _restate_posting(db: AsyncSession, q: Quotation, was_total: float) -> dict | None:
+    """Re-state the ledger when a posted quotation's figures move.
+
+    Winning a quotation posts it: receivable up, revenue up, tax and discount
+    with them. Editing one afterwards is now allowed — a won deal is the live
+    one, and the customer adding four more of item eight has to land somewhere
+    — which means the accounts can no longer be left holding the figure the
+    document used to say.
+
+    Reversed and re-posted rather than adjusted in place, because that is the
+    rule everywhere else in this system: the original entries stay, the
+    reversal sits beside them, and the new posting follows. Someone reading
+    the account in six months sees a correction, which is what happened,
+    instead of a number that quietly became a different number.
+    """
+    if not q.is_posted:
+        return None
+    now_total = float(q.total or 0)
+    if abs(now_total - was_total) < 0.005:
+        return None
+    await ledger.reverse_quotation(db, q)
+    await ledger.post_quotation(db, q)
+    return {"was": was_total, "now": now_total}
+
+
 async def _apply_quotation_changes(db: AsyncSession, q: Quotation, changes: dict) -> None:
     """Apply a queued edit payload (JSON-shaped) to a quotation + recalc.
 
@@ -124,6 +149,7 @@ async def _apply_quotation_changes(db: AsyncSession, q: Quotation, changes: dict
         db.add_all(items)
     else:
         items = list(q.items)
+    was_total = float(q.total or 0)
     _recalc(q, items)
     await db.flush()
     # Approving a queued line edit is the same act as making one directly, so
@@ -133,6 +159,7 @@ async def _apply_quotation_changes(db: AsyncSession, q: Quotation, changes: dict
     if new_items is not None:
         from app.services.price_request_sync import sync_from_quotation
         await sync_from_quotation(db, q, None, items)
+        await _restate_posting(db, q, was_total)
 
 
 def _recalc(q: Quotation, items: list[QuotationItem]) -> None:
@@ -352,16 +379,30 @@ async def update_quotation(
 
     # Fields that don't change pricing/approval — allowed even after submit.
     _META_FIELDS = {"valid_until", "notes"}
-    _CLOSED_STATES = {"won", "lost", "cancelled"}
+    # Deals that are over. Nothing downstream reads them and nothing is being
+    # delivered against them, so editing one changes no reality — it only
+    # rewrites history.
+    #
+    # `won` was in this list and does not belong. A won quotation is the one
+    # deal that is *most* alive: it has a project running against it, it is
+    # what the price request behind it is kept in step with, and it is what
+    # purchasing buys to. It is also exactly when a customer rings up to add
+    # four more of item eight. Locking it meant that change had nowhere to
+    # land — the edit was refused, so nothing synced anywhere, which is the
+    # "it doesn't work on closed quotations" people were hitting.
+    _CLOSED_STATES = {"lost", "cancelled"}
     is_meta_only = bool(data) and all(k in _META_FIELDS for k in data)
 
     if q.status in _CLOSED_STATES or q.status == "superseded":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"A '{q.status}' quotation can't be edited — the deal is closed.",
+            f"A '{q.status}' quotation can't be edited — the deal is closed. "
+            + ("Revise the quotation that superseded it."
+               if q.status == "superseded"
+               else "Raise a new quotation if it has come back to life."),
         )
     if q.status not in ("draft", "rejected") and not is_meta_only:
-        if q.status not in ("approved", "sent"):
+        if q.status not in ("approved", "sent", "won"):
             # pending_approval: unsubmit first — editing under the
             # director's nose would decide a different document.
             raise HTTPException(
@@ -369,7 +410,7 @@ async def update_quotation(
                 f"A '{q.status}' quotation is locked for pricing edits. "
                 "Only valid_until / notes can be updated at this stage.",
             )
-        # Approved/sent quotations CAN take pricing edits, but they need
+        # Approved/sent/won quotations CAN take pricing edits, but they need
         # the director's sign-off again — the numbers were already
         # approved once. Non-directors file the change; it applies when
         # the director approves in /approvals. Directors apply directly.
@@ -472,15 +513,21 @@ async def update_quotation(
         items = list(q.items)
 
     q.updated_by = user.id
+    was_total = float(q.total or 0)
     _recalc(q, items)
     await db.flush()
     # The request behind it follows the deal. Only when the lines moved —
     # changing a validity date or a note says nothing about what was ordered.
+    restated = None
     if new_items is not None:
         from app.services.price_request_sync import sync_from_quotation
         await sync_from_quotation(db, q, user, items)
+        # A won quotation has already posted revenue. Now that it can be
+        # edited, the accounts have to be told.
+        restated = await _restate_posting(db, q, was_total)
     await audit_record(db, actor=user, action="update", entity="quotation",
-                       entity_id=q.id)
+                       entity_id=q.id,
+                       after={"restated_posting": restated} if restated else None)
     return await _load(q.id, db)
 
 
