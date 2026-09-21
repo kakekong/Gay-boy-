@@ -519,6 +519,18 @@ screen claiming something that has not happened), and `touched_total` counts
 queued lines so the "Nothing to cost" 409 does not fire on a successful queue.
 `_pending_revision` still allows only one at a time.
 
+**Form drafts live in `lib/draft.ts` and must outlive a sign-out.** Long forms
+call `useFormDraft(key, value, restore, {enabled, isEmpty})`, which mirrors
+state to `localStorage` under `tsm-draft:<userId>:<key>`. Three rules hold it
+together: `logout()` removes only the session's own key (never
+`localStorage.clear()`), so drafts survive — that is the whole point; the
+login page's "wipe leftover login data" button snapshots and restores drafts
+around its `clear()`, because the person pressing it has usually just been
+signed out mid-form; and `isEmpty` must answer "is this the same as what the
+record already says", not "is this blank" — otherwise a form prefilled from
+the server stores a draft on every visit and offers to restore what is
+already saved. Every call site clears the draft in its mutation's onSuccess.
+
 **`won` is NOT a closed quotation state.** It used to be grouped with `lost`
 and `cancelled` in `update_quotation`, which made the whole quotation→price
 request sync look broken: by the time a project exists the quotation is won,

@@ -11,6 +11,8 @@ import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
 import { CURRENCIES, money } from "@/lib/currency";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useFormDraft } from "@/lib/draft";
 import { CommentThread } from "@/components/CommentThread";
 import { UserLink } from "@/components/UserLink";
 import { useAuthStore } from "@/store/auth";
@@ -113,6 +115,22 @@ export default function PurchaseOrderDetailPage() {
     queryFn: () => api.get(`/purchasing/po/${id}`).then((r) => r.data as PO),
     enabled: !!id,
   });
+
+  // The item editor holds real work — descriptions, quantities, a currency
+  // and a rate — and none of it exists anywhere until Save items is pressed.
+  // Kept while the editor is open, dropped the moment it is saved or
+  // cancelled, because a stale set of lines offered back over a PO that has
+  // since moved is worse than nothing.
+  const itemsDraft = useFormDraft(
+    id ? `po-items:${id}` : null,
+    { draftItems, draftCurrency, draftRate },
+    (v) => {
+      if (Array.isArray(v.draftItems)) setDraftItems(v.draftItems);
+      if (v.draftCurrency) setDraftCurrency(v.draftCurrency);
+      setDraftRate(v.draftRate ?? "");
+    },
+    { enabled: editingItems },
+  );
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["po", id] });
   const onErr = (e: any) => {
@@ -276,7 +294,9 @@ export default function PurchaseOrderDetailPage() {
     // own rule and leave an IDR order with no rate at all.
     const rateBefore = p.fx_rate == null ? null : Number(p.fx_rate);
     if (draftForeign && draftRateNum !== rateBefore) body.fx_rate = draftRateNum;
-    patch.mutate(body, { onSuccess: () => { refresh(); setEditingItems(false); } });
+    patch.mutate(body, {
+      onSuccess: () => { itemsDraft.clear(); refresh(); setEditingItems(false); },
+    });
   }
 
   return (
@@ -578,7 +598,8 @@ export default function PurchaseOrderDetailPage() {
               <Pencil size={13} /> {T("Edit items")}</button>
           ) : (
             <div className="flex gap-2">
-              <button className="btn-ghost" onClick={() => setEditingItems(false)}>
+              <button className="btn-ghost"
+                      onClick={() => { itemsDraft.clear(); setEditingItems(false); }}>
                 {T("Cancel")}</button>
               <button
                 className="btn-primary"
@@ -667,6 +688,11 @@ export default function PurchaseOrderDetailPage() {
 
         {editingItems ? (
           <div className="p-4 space-y-2">
+            {itemsDraft.restoredAt && (
+              <DraftNotice at={itemsDraft.restoredAt}
+                           what={tt("changes to these lines", "perubahan pada baris ini")}
+                           onDiscard={() => { itemsDraft.discard(); startItemsEdit(); }} />
+            )}
             {draftItems.map((it, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-end">
                 <div className="col-span-5">

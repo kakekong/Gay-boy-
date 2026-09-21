@@ -8,6 +8,8 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { UnitSelect } from "@/components/UnitSelect";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useFormDraft } from "@/lib/draft";
 import { useAuthStore } from "@/store/auth";
 import { useT, t as tt, T, locale } from "@/store/lang";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
@@ -278,6 +280,26 @@ function CreateForm({
   // cost from the source documents.
   const [files, setFiles] = useState<File[]>([]);
 
+  // A new request is a dozen lines typed from a customer's email, and until
+  // it is submitted it exists nowhere but this tab. Kept on the device as it
+  // is typed, so a dropped session or a closed tab costs nothing. Files are
+  // not kept — the browser will not hand a File back across a reload — so
+  // only what was typed comes home.
+  const typed = { customerId, notes, items };
+  const draft = useFormDraft(
+    "price-request:new",
+    typed,
+    (v) => {
+      if (v.customerId) setCustomerId(v.customerId);
+      setNotes(v.notes ?? "");
+      if (Array.isArray(v.items) && v.items.length) setItems(v.items);
+    },
+    {
+      isEmpty: (v) => !v.customerId && !(v.notes ?? "").trim()
+        && !(v.items ?? []).some((it: any) => (it?.description ?? "").trim()),
+    },
+  );
+
   const customers = useQuery({
     queryKey: ["customers"],
     queryFn: () => api.get("/customers", { params: { page_size: 200 } }).then((r) => {
@@ -317,7 +339,7 @@ function CreateForm({
       }
       return d;
     },
-    onSuccess: (d) => onCreated(d.id),
+    onSuccess: (d) => { draft.clear(); onCreated(d.id); },
     onError: onErr,
   });
 
@@ -330,6 +352,16 @@ function CreateForm({
         <div className="font-semibold">{t("New price request", "Permintaan harga baru")}</div>
         <button className="btn-ghost" onClick={onClose}><X size={15} /></button>
       </div>
+      {draft.restoredAt && (
+        <DraftNotice at={draft.restoredAt}
+                     what={t("price request", "permintaan harga")}
+                     onDiscard={() => {
+                       draft.discard();
+                       setCustomerId(initialCustomerId);
+                       setNotes("");
+                       setItems([emptyLine()]);
+                     }} />
+      )}
       <div className="grid md:grid-cols-2 gap-3">
         <div>
           <label className="block text-[11px] uppercase muted mb-1">{t("Customer", "Pelanggan")} *</label>

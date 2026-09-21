@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
 import { MessageQuote } from "@/components/MessageQuote";
+import { useFormDraft } from "@/lib/draft";
 import { useAuthStore } from "@/store/auth";
 import { useT, T, locale } from "@/store/lang";
 
@@ -74,6 +75,16 @@ export function CommentThread({
   const me = useAuthStore((s) => s.user);
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // A half-written message is the smallest thing worth keeping and the most
+  // often lost — it is one textarea, and closing the tab takes it. No notice
+  // for this one: an unsent message reappearing where it was left is what
+  // every messaging app does, and announcing it would be noise.
+  const msgDraft = useFormDraft(
+    `comment:${ownerType}:${ownerId}`,
+    draft,
+    (v) => { if (typeof v === "string" && v.trim()) setDraft(v); },
+    { isEmpty: (v) => !String(v ?? "").trim() },
+  );
   // Who the composer has actually picked. Kept separate from the text so the
   // backend never has to guess a person from a name typed by hand.
   const [picked, setPicked] = useState<Candidate[]>([]);
@@ -155,6 +166,7 @@ export function CommentThread({
     }),
     onSuccess: () => {
       setDraft("");
+      msgDraft.clear();
       setPicked([]);
       setReplyTo(null);
       qc.invalidateQueries({ queryKey: key });

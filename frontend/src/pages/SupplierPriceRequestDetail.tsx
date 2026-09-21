@@ -22,6 +22,8 @@ import { CURRENCIES, money } from "@/lib/currency";
 import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
+import { DraftNotice } from "@/components/DraftNotice";
+import { useFormDraft } from "@/lib/draft";
 import { useT, T } from "@/store/lang";
 
 const idr = (n: number) =>
@@ -152,6 +154,42 @@ export default function SupplierPriceRequestDetailPage() {
     setCurRate(q.data.fx_rate != null ? String(q.data.fx_rate) : "");
   }, [q.data?.id, q.data?.quoted_at, q.data?.currency, q.data?.fx_rate]);
 
+  // What the record already says, in the same shape the form holds it. A
+  // "draft" identical to this is not typing worth rescuing — it is the page
+  // as it loaded — and storing it would mean offering to restore something
+  // already saved every time somebody opens the request.
+  const asFiled = useMemo(() => (q.data ? {
+    draft: Object.fromEntries(q.data.items.map((it) => [it.line_no, {
+      price: it.quoted_price != null ? String(it.quoted_price) : "",
+      lead: it.lead_days != null ? String(it.lead_days) : "",
+    }])),
+    leadDays: q.data.quoted_lead_days != null ? String(q.data.quoted_lead_days) : "",
+    quoteNote: "",
+    currency: q.data.currency || "IDR",
+    fxRate: q.data.fx_rate != null ? String(q.data.fx_rate) : "",
+  } : null), [q.data]);
+
+  // A supplier's quote is read off a phone call that will not happen twice,
+  // and the page says outright that nothing leaves it until you save. So it
+  // is kept: a dropped session, a closed tab or a sleeping laptop no longer
+  // costs the call.
+  const typed = { draft, leadDays, quoteNote, currency, fxRate };
+  const quoteDraft = useFormDraft(
+    id ? `spr-quote:${id}` : null,
+    typed,
+    (v) => {
+      setDraft(v.draft ?? {});
+      setLeadDays(v.leadDays ?? "");
+      setQuoteNote(v.quoteNote ?? "");
+      setCurrency(v.currency ?? "IDR");
+      setFxRate(v.fxRate ?? "");
+    },
+    {
+      enabled: !!q.data,
+      isEmpty: (v) => !asFiled || JSON.stringify(v) === JSON.stringify(asFiled),
+    },
+  );
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["supplier-price-request", id] });
     qc.invalidateQueries({ queryKey: ["supplier-price-requests"] });
@@ -224,6 +262,9 @@ export default function SupplierPriceRequestDetailPage() {
     }),
     onSuccess: () => {
       setQuoteNote("");
+      // On the record now, so it is no longer a draft. Leaving it would have
+      // the next visit offer to restore what is already saved.
+      quoteDraft.clear();
       refresh();
       setFlash({ kind: "ok", text: t("Quote recorded.", "Penawaran dicatat.") });
     },
@@ -545,6 +586,25 @@ export default function SupplierPriceRequestDetailPage() {
       )}
 
       {/* What they said, line by line */}
+      {quoteDraft.restoredAt && (
+        <DraftNotice at={quoteDraft.restoredAt}
+                     what={t("quote for this supplier", "penawaran untuk pemasok ini")}
+                     onDiscard={() => {
+                       quoteDraft.discard();
+                       if (q.data) {
+                         setDraft(Object.fromEntries(q.data.items.map((it) => [it.line_no, {
+                           price: it.quoted_price != null ? String(it.quoted_price) : "",
+                           lead: it.lead_days != null ? String(it.lead_days) : "",
+                         }])));
+                         setLeadDays(q.data.quoted_lead_days != null
+                           ? String(q.data.quoted_lead_days) : "");
+                         setQuoteNote("");
+                         setCurrency(q.data.currency || "IDR");
+                         setFxRate(q.data.fx_rate != null ? String(q.data.fx_rate) : "");
+                       }
+                     }} />
+      )}
+
       <div className="card overflow-hidden">
         <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -553,8 +613,8 @@ export default function SupplierPriceRequestDetailPage() {
               {editing
                 ? t("Fix the wording, the quantity or the unit, then press Save changes above.",
                      "Perbaiki uraian, jumlah, atau satuannya, lalu tekan Simpan perubahan di atas.")
-                : t("Type what the supplier said. Nothing leaves this page until you save it.",
-                     "Ketik yang disampaikan pemasok. Tidak ada yang tersimpan sampai Anda menyimpannya.")}
+                : t("Type what the supplier said. Nothing leaves this page until you save it — but it is kept on this device, so a dropped session doesn't cost you the call.",
+                     "Ketik yang disampaikan pemasok. Tidak ada yang tersimpan sampai Anda menyimpannya — tapi disimpan di perangkat ini, jadi sesi yang terputus tidak menghilangkan hasil teleponnya.")}
             </div>
           </div>
           {quoting && (

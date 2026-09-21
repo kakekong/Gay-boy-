@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Factory, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { restoreDrafts, snapshotDrafts } from "@/lib/draft";
 import {
   useAuthStore, setAuthPersistence, diagnoseMissingSession,
 } from "@/store/auth";
@@ -220,8 +221,13 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={() => {
+              // Leftover *login* data is what this clears. Somebody who has
+              // just been signed out mid-form may well press it, and taking
+              // their unsaved typing with it would be the opposite of help.
+              const kept = snapshotDrafts();
               try { localStorage.clear(); } catch {}
               try { sessionStorage.clear(); } catch {}
+              restoreDrafts(kept);
               window.location.reload();
             }}
             className="text-[11px] text-ink-400 hover:text-ink-700 underline w-full text-center"
