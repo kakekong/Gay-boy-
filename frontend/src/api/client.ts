@@ -20,6 +20,61 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+// ── Refreshing before it breaks, instead of after ────────────────────────
+//
+// The session used to be renewed only in response to a 401, which is fine on
+// a machine that stays awake and online. It is not fine on one that sleeps:
+// the lid closes, the access token expires, the lid opens, and the app fires
+// every polling query it has at once — all of them with a dead token, all of
+// them into a network stack that is still bringing wifi up. Every one of
+// those is a chance to be answered by something that isn't us.
+//
+// So the token is renewed on the way in, while the old one is still valid:
+// when it is close to expiry, and when the tab comes back to the foreground.
+// Nothing here can sign anybody out — a failure just leaves the old 401 path
+// to do what it always did.
+
+/** Seconds left on a JWT, or null if it can't be read. */
+function secondsLeft(token: string | null): number | null {
+  if (!token) return null;
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const json = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/"))
+    );
+    if (typeof json.exp !== "number") return null;
+    return json.exp - Math.floor(Date.now() / 1000);
+  } catch {
+    return null;
+  }
+}
+
+// Renew when under five minutes remain. The access token lives for hours, so
+// this fires rarely — but it fires while the token still works, which is the
+// entire point.
+const RENEW_UNDER_SEC = 300;
+
+export function refreshIfExpiringSoon(): void {
+  const store = useAuthStore.getState();
+  if (!store.accessToken || !store.refreshToken) return;
+  const left = secondsLeft(store.accessToken);
+  // `null` means the token isn't a JWT we can read; leave it to the 401 path
+  // rather than refreshing on every request.
+  if (left === null || left > RENEW_UNDER_SEC) return;
+  void refreshAccessToken();
+}
+
+if (typeof document !== "undefined") {
+  // Coming back to the tab is the moment a slept machine reconnects, and the
+  // moment before the polling queries all fire again.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshIfExpiringSoon();
+  });
+  window.addEventListener("online", refreshIfExpiringSoon);
+  window.addEventListener("focus", refreshIfExpiringSoon);
+}
+
 // Single-flight refresh: if many requests 401 at once we only call /refresh
 // once and let them all retry with the new access token.
 let refreshing: Promise<string | null> | null = null;
@@ -41,12 +96,35 @@ export function noteSessionIsHealthy(): void {
   consecutiveAuthFailures = 0;
 }
 
+// Was this refusal actually ours?
+//
+// A captive portal, a corporate proxy, a CDN edge that lost the origin — all
+// of them answer with a status code of their choosing and an HTML page, and
+// 401/403 are common choices. Counted as auth failures, two of those in a row
+// sign somebody out of a session that was never invalid; the token was fine,
+// the request never reached us. Our API always answers JSON, so anything that
+// isn't is somebody else talking, and it is treated as transient.
+function isOurRefusal(e: AxiosError): boolean {
+  const res = e.response;
+  if (!res) return false;
+  const type = String(res.headers?.["content-type"] ?? "");
+  if (type.includes("json")) return true;
+  // Some stacks answer JSON without labelling it; accept a parsed object,
+  // reject anything that arrived as a page.
+  return typeof res.data === "object" && res.data !== null;
+}
+
 function attemptRefresh(): Promise<string | null> {
   const store = useAuthStore.getState();
   const refreshToken = store.refreshToken;
   if (!refreshToken) return Promise.resolve(null);
   return axios
-    .post(`${API_BASE}/auth/refresh`, null, {
+    .post(`${API_BASE}/auth/refresh`, { token: refreshToken }, {
+      // Sent twice on purpose, for one release. The token used to travel only
+      // in the query string, where it lands in every proxy and CDN access log
+      // along the way; the body is where it belongs. Backend and frontend
+      // deploy separately, so sending both means neither order of deployment
+      // signs everybody out. The query copy goes once the backend has shipped.
       params: { token: refreshToken },
       timeout: 60_000,
     })
@@ -59,11 +137,17 @@ function attemptRefresh(): Promise<string | null> {
     })
     .catch((e: AxiosError) => {
       const code = e.response?.status;
-      if (code === 401 || code === 403) {
+      if ((code === 401 || code === 403) && isOurRefusal(e)) {
         consecutiveAuthFailures += 1;
         // eslint-disable-next-line no-console
         console.warn(
           `[auth] /auth/refresh returned ${code} (failure #${consecutiveAuthFailures})`
+        );
+      } else if (code === 401 || code === 403) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[auth] a ${code} arrived that did not come from our API ` +
+          "(proxy or captive portal) — keeping the session"
         );
       } else {
         // eslint-disable-next-line no-console

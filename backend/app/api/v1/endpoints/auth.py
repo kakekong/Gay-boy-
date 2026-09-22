@@ -2,7 +2,8 @@ import time
 from collections import defaultdict, deque
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,10 +69,32 @@ async def login(
     )
 
 
+class RefreshIn(BaseModel):
+    token: str | None = None
+
+
 @router.post("/refresh", response_model=TokenPair)
-async def refresh(token: str, db: AsyncSession = Depends(get_db)):
+async def refresh(
+    body: RefreshIn | None = Body(None),
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trade a refresh token for a fresh pair.
+
+    The token is taken from the body, or from the query string, which is where
+    it used to live and where it must keep working: the frontend and this
+    service deploy separately, so an endpoint that accepted only the new shape
+    would sign everybody out for the length of one deployment gap. The query
+    string is the worse home for a credential — it ends up in every proxy and
+    CDN access log on the way here — so the body wins when both arrive, and
+    the query copy is what gets dropped later.
+    """
+    raw = (body.token if body else None) or token
+    if not raw:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                            "No refresh token supplied")
     try:
-        payload = decode_token(token)
+        payload = decode_token(raw)
     except Exception as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from exc
     if payload.get("type") != "refresh":

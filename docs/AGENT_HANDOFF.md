@@ -217,6 +217,8 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_won_quote_edit.py` | a won quotation is editable (it is the live deal), the price request and project follow automatically, the ledger is reversed and re-posted, and lost/cancelled stay shut |
 | `test_commission_claim.py` | commission is claimable only once the customer has paid in full: the gate is `SUM(payments)`, re-checked at approval, the 2% basis is frozen at claim time, and HR sees no commission figures at all |
 | `test_my_commission.py` | the rep's own page (`/commissions/summary`): what it offers is exactly what the claim gate accepts, a reversed receipt removes a job from the list, a refused claim puts its job back on offer, totals move stage by stage, and another rep gets a 403 |
+| `test_search_reach.py` | ⌘K search reaches the documents people actually look for: a PR number however it is typed, a part name finding every document its line is on, the six document types that were missing, per-role scoping, and a supplier's page listing the price requests sent to them |
+| `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -546,6 +548,26 @@ more things to preserve: the claim freezes
 `basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
 restate approved pay when a payment is later reversed), and approval
 re-checks the gate because a claim can outlive the payment that justified it.
+
+**Search is a reach problem, not a ranking one.** `endpoints/search.py` is
+one query per entity, each gated to the roles that can open the page it links
+to — add a group and you must add that gate, or search becomes the way to read
+documents a role is otherwise refused. Two helpers carry the behaviour people
+notice: `_number_match` compares a document number with the separators
+stripped from both sides (so `pr 2026 0012` finds `PR-2026-0012`), and
+`_items_match` walks the JSONB `items` array so a part name finds the
+documents whose *lines* mention it. Quotations keep their lines in a real
+table instead, so they need the separate subquery — that asymmetry is the
+thing to remember when adding a document type: ask which shape its lines are
+in before copying a block.
+
+**The refresh token is accepted in two places on purpose.** The frontend
+(Vercel) and this API (Render) deploy separately, so `/auth/refresh` takes the
+token from the body *or* the query string and the frontend sends both. Neither
+half can be ahead of the other in a way that signs the company out. The query
+copy is the one to delete, once nothing sends it — a credential in a URL is
+written to every proxy and CDN log on the way in — and deleting it means
+changing the frontend first, then this, not the other way round.
 
 **`won` is NOT a closed quotation state.** It used to be grouped with `lost`
 and `cancelled` in `update_quotation`, which made the whole quotation→price
