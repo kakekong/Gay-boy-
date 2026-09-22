@@ -35,7 +35,9 @@ from app.models.commission import (
 from app.models.crm import Customer
 from app.models.operation import Project
 from app.models.user import User
-from app.services.commission import claim_out, collected_for_projects
+from app.services.commission import (
+    claim_out, claims_for_projects, collected_for_projects,
+)
 
 router = APIRouter()
 
@@ -104,6 +106,124 @@ async def list_claims(
         stmt = stmt.where(CommissionClaim.status == status_eq)
     rows = (await db.scalars(stmt)).all()
     return [await _serialize(db, c) for c in rows]
+
+
+@router.get("/summary")
+async def commission_summary(
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+    user_id: UUID | None = None,
+    year: int | None = None,
+):
+    """One rep's whole commission picture, in the order they care about it:
+    what can be claimed now, what has been filed and is moving, what has been
+    paid.
+
+    A rep reads their own by default; management can read somebody else's by
+    naming them. A rep asking for a colleague gets the same refusal the claim
+    endpoint gives, because pay is not something colleagues browse.
+
+    `year` narrows the payout history only. Claimable and in-flight figures
+    are live state, not history — filtering those by year would hide money
+    somebody is owed today because the job started last December.
+    """
+    role = Role(me.role)
+    target = me.id
+    if user_id and user_id != me.id:
+        if role not in (Role.DIRECTOR, Role.MANAGER, Role.FINANCE):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "You can see your own commission. Somebody else's is "
+                "management's to look at.",
+            )
+        target = user_id
+
+    who = await db.get(User, target)
+    rows = (await db.execute(
+        select(Project, Customer)
+        .join(Customer, Project.customer_id == Customer.id)
+        .where(Customer.sales_pic_id == target, Project.is_deleted.is_(False))
+        .order_by(Project.created_at.desc())
+    )).all()
+    by_project = {p.id: (p, c) for p, c in rows}
+    ids = list(by_project)
+
+    money = await collected_for_projects(db, ids) if ids else {}
+    live = await claims_for_projects(db, ids) if ids else {}
+
+    # Claimable: settled in full, and nothing live standing on it. A refused
+    # claim is not live, so its job comes back here — which is what makes
+    # "claim again" the ordinary Claim button rather than a second door.
+    claimable = []
+    for pid in ids:
+        project, customer = by_project[pid]
+        m = money.get(pid) or {}
+        if not m.get("paid_in_full") or live.get(pid) is not None:
+            continue
+        collected = float(m.get("collected") or 0)
+        claimable.append({
+            "project_id": str(pid),
+            "project_code": project.code,
+            "customer_name": customer.company_name,
+            "collected": collected,
+            "invoices": m.get("invoices", 0),
+            "rate_pct": DEFAULT_RATE_PCT,
+            "amount": round(collected * DEFAULT_RATE_PCT / 100.0, 2),
+        })
+    claimable.sort(key=lambda r: r["amount"], reverse=True)
+
+    all_claims = (await db.scalars(
+        select(CommissionClaim)
+        .where(CommissionClaim.beneficiary_id == target)
+        .order_by(CommissionClaim.created_at.desc())
+    )).all()
+    paid_years = sorted(
+        {c.paid_at.year for c in all_claims if c.status == "paid" and c.paid_at},
+        reverse=True,
+    )
+
+    filed = [c for c in all_claims if c.status in ("pending", "approved", "rejected")]
+    paid = [c for c in all_claims if c.status == "paid"]
+    if year:
+        paid = [c for c in paid if c.paid_at and c.paid_at.year == year]
+
+    async def _rows(claims):
+        out = []
+        for c in claims:
+            row = await _serialize(db, c)
+            pc = by_project.get(c.project_id)
+            row["customer_name"] = pc[1].company_name if pc else None
+            out.append(row)
+        return out
+
+    def _sum(claims):
+        return round(sum(float(c.amount or 0) for c in claims), 2)
+
+    pending = [c for c in filed if c.status == "pending"]
+    approved = [c for c in filed if c.status == "approved"]
+
+    return {
+        "beneficiary": {
+            "id": str(target),
+            "name": who.full_name if who else None,
+        },
+        "rate_pct": DEFAULT_RATE_PCT,
+        "year": year,
+        "paid_years": paid_years,
+        "totals": {
+            "claimable": round(sum(r["amount"] for r in claimable), 2),
+            "claimable_jobs": len(claimable),
+            "pending": _sum(pending),
+            "pending_claims": len(pending),
+            "approved": _sum(approved),
+            "approved_claims": len(approved),
+            "paid": _sum(paid),
+            "paid_claims": len(paid),
+        },
+        "claimable": claimable,
+        "filed": await _rows(filed),
+        "paid": await _rows(paid),
+    }
 
 
 @router.post("", status_code=201)

@@ -36,6 +36,7 @@ const MentionsPage         = lazy(() => import("@/pages/Mentions"));
 const HelpPage             = lazy(() => import("@/pages/Help"));
 const ReportsPage          = lazy(() => import("@/pages/Reports"));
 const SalesTargetsPage     = lazy(() => import("@/pages/SalesTargets"));
+const MyCommissionPage     = lazy(() => import("@/pages/MyCommission"));
 const AuditLogPage         = lazy(() => import("@/pages/AuditLog"));
 const ProjectsPage         = lazy(() => import("@/pages/Projects"));
 const ProjectDetailPage    = lazy(() => import("@/pages/ProjectDetail"));
@@ -238,6 +239,11 @@ function MainApp() {
           <Route path="/feedback" element={<RequireRole roles={["director"]}><FeedbackPage /></RequireRole>} />
           <Route path="/reports" element={<RequireRole roles={["director"]}><ReportsPage /></RequireRole>} />
           <Route path="/sales-targets" element={<SalesTargetsPage />} />
+          <Route path="/my-commission" element={
+            <RequireRole roles={["sales", "manager", "director"]}>
+              <MyCommissionPage />
+            </RequireRole>
+          } />
           <Route path="/audit" element={<AuditLogPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />

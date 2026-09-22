@@ -9,7 +9,7 @@ import {
   Bell, Menu, X, Factory, CalendarDays, BookOpen, Wallet, Package,
   MessageCircle, AtSign, HelpCircle, Target, Shield, Clock, UserCog, Map, Truck,
   Receipt, ClipboardList, Eye, Tag, Sun, Moon, ChevronLeft, Trash2, CheckCheck,
-  Upload, Landmark, Building2,
+  Upload, Landmark, Building2, Percent,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
@@ -107,6 +107,13 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       { to: "/attendance", label: "Attendance", label_id: "Absensi", icon: Clock,
         roles: ["sales", "admin", "hr", "finance", "purchasing", "manager", "director"] },
       { to: "/sales-targets", label: "Sales Targets", label_id: "Target penjualan", icon: Target },
+      // A rep's own pay. It sits in People rather than Workspace because it
+      // is about the person, not the pipeline — and the badge counts jobs
+      // they can claim on today, which is the one number worth interrupting
+      // them for.
+      { to: "/my-commission", label: "My commission", label_id: "Komisi saya", icon: Percent,
+        roles: ["sales", "manager", "director"],
+        badgeQuery: "commission-claimable" },
       { to: "/admin/users", label: "Users", label_id: "Pengguna", icon: UserCog,
         roles: ["director"] },
       // One-off housekeeping. Director-only in the sidebar, at the route, and
@@ -406,6 +413,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
     refetchInterval: 30_000,
     enabled: !!user && canSeePendingApprovals,
   });
+  // Jobs this person could claim commission on right now. Everyone who can
+  // open the page has their own figure, so there is no role gate beyond the
+  // nav item's — the endpoint answers for whoever is asking.
+  const canClaimCommission = ["sales", "manager", "director"].includes(role);
+  const claimableCommission = useQuery({
+    queryKey: ["nav-commission-claimable"],
+    queryFn: () => api.get("/commissions/summary")
+      .then((r) => Number(r.data?.totals?.claimable_jobs) || 0),
+    refetchInterval: 30_000,
+    enabled: !!user && canClaimCommission,
+  });
   const pendingDp = useQuery({
     queryKey: ["nav-pending-dp", dpQueueStatus],
     queryFn: () => api.get("/customer-pos", { params: { status_eq: dpQueueStatus } })
@@ -421,6 +439,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     "claims-pending": pendingClaims.data ?? 0,
     "approvals-pending": (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
     "dp-pending": pendingDp.data ?? 0,
+    "commission-claimable": claimableCommission.data ?? 0,
   };
 
   // Generic per-section badges: every bell item carries a link, so any nav

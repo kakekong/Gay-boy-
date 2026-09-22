@@ -318,7 +318,7 @@ Nothing is deleted: both rows stay on the invoice — the receipt struck through
 
 ### 9.2c Sales commission
 
-A rep's share of a job, claimed on their own **employee page** — the Projects / POs card now carries the book's total beside the label, what has been **collected** across it, and a **Commission** column per job.
+A rep's share of a job. Two doors onto the same figures: the rep's own **My commission** page (sidebar → People, `/my-commission`), and the **employee page** the director and HR already use — whose Projects / POs card carries the book's total beside the label, what has been **collected** across it, and a **Commission** column per job.
 
 The rule the whole thing turns on is *when*: **only once finance has the money.** Not the deal being won, not the goods going out, not the invoice being raised — the payment being in the bank. Commission against an outstanding invoice is a payout on a promise, and the promise is the part that sometimes does not arrive.
 
@@ -329,6 +329,10 @@ The rule the whole thing turns on is *when*: **only once finance has the money.*
 - **The gate is re-checked at approval.** A claim can sit in the queue for a week and a payment can be reversed in that week, so approving re-asks whether the money is still in and refuses if it is not.
 - One live claim per job (pending/approved/paid). A **rejected** claim does not block a fresh one.
 - **HR sees none of it** — they run the personnel side and get the project list without deal value or commission, exactly as before.
+
+**The rep's page** (`GET /commissions/summary`) answers one question — *where is my money right now?* — and its four figures are that question as a sequence: **ready to claim → with the director → agreed, in payroll → paid**. Under them sit the three lists that matter: jobs to claim (each with a Claim button that says the amount), claims filed (status chip per row; a refusal opens a band with the director's own words and a **Claim again** button, since a rejected claim puts its job straight back on offer), and the payout history, which a period select narrows by year. Claimable and in-flight figures are never year-filtered — that money is owed today, whenever the job started.
+
+Two rules hold this together. The page is derived from the **same** collected figure the claim gate uses, so a Claim button can never offer what the server would refuse — reverse a receipt and the job leaves the list at the same moment the door shuts. And a job is either claimable or **absent**: nothing is greyed out, because a greyed-out button with no explanation is how a rep concludes the system is broken. The sidebar badge counts jobs claimable today. Pay is private: a rep reads their own; the director, a manager or finance can read anybody's (`?user_id=`), another rep gets a 403.
 
 ### 9.3 The journal & chart of accounts
 

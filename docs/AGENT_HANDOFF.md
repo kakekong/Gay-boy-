@@ -216,6 +216,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_ask_after_approval.py` | an approved price request can still be sent to a vendor, and the quote that comes back files a cost revision for the director instead of moving the approved cost |
 | `test_won_quote_edit.py` | a won quotation is editable (it is the live deal), the price request and project follow automatically, the ledger is reversed and re-posted, and lost/cancelled stay shut |
 | `test_commission_claim.py` | commission is claimable only once the customer has paid in full: the gate is `SUM(payments)`, re-checked at approval, the 2% basis is frozen at claim time, and HR sees no commission figures at all |
+| `test_my_commission.py` | the rep's own page (`/commissions/summary`): what it offers is exactly what the claim gate accepts, a reversed receipt removes a job from the list, a refused claim puts its job back on offer, totals move stage by stage, and another rep gets a 403 |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -534,10 +535,14 @@ already saved. Every call site clears the draft in its mutation's onSuccess.
 
 **Commission claims gate on collected money, not on status.**
 `services/commission.py` owns the question — `collected_for_projects` sums
-payments per project across its live invoices — and both the button
-(`/users/{id}/projects` → `commission.may_claim`) and the endpoint
-(`POST /commissions`) ask it, so the screen and the server can never disagree
-about whether a job is claimable. Two things to preserve: the claim freezes
+payments per project across its live invoices — and all three callers ask it:
+the director's button (`/users/{id}/projects` → `commission.may_claim`), the
+rep's own page (`GET /commissions/summary` → the `claimable` list) and the
+endpoint that decides (`POST /commissions`). Keep it that way; a fourth caller
+that computes claimability for itself is how the screen and the server start
+disagreeing. Note the rep's page expresses it differently on purpose — a job
+is claimable or **absent**, never greyed out — but it is the same answer. Two
+more things to preserve: the claim freezes
 `basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
 restate approved pay when a payment is later reversed), and approval
 re-checks the gate because a claim can outlive the payment that justified it.
