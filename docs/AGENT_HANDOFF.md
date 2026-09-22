@@ -215,6 +215,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_order_sync_back.py` | the reverse sync: a quotation edit rewrites the price request behind it (cost untouched), the supplier request is told but never rewritten, and the project's order card reports drift with a button to clear it |
 | `test_ask_after_approval.py` | an approved price request can still be sent to a vendor, and the quote that comes back files a cost revision for the director instead of moving the approved cost |
 | `test_won_quote_edit.py` | a won quotation is editable (it is the live deal), the price request and project follow automatically, the ledger is reversed and re-posted, and lost/cancelled stay shut |
+| `test_commission_claim.py` | commission is claimable only once the customer has paid in full: the gate is `SUM(payments)`, re-checked at approval, the 2% basis is frozen at claim time, and HR sees no commission figures at all |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -530,6 +531,16 @@ signed out mid-form; and `isEmpty` must answer "is this the same as what the
 record already says", not "is this blank" — otherwise a form prefilled from
 the server stores a draft on every visit and offers to restore what is
 already saved. Every call site clears the draft in its mutation's onSuccess.
+
+**Commission claims gate on collected money, not on status.**
+`services/commission.py` owns the question — `collected_for_projects` sums
+payments per project across its live invoices — and both the button
+(`/users/{id}/projects` → `commission.may_claim`) and the endpoint
+(`POST /commissions`) ask it, so the screen and the server can never disagree
+about whether a job is claimable. Two things to preserve: the claim freezes
+`basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
+restate approved pay when a payment is later reversed), and approval
+re-checks the gate because a claim can outlive the payment that justified it.
 
 **`won` is NOT a closed quotation state.** It used to be grouped with `lost`
 and `cancelled` in `update_quotation`, which made the whole quotation→price

@@ -415,6 +415,52 @@ async def employee_projects(
     # HR sees fulfillment status only — no customer names, no deal value.
     is_hr = Role(me.role) == Role.HR
     show_money = Role(me.role) == Role.DIRECTOR
+
+    # What each job has actually collected, and whether a commission has been
+    # claimed on it. Money, so it travels with the same gate as the PO value:
+    # HR runs the personnel side and has no business seeing what a rep earns
+    # on a deal.
+    money: dict = {}
+    claims: dict = {}
+    if show_money and rows:
+        from app.models.commission import DEFAULT_RATE_PCT
+        from app.services.commission import (
+            claim_out, claims_for_projects, collected_for_projects,
+        )
+        ids = [p.id for p, _ in rows]
+        money = await collected_for_projects(db, ids)
+        claims = await claims_for_projects(db, ids)
+
+    def commission_block(p) -> dict | None:
+        if not show_money:
+            return None
+        m = money.get(p.id) or {}
+        claim = claims.get(p.id)
+        paid_in_full = bool(m.get("paid_in_full"))
+        rate = float(claim.rate_pct) if claim is not None else DEFAULT_RATE_PCT
+        basis = (float(claim.basis_amount) if claim is not None
+                 else float(m.get("collected") or 0))
+        return {
+            "invoiced": m.get("invoiced", 0.0),
+            "collected": m.get("collected", 0.0),
+            "outstanding": m.get("outstanding", 0.0),
+            "paid_in_full": paid_in_full,
+            "rate_pct": rate,
+            # What it would come to, so the button can say the figure before
+            # anybody commits to it.
+            "amount": round(basis * rate / 100.0, 2),
+            "claim": claim_out(claim),
+            # One question, answered once, on the server: the button and the
+            # endpoint must never disagree about whether a job is claimable.
+            "may_claim": paid_in_full and claim is None,
+            "blocked_reason": (
+                None if paid_in_full and claim is None
+                else ("already claimed" if claim is not None
+                      else "not invoiced yet" if not m.get("invoices")
+                      else "not paid in full")
+            ),
+        }
+
     return [
         {
             "id": str(p.id),
@@ -424,6 +470,7 @@ async def employee_projects(
             "customer_name": None if is_hr else c.company_name,
             "po_value": float(p.po_value or 0) if show_money else None,
             "target_delivery": p.target_delivery,
+            "commission": commission_block(p),
         }
         for p, c in rows
     ]

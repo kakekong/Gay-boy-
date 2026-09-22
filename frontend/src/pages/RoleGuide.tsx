@@ -126,6 +126,9 @@ const ROLES: RoleSection[] = [
         effect_id: "Tampilan read-only lokasi pesanan pelanggan di produksi (tanpa kode WO, catatan, atau tombol aksi)" },
       { page: "Customer PO", page_id: "PO Pelanggan", button: "(sidebar, Workspace)", button_id: "(sidebar, Ruang kerja)",
         effect: "Track the POs you've filed and their status", effect_id: "Pantau PO yang Anda daftarkan dan statusnya" },
+      { page: "Your employee page", page_id: "Halaman karyawan Anda", button: "Claim Rp …", button_id: "Klaim Rp …",
+        effect: "Claim your 2% on a job the customer has paid in full — it goes to the director to agree",
+        effect_id: "Klaim 2% Anda atas pekerjaan yang sudah dibayar lunas pelanggan — masuk ke direktur untuk disetujui" },
       { page: "Notifications bell", page_id: "Lonceng notifikasi", button: "Any item", button_id: "Item apa saja",
         effect: "Jump to whatever needs you", effect_id: "Lompat ke apa pun yang butuh Anda" },
     ],
@@ -143,6 +146,8 @@ const ROLES: RoleSection[] = [
       "The customer page reads top-to-bottom as a deal funnel: name → contacts → quotations → customer POs → projects. Rejected POs show the director's / finance's reason inline on the quotation page.",
       "You can upload the customer's drawing on your own customers' projects — the rest of the project page (work orders, invoices, margins) stays internal and hidden from you.",
       "Overdue stage tasks light up the bell and the calendar in red — and you only get YOUR tasks now (deal chores for your customers), not purchasing's or finance's.",
+      "Commission is 2% of what the customer actually paid, and the Claim button only appears once finance has received the whole invoice — not when the deal is won, not when the goods ship. A job still owing money shows what's outstanding instead of a button. Your own page shows your claims and nobody else's.",
+      "Claiming doesn't pay you: it asks. The director agrees the figure (they can settle at something other than 2%), then finance marks it paid with payroll. One live claim per job — if it's refused, you can put the case again.",
     ],
     rules_id: [
       "Anda hanya bisa mengedit pelanggan yang ditugaskan kepada Anda (sales PIC).",
@@ -158,6 +163,8 @@ const ROLES: RoleSection[] = [
       "Halaman pelanggan mengalir atas-ke-bawah sebagai funnel deal: nama → kontak → penawaran → PO pelanggan → proyek. PO yang ditolak menampilkan alasan direktur / keuangan langsung di halaman penawaran.",
       "Anda bisa mengunggah gambar dari pelanggan di proyek pelanggan Anda sendiri — sisa halaman proyek (work order, faktur, margin) tetap internal dan tersembunyi dari Anda.",
       "Tugas tahap yang telat menyala merah di lonceng dan kalender — dan sekarang hanya tugas ANDA (urusan deal pelanggan Anda), bukan tugas pembelian atau keuangan.",
+      "Komisi adalah 2% dari uang yang benar-benar dibayar pelanggan, dan tombol Klaim baru muncul setelah keuangan menerima seluruh faktur — bukan saat deal menang, bukan saat barang dikirim. Pekerjaan yang masih kurang bayar menampilkan sisa tagihan, bukan tombol. Halaman Anda hanya menampilkan klaim Anda sendiri.",
+      "Klaim bukan pembayaran: klaim adalah permintaan. Direktur menyetujui angkanya (boleh selain 2%), lalu keuangan menandainya dibayar bersama gaji. Satu klaim aktif per pekerjaan — kalau ditolak, Anda bisa mengajukannya lagi.",
     ],
   },
   {
@@ -447,6 +454,9 @@ const ROLES: RoleSection[] = [
       { page: "Financial reports", page_id: "Laporan keuangan", button: "Any tab", button_id: "Tab apa saja",
         effect: "P&L, cash flow, revenue by sales rep — sliced by month / quarter / year",
         effect_id: "Laba/rugi, arus kas, pendapatan per sales — per bulan / kuartal / tahun" },
+      { page: "Employee page (commission)", page_id: "Halaman karyawan (komisi)", button: "Mark paid", button_id: "Tandai dibayar",
+        effect: "On a commission the director has approved — say it has gone out with payroll. Only you or the director can, because you are the ones who see it leave.",
+        effect_id: "Pada komisi yang sudah disetujui direktur — nyatakan sudah keluar bersama gaji. Hanya Anda atau direktur, karena Andalah yang melihat uangnya keluar." },
     ],
     rules: [
       "You now own invoice issuing — both flavours. DP invoices are issued from the CUSTOMER PO page (before any project exists); final invoices from the project page after QC passes, with the delivery order.",
@@ -458,6 +468,7 @@ const ROLES: RoleSection[] = [
       "Your sidebar: Customer PO, Projects, Finance, Financial reports, Payment verification, Chart of Accounts, Recent ledgers, Attendance, Chat.",
       "Reject a payment proof or a DP PO with a clear reason — sales and the customer see it.",
       "A delivery order waiting on you shows in Approvals and on the project. Release it before the sheet can be printed — an unreleased one prints stamped DRAFT.",
+      "Sales commission hangs off your work, not theirs: a rep can only claim once the payments you have recorded cover the job's invoices in full. Reverse a receipt and the claim gate shuts again — a claim already filed can't be approved until the money is back in.",
     ],
     rules_id: [
       "Anda sekarang yang menerbitkan faktur — kedua jenisnya. Faktur DP diterbitkan dari halaman PO PELANGGAN (sebelum proyek ada); faktur akhir dari halaman proyek setelah QC lulus, dengan DO.",
@@ -467,6 +478,7 @@ const ROLES: RoleSection[] = [
       "Anda bisa menghapus faktur duplikat/salah beserta catatan faktur pajaknya — tapi tidak setelah ada pembayaran terverifikasi di dalamnya. Kalau pembayaran tercatat di faktur yang salah, minta direktur: membalik penerimaan adalah haknya, bukan Anda. Setelah dibalik, tidak ada lagi pembayaran di faktur itu dan Anda bisa menghapusnya.",
       "Sidebar Anda: PO Pelanggan, Proyek, Keuangan, Laporan keuangan, Verifikasi Pembayaran, Bagan Akun, Ledger Terbaru, Absensi, Chat.",
       "Tolak bukti bayar atau PO DP dengan alasan jelas — sales dan pelanggan melihatnya.",
+      "Komisi sales bergantung pada pekerjaan Anda, bukan pekerjaan mereka: sales baru bisa mengklaim setelah pembayaran yang Anda catat menutup seluruh faktur pekerjaan itu. Balikkan satu penerimaan dan pintunya tertutup lagi — klaim yang sudah diajukan tidak bisa disetujui sampai uangnya masuk kembali.",
     ],
   },
   {
@@ -586,6 +598,9 @@ const ROLES: RoleSection[] = [
       { page: "Admin → Users", page_id: "Admin → Pengguna", button: "Custom roles", button_id: "Peran khusus",
         effect: "Build your own role: name + base tier + which pages it sees",
         effect_id: "Buat peran sendiri: nama + tingkat dasar + halaman yang bisa dilihat" },
+      { page: "Employee page (commission)", page_id: "Halaman karyawan (komisi)", button: "Approve / Refuse a claim", button_id: "Setujui / Tolak klaim",
+        effect: "Agree the rep's share, or refuse it with a reason. You can settle at a rate other than the baseline 2% — the amount recomputes from the money that was collected when the claim was filed.",
+        effect_id: "Setujui bagian sales, atau tolak dengan alasan. Anda boleh memakai persentase selain baseline 2% — jumlahnya dihitung ulang dari uang yang sudah masuk saat klaim diajukan." },
     ],
     rules: [
       "A staff login is created against an employee record, so HR puts the person on the register (Employees → + New employee) before you can give them a way to sign in. Customer and supplier portal accounts are the exception — they are not employees.",
@@ -604,6 +619,8 @@ const ROLES: RoleSection[] = [
       "Traceability chain: project detail links back to the customer PO that spawned it, which links back to the quotation. All three docs travel together forwards and backwards.",
       "Mark-paid + post-to-ledger feel irreversible — reverse uses a matching reversal entry, not a hard delete.",
       "Only YOU can reverse a payment. Open the invoice (Finance → the invoice number) → 'Reverse' beside the receipt → say why. 'Paid' is derived from the payments recorded against the invoice, so the reversal writes the negative receipt and posts the mirror ledger entry: the invoice goes back to unpaid (or partial), it returns to the collections queue, and the project comes off 'closed' back to 'delivered'. Both rows stay on the invoice — nothing is erased. Finance record the money; taking it back off is yours.",
+      "Commission claims are yours to settle. A rep's employee page lists their jobs with a 2% figure beside each, and the Claim button only lights up on jobs the customer has paid in full — the gate is the money received, not the project's status. What they claim is frozen at that moment, so an order re-priced later doesn't quietly restate an approved payout.",
+      "Approving a claim re-checks that the job is still paid in full, because a claim can sit a week and you may have reversed a receipt in the meantime. Refusing one needs a reason — it is somebody's pay — and doesn't close the door: the rep can put the case again. Finance marks the approved figure paid when it goes out with payroll.",
     ],
     rules_id: [
       "Akun masuk karyawan dibuat dari data di daftar karyawan, jadi HR mendaftarkan orangnya dulu (Karyawan → + Karyawan baru) sebelum Anda bisa memberi akun. Akun portal pelanggan dan pemasok pengecualian — mereka bukan karyawan.",
@@ -622,6 +639,8 @@ const ROLES: RoleSection[] = [
       "Rantai jejak: detail proyek balik ke PO pelanggan yang membentuknya, dan itu balik ke penawaran. Ketiganya bergerak bersama, maju dan mundur.",
       "Tandai-dibayar + posting-ke-ledger terasa tak terbalik — pembalikan pakai entri jurnal balik, bukan hapus paksa.",
       "Hanya ANDA yang bisa membalik pembayaran. Buka fakturnya (Keuangan → nomor faktur) → 'Balikkan' di samping penerimaan → isi alasannya. Status 'lunas' dihitung dari pembayaran yang tercatat, jadi pembalikan menulis penerimaan negatif dan memposting entri jurnal balik: faktur kembali belum lunas (atau sebagian), masuk lagi ke antrean penagihan, dan proyek turun dari 'closed' ke 'delivered'. Kedua baris tetap ada di faktur — tidak ada yang dihapus. Keuangan mencatat uangnya; menariknya kembali hak Anda.",
+      "Klaim komisi Anda yang memutuskan. Halaman karyawan seorang sales mendaftar pekerjaannya dengan angka 2% di sampingnya, dan tombol Klaim baru menyala pada pekerjaan yang sudah dibayar lunas pelanggan — gerbangnya uang yang masuk, bukan status proyek. Angka yang diklaim dibekukan saat itu juga, jadi pesanan yang dihargai ulang kemudian tidak diam-diam mengubah pembayaran yang sudah disetujui.",
+      "Menyetujui klaim memeriksa ulang bahwa pekerjaannya masih lunas, karena klaim bisa menunggu seminggu dan mungkin Anda sudah membalik satu penerimaan di sela itu. Menolak wajib beralasan — itu gaji orang — dan tidak menutup pintu: sales bisa mengajukannya lagi. Keuangan menandai angka yang disetujui sebagai dibayar saat keluar bersama gaji.",
     ],
   },
   {

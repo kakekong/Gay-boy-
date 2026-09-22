@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Mail, Phone, Briefcase, FileText, Users, Trophy, Frown,
   Wallet, TrendingUp, Activity as ActivityIcon, Tags, CalendarCheck, Clock,
-  CalendarX, Pencil, Save, X, Landmark, CalendarDays, Loader2,
+  CalendarX, Pencil, Save, X, Landmark, CalendarDays, Loader2, BadgeCheck,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -111,6 +111,31 @@ export default function EmployeeDetailPage() {
       err?.response?.data?.errors?.[0]?.message
         ?? err?.response?.data?.detail
         ?? "That didn't save."),
+  });
+
+  // Claiming the rep's share of a job the customer has settled. The button
+  // is only drawn when the server says the job is claimable, and the server
+  // checks again when it arrives — the two must never disagree about whether
+  // the money is in.
+  const [claimErr, setClaimErr] = useState<string | null>(null);
+  const [claimOk, setClaimOk] = useState<string | null>(null);
+  const claimCommission = useMutation({
+    mutationFn: (projectId: string) =>
+      api.post("/commissions", { project_id: projectId }),
+    onSuccess: (r: any) => {
+      setClaimErr(null);
+      setClaimOk(t(
+        `Claimed ${idr(r?.data?.amount ?? 0)} — waiting on the director.`,
+        `Diklaim ${idr(r?.data?.amount ?? 0)} — menunggu direktur.`));
+      qc.invalidateQueries({ queryKey: ["employee-projects", id] });
+      qc.invalidateQueries({ queryKey: ["commissions"] });
+    },
+    onError: (err: any) => {
+      setClaimOk(null);
+      setClaimErr(err?.response?.data?.errors?.[0]?.message
+        ?? err?.response?.data?.detail
+        ?? t("That claim wasn't accepted.", "Klaim itu tidak diterima."));
+    },
   });
 
   const stats = useQuery({
@@ -544,14 +569,48 @@ export default function EmployeeDetailPage() {
 
       {/* Projects / POs tied to this employee's customers — hidden from HR
           (HR sees the fulfillment counts above instead) */}
-      {!isHR && (
+      {!isHR && (() => {
+      const rows: any[] = projects.data ?? [];
+      const anyMoney = rows.some((p) => p.po_value != null);
+      const poTotal = rows.reduce((a, p) => a + Number(p.po_value || 0), 0);
+      const collected = rows.reduce(
+        (a, p) => a + Number(p.commission?.collected || 0), 0);
+      const claimable = rows.filter((p) => p.commission?.may_claim).length;
+      return (
       <div className="card overflow-hidden">
-        <div className="px-5 py-3 border-b border-ink-100">
-          <div className="font-semibold flex items-center gap-2">
-            <Briefcase size={15} /> {T("Projects / POs")}</div>
-          <div className="text-xs muted">{(projects.data ?? []).length} {T("project(s)")}</div>
+        <div className="px-5 py-3 border-b border-ink-100
+                        flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-semibold flex items-center gap-2 flex-wrap">
+              <Briefcase size={15} /> {T("Projects / POs")}
+              {/* What the whole book is worth, beside the label rather than
+                  only as a column somebody has to add up by eye. */}
+              {anyMoney && (
+                <span className="chip bg-brand-50 text-brand-700 tabular-nums">
+                  {idr(poTotal)}
+                </span>
+              )}
+            </div>
+            <div className="text-xs muted">
+              {rows.length} {T("project(s)")}
+              {anyMoney && <> · {t(`${idr(collected)} collected`,
+                                   `${idr(collected)} diterima`)}</>}
+            </div>
+          </div>
+          {anyMoney && claimable > 0 && (
+            <span className="chip bg-emerald-50 text-emerald-700 text-[11px]">
+              {t(`${claimable} claimable`, `${claimable} bisa diklaim`)}
+            </span>
+          )}
         </div>
-        {(projects.data ?? []).length === 0 ? (
+        {(claimErr || claimOk) && (
+          <div className={clsx("px-5 py-2 text-xs border-b",
+            claimErr ? "bg-red-50 text-red-700 border-red-100"
+                     : "bg-emerald-50 text-emerald-800 border-emerald-100")}>
+            {claimErr || claimOk}
+          </div>
+        )}
+        {rows.length === 0 ? (
           <div className="p-8 text-center muted text-sm">{T("No projects.")}</div>
         ) : (
           <div className="overflow-x-auto">
@@ -563,10 +622,13 @@ export default function EmployeeDetailPage() {
                   <th className="th">{T("Status")}</th>
                   <th className="th">{T("Target delivery")}</th>
                   <th className="th text-right">{T("PO value")}</th>
+                  {anyMoney && (
+                    <th className="th text-right">{t("Commission", "Komisi")}</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {(projects.data ?? []).map((p: any) => (
+                {rows.map((p: any) => (
                   <tr
                     key={p.id}
                     className="tr-hover border-t border-ink-100 cursor-pointer"
@@ -582,6 +644,21 @@ export default function EmployeeDetailPage() {
                     <td className="td text-right tabular-nums">
                       {p.po_value == null ? "—" : idr(p.po_value)}
                     </td>
+                    {anyMoney && (
+                      <td className="td text-right"
+                          onClick={(ev) => ev.stopPropagation()}>
+                        <CommissionCell
+                          c={p.commission}
+                          busy={claimCommission.isPending}
+                          onClaim={() => {
+                            const amt = idr(p.commission?.amount ?? 0);
+                            if (window.confirm(t(
+                              `Claim ${amt} on ${p.code}? That is ${p.commission?.rate_pct ?? 2}% of the ${idr(p.commission?.collected ?? 0)} the customer has paid. It goes to the director to approve.`,
+                              `Klaim ${amt} untuk ${p.code}? Itu ${p.commission?.rate_pct ?? 2}% dari ${idr(p.commission?.collected ?? 0)} yang sudah dibayar pelanggan. Akan dikirim ke direktur untuk disetujui.`)))
+                              claimCommission.mutate(p.id);
+                          }} />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -589,7 +666,8 @@ export default function EmployeeDetailPage() {
           </div>
         )}
       </div>
-      )}
+      );
+      })()}
 
       {/* Attendance — HR/Director only */}
       {canSeeAttendance && (
@@ -727,6 +805,68 @@ export default function EmployeeDetailPage() {
       </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The commission on one job, and what can be done about it.
+ *
+ * Four states, and the difference between them is money that has actually
+ * arrived: nothing invoiced yet, invoiced but not settled, settled and
+ * claimable, or already claimed and somewhere in the decision. The button
+ * only exists in the third, and it says the figure before anybody commits to
+ * it — a rep should know what they are asking for before they ask.
+ */
+function CommissionCell({ c, busy, onClaim }: {
+  c: any; busy: boolean; onClaim: () => void;
+}) {
+  const t = useT();
+  if (!c) return <span className="muted">—</span>;
+
+  const claim = c.claim;
+  if (claim) {
+    const chip = {
+      pending:  "bg-amber-50 text-amber-700",
+      approved: "bg-blue-50 text-blue-700",
+      paid:     "bg-emerald-50 text-emerald-700",
+      rejected: "bg-red-50 text-red-700",
+    }[claim.status as string] ?? "bg-ink-100 text-ink-700";
+    const label = {
+      pending:  t("waiting on the director", "menunggu direktur"),
+      approved: t("approved", "disetujui"),
+      paid:     t("paid", "dibayar"),
+      rejected: t("refused", "ditolak"),
+    }[claim.status as string] ?? claim.status;
+    return (
+      <div className="inline-flex flex-col items-end gap-0.5">
+        <span className="tabular-nums font-medium">{idr(claim.amount)}</span>
+        <span className={clsx("chip text-[10px]", chip)}
+              title={claim.decision_notes || undefined}>{label}</span>
+      </div>
+    );
+  }
+
+  if (!c.paid_in_full) {
+    return (
+      <div className="inline-flex flex-col items-end gap-0.5">
+        <span className="muted tabular-nums">{idr(c.amount)}</span>
+        <span className="text-[10px] muted">
+          {c.blocked_reason === "not invoiced yet"
+            ? t("not invoiced yet", "belum ditagih")
+            : t(`${idr(c.outstanding)} still owed`, `${idr(c.outstanding)} belum dibayar`)}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <button type="button" className="btn-ghost text-xs text-emerald-700"
+            disabled={busy} onClick={onClaim}
+            title={t("The customer has paid in full — claim your commission",
+                     "Pelanggan sudah membayar lunas — klaim komisi Anda")}>
+      <BadgeCheck size={13} />
+      {t(`Claim ${idr(c.amount)}`, `Klaim ${idr(c.amount)}`)}
+    </button>
   );
 }
 

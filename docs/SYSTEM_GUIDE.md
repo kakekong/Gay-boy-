@@ -316,6 +316,20 @@ What it does: writes a **second payment row for the negative amount** pointing a
 
 Nothing is deleted: both rows stay on the invoice — the receipt struck through and marked *taken back*, the reversal beside it in amber with who did it and why. A receipt cannot be reversed twice, and a reversal row cannot itself be reversed (record a fresh payment instead). This is also the door the delete guard has always pointed at: an invoice with a payment against it refuses to be deleted "until the payment is reversed" — now that is something you can actually do. Reversing the deposit that started a job deliberately does **not** unwind the project, the work done since, or the documents filed against it; that is a bigger decision than a mis-keyed receipt.
 
+### 9.2c Sales commission
+
+A rep's share of a job, claimed on their own **employee page** — the Projects / POs card now carries the book's total beside the label, what has been **collected** across it, and a **Commission** column per job.
+
+The rule the whole thing turns on is *when*: **only once finance has the money.** Not the deal being won, not the goods going out, not the invoice being raised — the payment being in the bank. Commission against an outstanding invoice is a payout on a promise, and the promise is the part that sometimes does not arrive.
+
+- **The gate** is the collected figure: `SUM(payments.amount)` across every live invoice on the project, which is the same number the AR screens read. Every invoice must be settled — a deposit on a job still being built is money in the bank but not the job being paid for.
+- **The basis** is what was collected, and the **baseline rate is 2 %**. Both are frozen onto the claim when it is filed rather than recomputed on read, so reversing a payment or re-pricing an order months later cannot quietly restate somebody's approved pay.
+- **The column says which state a job is in**: *not invoiced yet* · *Rp X still owed* · a green **Claim Rp X** button · or the claim's own chip (waiting on the director / approved / paid / refused).
+- **Who does what**: the rep files their own (management may file on their behalf; another rep or admin cannot). The **director approves or refuses** — and may settle a different percentage than the baseline, with the amount recomputed from the frozen basis. **Finance marks it paid** once it has gone out with payroll. A refusal needs a reason; it is somebody's pay.
+- **The gate is re-checked at approval.** A claim can sit in the queue for a week and a payment can be reversed in that week, so approving re-asks whether the money is still in and refuses if it is not.
+- One live claim per job (pending/approved/paid). A **rejected** claim does not block a fresh one.
+- **HR sees none of it** — they run the personnel side and get the project list without deal value or commission, exactly as before.
+
 ### 9.3 The journal & chart of accounts
 
 Every financial movement (quotation posting, payments, payroll) writes signed journal lines against the 109 pre-seeded Indonesian chart of accounts (admin/director can extend it). Reversals are matching journal entries, never deletes.

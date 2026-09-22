@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     calendar,
     chat,
     comments,
+    commissions,
     custom_roles,
     customer_pos,
     customers,
@@ -51,6 +52,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(employees.router, prefix="/employees", tags=["employees"])
+api_router.include_router(commissions.router, prefix="/commissions", tags=["commission"])
 api_router.include_router(customers.router, prefix="/customers", tags=["crm"])
 api_router.include_router(customer_pos.router, prefix="/customer-pos", tags=["customer-pos"])
 api_router.include_router(quotations.router, prefix="/quotations", tags=["quotation"])
