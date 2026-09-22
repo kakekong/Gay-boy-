@@ -5,7 +5,7 @@ import {
   Search, Loader2, ArrowRight, LayoutDashboard, Users, FileText,
   CalendarDays, MessageCircle, CheckSquare, Briefcase, ShoppingCart,
   Wrench, Banknote, Package, Receipt, Wallet, BarChart3, Crown,
-  BrainCircuit, HelpCircle, BookOpen, Building2,
+  BrainCircuit, HelpCircle, BookOpen, Building2, Tag, Truck,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -48,8 +48,14 @@ const PAGES: { label: string; sublabel: string; link: string; icon: any }[] = [
 
 const GROUP_ICON: Record<string, any> = {
   Customers:          Users,
+  "Price requests":   Tag,
   Quotations:         FileText,
+  "Customer POs":     Receipt,
   Projects:           Briefcase,
+  Invoices:           Banknote,
+  Suppliers:          Building2,
+  "Supplier price requests": Tag,
+  "Purchasing POs":   Truck,
   Inventory:          Package,
   Employees:          Users,
   "Chart of Accounts": Receipt,

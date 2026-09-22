@@ -436,6 +436,19 @@ A month grid aggregating the same material with identical role routing and purch
 
 ---
 
+## 11b. Finding things (⌘K)
+
+The header search box, and `⌘K` / `Ctrl-K` anywhere. It searches **customers, price requests, quotations, customer POs, projects, invoices, suppliers, supplier price requests, purchasing POs, inventory, employees and the chart of accounts** — each group scoped to the roles that can open the page it links to, because a result nobody can open is a dead end, and a result nobody *should* open is a leak.
+
+Two things it does that are worth knowing:
+
+- **A number is matched however it was typed.** `PR-2026-0012`, `pr 2026 0012`, `PR20260012` and `0012` all find the same request: separators are stripped from both the query and the stored number before comparing. Same for quotation, PO, invoice, faktur-pajak, project and account numbers.
+- **A product name finds every document the line appears on.** Searching a part number surfaces the price request, the quotation, the customer PO, the supplier price request and the purchasing PO that carry it — not just the inventory row. The lines are stored two different ways (a JSONB `items` array on most documents, the `quotation_items` table on quotations) and both are searched. The matching line is printed in the result's subtitle, with its quantity, so a hit can be recognised without opening it.
+
+A **supplier's page** answers the same question from the other side: alongside the PO history it lists every price request sent to that supplier — what we asked about, when it went, and whether they have answered — with a chip counting the ones still awaiting their price.
+
+---
+
 ## 12. People (HR) & other modules
 
 - **Employees**: directory with tags, per-employee KPI page, and a four-slot **documents card: KTP, employment contract, NPWP, BPJS** (uploads by HR; visible to HR/finance/management; empty slots highlight what's missing).

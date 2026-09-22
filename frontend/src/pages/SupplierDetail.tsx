@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft, Building2, Star, Truck, Loader2, AlertCircle, Mail, Phone,
   Briefcase, PackageCheck, CheckCircle2, Paperclip, Eye, Download,
-  MapPin, MessageCircle, Pencil, Save,
+  MapPin, MessageCircle, Pencil, Save, Tag,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -16,6 +16,24 @@ import { useAuthStore } from "@/store/auth";
 import { useT, T, locale } from "@/store/lang";
 
 interface Contact { name?: string; phone?: string; email?: string }
+
+/** A price request we sent this supplier. The PO list says what we bought
+ *  from them; this says what we asked them about — including the asks still
+ *  unanswered, which is usually why somebody opens a supplier's page. */
+interface SupplierPR {
+  id: string;
+  number: string;
+  status: string;
+  created_at: string | null;
+  sent_at: string | null;
+  quoted_at: string | null;
+  valid_until: string | null;
+  currency: string;
+  line_count: number;
+  quoted_lines: number;
+  first_item: string | null;
+  quoted_total: number | null;
+}
 
 /** A named person at the supplier, with their own line — same row shape the
  *  customer's PICs use, because it is the same card rendering them. */
@@ -67,6 +85,9 @@ interface SupplierDetail {
   open_po_count: number;
   lifetime_value: number;
   purchase_orders: PO[];
+  price_requests: SupplierPR[];
+  price_request_count: number;
+  awaiting_quote_count: number;
   projects: { id: string; code: string; status: string; target_delivery: string | null }[];
   goods_receipts: { id: string; po_number: string | null; received_at: string | null; status: string; items: any[] }[];
   qc_reports: { id: string; po_number: string | null; pass_qty: number; fail_qty: number; decision: string; findings: string | null }[];
@@ -81,10 +102,24 @@ const POSTATUS: Record<string, string> = {
   cancelled:        "bg-red-50 text-red-700",
 };
 
+const SPRSTATUS: Record<string, string> = {
+  draft:  "bg-ink-100 text-ink-700",
+  sent:   "bg-amber-50 text-amber-800 ring-1 ring-amber-200",
+  quoted: "bg-blue-50 text-blue-700",
+  applied: "bg-emerald-50 text-emerald-700",
+  closed: "bg-ink-100 text-ink-600",
+  cancelled: "bg-red-50 text-red-700",
+};
+
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
+const fmtDate = (s: string | null | undefined) =>
+  s ? new Date(s).toLocaleDateString(locale(),
+    { day: "numeric", month: "short", year: "numeric" }) : null;
+
 export default function SupplierDetailPage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const [preview, setPreview] = useState<SupplierFile | null>(null);
@@ -175,10 +210,84 @@ export default function SupplierDetailPage() {
       {canEdit && <AttachmentsSection ownerType="supplier" ownerId={s.id} />}
 
       {/* PO history */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
         <BigStat label={T("POs issued")} value={s.po_count} />
         <BigStat label={T("Open POs")} value={s.open_po_count} tone="amber" />
+        <BigStat label={T("Price requests")} value={s.price_request_count ?? 0} />
         <BigStat label={T("Lifetime spend")} value={idr(s.lifetime_value)} />
+      </div>
+
+      {/* What we have asked them to price */}
+      <div className="card overflow-hidden">
+        <header className="px-5 py-3 border-b border-ink-100 flex items-center gap-2">
+          <Tag size={15} className="text-brand-600" />
+          <span className="font-semibold">{T("Price requests")}</span>
+          {(s.awaiting_quote_count ?? 0) > 0 && (
+            <span className="chip bg-amber-50 text-amber-800">
+              {t(`${s.awaiting_quote_count} awaiting their price`,
+                 `${s.awaiting_quote_count} menunggu harga mereka`)}
+            </span>
+          )}
+          <span className="text-[10px] uppercase tracking-wider muted ml-auto">
+            {(s.price_requests ?? []).length}
+          </span>
+        </header>
+        {!(s.price_requests ?? []).length ? (
+          <div className="p-8 text-center text-sm muted">
+            {t("Nothing has been sent to this supplier to price yet.",
+               "Belum ada yang dikirim ke pemasok ini untuk dihargai.")}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">{T("Number")}</th>
+                  <th className="th">{t("What we asked about", "Yang kami tanyakan")}</th>
+                  <th className="th">{T("Sent")}</th>
+                  <th className="th">{T("Status")}</th>
+                  <th className="th text-right">{t("Their price", "Harga mereka")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.price_requests.map((p) => (
+                  <tr key={p.id} className="border-t border-ink-100 tr-hover">
+                    <td className="td">
+                      <Link
+                        to={`/purchasing/price-requests/${p.id}`}
+                        className="font-mono text-xs text-brand-700 hover:underline"
+                      >
+                        {p.number}
+                      </Link>
+                    </td>
+                    <td className="td">
+                      <span className="text-ink-800">{p.first_item ?? "—"}</span>
+                      {p.line_count > 1 && (
+                        <span className="muted ml-1.5 text-xs">
+                          {t(`+${p.line_count - 1} more`, `+${p.line_count - 1} lagi`)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="td muted">{fmtDate(p.sent_at) ?? "—"}</td>
+                    <td className="td">
+                      <span className={clsx(
+                        "chip capitalize",
+                        SPRSTATUS[p.status] ?? "bg-ink-100 text-ink-700",
+                      )}>
+                        {T(p.status.replace(/_/g, " "))}
+                      </span>
+                    </td>
+                    <td className="td text-right tabular-nums">
+                      {p.quoted_total != null
+                        ? `${p.currency === "IDR" ? "" : p.currency + " "}${idr(p.quoted_total)}`
+                        : <span className="muted">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card overflow-hidden">

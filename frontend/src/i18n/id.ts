@@ -898,6 +898,7 @@ export const ID_STATIC: Record<string, string> = {
   "Start a new chat": "Mulai obrolan baru",
   "Start typing to search": "Mulai mengetik untuk mencari",
   "Start your work day": "Mulai hari kerja Anda",
+  "Sent": "Dikirim",
   "Status": "Status",
   "Steel plate 10mm": "Pelat baja 10mm",
   "Still in production, shipping or billing.": "Masih dalam produksi, pengiriman, atau penagihan.",

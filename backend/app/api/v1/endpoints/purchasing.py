@@ -135,6 +135,7 @@ async def get_supplier(
     from app.models.operation import Project
     from app.models.purchasing import (
         GoodsReceipt, QCReport, Supplier, SupplierContact, SupplierPO,
+        SupplierPriceRequest,
     )
 
     s = await db.get(Supplier, supplier_id)
@@ -197,6 +198,42 @@ async def get_supplier(
                 "download_url": f"/api/v1/attachments/{a.id}/download",
             })
 
+    # What we have asked this supplier to price. The PO history answers "what
+    # have we bought"; this answers "what have we asked about" — including the
+    # asks still sitting unanswered, which is the reason to open a supplier's
+    # page before picking up the phone.
+    spr_rows = (await db.scalars(
+        select(SupplierPriceRequest)
+        .where(SupplierPriceRequest.supplier_id == supplier_id)
+        .order_by(SupplierPriceRequest.created_at.desc())
+    )).all()
+    price_requests = []
+    for x in spr_rows:
+        lines = x.items if isinstance(x.items, list) else []
+        quoted = [l for l in lines
+                  if isinstance(l, dict) and l.get("unit_price") not in (None, "")]
+        price_requests.append({
+            "id": str(x.id),
+            "number": x.number,
+            "status": x.status,
+            "created_at": x.created_at,
+            "sent_at": x.sent_at,
+            "quoted_at": x.quoted_at,
+            "valid_until": x.valid_until,
+            "currency": x.currency,
+            "line_count": len(lines),
+            "quoted_lines": len(quoted),
+            # A one-line reminder of what the ask was about, so the row can be
+            # recognised without opening it.
+            "first_item": next(
+                (str(l.get("description")) for l in lines
+                 if isinstance(l, dict) and l.get("description")), None),
+            "quoted_total": float(sum(
+                float(l.get("unit_price") or 0) * float(l.get("qty") or 0)
+                for l in quoted)) if quoted else None,
+        })
+    awaiting = [x for x in price_requests if x["status"] in ("draft", "sent")]
+
     contacts = (await db.scalars(
         select(SupplierContact)
         .where(SupplierContact.supplier_id == supplier_id)
@@ -223,6 +260,9 @@ async def get_supplier(
         "contact": s.contact or {},
         "po_count": len(po_rows),
         "open_po_count": len(open_pos),
+        "price_requests": price_requests,
+        "price_request_count": len(price_requests),
+        "awaiting_quote_count": len(awaiting),
         "lifetime_value": float(sum(float(p.total or 0) for p in po_rows)),
         "purchase_orders": [
             {
