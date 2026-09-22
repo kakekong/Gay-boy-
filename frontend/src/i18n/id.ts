@@ -93,6 +93,8 @@ export const ID_STATIC: Record<string, string> = {
   "Approval inbox": "Kotak masuk persetujuan",
   "Changes here need the director — except the ETA": "Perubahan di sini butuh direktur — kecuali ETA",
   "Approve": "Setujui",
+  // As in "≈ Rp 126.000.000 at 105" — the rate a foreign total was converted at.
+  "at": "pada",
   "Approved": "Disetujui",
   "Approved invoices with a faktur pajak number, as an e-Faktur import CSV for the chosen masa pajak.": "Invoice yang disetujui dan bernomor faktur pajak, sebagai CSV impor e-Faktur untuk masa pajak yang dipilih.",
   "Ask suppliers what they'd charge for the items on a PR. Each quote is a row here; compare price and lead time, then issue a PO to the winner.": "Tanyakan ke pemasok berapa harga untuk barang di sebuah PR. Setiap penawaran menjadi satu baris di sini; bandingkan harga dan lead time, lalu terbitkan PO ke pemenangnya.",

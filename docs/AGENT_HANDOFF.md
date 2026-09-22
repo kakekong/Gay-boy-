@@ -219,6 +219,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_my_commission.py` | the rep's own page (`/commissions/summary`): what it offers is exactly what the claim gate accepts, a reversed receipt removes a job from the list, a refused claim puts its job back on offer, totals move stage by stage, and another rep gets a 403 |
 | `test_search_reach.py` | ⌘K search reaches the documents people actually look for: a PR number however it is typed, a part name finding every document its line is on, the six document types that were missing, per-role scoping, and a supplier's page listing the price requests sent to them |
 | `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
+| `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -548,6 +549,16 @@ more things to preserve: the claim freezes
 `basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
 restate approved pay when a payment is later reversed), and approval
 re-checks the gate because a claim can outlive the payment that justified it.
+
+**Money in the approval preview carries its currency.** `preview_request`
+returns `currency`, `fx_rate` and `total_idr` on every shape, defaulting to
+`"IDR"` — the frontend formats from those and never assumes. This existed as a
+bug for exactly as long as it took somebody to raise a PO in yen: the figures
+were rendered as rupiah whatever the document said. If you add a document type
+to the preview, set its currency explicitly even when it is rupiah; a `None`
+there puts the old bug back. On a supplier-PO *edit* the currency shown is the
+**proposed** one (`changes["currency"]`), not the row's, because the preview's
+job is to show the change being approved.
 
 **Search is a reach problem, not a ranking one.** `endpoints/search.py` is
 one query per entity, each gated to the roles that can open the page it links

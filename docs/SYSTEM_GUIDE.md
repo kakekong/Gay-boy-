@@ -270,6 +270,14 @@ Rules worth knowing:
 - **A rate alone still applies immediately** (it is not a decision anyone approves — it moves when the bank says so). **A currency alone still waits for the director**, and dropping the old rate with it. **Submitted together they queue together and land together**, so a PO is never left reading a new rate against an old currency.
 - **Finance** may set the rate and correct prices here; the currency selector is disabled for them — what was agreed with the vendor is purchasing's.
 
+### 8.3c What the approval box shows about money
+
+A purchasing PO can be raised in yen, dollars or yuan, and the director's approval preview used to print every figure as rupiah regardless — a ¥1.200.000 order read as "Rp 1.200.000": the same digits, the wrong symbol, about a hundredfold out, on a screen whose only two buttons are approve and reject.
+
+The preview now carries the document's **currency**, its **fx rate**, and the **rupiah equivalent** of the total. Line prices, line totals and the total print in the currency they are in; a foreign total shows `≈ Rp X at <rate>` beneath it, because what a foreign order costs *us* is the figure the decision actually turns on. Rupiah documents are unchanged.
+
+On an **edit** that changes the currency, the money shown is the money being decided on — the proposed currency and rate — and the value it replaces stays in the old one, so `Total: JPY 1,200,000.00 → USD 8,000.00` reads as the change it is. Quotations carry a currency too and are covered by the same mechanism; everything with no money of its own answers `IDR`.
+
 ### 8.4 Logistics & imports
 
 For import orders, purchasing maintains the required import documents (invoice, packing list, B/L, PIB, …) per delivery mode on the project's logistics card — expected complete before goods land. Document scans go through a director check.

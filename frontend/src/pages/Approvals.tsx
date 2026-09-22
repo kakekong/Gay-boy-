@@ -542,6 +542,14 @@ interface PreviewShape {
     was_unit_price?: number | null;
   }[];
   total: number | null;
+  /** What the figures on this document are denominated in. A purchasing PO
+   *  can be in JPY, USD or CNY; most documents are rupiah and say so. */
+  currency?: string | null;
+  /** Rupiah per unit of `currency`, when it is not rupiah. */
+  fx_rate?: number | null;
+  /** The total converted, because what a foreign order costs us is the
+   *  number the decision actually turns on. */
+  total_idr?: number | null;
   notes: string | null;
   attachments: ApprovalAttachment[];
   link: string | null;
@@ -552,6 +560,25 @@ interface PreviewShape {
 
 const rp = (n: number | null | undefined) =>
   n == null ? "—" : "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n));
+
+/**
+ * Money, in the currency it is actually in.
+ *
+ * Everything in this panel used to be printed as rupiah whatever the document
+ * said, so a purchase order in yen showed the yen figure with "Rp" in front of
+ * it — the same number, off by a factor of a hundred or so, in a box whose
+ * only two buttons are approve and reject. A currency that is not rupiah is
+ * shown with its own code and two decimals, because that is how those prices
+ * are quoted.
+ */
+const money = (n: number | null | undefined, currency?: string | null) => {
+  if (n == null) return "—";
+  const cur = currency || "IDR";
+  if (cur === "IDR") return rp(n);
+  return `${cur} ${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).format(n)}`;
+};
 
 /**
  * What is actually being approved.
@@ -656,12 +683,14 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                                 {it.was_unit_price != null
                                   && it.was_unit_price !== it.unit_price && (
                                   <span className="muted line-through mr-1">
-                                    {rp(it.was_unit_price)}
+                                    {money(it.was_unit_price, p.currency)}
                                   </span>
                                 )}
-                                {rp(it.unit_price)}
+                                {money(it.unit_price, p.currency)}
                               </td>
-                              <td className="td text-right tabular-nums">{rp(it.line_total)}</td>
+                              <td className="td text-right tabular-nums">
+                                {money(it.line_total, p.currency)}
+                              </td>
                             </>
                           )}
                         </tr>
@@ -672,7 +701,21 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                         <tr className="border-t border-ink-200 font-semibold">
                           <td className="td" colSpan={p.items.some((x) => x.unit_price != null) ? 3 : 1}>
                             {T("Total")}</td>
-                          <td className="td text-right tabular-nums">{rp(p.total)}</td>
+                          <td className="td text-right tabular-nums">
+                            {money(p.total, p.currency)}
+                            {/* What it costs us, so nobody converts in their
+                                head to decide whether to approve it. */}
+                            {p.total_idr != null && (
+                              <div className="text-[11px] font-normal muted mt-0.5">
+                                {`\u2248 ${rp(p.total_idr)}`}
+                                {p.fx_rate != null && (
+                                  <> {T("at")}{" "}
+                                    {new Intl.NumberFormat("id-ID").format(p.fx_rate)}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       </tfoot>
                     )}

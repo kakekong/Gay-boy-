@@ -509,6 +509,18 @@ async def preview_request(
     out: dict = {
         "target_type": req.target_type, "title": None, "subtitle": None,
         "fields": [], "items": [], "total": None, "notes": None,
+        # What the money on this document is denominated in. Everything here
+        # used to be rendered as rupiah whatever it actually was, so a supplier
+        # PO in yen read as an identical number of rupiah — off by a factor of
+        # a hundred or so, in a box whose only two buttons are approve and
+        # reject. IDR is the default because most documents have no currency
+        # at all, and that is what they are.
+        "currency": "IDR",
+        "fx_rate": None,
+        # The same total in rupiah, when it is not already. What a foreign
+        # order costs *us* is the number the decision actually turns on, and
+        # nobody should be doing the multiplication in their head.
+        "total_idr": None,
         "attachments": await _attachments_for(db, "approval_request", req.id),
         "link": None,
         # For documents the system prints: the sheet as it would come out,
@@ -532,6 +544,7 @@ async def preview_request(
             out.update(
                 title=q.number, subtitle=cust.company_name if cust else None,
                 link=f"/quotations/{q.id}", notes=q.notes,
+                currency=getattr(q, "currency", None) or "IDR",
                 total=_money(q.total) if hasattr(q, "total") else None,
                 items=[{"description": i.description, "qty": _money(i.qty),
                         "unit_price": _money(i.unit_price),
@@ -599,11 +612,18 @@ async def preview_request(
                     "currency": "Currency", "total": "Total", "status": "Status",
                 }
 
-                def _show(key, val):
+                # A change can move the currency itself, and then the two sides
+                # of the arrow are in different money. Showing both in the old
+                # one — which is what happened — is the worst possible way to
+                # present exactly the change being approved.
+                new_cur = changes.get("currency") or cur
+
+                def _show(key, val, in_currency):
                     if val in (None, ""):
                         return "—"
                     if key == "total":
-                        return _rupiah(val) if cur == "IDR" else f"{cur} {_money(val):,.2f}"
+                        return (_rupiah(val) if in_currency == "IDR"
+                                else f"{in_currency} {_money(val):,.2f}")
                     return str(val)
 
                 fields = [{"label": "Change requested by", "value": requester_name}]
@@ -612,7 +632,8 @@ async def preview_request(
                         continue                       # shown as the line table
                     fields.append({
                         "label": labels.get(k, k.replace("_", " ").capitalize()),
-                        "value": f"{_show(k, getattr(sp, k, None))}  →  {_show(k, v)}",
+                        "value": (f"{_show(k, getattr(sp, k, None), cur)}"
+                                  f"  →  {_show(k, v, new_cur)}"),
                     })
                 if "items" in changes:
                     was = {(i.get("description") or ""): i
@@ -630,13 +651,23 @@ async def preview_request(
                              for i in (changes.get("items") or [])]
                     fields.append({"label": "Lines",
                                    "value": f"{len(items)} proposed, replacing {len(was)}"})
+            # The money shown is the money being decided on: on an edit that is
+            # the proposed currency and rate, not the ones on the row today.
+            shown_cur = (changes.get("currency") or cur) if is_update else cur
+            shown_rate = (changes.get("fx_rate", sp.fx_rate)
+                          if is_update else sp.fx_rate)
+            shown_total = _money(changes.get("total", getattr(sp, "total", 0)))
             out.update(
                 title=(f"{sp.number} — proposed changes" if is_update else sp.number),
                 subtitle=sup.name if sup else None,
                 # The specific order, not the list. A director deciding one of
                 # eight queued edits should not have to go and find it.
                 link=f"/purchase-orders/{sp.id}",
-                total=_money(changes.get("total", getattr(sp, "total", 0))),
+                currency=shown_cur,
+                fx_rate=_money(shown_rate) if shown_rate else None,
+                total=shown_total,
+                total_idr=(round(shown_total * _money(shown_rate), 2)
+                           if shown_cur != "IDR" and shown_rate else None),
                 items=items,
                 fields=fields,
             )
