@@ -161,8 +161,8 @@ export default function QuotationDetailPage() {
       refresh();
       if (res?.status === 202) {
         setFlash({ kind: "ok", text: tt(
-          "Mark-won sent to the director for approval.",
-          "Penandaan menang dikirim ke direktur untuk persetujuan.",
+          "Mark-won sent to finance for approval.",
+          "Penandaan menang dikirim ke keuangan untuk persetujuan.",
         ) });
       } else {
         setFlash({ kind: "ok", text: tt("Mark won succeeded.", "Tandai menang berhasil.") });
@@ -234,7 +234,7 @@ export default function QuotationDetailPage() {
     && Q.status === "pending_approval";
   const canDecide  = canApprove && Q.status === "pending_approval";
   // Won and Lost are mutually exclusive — and both freeze while a
-  // Mark-won request sits with the director (won_pending).
+  // Mark-won request sits with finance (won_pending).
   const canMarkWonLost = isOwner && (Q.status === "approved" || Q.status === "sent")
     && !Q.won_pending;
   // A PO that is filed or approved is evidence; one that was rejected or
@@ -361,7 +361,7 @@ export default function QuotationDetailPage() {
                 <span className="chip bg-ink-100 text-ink-600">v{Q.version}</span>
                 {Q.won_pending && (
                   <span className="chip bg-amber-50 text-amber-700">
-                    {t("Mark-won awaiting director", "Mark-won menunggu direktur")}
+                    {t("Mark-won awaiting finance", "Mark-won menunggu keuangan")}
                   </span>
                 )}
                 {Q.edit_pending && (
@@ -1245,7 +1245,7 @@ function WonNextStepCard({
               ? T("The customer's PO has been approved by the director and the project is now active. Manage it from the Projects section.")
               : pending.length
                 ? T("The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed.")
-                : T("Once you have the signed PO from the customer, file it here. You'll attach the actual PO file and pick the items they ordered out of this quote. With it on file you can mark the quote Won, which is what starts the project; the director approves the PO alongside.")}
+                : T("Once you have the signed PO from the customer, file it here. You'll attach the actual PO file and pick the items they ordered out of this quote. With it on file you can mark the quote Won, which is what starts the project; finance signs the Won off and the director approves the PO alongside.")}
           </p>
           {/* Filing the PO is what unlocks Mark won — say so here rather than
               leaving a greyed-out button on the header to be puzzled over. */}

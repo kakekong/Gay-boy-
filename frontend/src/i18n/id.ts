@@ -641,7 +641,7 @@ export const ID_STATIC: Record<string, string> = {
   "Notifications": "Notifikasi",
   "Number": "Nomor",
   "On quotation": "Pada penawaran",
-  "Once you have the signed PO from the customer, file it here. You'll attach the actual PO file and pick the items they ordered out of this quote. With it on file you can mark the quote Won, which is what starts the project; the director approves the PO alongside.": "Setelah Anda menerima PO bertanda tangan dari pelanggan, ajukan di sini. Anda melampirkan file PO-nya dan memilih barang yang mereka pesan dari penawaran ini. Dengan PO ini tercatat, penawaran bisa ditandai Menang — itulah yang memulai proyeknya; direktur tetap menyetujui PO-nya.",
+  "Once you have the signed PO from the customer, file it here. You'll attach the actual PO file and pick the items they ordered out of this quote. With it on file you can mark the quote Won, which is what starts the project; finance signs the Won off and the director approves the PO alongside.": "Setelah Anda menerima PO bertanda tangan dari pelanggan, ajukan di sini. Anda melampirkan file PO-nya dan memilih barang yang mereka pesan dari penawaran ini. Dengan PO ini tercatat, penawaran bisa ditandai Menang — itulah yang memulai proyeknya; keuangan yang menyetujui penandaan Menang dan direktur tetap menyetujui PO-nya.",
   "One row per supplier quoting a PR.": "Satu baris per pemasok yang menawar sebuah PR.",
   "Ongoing": "Berjalan",
   "Open": "Buka",

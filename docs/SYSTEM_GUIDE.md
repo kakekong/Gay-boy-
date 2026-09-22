@@ -188,7 +188,7 @@ Around the PR:
   - PR-backed drafts: line prices are fixed by the approved PR.
 
   **Why `won` is editable.** It used to sit with lost and cancelled, which read as "the deal is finished". It is the opposite: a won quotation is the *live* deal — a project runs against it, the price request behind it is kept in step with it, and purchasing buys to that request. It is exactly the document a customer rings about to add four more of item eight, and locking it meant that change had nowhere to land: the edit was refused, so nothing reached the price request or the project either. Two consequences ride along — the price request and the project's order card follow the edit automatically (§6.1b), and because winning a quotation **posts revenue to the ledger**, a change to a posted quotation's figures is **reversed and re-posted** so the accounts stop holding the old total. The original entries stay, the reversal sits beside them, the new posting follows.
-- **Mark won**: sales' click files a `quotation_won` request to the director; approval flips the quote to Won, posts revenue to the ledger, and bumps the stage. **Won does not create a project — the customer PO does.**
+- **Mark won**: sales' click files a `quotation_won` request to **finance**, not the director. Approval flips the quote to Won, posts revenue to the ledger, opens the project and bumps the stage — winning is the moment the deal becomes money, so the sign-off sits with the desk that lives with the ledger, the project and the invoice schedule that follows. Finance can also mark it Won directly from the quotation, which closes any request already queued. The director keeps the ability to settle one (they can settle any request) but nothing waits on them for it.
 - **Mark lost**: requires a written reason (feeds the Lost-deals report); blocked while a Mark-won request is pending and on won/closed quotes — the two outcomes are mutually exclusive, enforced in UI and API.
 - **Exports**: PDF and Excel with the company header, PIC addressing and totals. **Every export writes an `export` activity** to the customer timeline (who, which quote, which format, when).
 - **Quote import**: line items can be imported from an existing Excel/PDF quotation document instead of typed by hand.
@@ -379,7 +379,8 @@ A single `ApprovalRequest` table (target type + id, requester, required role, re
 
 | Decision | Approver |
 |---|---|
-| Quotation submit, Mark-won, customer PO (regular), supplier PO, price-request pricing, shipping/delivery date changes, quotation edits | **Director only** |
+| Quotation submit, customer PO (regular), supplier PO, price-request pricing, shipping/delivery date changes, quotation edits | **Director only** |
+| **Mark-won**, down-payment customer PO | **Finance** (director may also settle) |
 | DP customer PO, faktur pajak, payment verification | **Finance** (director backstop) |
 | Manual CRM stage moves, manager-tier data changes | **Manager or director** |
 
@@ -482,7 +483,7 @@ A **supplier's page** answers the same question from the other side: alongside t
 1. **Sales** creates the customer (3-step wizard: basics → PICs → tax/NPWP), logs the first contact, advances Lead → Presentation (manager/director approve, reason recorded).
 2. **Sales** files a **price request**. **Purchasing** costs it (pinged instantly). **Director** sets sell prices and approves (pinged when costing lands). Sales is notified of the decision.
 3. **Sales** generates the **quotation** from the PR, submits; **director approves** (stage auto-bumps); sales exports the PDF (activity logged) and sends it. Questions along the way live in the PR/quotation discussion threads.
-4. Customer says yes → **Mark won** → director approves (revenue posts to the journal). If terms change later: **Post revision** → edit → resubmit → the old version supersedes on approval.
+4. Customer says yes → **Mark won** → finance approves (revenue posts to the journal, the project opens). If terms change later: **Post revision** → edit → resubmit → the old version supersedes on approval.
 5. **Sales files the customer PO** with the file + ordered items.
    - *Regular*: director approves → **project spawns**.
    - *DP*: finance approves → DP invoice on the PO → customer pays → sales confirms deposit → **project spawns**.

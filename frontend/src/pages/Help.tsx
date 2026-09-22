@@ -159,7 +159,7 @@ export default function HelpPage() {
             <Workflow
               title="C) From Won to a project (the PO is the trigger)"
               steps={[
-                "Open the approved quotation → Mark won → the director approves the Won request",
+                "Open the approved quotation → Mark won → FINANCE approves the Won request",
                 "Winning does NOT create the project — file the customer's PO on the quote's Next-step card (attach the PO file, pick ordered items)",
                 "Regular PO → director approves → project spawns with the PO number/value",
                 "DP PO → finance approves + issues the DP invoice → you confirm 'deposit received' → project spawns",
@@ -189,7 +189,7 @@ export default function HelpPage() {
               title="F) Clearing the Approvals inbox (Manager / Director)"
               steps={[
                 "The Approvals nav item shows a count when anything is waiting",
-                "Quotations, customer/supplier POs, Mark-won, follow-ups and shipping-date changes are director-only; manual stage moves clear through manager or director",
+                "Quotations, customer/supplier POs, follow-ups and shipping-date changes are director-only; Mark-won is finance's; manual stage moves clear through manager or director",
                 "The Documents card lists drawings, import docs, delivery proofs and price requests waiting for a decision — with deep links",
                 "Click Approve or Reject (with reason — the requester sees it)",
                 "Approving a deal document also advances the customer's pipeline stage automatically",
@@ -260,8 +260,8 @@ export default function HelpPage() {
 
             <h3 className="font-semibold mt-5 mb-1">Who approves what</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-              <Tier label="Director" who="Every quotation, customer & supplier PO, Mark-won, follow-ups, price requests, shipping-date changes" tone="red" />
-              <Tier label="Finance" who="DP customer POs, faktur pajak, payment verification" tone="amber" />
+              <Tier label="Director" who="Every quotation, customer &amp; supplier PO, follow-ups, price requests, shipping-date changes" tone="red" />
+              <Tier label="Finance" who="Mark-won, DP customer POs, faktur pajak, payment verification" tone="amber" />
               <Tier label="Manager or Director" who="Manual CRM stage moves, data changes" tone="emerald" />
             </div>
             <P>

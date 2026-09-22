@@ -106,20 +106,32 @@ async def list_notifications(
     items: list[dict] = []
     role = Role(me.role)
 
-    # 1. Approvals waiting (manager/director only)
-    if role in (Role.MANAGER, Role.DIRECTOR):
+    # 1. Approvals waiting.
+    #
+    # Finance is here because requests are addressed to them — the
+    # down-payment customer POs, and now mark-won. Without this they had a
+    # queue they could open but nothing telling them anything was in it, which
+    # is the same as not having one.
+    if role in (Role.MANAGER, Role.DIRECTOR, Role.FINANCE):
         appr_stmt = (
             select(ApprovalRequest)
             .where(ApprovalRequest.status == ApprovalStatus.PENDING.value)
             .order_by(ApprovalRequest.created_at.desc())
         )
+        # Same filter the inbox applies, so the bell and the page agree about
+        # what is waiting on you.
         if role == Role.MANAGER:
             appr_stmt = appr_stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
+        elif role == Role.FINANCE:
+            appr_stmt = appr_stmt.where(ApprovalRequest.required_role == Role.FINANCE.value)
         for a in (await db.scalars(appr_stmt)).all():
             items.append({
                 "id": f"approval:{a.id}",
                 "kind": "approval",
-                "severity": "high" if a.required_role == Role.DIRECTOR.value else "medium",
+                # A decision somebody is blocked on is a decision somebody is
+                # blocked on, whichever desk it is addressed to.
+                "severity": ("high" if a.required_role in
+                             (Role.DIRECTOR.value, Role.FINANCE.value) else "medium"),
                 "title": f"Approval needed: {_APPROVAL_LABEL.get(a.target_type, a.target_type.replace('_', ' '))}",
                 "body": a.reason or "",
                 "link": "/approvals",

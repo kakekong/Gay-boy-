@@ -56,7 +56,11 @@ const NAV_GROUPS: { label: string; label_id: string; items: NavItem[] }[] = [
       // somewhere to read it — that is the whole point of the feature.
       { to: "/mentions", label: "Mentions", label_id: "Sebutan", icon: AtSign,
         badgeQuery: "mentions-unread" },
-      { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare, roles: ["manager", "director"],
+      // Finance belongs here: DP customer POs have always been addressed to
+      // them, and mark-won now is too. They saw neither, because the page
+      // they were expected to decide on was not in their sidebar.
+      { to: "/approvals", label: "Approvals", label_id: "Persetujuan", icon: CheckSquare,
+        roles: ["manager", "director", "finance"],
         badgeQuery: "approvals-pending" },
     ],
   },
@@ -272,6 +276,12 @@ function BackButton() {
 // `roles` lists. A custom role or per-user page override still wins over this.
 export const ROLE_PAGE_ALLOWLIST: Record<string, string[]> = {
   finance: [
+    // Requests are addressed to finance — DP customer POs, and marking a deal
+    // Won. Without this the sign-off was filed to a page they were redirected
+    // away from, which is the quietest way to stall a queue: the request
+    // exists, the badge would count it, and the person it waits on never
+    // arrives.
+    "/approvals",
     "/recent-ledgers",
     "/accounts",
     "/journals",       // Jurnal Umum — finance keeps the books
@@ -373,9 +383,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const role = user?.role ?? "";
   const canSeePendingInvoices = ["finance", "manager", "director"].includes(role);
   const canSeePendingClaims   = ["finance", "manager", "director"].includes(role);
-  // GET /approvals is manager/director-only on the backend — polling it as
-  // finance just 403s every 30s. Finance gets its own DP queue below.
-  const canSeePendingApprovals = ["manager", "director"].includes(role);
+  // GET /approvals accepts finance too, and scopes the list to the requests
+  // addressed to them — the DP customer POs and mark-won. The old comment
+  // here said the endpoint was manager/director-only and that polling it as
+  // finance would 403; that stopped being true when DP POs started routing to
+  // finance, and it left them with a queue nothing counted.
+  const canSeePendingApprovals = ["manager", "director", "finance"].includes(role);
   // The DP customer-PO queue is finance's from end to end: they approve the
   // PO, invoice it, and then say whether the money arrived. Sales no longer
   // has a step here, so no longer has a badge.

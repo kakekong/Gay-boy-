@@ -975,9 +975,18 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
     # Won lands (direct director path below, or apply_to_target for the
     # approval-request path).
     cust = await db.get(Customer, q.customer_id) if q.customer_id else None
-    # Only the director can flip a deal to Won directly. Everyone else files
-    # an approval request; the Won + ledger posting happen on approval.
-    if Role(user.role) != Role.DIRECTOR:
+    # Won goes to FINANCE to sign off, not the director.
+    #
+    # Winning a deal is the moment it stops being a conversation and becomes
+    # money: the quotation posts to the ledger, the project opens, and the
+    # invoice schedule follows from it. Finance are the desk that lives with
+    # all three, and they are already the ones checking the customer's PO on
+    # the down-payment path — so the sign-off sits with the people who carry
+    # its consequences rather than one more thing queued behind the director.
+    #
+    # The director keeps the direct path because they can settle any request
+    # in the system; `decide()` has always let them answer a finance-gated one.
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
         existing = await db.scalar(
             select(ApprovalRequest).where(
                 ApprovalRequest.target_type == "quotation_won",
@@ -991,7 +1000,7 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
                 target_type="quotation_won",
                 target_id=q.id,
                 requested_by=user.id,
-                required_role=Role.DIRECTOR,
+                required_role=Role.FINANCE,
                 reason=f"Mark quotation {q.number} as Won",
                 payload={
                     "total": float(q.total or 0),
@@ -1007,13 +1016,13 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
             status_code=status.HTTP_202_ACCEPTED,
             content={
                 "status": "pending_approval",
-                "message": "Mark-won sent to the director for approval.",
+                "message": "Mark-won sent to finance for approval.",
             },
         )
     q.status = "won"
-    # The director may mark Won directly while sales' own mark-won request is
-    # still pending. Close it here — otherwise it sits in the approvals inbox
-    # forever with nothing left to decide.
+    # Finance (or the director) may mark Won directly while sales' own
+    # mark-won request is still pending. Close it here — otherwise it sits in
+    # the approvals inbox forever with nothing left to decide.
     stale = (await db.scalars(
         select(ApprovalRequest).where(
             ApprovalRequest.target_type == "quotation_won",
@@ -1025,7 +1034,9 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
         req.status = ApprovalStatus.APPROVED.value
         req.decided_by = user.id
         req.decided_at = datetime.now(UTC)
-        req.decision_notes = "Marked Won directly by the director."
+        req.decision_notes = (
+            f"Marked Won directly by {user.full_name or Role(user.role).value}."
+        )
     # Won is where the job starts. The customer has said yes and their PO is
     # on file — that is checked above, it is what Won means here — so there is
     # nothing left to wait for before the work has somewhere to live. The
