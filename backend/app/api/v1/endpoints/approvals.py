@@ -416,6 +416,12 @@ async def inbox(
             "target_id": str(r.target_id),
             "target_label": target_label,
             "currency": row_currency,
+            # How many times this proposal has been rewritten, and when it was
+            # first raised. A row that says "revised 4 times" is a row the
+            # director can trust to be the current intent — which is the whole
+            # reason there is only one of them.
+            "revision": int((r.payload or {}).get("revision") or 1),
+            "first_requested_at": (r.payload or {}).get("first_requested_at"),
             "required_role": r.required_role,
             "reason": r.reason,
             "payload": payload,

@@ -386,6 +386,16 @@ A single `ApprovalRequest` table (target type + id, requester, required role, re
 
 The **/approvals inbox** (manager/director) lists pending requests **plus a documents queue** for status-based gates: submitted drawings, import-document scans, delivery proofs awaiting verification, and price requests pending director pricing — each deep-linked.
 
+### 10.1b One live proposal per document
+
+Somebody settling a figure edits, looks at it, and edits again. Every one of those used to file a fresh approval, so the director held a stack of near-identical rows against one document with no way to tell which was current — and approving an older one applied a **stale** intent while the newer one sat there still waiting.
+
+There is now **one pending request per document**. A second edit rewrites the first in place: same row, current values, the clock reset to the latest change, and a `revised N×` chip so the director can see the row has moved rather than assuming it is new (hovering it gives the time it was first raised). Approving it applies what was typed last. Supplier POs, project shipping dates and quotation edits all behave this way — quotation edits always did; the shared `file_or_revise()` helper in `core/approval.py` is what gives it to the rest.
+
+**The reason line says what moved.** It used to name the field keys — `Update PO PO-001: items, total` — which is the same sentence for every edit ever made to that order. It now reads `Update PO PO-001: total CNY 400.00 → CNY 2,850.00, Belt b0c2d5: CNY 40.00 → CNY 950.00`, in the document's own currency, so two edits to one order can be told apart without opening either.
+
+---
+
 ### 10.2 The notification bell
 
 Notifications are computed live per user (nothing is stored stale) and surfaced four ways: the **bell dropdown**, **sidebar badges**, **banner pop-ups with a chime** for new arrivals, and **device push** (§10.3).

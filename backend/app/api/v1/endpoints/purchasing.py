@@ -10,7 +10,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.approval import request_approval, require_pr_approval
+from app.core.approval import (
+    file_or_revise, request_approval, require_pr_approval,
+)
 from app.core.audit import record as audit_record
 from app.core.config import settings
 from app.core.db import get_db
@@ -938,6 +940,75 @@ async def list_pos(
     return out
 
 
+def _describe_po_changes(po, data: dict) -> str:
+    """What changed, in words, rather than which field names were touched.
+
+    "Update PO PO-001: items, total" is the same sentence for every edit ever
+    made to that order, which is no help at all to somebody holding a queue of
+    them. This says what moved and to what, so two edits to one PO can be told
+    apart at a glance and the director knows what they are about to approve
+    before opening anything.
+    """
+    cur = po.currency or "IDR"
+
+    def money(v, currency=None) -> str:
+        c = currency or cur
+        try:
+            n = float(v or 0)
+        except (TypeError, ValueError):
+            return str(v)
+        if c == "IDR":
+            return "Rp " + f"{round(n):,}".replace(",", ".")
+        return f"{c} {n:,.2f}"
+
+    bits: list[str] = []
+    if "currency" in data and (data["currency"] or "IDR") != cur:
+        bits.append(f"currency {cur} → {data['currency']}")
+    if "total" in data:
+        was, now = float(po.total or 0), float(data["total"] or 0)
+        new_cur = data.get("currency") or cur
+        if abs(was - now) > 0.005 or new_cur != cur:
+            bits.append(f"total {money(was)} → {money(now, new_cur)}")
+    if "fx_rate" in data:
+        was = None if po.fx_rate is None else float(po.fx_rate)
+        now = None if data["fx_rate"] in (None, "") else float(data["fx_rate"])
+        if was != now:
+            fmt = lambda x: "—" if x is None else f"{x:,.0f}".replace(",", ".")
+            bits.append(f"rate {fmt(was)} → {fmt(now)}")
+    if "items" in data:
+        old_lines = po.items or []
+        new_lines = data["items"] or []
+        if len(old_lines) != len(new_lines):
+            bits.append(f"{len(old_lines)} line(s) → {len(new_lines)}")
+        else:
+            # Same count: name the first line whose price or quantity moved,
+            # which is what somebody is usually iterating on.
+            moved = None
+            for i, nl in enumerate(new_lines):
+                ol = old_lines[i] if i < len(old_lines) else {}
+                if not isinstance(nl, dict) or not isinstance(ol, dict):
+                    continue
+                if (float(nl.get("unit_price") or 0) != float(ol.get("unit_price") or 0)
+                        or float(nl.get("qty") or 0) != float(ol.get("qty") or 0)):
+                    moved = (ol, nl)
+                    break
+            if moved:
+                ol, nl = moved
+                desc = str(nl.get("description") or "line")[:28]
+                if float(nl.get("unit_price") or 0) != float(ol.get("unit_price") or 0):
+                    bits.append(f"{desc}: {money(ol.get('unit_price'))} → "
+                                f"{money(nl.get('unit_price'), data.get('currency'))}")
+                else:
+                    bits.append(f"{desc}: qty {ol.get('qty')} → {nl.get('qty')}")
+            else:
+                bits.append("lines re-sent unchanged")
+    for key, label in (("number", "number"), ("po_date", "PO date"),
+                       ("quoted_lead_days", "lead time"), ("status", "status")):
+        if key in data and str(data[key] or "") != str(getattr(po, key, "") or ""):
+            bits.append(f"{label} {getattr(po, key, None) or '—'} → {data[key] or '—'}")
+    return ", ".join(bits) if bits else "no visible change"
+
+
 @router.post("/po", status_code=201)
 async def create_po(
     payload: PoCreate,
@@ -1566,14 +1637,17 @@ async def update_po(
         # dates". The director can still set a date explicitly.
         if data.get("po_date") in (None, ""):
             data.pop("po_date", None)
-        await request_approval(
+        # One live proposal per PO. Editing again revises the row already
+        # waiting rather than stacking a second one the director has to guess
+        # between — and the reason says what moved, not which field names did.
+        await file_or_revise(
             db,
             target_type="supplier_po",
             target_id=po.id,
             requested_by=user.id,
             required_role=Role.DIRECTOR,
-            reason=f"Update PO {po.number}: {', '.join(sorted(data.keys())) or 'no fields'}",
-            payload={"action": "update", "changes": data},
+            reason=f"Update PO {po.number}: {_describe_po_changes(po, data)}",
+            changes=data,
         )
         # IMPORTANT: return (don't raise) — raising rolls back the session via
         # get_db's exception handler, which would discard the approval we just

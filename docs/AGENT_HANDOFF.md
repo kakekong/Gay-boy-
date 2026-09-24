@@ -220,6 +220,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_search_reach.py` | ⌘K search reaches the documents people actually look for: a PR number however it is typed, a part name finding every document its line is on, the six document types that were missing, per-role scoping, and a supplier's page listing the price requests sent to them |
 | `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
+| `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
 | `test_won_to_finance.py` | marking a deal Won is finance's sign-off: the request is addressed to them, reaches their inbox AND their bell, approving it wins the deal and opens the project, a manager cannot reach past it, the director can still settle one, and finance marking it directly closes the queued request |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
@@ -550,6 +551,19 @@ more things to preserve: the claim freezes
 `basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
 restate approved pay when a payment is later reversed), and approval
 re-checks the gate because a claim can outlive the payment that justified it.
+
+**One pending approval per document — use `file_or_revise()`.**
+A repeated edit must revise the request already waiting, not queue another:
+two rows against one document are not alternatives, they are drafts of one
+intent, and approving the older one applies a stale figure while the newer one
+is still pending. `core/approval.py::file_or_revise` is the shared door —
+it replaces the pending request's `changes` wholesale, bumps `revision`, keeps
+`first_requested_at` and resets `created_at` so the row sorts as the latest
+proposal. Replacing rather than merging is correct **because each request is a
+complete statement of the fields its form governs, computed against a document
+that does not move while the request is pending**; if you ever add a partial
+patch path, that assumption is what breaks. Any new approval that carries a
+`changes` payload should file through this rather than `request_approval`.
 
 **Moving an approval to a new desk is four places, not one.**
 Mark-won went from the director to finance, and `required_role` was the least

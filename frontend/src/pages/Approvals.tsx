@@ -27,6 +27,11 @@ interface ApprovalRow {
   /** What the money on this row is in. Quotations can be non-IDR, and the
    *  mark-won row prints their total. */
   currency?: string | null;
+  /** How many times this proposal has been rewritten. There is only ever one
+   *  live request per document, so >1 means earlier edits were folded in. */
+  revision?: number;
+  /** When the first version of it was raised, if it has been revised. */
+  first_requested_at?: string | null;
   required_role: string;
   reason: string;
   payload: Record<string, any>;
@@ -297,6 +302,16 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             )}
             <span className="chip bg-amber-50 text-amber-700 uppercase">
               {r.required_role} {T("approval")}</span>
+            {(r.revision ?? 1) > 1 && (
+              <span
+                className="chip bg-violet-50 text-violet-700"
+                title={r.first_requested_at
+                  ? `${T("First raised")} ${new Date(r.first_requested_at).toLocaleString(locale())}`
+                  : undefined}
+              >
+                {T("revised")} {r.revision}×
+              </span>
+            )}
             <span className="text-[11px] muted">
               {new Date(r.created_at).toLocaleString(locale())}
               {r.requester_name && <> {T("· by")}{" "}<b className="text-ink-700">{r.requester_name}</b></>}

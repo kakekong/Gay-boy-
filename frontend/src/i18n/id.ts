@@ -93,6 +93,9 @@ export const ID_STATIC: Record<string, string> = {
   "Approval inbox": "Kotak masuk persetujuan",
   "Changes here need the director — except the ETA": "Perubahan di sini butuh direktur — kecuali ETA",
   "Approve": "Setujui",
+  // On an approval card: how many times the one live proposal has been rewritten.
+  "revised": "direvisi",
+  "First raised": "Pertama diajukan",
   // As in "≈ Rp 126.000.000 at 105" — the rate a foreign total was converted at.
   "at": "pada",
   "Approved": "Disetujui",

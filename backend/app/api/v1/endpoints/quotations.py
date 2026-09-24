@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.approval import (
     decide,
     evaluate_discount,
+    file_or_revise,
     request_approval,
 )
 from app.core.audit import record as audit_record
@@ -421,26 +422,20 @@ async def update_quotation(
                       payload.model_dump(mode="json", exclude_unset=True).items()
                       if k in data}
             queued.pop("number", None)  # number stays a direct meta edit
-            existing = await db.scalar(
-                select(ApprovalRequest).where(
-                    ApprovalRequest.target_type == "quotation_edit",
-                    ApprovalRequest.target_id == q.id,
-                    ApprovalRequest.status == ApprovalStatus.PENDING.value,
-                )
+            # This document already worked this way — one live proposal,
+            # revised in place. It now goes through the shared helper so it
+            # also carries the revision count the queue shows, and so every
+            # document behaves the same rather than only this one.
+            await file_or_revise(
+                db,
+                target_type="quotation_edit",
+                target_id=q.id,
+                requested_by=user.id,
+                required_role=Role.DIRECTOR,
+                reason=(f"Edit approved quotation {q.number}: "
+                        + (", ".join(sorted(queued)) or "no visible change")),
+                changes=queued,
             )
-            if existing:
-                existing.payload = {"action": "update", "changes": queued}
-                existing.requested_by = user.id
-            else:
-                await request_approval(
-                    db,
-                    target_type="quotation_edit",
-                    target_id=q.id,
-                    requested_by=user.id,
-                    required_role=Role.DIRECTOR,
-                    reason=f"Edit approved quotation {q.number}",
-                    payload={"action": "update", "changes": queued},
-                )
             await audit_record(db, actor=user, action="edit_requested",
                                entity="quotation", entity_id=q.id,
                                after={"changes": sorted(queued)})

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.approval import request_approval
+from app.core.approval import file_or_revise, request_approval
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
@@ -713,14 +713,24 @@ async def update_project(project_id: UUID,
         # Don't queue a null that would only clear a protected date.
         queued = {k: v for k, v in data.items()
                   if not (v is None and k in DATE_FIELDS_PROTECTED)}
-        await request_approval(
+        # A date somebody is still settling gets edited more than once, so
+        # this revises the request already waiting rather than stacking
+        # another indistinguishable row. The reason names the dates and what
+        # they become, not the field names that happen to hold them.
+        def _pretty(k: str) -> str:
+            return k.replace("est_", "est. ").replace("act_", "actual ").replace("_", " ")
+        moved = ", ".join(
+            f"{_pretty(k)} {getattr(p, k, None) or '—'} → {v or '—'}"
+            for k, v in sorted(queued.items())
+        ) or "no visible change"
+        await file_or_revise(
             db,
             target_type="project",
             target_id=p.id,
             requested_by=user.id,
             required_role=Role.DIRECTOR,
-            reason=f"Shipping update for {p.code}: {', '.join(sorted(queued))}",
-            payload={"action": "update", "changes": queued},
+            reason=f"Shipping update for {p.code}: {moved}",
+            changes=queued,
         )
         return {"ok": True, "id": str(p.id), "pending_approval": True}
 

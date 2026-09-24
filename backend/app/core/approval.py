@@ -44,6 +44,70 @@ def evaluate_data_change(actor_role: Role) -> ApprovalRule:
     return ApprovalRule("data_change", None, "no approval required")
 
 
+async def file_or_revise(
+    db: AsyncSession,
+    *,
+    target_type: str,
+    target_id: UUID,
+    requested_by: UUID,
+    required_role: Role,
+    reason: str,
+    changes: dict[str, Any],
+) -> ApprovalRequest:
+    """File a proposed edit — or revise the one already waiting on this document.
+
+    A person testing a change does not get it right first time. They edit,
+    look at it, edit again. Filing a fresh request each time gave the director
+    a stack of near-identical rows against one document, with no way to tell
+    which was current, and — worse than confusing — approving an older one
+    applied a stale intent while the newer one sat there still waiting.
+
+    So there is only ever **one live proposal per document**. A second edit
+    revises the first in place: same row, new values, the clock reset to the
+    latest change. The count of revisions rides along in the payload so the
+    screen can say the row has moved rather than pretending it is new.
+
+    Each request is a complete statement of the fields its form governs,
+    computed against a document that does not move while the request is
+    pending — so replacing the changes wholesale is what "this is what I now
+    propose" means. This is the behaviour quotation edits already had; it is
+    here so every document gets it rather than the one that was noticed first.
+    """
+    existing = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == target_type,
+            ApprovalRequest.target_id == target_id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        ).order_by(ApprovalRequest.created_at.asc())
+    )
+    if existing is None:
+        return await request_approval(
+            db, target_type=target_type, target_id=target_id,
+            requested_by=requested_by, required_role=required_role,
+            reason=reason,
+            payload={"action": "update", "changes": changes, "revision": 1},
+        )
+
+    prior = (existing.payload or {}).get("revision") or 1
+    existing.payload = {
+        "action": "update",
+        "changes": changes,
+        "revision": int(prior) + 1,
+        # When somebody first raised this, kept so the queue can show how long
+        # a document has been waiting rather than how long the latest keystroke
+        # has.
+        "first_requested_at": ((existing.payload or {}).get("first_requested_at")
+                               or (existing.created_at.isoformat()
+                                   if existing.created_at else None)),
+    }
+    existing.requested_by = requested_by
+    existing.reason = reason
+    # The row is the latest proposal, so it sorts as the latest proposal.
+    existing.created_at = datetime.now(UTC)
+    await db.flush()
+    return existing
+
+
 async def request_approval(
     db: AsyncSession,
     *,
