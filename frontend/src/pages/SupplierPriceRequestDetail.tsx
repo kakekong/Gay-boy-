@@ -86,14 +86,19 @@ interface SPR {
    *  from. Reported, never applied on its own — the supplier is holding this
    *  list. */
   source_drift?: {
-    line_no: number;
-    change: "differs" | "source_gone";
+    line_no: number | null;
+    /** "added": a line the customer request has gained that this one lacks —
+     *  only reported when this request was the whole job. */
+    change: "differs" | "source_gone" | "added";
     description?: string | null;
     source_number?: string | null;
+    source_line_no?: number | null;
+    qty?: number | null;
+    uom?: string | null;
     fields?: { field: string; on_request: any; on_source: any }[];
   }[];
-  /** Whether pulling the changes across is still allowed — a closed request
-   *  is the record of what was asked and answered. */
+  /** Whether pulling the changes across is still allowed. Closed requests can
+   *  be — refreshing one reopens it — cancelled ones cannot. */
   may_refresh?: boolean;
 }
 
@@ -232,8 +237,11 @@ export default function SupplierPriceRequestDetailPage() {
       setFlash({
         kind: "ok",
         text: b.changed
-          ? t(`${(b.updated ?? []).length} line(s) updated${(b.added ?? []).length ? `, ${(b.added ?? []).length} added` : ""}. Tell the supplier if they have already priced it.`,
-               `${(b.updated ?? []).length} baris diperbarui${(b.added ?? []).length ? `, ${(b.added ?? []).length} ditambahkan` : ""}. Beri tahu pemasok kalau mereka sudah memberi harga.`)
+          ? (b.reopened_from
+              ? t(`${(b.added ?? []).length} line(s) added, ${(b.updated ?? []).length} updated. This request was closed and has been reopened, because the supplier has not priced the new lines — send them the updated list.`,
+                   `${(b.added ?? []).length} baris ditambahkan, ${(b.updated ?? []).length} diperbarui. Permintaan ini sudah ditutup dan dibuka kembali, karena pemasok belum memberi harga untuk baris baru — kirimkan daftar terbaru kepada mereka.`)
+              : t(`${(b.updated ?? []).length} line(s) updated${(b.added ?? []).length ? `, ${(b.added ?? []).length} added` : ""}. Tell the supplier if they have already priced it.`,
+                   `${(b.updated ?? []).length} baris diperbarui${(b.added ?? []).length ? `, ${(b.added ?? []).length} ditambahkan` : ""}. Beri tahu pemasok kalau mereka sudah memberi harga.`))
           : t("Already matches the customer request.",
                "Sudah sama dengan permintaan pelanggan."),
       });
@@ -560,11 +568,21 @@ export default function SupplierPriceRequestDetailPage() {
           <ul className="text-xs pl-4 list-disc space-y-0.5">
             {(r.source_drift ?? []).slice(0, 6).map((d: any, i: number) => (
               <li key={i}>
-                {t("Line", "Baris")} {d.line_no}
-                {d.change === "source_gone"
-                  ? ` · ${t("its line on the customer request is gone", "barisnya di permintaan pelanggan sudah dihapus")}`
-                  : ": " + (d.fields ?? []).map((f: any) =>
-                      `${f.field} ${f.on_request} → ${f.on_source}`).join(", ")}
+                {d.change === "added" ? (
+                  <>
+                    <b>{t("New on", "Baru di")} {d.source_number}</b>
+                    {`: ${d.description ?? "—"}`}
+                    {d.qty != null && ` · ${d.qty} ${d.uom ?? ""}`}
+                  </>
+                ) : (
+                  <>
+                    {t("Line", "Baris")} {d.line_no}
+                    {d.change === "source_gone"
+                      ? ` · ${t("its line on the customer request is gone", "barisnya di permintaan pelanggan sudah dihapus")}`
+                      : ": " + (d.fields ?? []).map((f: any) =>
+                          `${f.field} ${f.on_request} → ${f.on_source}`).join(", ")}
+                  </>
+                )}
               </li>
             ))}
             {(r.source_drift ?? []).length > 6 && <li>+{(r.source_drift ?? []).length - 6}…</li>}
@@ -573,9 +591,11 @@ export default function SupplierPriceRequestDetailPage() {
             <button className="btn-ghost text-xs text-amber-900 underline hover:no-underline"
                     disabled={refreshSrc.isPending}
                     onClick={() => {
-                      if (window.confirm(t(
-                        "Pull the customer request's lines across? What the supplier quoted stays — their price is per unit, so a line total simply follows the new quantity. Only what we asked for changes.",
-                        "Tarik baris dari permintaan pelanggan? Harga dari pemasok tetap — harganya per satuan, jadi total baris mengikuti jumlah yang baru. Hanya yang kita minta yang berubah.")))
+                      if (window.confirm(r.status === "closed"
+                        ? t("Pull the customer request's lines across? This request is closed, so it will reopen — the new lines have not been priced by the supplier yet. What they already quoted stays.",
+                            "Tarik baris dari permintaan pelanggan? Permintaan ini sudah ditutup, jadi akan dibuka kembali — baris baru belum diberi harga oleh pemasok. Harga yang sudah mereka berikan tetap.")
+                        : t("Pull the customer request's lines across? What the supplier quoted stays — their price is per unit, so a line total simply follows the new quantity. Only what we asked for changes.",
+                            "Tarik baris dari permintaan pelanggan? Harga dari pemasok tetap — harganya per satuan, jadi total baris mengikuti jumlah yang baru. Hanya yang kita minta yang berubah.")))
                         refreshSrc.mutate();
                     }}>
               {refreshSrc.isPending
@@ -585,8 +605,8 @@ export default function SupplierPriceRequestDetailPage() {
             </button>
           ) : (
             <div className="text-xs">
-              {t("This request is closed — it is the record of what was asked and answered. Raise a new one for the changed order.",
-                 "Permintaan ini sudah ditutup — ini catatan apa yang ditanya dan dijawab. Buat permintaan baru untuk pesanan yang berubah.")}
+              {t("This request was cancelled, so there is nothing to bring up to date. Raise a new one for the changed order.",
+                 "Permintaan ini dibatalkan, jadi tidak ada yang perlu diperbarui. Buat permintaan baru untuk pesanan yang berubah.")}
             </div>
           )}
         </div>

@@ -180,6 +180,16 @@ Opening a price request (as purchasing, a manager or the director) lists every *
 
 ---
 
+### 5.y When the job grows after the vendor has answered
+
+A supplier request is a copy of the job's lines, taken when it was made and never rewritten on its own — the vendor is holding that list. When the customer request changes, the supplier request says so in an amber banner, and **Bring this list up to date** pulls the changes across by hand. What the vendor quoted is kept (their prices are per unit).
+
+- **New items are reported.** The banner used to walk only the lines the supplier request already held, so an item *added* to the job could never appear — a job going from 12 lines to 14 produced no warning at all. It now lists each new item.
+- **Closed requests can be brought up to date.** Refreshing a closed one that takes new lines **reopens** it — as *quoted* if the vendor had answered anything, as a *draft* ready to send if not — because a closed request refuses a quote and the new lines would otherwise be stranded unpriced. A closed request with nothing to catch up on stays closed. Cancelled requests stay void.
+- **Only a request that was the whole job takes new items.** Asking a vendor "about the job" means its new items are theirs to price. A split (this vendor lines 1–3, another the rest) or a request for hand-picked lines does not claim them — a new item is nobody's until somebody assigns it. The shape is recorded when the request is made (`meta.scope`); older requests are inferred: whole only if they hold an unbroken run of the job's lines from the first **and** no other supplier request on the job holds a line they lack.
+
+---
+
 ## 6. Quotations
 
 ### 6.1 Lifecycle

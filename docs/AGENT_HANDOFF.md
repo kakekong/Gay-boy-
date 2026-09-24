@@ -222,6 +222,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
 | `test_pr_supplier_links.py` | a price request lists its supplier requests (joint ones included, counting only this job's lines, no total until fully answered) for the roles that can open them and not for sales; the supplier-request list filter finds joint requests; the supplier page reads `quoted_price` |
+| `test_closed_spr_catches_up.py` | a closed supplier request reports items the job gained, refreshes, reopens (quoted/draft) and keeps the vendor's prices; split, hand-picked and pre-marker split requests never claim new items; cancelled stays refused |
 | `test_won_to_finance.py` | marking a deal Won is finance's sign-off: the request is addressed to them, reaches their inbox AND their bell, approving it wins the deal and opens the project, a manager cannot reach past it, the director can still settle one, and finance marking it directly closes the queued request |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
@@ -552,6 +553,17 @@ more things to preserve: the claim freezes
 `basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
 restate approved pay when a payment is later reversed), and approval
 re-checks the gate because a claim can outlive the payment that justified it.
+
+**Whether a supplier request takes a job's new lines is `_is_whole()`.**
+Both the drift banner and `refresh-from-source` ask it, so the warning and the
+button can never disagree. `meta.scope` is written at creation (`whole`,
+`assigned`, `picked`, `standalone`); only `whole` takes new lines. Rows made
+before the marker are inferred — contiguous run of the job's lines from 1
+**and** no sibling request on the job holding a line this one lacks. The
+sibling check is load-bearing: the half of a split holding lines 1–3 passes
+the contiguity test on its own. A split request still gets `price_request_id`
+set (single source), so that field says nothing about shape. Refreshing a
+`closed` request that changes reopens it; `cancelled` stays refused.
 
 **Supplier-request lines keep the vendor's price in `quoted_price`.**
 Not `unit_price` — that is a PO's field. The supplier page's "Their price"

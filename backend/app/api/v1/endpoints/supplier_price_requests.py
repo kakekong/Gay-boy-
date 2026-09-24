@@ -59,7 +59,15 @@ _OPEN = ("draft", "sent")
 # quantities we need — so purchasing can bring it up to date and go back to
 # them. What is finished (closed, cancelled) stays as the record of what was
 # actually asked and answered.
-_REFRESHABLE = ("draft", "sent", "quoted")
+#
+# Closed is refreshable too. A closed request is the vendor's answer on a job
+# that is still live — the customer adds two items and the request we would
+# price them against is the one we already closed. Refusing meant raising a
+# second request to the same vendor for the same job, which splits one answer
+# across two documents. Refreshing a closed one reopens it (see the endpoint),
+# because it now holds lines the vendor has not priced. Cancelled stays out:
+# that request was voided, not finished.
+_REFRESHABLE = ("draft", "sent", "quoted", "closed")
 
 
 # ─── payloads ────────────────────────────────────────────────────────────────
@@ -261,7 +269,7 @@ async def _decorate(db: AsyncSession, rows: list[SupplierPriceRequest]) -> list[
                                     x for x in lines if x is not None)})
         out.append(_out(r, sups.get(r.supplier_id),
                         prs.get(r.price_request_id) if r.price_request_id else None,
-                        sources, _source_drift(r, prs)))
+                        sources, _source_drift(r, prs, await _is_whole(db, r, prs))))
     return out
 
 
@@ -301,8 +309,73 @@ def _copy_line(pr: PriceRequest, it: dict, line_no: int) -> dict:
     }
 
 
+def _held(spr: SupplierPriceRequest) -> set[tuple[str, int]]:
+    """(customer request id, its line number) for every line this holds."""
+    return {(str(i.get("source_pr_id")), int(i.get("source_line_no")))
+            for i in (spr.items or [])
+            if isinstance(i, dict) and i.get("source_pr_id")
+            and i.get("source_line_no") is not None}
+
+
+def _source_ids(spr: SupplierPriceRequest) -> list[str]:
+    ids = [str(x) for x in (spr.source_pr_ids or [])]
+    if spr.price_request_id and str(spr.price_request_id) not in ids:
+        ids.append(str(spr.price_request_id))
+    return ids
+
+
+async def _is_whole(db: AsyncSession, spr: SupplierPriceRequest,
+                    prs: dict[UUID, PriceRequest]) -> bool:
+    """Was this request the WHOLE of its customer request(s) — every line?
+
+    That is what decides whether a line the customer adds later belongs on it.
+    On "ask these suppliers about the job" it does: the vendor was asked about
+    the job, and the job grew. On a split — this vendor lines 1–3, another
+    vendor the rest — it does not; the new line is nobody's until somebody
+    assigns it.
+
+    Recorded when the request is made (`meta.scope`). Requests made before
+    that was recorded are inferred, conservatively: it counts as whole only if
+    it holds a contiguous run of its customer request's lines from the first,
+    with nothing missing below the highest one it holds, AND no other supplier
+    request on the same job holds a line this one lacks — which is exactly the
+    shape a split leaves behind.
+    """
+    scope = (spr.meta or {}).get("scope")
+    if scope == "whole":
+        return True
+    if scope in ("assigned", "picked", "standalone"):
+        return False
+    # ── inferred, for requests that predate the marker ──
+    held = _held(spr)
+    if not held or spr.price_request_id is None or len(prs) != 1:
+        return False
+    pr = prs.get(spr.price_request_id)
+    if pr is None:
+        return False
+    top = max(n for _, n in held)
+    below = {(str(pr.id), int(it.get("line_no") or 0))
+             for it in (pr.items or [])
+             if isinstance(it, dict) and 0 < int(it.get("line_no") or 0) <= top}
+    if not below <= held:
+        return False                      # a gap: some lines were left out
+    siblings = (await db.scalars(
+        select(SupplierPriceRequest).where(
+            SupplierPriceRequest.id != spr.id,
+            SupplierPriceRequest.status != "cancelled",
+            or_(SupplierPriceRequest.price_request_id == pr.id,
+                SupplierPriceRequest.source_pr_ids.contains([str(pr.id)])),
+        )
+    )).all()
+    for sib in siblings:
+        if _held(sib) - held:
+            return False                  # another vendor has lines we lack
+    return True
+
+
 def _source_drift(spr: SupplierPriceRequest,
-                  prs: dict[UUID, PriceRequest]) -> list[dict]:
+                  prs: dict[UUID, PriceRequest],
+                  whole: bool = False) -> list[dict]:
     """Where this request's lines no longer match the ones they were copied
     from. Read-only — it reports, it does not touch anything.
 
@@ -344,6 +417,31 @@ def _source_drift(spr: SupplierPriceRequest,
                         "description": it.get("description"),
                         "source_number": it.get("source_pr_number"),
                         "fields": fields})
+
+    # Lines the customer request has gained since this was drawn up. Walking
+    # only this request's own lines — which is all the above does — can never
+    # see a line that isn't on it, so a customer adding two items produced no
+    # warning at all and the two screens disagreed about the count in silence.
+    #
+    # Only when this request is the WHOLE of its customer request(s). On a
+    # split — this vendor given some lines, another vendor the rest — a new
+    # line is not this vendor's by default, and reporting it here would be
+    # wrong. `whole` is decided by `_is_whole`, which the refresh asks too.
+    if whole:
+        held = _held(spr)
+        for pr in prs.values():
+            if str(pr.id) not in {str(x) for x in _source_ids(spr)}:
+                continue
+            for it in (pr.items or []):
+                if not isinstance(it, dict):
+                    continue
+                if (str(pr.id), int(it.get("line_no") or 0)) in held:
+                    continue
+                out.append({"line_no": None, "change": "added",
+                            "source_line_no": it.get("line_no"),
+                            "description": it.get("description"),
+                            "qty": it.get("qty"), "uom": it.get("uom"),
+                            "source_number": pr.number})
     return out
 
 
@@ -528,6 +626,10 @@ async def create_requests(
                                 "The same supplier is asked the same lines twice")
         seen.add(key)
 
+    scope_kind = ("assigned" if payload.assignments
+                  else "standalone" if not scope_ids
+                  else "picked" if payload.lines
+                  else "whole")
     created: list[SupplierPriceRequest] = []
     for sid, items in plan:
         supplier = await db.get(Supplier, sid)
@@ -547,6 +649,11 @@ async def create_requests(
             notes=payload.notes,
             currency=payload.currency or "IDR",
             valid_until=payload.valid_until,
+            # What this request is the whole OF, recorded rather than guessed
+            # later: "whole" means the vendor was asked about the job(s), so a
+            # line the customer adds belongs here too; anything else means the
+            # vendor was given particular lines and a new one is not theirs.
+            meta={"scope": scope_kind},
         )
         db.add(spr)
         # Flushed inside the loop so the next number sees this one — without
@@ -748,8 +855,8 @@ async def refresh_from_source(
     if spr.status not in _REFRESHABLE:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"This request is '{spr.status}' — it is the record of what was "
-            "asked and answered now. Raise a new one for a changed order.",
+            f"This request is '{spr.status}' — it was voided, so there is "
+            "nothing to bring up to date. Raise a new one for the order.",
         )
 
     pr_ids: set[UUID] = set()
@@ -772,13 +879,10 @@ async def refresh_from_source(
     held = {(str(i.get("source_pr_id")), int(i.get("source_line_no")))
             for i in (spr.items or [])
             if i.get("source_pr_id") and i.get("source_line_no") is not None}
-    # Does it hold every line of exactly one request? Then it is the "ask them
-    # all" shape, and a line added to that request belongs on it too.
-    single = len(prs) == 1 and spr.price_request_id is not None
-    covers_all = single and all(
-        (str(pr.id), int(it.get("line_no") or 0)) in held
-        for pr in prs.values() for it in (pr.items or [])
-    )
+    # Was this request the whole job? Then a line the customer has added
+    # belongs on it too. Same answer the drift banner gives, from one helper,
+    # so the warning and the button never disagree about what will happen.
+    covers_all = await _is_whole(db, spr, prs)
     want_new = (payload.add_new_lines if payload and payload.add_new_lines is not None
                 else covers_all)
 
@@ -838,11 +942,26 @@ async def refresh_from_source(
                 "request": (await _decorate(db, [spr]))[0]}
 
     spr.items = items
+    # A closed request that has just gained lines the vendor never saw cannot
+    # stay closed: nothing could be quoted against it (a closed request
+    # refuses a quote) and the new lines would sit unpriced for good. It
+    # reopens as "quoted" when the vendor had already answered something —
+    # their prices still stand, per unit — or as a draft ready to send when
+    # they had not. A refresh that only reworded lines on a closed request
+    # still reopens it, because what we are asking them has changed.
+    reopened_from = None
+    if spr.status == "closed":
+        reopened_from = spr.status
+        any_quoted = any(i.get("quoted_price") is not None for i in items)
+        spr.status = "quoted" if any_quoted else "draft"
     note = ("[system] Refreshed from "
             + ", ".join(sorted({p.number for p in prs.values()}))
             + f" by {user.full_name}: {len(updated)} line(s) updated"
             + (f", {len(added)} added" if added else "")
-            + (f", {len(orphaned)} with no source left" if orphaned else "") + ".")
+            + (f", {len(orphaned)} with no source left" if orphaned else "") + "."
+            + (f" Reopened from '{reopened_from}' — {len(added)} new line(s) "
+               "need the supplier's price." if reopened_from and added
+               else f" Reopened from '{reopened_from}'." if reopened_from else ""))
     spr.notes = f"{(spr.notes or '').rstrip()}\n{note}".strip()
     await db.flush()
     await audit_record(
@@ -853,6 +972,7 @@ async def refresh_from_source(
     )
     return {"ok": True, "changed": True,
             "updated": updated, "added": added, "orphaned": orphaned,
+            "reopened_from": reopened_from,
             "request": (await _decorate(db, [spr]))[0]}
 
 

@@ -213,12 +213,21 @@ async def main():
           float(sline.get("quoted_price") or 0) == 100_000,
           str(sline.get("quoted_price")))
 
-    print("\n── and a finished one is left as the record it is ──")
+    # A closed request used to refuse this. That left a job that grew after
+    # its vendor had answered with no way to bring their request level with
+    # it — see test_closed_spr_catches_up.py for the full case. Now a closed
+    # request with nothing to catch up on is simply left closed: the refresh
+    # is harmless and the record is untouched.
+    print("\n── and a finished one with nothing to catch up on stays finished ──")
     await c.post(f"/purchasing/price-requests/{spr_id}/close", headers=pur, json={})
     r = await c.post(f"/purchasing/price-requests/{spr_id}/refresh-from-source",
                      headers=pur, json={})
-    check("a closed request refuses the refresh", r.status_code == 409,
-          f"{r.status_code} {why(r)}")
+    check("refreshing a closed request that already matches is harmless",
+          r.status_code == 200 and J(r).get("changed") is False,
+          f"{r.status_code} {str(J(r))[:160]}")
+    got = J(await c.get(f"/purchasing/price-requests/{spr_id}", headers=pur))
+    check("...and it stays closed, the record it was",
+          got.get("status") == "closed", str(got.get("status")))
 
     # ══ the project ══════════════════════════════════════════════════════
     print("\n── the project, whose card reads the request live ──")
