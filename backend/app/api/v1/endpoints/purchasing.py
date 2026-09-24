@@ -475,7 +475,12 @@ class PoCreate(BaseModel):
     # The job this order is for. On an order covering several jobs — one
     # vendor, one truck, three customers — this is the first of them and the
     # per-line `project_id` on each item is the real answer.
-    project_id: UUID
+    #
+    # Optional. Stock gets bought ahead of a job, a vendor's minimum order
+    # covers more than one, a PO goes out while the customer's paper is still
+    # being signed — the order is real before anyone knows its job. It can be
+    # given one later (PATCH with `project_id`).
+    project_id: UUID | None = None
     po_date: str | None = None  # ISO date
     quoted_lead_days: int | None = None
     # When this shipment lands. Per PO, because a job split across three
@@ -944,7 +949,16 @@ async def list_pos(
     return out
 
 
-def _describe_po_changes(po, data: dict) -> str:
+async def _project_code(db, po) -> str | None:
+    if not po.project_id:
+        return None
+    from app.models.operation import Project
+    pj = await db.get(Project, po.project_id)
+    return pj.code if pj else None
+
+
+def _describe_po_changes(po, data: dict, *, project_label: str | None = None,
+                         project_before: str | None = None) -> str:
     """What changed, in words, rather than which field names were touched.
 
     "Update PO PO-001: items, total" is the same sentence for every edit ever
@@ -1010,6 +1024,8 @@ def _describe_po_changes(po, data: dict) -> str:
                        ("quoted_lead_days", "lead time"), ("status", "status")):
         if key in data and str(data[key] or "") != str(getattr(po, key, "") or ""):
             bits.append(f"{label} {getattr(po, key, None) or '—'} → {data[key] or '—'}")
+    if "project_id" in data:
+        bits.insert(0, f"project {project_before or 'none'} → {project_label or 'none'}")
     return ", ".join(bits) if bits else "no visible change"
 
 
@@ -1034,9 +1050,8 @@ async def create_po(
     supplier = await db.get(Supplier, payload.supplier_id)
     if not supplier:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown supplier")
-    project = await db.get(Project, payload.project_id)
-    if not project:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
+    from app.services.po_project import resolve_project
+    project = await resolve_project(db, payload.project_id)
 
     number = payload.number
     if not number:
@@ -1056,8 +1071,9 @@ async def create_po(
 
     # Link the PO to the price request it sources against: an explicit choice
     # wins, else the project's direct link, else the project's quotation's link.
-    price_request_id = payload.price_request_id or project.price_request_id
-    if not price_request_id and project.quotation_id:
+    price_request_id = payload.price_request_id or (
+        project.price_request_id if project else None)
+    if not price_request_id and project and project.quotation_id:
         from app.models.quotation import Quotation
         quote = await db.get(Quotation, project.quotation_id)
         price_request_id = quote.price_request_id if quote else None
@@ -1071,10 +1087,16 @@ async def create_po(
 
     # Lines carry the job they belong to. A line that does not name one is
     # for the PO's own project, which is every ordinary single-job order.
+    # A PO with no job yet has lines with no job either, until one is given.
     items = [dict(it) for it in (payload.items or [])]
-    project_cache: dict[str, Project] = {str(project.id): project}
+    project_cache: dict[str, Project] = {str(project.id): project} if project else {}
     for it in items:
-        pid = str(it.get("project_id") or payload.project_id)
+        raw = it.get("project_id") or (str(project.id) if project else None)
+        if not raw:
+            it["project_id"] = None
+            it["project_code"] = None
+            continue
+        pid = str(raw)
         if pid not in project_cache:
             other = await db.get(Project, UUID(pid))
             if not other:
@@ -1083,14 +1105,15 @@ async def create_po(
             project_cache[pid] = other
         it["project_id"] = pid
         it["project_code"] = project_cache[pid].code
-    project_ids = sorted({it["project_id"] for it in items}) or [str(project.id)]
+    project_ids = sorted({it["project_id"] for it in items if it.get("project_id")}
+                         | ({str(project.id)} if project else set()))
 
     is_director = Role(user.role) == Role.DIRECTOR
     _cur = (payload.currency or "IDR").strip().upper()[:8] or "IDR"
     po = SupplierPO(
         number=number,
         supplier_id=payload.supplier_id,
-        project_id=payload.project_id,
+        project_id=project.id if project else None,
         project_ids=project_ids,
         price_request_id=price_request_id,
         po_date=po_date_parsed,
@@ -1115,7 +1138,9 @@ async def create_po(
             target_id=po.id,
             requested_by=user.id,
             required_role=Role.DIRECTOR,
-            reason=f"Create PO {po.number} ({supplier.name}, project {project.code})",
+            reason=(f"Create PO {po.number} ({supplier.name}, "
+                    + (f"project {project.code})" if project
+                       else "no project yet)")),
             payload={"action": "create"},
         )
 
@@ -1126,7 +1151,8 @@ async def create_po(
     # in this workflow). Only advance forward — never regress a project
     # already past purchasing.
     from app.models.operation import advance_project_status
-    advance_project_status(project, "purchasing")
+    if project is not None:
+        advance_project_status(project, "purchasing")
     # An open PO is goods on their way, so the shelf count follows it — and
     # each line becomes a catalogue item, with a generated SKU, the first
     # time that part is ordered. A PO still waiting for the director does
@@ -1140,7 +1166,9 @@ async def create_po(
     return {
         "id": str(po.id), "number": po.number,
         "supplier_id": str(po.supplier_id),
-        "project_id": str(po.project_id),
+        # Was str() of a value that can now be None — "None" is a string
+        # every caller would have had to special-case.
+        "project_id": str(po.project_id) if po.project_id else None,
         "status": po.status,
         # Echoed back because it is normalised on the way in ("usd" → "USD"),
         # and a caller that cannot see what was stored cannot tell.
@@ -1484,6 +1512,10 @@ class POPatch(BaseModel):
     total: float | None = None
     status: str | None = None         # open | received | closed | cancelled
     items: list | None = None
+    # Give the PO its job, move it to another, or clear it (send null). Which
+    # vendor serves which job is the director's call, so from anyone else
+    # this queues for approval like every other PO edit.
+    project_id: UUID | None = None
 
 
 @router.patch("/po/{po_id}")
@@ -1549,6 +1581,17 @@ async def update_po(
 
     # Validate without mutating — same checks regardless of approval path,
     # so we never queue a doomed approval the director can't apply later.
+    new_project = None
+    project_label = None
+    if "project_id" in data:
+        from app.services.po_project import resolve_project
+        new_project = await resolve_project(db, data["project_id"])
+        # Stored as text: a queued change lives in JSON, which has no UUIDs.
+        data["project_id"] = str(new_project.id) if new_project else None
+        if (str(po.project_id) if po.project_id else None) == data["project_id"]:
+            data.pop("project_id")            # already on that job; nothing to do
+        else:
+            project_label = new_project.code if new_project else None
     if "number" in data:
         new_num = (data["number"] or "").strip()
         if not new_num:
@@ -1650,7 +1693,9 @@ async def update_po(
             target_id=po.id,
             requested_by=user.id,
             required_role=Role.DIRECTOR,
-            reason=f"Update PO {po.number}: {_describe_po_changes(po, data)}",
+            reason=(f"Update PO {po.number}: "
+                    + _describe_po_changes(po, data, project_label=project_label,
+                                           project_before=await _project_code(db, po))),
             changes=data,
         )
         # IMPORTANT: return (don't raise) — raising rolls back the session via
@@ -1710,6 +1755,11 @@ async def update_po(
             await receive_purchase_order(db, po, user)
     if "items" in data and data["items"] is not None:
         po.items = data["items"]
+    # After the lines, so a change that sends both new lines and a new job
+    # stamps the new lines with it.
+    if "project_id" in data:
+        from app.services.po_project import assign_po_project
+        await assign_po_project(db, po, new_project)
 
     await db.flush()
     return {

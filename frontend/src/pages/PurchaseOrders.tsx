@@ -315,7 +315,7 @@ export default function PurchaseOrdersPage() {
                     <td className="td font-mono text-xs">
                       {p.project_id
                         ? (p.project_code ?? p.project_id.slice(0, 8))
-                        : "—"}
+                        : <span className="chip bg-amber-50 text-amber-800 font-sans">{T("unassigned")}</span>}
                     </td>
                     <td className="td muted">{p.po_date ?? "—"}</td>
                     <td className="td">
@@ -448,7 +448,8 @@ function NewPOModal({
   const create = useMutation({
     mutationFn: () => api.post("/purchasing/po", {
       supplier_id: supplierId,
-      project_id: projectId,
+      // Optional — a PO can go out before its job exists and be given one later.
+      project_id: projectId || null,
       number: poNumber.trim() || null,
       po_date: poDate || null,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
@@ -478,7 +479,6 @@ function NewPOModal({
     setLocalErr(null);
     const missing: string[] = [];
     if (!supplierId) missing.push("supplier");
-    if (!projectId) missing.push("project");
     if (missing.length) {
       setLocalErr(`Please choose a ${missing.join(" and a ")} first.`);
       return;
@@ -503,7 +503,7 @@ function NewPOModal({
         <header className="px-5 py-4 border-b border-ink-100">
           <h2 className="text-lg font-semibold">{T("New Purchase Order")}</h2>
           <p className="text-sm muted mt-0.5">
-            {T("Pick the supplier and the project. The number defaults to an auto-generated one; type your own if you want.")}</p>
+            {T("Pick the supplier, and the project if you already know it. The number defaults to an auto-generated one; type your own if you want.")}</p>
         </header>
         <form
           onSubmit={(e) => { e.preventDefault(); attemptSubmit(); }}
@@ -530,18 +530,17 @@ function NewPOModal({
             )}
           </Field>
 
-          <Field label={T("Project *")}>
+          <Field label={`${T("Project")} ${T("(optional)")}`}>
             {projectsLoading ? (
               <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> {T("Loading projects…")}</div>
             ) : projects.length === 0 ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+              <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-sm text-ink-700 flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>{T("No projects yet. Open Operations and create one.")}</span>
+                <span>{T("No projects yet — that's fine. Raise the PO without one and assign it from the PO page later.")}</span>
               </div>
             ) : (
               <select
-                required
                 className="input"
                 value={projectId}
                 onChange={(e) => {
@@ -552,7 +551,7 @@ function NewPOModal({
                   setManualPrId("");
                 }}
               >
-                <option value="">{T("Choose a project…")}</option>
+                <option value="">{T("No project yet — assign later")}</option>
                 {projects.map((p: any) => (
                   <option key={p.id} value={p.id}>
                     {p.code} {p.status ? `· ${p.status}` : ""}
@@ -677,13 +676,13 @@ function NewPOModal({
 
           <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
             <div className="text-[11px] muted">
-              {(!supplierId || !projectId) && (
+              {!supplierId ? (
                 <>
-                  {T("Need:")}{" "}{!supplierId && <span className="font-semibold">{T("supplier")}</span>}
-                  {!supplierId && !projectId && " · "}
-                  {!projectId && <span className="font-semibold">{T("project")}</span>}
+                  {T("Need:")}{" "}<span className="font-semibold">{T("supplier")}</span>
                 </>
-              )}
+              ) : !projectId ? (
+                <>{T("No project yet — you can assign one from the PO page later.")}</>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>

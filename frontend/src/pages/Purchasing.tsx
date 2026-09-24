@@ -1220,7 +1220,9 @@ function NewPOModal({
   const create = useMutation({
     mutationFn: () => api.post("/purchasing/po", {
       supplier_id: supplierId,
-      project_id: projectId,
+      // No project is fine — stock ordered ahead of a job, or a PO going out
+      // before the customer's paper is signed. It can be given one later.
+      project_id: projectId || null,
       number: poNumber.trim() || null,
       po_date: poDate || null,
       eta: eta || null,
@@ -1246,7 +1248,6 @@ function NewPOModal({
     setLocalErr(null);
     const missing: string[] = [];
     if (!supplierId) missing.push("supplier");
-    if (!projectId) missing.push("project");
     if (missing.length) {
       setLocalErr(`Please choose a ${missing.join(" and a ")} first.`);
       return;
@@ -1300,18 +1301,17 @@ function NewPOModal({
           </label>
 
           <label className="block">
-            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Project *")}</span>
+            <span className="block text-xs font-medium text-ink-600 mb-1">{T("Project")} <span className="font-normal text-ink-400">{T("(optional)")}</span></span>
             {projectsLoading ? (
               <div className="rounded-lg border border-ink-200 px-3 py-2 text-sm muted flex items-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> {T("Loading projects…")}</div>
             ) : projects.length === 0 ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
+              <div className="rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-2 text-sm text-ink-700 flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>{T("No projects yet. Open Operations and create one.")}</span>
+                <span>{T("No projects yet — that's fine. Raise the PO without one and assign it from the PO page later.")}</span>
               </div>
             ) : (
               <select
-                required
                 className="input"
                 value={projectId}
                 onChange={(e) => {
@@ -1321,7 +1321,7 @@ function NewPOModal({
                   setManualPrId("");
                 }}
               >
-                <option value="">{T("Choose a project…")}</option>
+                <option value="">{T("No project yet — assign later")}</option>
                 {projects.map((p: any) => (
                   <option key={p.id} value={p.id}>
                     {p.code} {p.status ? `· ${p.status}` : ""}
@@ -1468,13 +1468,13 @@ function NewPOModal({
 
           <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
             <div className="text-[11px] muted">
-              {(!supplierId || !projectId) && (
+              {!supplierId ? (
                 <>
-                  {T("Need:")}{" "}{!supplierId && <span className="font-semibold">{T("supplier")}</span>}
-                  {!supplierId && !projectId && " · "}
-                  {!projectId && <span className="font-semibold">{T("project")}</span>}
+                  {T("Need:")}{" "}<span className="font-semibold">{T("supplier")}</span>
                 </>
-              )}
+              ) : !projectId ? (
+                <>{T("No project yet — you can assign one from the PO page later.")}</>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <button type="button" className="btn-ghost" onClick={onClose}>{T("Cancel")}</button>

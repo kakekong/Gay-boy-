@@ -298,6 +298,20 @@ The preview now carries the document's **currency**, its **fx rate**, and the **
 
 On an **edit** that changes the currency, the money shown is the money being decided on — the proposed currency and rate — and the value it replaces stays in the old one, so `Total: JPY 1,200,000.00 → USD 8,000.00` reads as the change it is. Quotations carry a currency too and are covered by the same mechanism; everything with no money of its own answers `IDR`.
 
+### 8.3d A PO without a project, given one later
+
+A purchasing PO no longer needs a project to exist. Stock gets ordered ahead of a job, a vendor's minimum order covers more than one, a PO goes out while the customer's paper is still being signed — the order is real before anyone knows which job it belongs to. On both *New PO* forms the project is now **optional** ("No project yet — assign later"); the director's approval row says "no project yet", and the PO list shows an amber **unassigned** chip in the Project column.
+
+On the PO page the Project cell carries **Assign project** (or **Change** once it has one). Everything raising the PO against the job would have done happens at that moment instead:
+- the lines are stamped with the job — the project page and the per-job cost roll-up read the lines, not the header, so a header-only link would be a link in name only;
+- `project_ids` (every job the PO feeds) is recomputed from the lines;
+- the PO picks up the job's price request if it had none, so its cost can be traced;
+- the job moves to **purchasing**, forward only.
+
+Moving a PO to another job takes the lines that followed the old job (or had none) with it; a line placed on a third job on purpose stays where it was put. Choosing *No project* clears it again.
+
+Who: which vendor serves which job is the **director's** call, so purchasing's assignment queues as an ordinary PO change ("project none → PRJ-…" in the approval preview, one live request per PO) and the director's applies at once. **Finance** does not get the control. The shared logic is `services/po_project.py`.
+
 ### 8.4 Logistics & imports
 
 For import orders, purchasing maintains the required import documents (invoice, packing list, B/L, PIB, …) per delivery mode on the project's logistics card — expected complete before goods land. Document scans go through a director check.

@@ -97,6 +97,19 @@ export default function PurchaseOrderDetailPage() {
   // editor below locks every field except the price for this role.
   const isFinance = me?.role === "finance";
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // Giving the PO its job — now that one can be raised without it. Finance
+  // doesn't get the control: the rate and the prices are theirs, which vendor
+  // serves which job is not.
+  const canAssignProject = !isFinance;
+  const [assigning, setAssigning] = useState(false);
+  const [projectChoice, setProjectChoice] = useState("");
+  const projectList = useQuery({
+    queryKey: ["projects-min"],
+    queryFn: () => api.get("/operation/projects").then((r) =>
+      (Array.isArray(r.data) ? r.data : (r.data?.items ?? [])) as any[]),
+    enabled: assigning,
+    retry: false,
+  });
   const [editingNumber, setEditingNumber] = useState(false);
   const [draftNumber, setDraftNumber] = useState("");
   const [editingItems, setEditingItems] = useState(false);
@@ -181,6 +194,7 @@ export default function PurchaseOrderDetailPage() {
       }
       setEditingNumber(false);
       setEditingItems(false);
+      setAssigning(false);
     },
     onError: onErr,
   });
@@ -434,14 +448,67 @@ export default function PurchaseOrderDetailPage() {
             )}
           </Meta>
           <Meta label={T("Project")} icon={<Briefcase size={12} />}>
-            {p.project_id ? (
-              <Link
-                to={`/projects/${p.project_id}`}
-                className="text-brand-700 hover:underline font-mono text-xs"
-              >
-                {p.project_code ?? p.project_id.slice(0, 8)}
-              </Link>
-            ) : "—"}
+            {assigning ? (
+              <div className="flex flex-col gap-1.5">
+                <select
+                  className="input text-xs"
+                  value={projectChoice}
+                  onChange={(e) => setProjectChoice(e.target.value)}
+                  autoFocus
+                >
+                  <option value="">
+                    {projectList.isLoading ? T("Loading projects…") : T("No project")}
+                  </option>
+                  {(projectList.data ?? []).map((pj: any) => (
+                    <option key={pj.id} value={pj.id}>
+                      {pj.code}{pj.status ? ` · ${pj.status}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex gap-1.5">
+                  <button
+                    className="btn-primary text-xs px-2.5 py-1"
+                    disabled={patch.isPending
+                      || (projectChoice || null) === (p.project_id || null)}
+                    onClick={() => patch.mutate({ project_id: projectChoice || null })}
+                  >
+                    {patch.isPending ? <Loader2 size={12} className="animate-spin" /> : T("Save")}
+                  </button>
+                  <button className="btn-ghost text-xs px-2 py-1"
+                          onClick={() => setAssigning(false)}>{T("Cancel")}</button>
+                </div>
+                {!isDirector && (
+                  <span className="text-[10px] muted">
+                    {T("Goes to the director — which supplier serves which job is theirs to approve.")}
+                  </span>
+                )}
+              </div>
+            ) : p.project_id ? (
+              <span className="inline-flex items-center gap-2">
+                <Link
+                  to={`/projects/${p.project_id}`}
+                  className="text-brand-700 hover:underline font-mono text-xs"
+                >
+                  {p.project_code ?? p.project_id.slice(0, 8)}
+                </Link>
+                {canAssignProject && (
+                  <button className="text-[11px] text-ink-500 hover:text-brand-700 underline"
+                          onClick={() => { setProjectChoice(p.project_id ?? ""); setAssigning(true); }}>
+                    {T("Change")}
+                  </button>
+                )}
+              </span>
+            ) : (
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <span className="chip bg-amber-50 text-amber-800">{T("Not assigned yet")}</span>
+                {canAssignProject && (
+                  <button className="btn-ghost text-xs px-2 py-1 border border-brand-200 text-brand-700"
+                          onClick={() => { setProjectChoice(""); setAssigning(true); }}>
+                    <Briefcase size={12} /> {T("Assign project")}
+                  </button>
+                )}
+              </span>
+            )}
             {p.project_status && (
               <span className="block text-[11px] muted capitalize">
                 {T(p.project_status.replace(/_/g, " "))}

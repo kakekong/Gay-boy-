@@ -224,6 +224,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_pr_supplier_links.py` | a price request lists its supplier requests (joint ones included, counting only this job's lines, no total until fully answered) for the roles that can open them and not for sales; the supplier-request list filter finds joint requests; the supplier page reads `quoted_price` |
 | `test_closed_spr_catches_up.py` | a closed supplier request reports items the job gained, refreshes, reopens (quoted/draft) and keeps the vendor's prices; split, hand-picked and pre-marker split requests never claim new items; cancelled stays refused |
 | `test_won_to_finance.py` | marking a deal Won is finance's sign-off: the request is addressed to them, reaches their inbox AND their bell, approving it wins the deal and opens the project, a manager cannot reach past it, the director can still settle one, and finance marking it directly closes the queued request |
+| `test_po_without_project.py` | a purchasing PO raised with no project (by purchasing via approval, by the director at once) and given one later: purchasing's assignment queues with the code in the reason and preview, approving it stamps the lines, recomputes `project_ids`, picks up the job's price request and moves the job to purchasing; moving jobs leaves a line placed on a third job alone; clearing, unknown project (400), finance (403), same project (no-op) |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
 | `test_daily_log.py` | attendance daily log |
@@ -885,6 +886,18 @@ contradict each other and are wired to the same value: the PO page's
 *Shipping & ETA* panel prefers the quoted date over `po_date + lead_days` (and
 labels which it showed), and the shipments card says "not complete before"
 rather than naming a completion date when any shipment is still undated.
+
+**A supplier PO's project is optional, and assigning one later is not just
+setting `project_id`.** The project page and the per-job cost roll-up read the
+*lines* (`items[].project_id`), `project_ids` lists every job the PO feeds, and
+raising a PO against a job used to also derive `price_request_id` and move the
+job to purchasing. `services/po_project.assign_po_project()` does all four; the
+director's direct `PATCH /purchasing/po/{id}` with `project_id` and the
+approval applier in `core/approval.py` both call it, so never assign by setattr.
+Lines on the old project (or none) move with the header; lines explicitly on a
+different job stay. `project_id: null` clears it. Code that reads
+`po.project_id` must tolerate `None` — deleting a project already nulled it, so
+that was never a safe assumption; now it is simply common.
 
 **A price request has a buy side now, and it is a separate document.**
 `PriceRequest` (PR-…) is the sell side: what a customer wants, what it costs

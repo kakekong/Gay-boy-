@@ -414,8 +414,14 @@ async def apply_to_target(
                     if project:
                         advance_project_status(project, "purchasing")
             elif action == "update" and approve:
-                changes = (req.payload or {}).get("changes") or {}
+                changes = dict((req.payload or {}).get("changes") or {})
                 was_currency = (po.currency or "IDR").upper()
+                # A project is not a field to copy across: it moves the lines
+                # and the job with it, so it goes through the same helper the
+                # director's own edit uses — after the lines, so any new lines
+                # in the same change are stamped with it.
+                has_project = "project_id" in changes
+                new_project_id = changes.pop("project_id", None)
                 for k, v in changes.items():
                     if k == "po_date":
                         po.po_date = None if v in (None, "") else date_t.fromisoformat(v)
@@ -431,6 +437,19 @@ async def apply_to_target(
                         and "fx_rate" not in changes
                         and (po.currency or "IDR").upper() != was_currency):
                     po.fx_rate = 1 if (po.currency or "IDR").upper() == "IDR" else None
+                if has_project:
+                    from app.models.operation import Project
+                    from app.services.po_project import assign_po_project
+                    target = None
+                    if new_project_id:
+                        target = await db.get(Project, UUID(str(new_project_id)))
+                    # A job deleted while the request sat in the queue is not
+                    # one to attach to; leave the PO as it is and say so.
+                    if new_project_id and target is None:
+                        applied["project_skipped"] = "that project no longer exists"
+                    else:
+                        applied["project"] = await assign_po_project(db, po, target)
+                    changes["project_id"] = new_project_id
                 applied["applied_changes"] = list(changes.keys())
     elif req.target_type == "delivery_order":
         # The director's release of a delivery order, taken from the inbox

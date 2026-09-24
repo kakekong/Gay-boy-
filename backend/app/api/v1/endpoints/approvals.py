@@ -634,6 +634,7 @@ async def preview_request(
                     "eta": "Expected arrival", "quoted_lead_days": "Lead time (days)",
                     "currency": "Currency", "total": "Total", "status": "Status",
                     "fx_rate": "Exchange rate (Rp per unit)",
+                    "project_id": "Project",
                 }
 
                 # A change can move the currency itself, and then the two sides
@@ -654,6 +655,19 @@ async def preview_request(
                 for k, v in changes.items():
                     if k == "items":
                         continue                       # shown as the line table
+                    if k == "project_id":
+                        # Codes, not ids — "PRJ-2026-0012", not a UUID.
+                        from app.models.operation import Project as _Pj
+                        async def _code(pid):
+                            if not pid:
+                                return "none"
+                            pj = await db.get(_Pj, UUID(str(pid)))
+                            return pj.code if pj else "a deleted project"
+                        fields.append({
+                            "label": "Project",
+                            "value": f"{await _code(sp.project_id)}  →  {await _code(v)}",
+                        })
+                        continue
                     fields.append({
                         "label": labels.get(k, k.replace("_", " ").capitalize()),
                         "value": (f"{_show(k, getattr(sp, k, None), cur)}"
