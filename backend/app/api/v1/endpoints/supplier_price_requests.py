@@ -365,6 +365,58 @@ async def _touching(db: AsyncSession, pr_id: UUID) -> list[SupplierPriceRequest]
 
 
 
+async def supplier_requests_for_pr(db: AsyncSession, pr_id: UUID) -> list[dict]:
+    """The supplier requests raised off one price request, for its own page.
+
+    A price request is the customer's side of a job and these are the vendor
+    side, and until now the only way from one to the other was to go and find
+    the supplier request by number. This is the list the price request shows
+    so the two are one click apart.
+
+    Matched through `_touching`, so a joint request covering three jobs and a
+    split one covering half of this job both count — and on a joint one only
+    *this* request's lines are counted and priced, because the vendor's total
+    for the whole basket says nothing about what this customer's items cost.
+    """
+    rows = await _touching(db, pr_id)
+    if not rows:
+        return []
+    sups = {s.id: s for s in (await db.scalars(
+        select(Supplier).where(Supplier.id.in_({r.supplier_id for r in rows}))
+    )).all()}
+    out = []
+    for r in rows:
+        items = [dict(i) for i in (r.items or []) if isinstance(i, dict)]
+        mine = [i for i in items if str(i.get("source_pr_id") or "") == str(pr_id)]
+        # Older requests predate the per-line pointer; if the header points
+        # here, every line is this request's.
+        if not mine and r.price_request_id == pr_id:
+            mine = items
+        quoted = [i for i in mine if i.get("quoted_price") is not None]
+        sup = sups.get(r.supplier_id)
+        out.append({
+            "id": str(r.id),
+            "number": r.number,
+            "status": r.status,
+            "supplier_id": str(r.supplier_id),
+            "supplier_name": sup.name if sup else None,
+            "currency": r.currency or "IDR",
+            "sent_at": r.sent_at,
+            "quoted_at": r.quoted_at,
+            "valid_until": r.valid_until,
+            "quoted_lead_days": r.quoted_lead_days,
+            "lines": len(mine),
+            "lines_quoted": len(quoted),
+            # Only this request's lines, and only once every one of them has
+            # an answer — a partial sum reads as a cheap quote when it is an
+            # incomplete one.
+            "quoted_total": (sum(_line_total(i) for i in mine)
+                             if mine and len(quoted) == len(mine) else None),
+            "is_joint": len(r.source_pr_ids or []) > 1,
+        })
+    return out
+
+
 # ─── endpoints ───────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -525,7 +577,12 @@ async def list_requests(
     if supplier_id:
         q = q.where(SupplierPriceRequest.supplier_id == supplier_id)
     if price_request_id:
-        q = q.where(SupplierPriceRequest.price_request_id == price_request_id)
+        # The header link alone misses a joint request, which has none; the
+        # line pointers are what say a request is about this job.
+        q = q.where(or_(
+            SupplierPriceRequest.price_request_id == price_request_id,
+            SupplierPriceRequest.source_pr_ids.contains([str(price_request_id)]),
+        ))
     if open_only:
         q = q.where(SupplierPriceRequest.status.in_(_OPEN))
     return await _decorate(db, list((await db.scalars(q)).all()))

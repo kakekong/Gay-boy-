@@ -212,8 +212,10 @@ async def get_supplier(
     price_requests = []
     for x in spr_rows:
         lines = x.items if isinstance(x.items, list) else []
+        # A supplier request keeps the vendor's answer in `quoted_price`;
+        # `unit_price` is a PO's field and never appears here.
         quoted = [l for l in lines
-                  if isinstance(l, dict) and l.get("unit_price") not in (None, "")]
+                  if isinstance(l, dict) and l.get("quoted_price") is not None]
         price_requests.append({
             "id": str(x.id),
             "number": x.number,
@@ -230,9 +232,11 @@ async def get_supplier(
             "first_item": next(
                 (str(l.get("description")) for l in lines
                  if isinstance(l, dict) and l.get("description")), None),
+            # Only once every line is answered; a partial sum reads as a cheap
+            # quote when it is an incomplete one.
             "quoted_total": float(sum(
-                float(l.get("unit_price") or 0) * float(l.get("qty") or 0)
-                for l in quoted)) if quoted else None,
+                float(l.get("quoted_price") or 0) * float(l.get("qty") or 0)
+                for l in quoted)) if quoted and len(quoted) == len(lines) else None,
         })
     awaiting = [x for x in price_requests if x["status"] in ("draft", "sent")]
 

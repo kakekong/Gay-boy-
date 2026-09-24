@@ -170,6 +170,16 @@ Around the PR:
 
 ---
 
+### 5.x The vendor side, one click away
+
+Opening a price request (as purchasing, a manager or the director) lists every **supplier price request** raised off it: the vendor, the status, how many of this job's lines they have answered, their lead time, and their price **in the currency they quoted** — answered and cheapest first. Each row opens the supplier request, and the supplier request's *Costing* cell links back to the price request, so the two sides of a job are one click apart in either direction.
+
+- **Joint requests count.** A request asking one vendor about several jobs has no single header link; it is found through the per-line pointers, and on each job only *that job's* lines are counted and priced — the vendor's total for the whole basket says nothing about what one customer's items cost.
+- **No total until every line is answered.** A sum over half the lines reads as a cheap quote when it is an incomplete one.
+- **Sales never sees the list** — which vendor serves which customer is the director's to know — and nor does anyone who could only bounce off the page it links to.
+
+---
+
 ## 6. Quotations
 
 ### 6.1 Lifecycle

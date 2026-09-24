@@ -619,9 +619,21 @@ async def get_price_request(
     user: User = Depends(get_current_user),
 ):
     pr = await _scoped(pr_id, db, user)
-    if Role(user.role) == Role.PURCHASING and pr.status == "draft":
+    role = Role(user.role)
+    if role == Role.PURCHASING and pr.status == "draft":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    return await _serialize(db, pr, Role(user.role))
+    out = await _serialize(db, pr, role)
+    # The vendor side of this job, one click away. Only for the desks that
+    # can open a supplier request: sales never sees which vendor serves a
+    # customer (that mapping is the director's), and a link finance or admin
+    # could only bounce off is worse than no link. Detail only — the list
+    # does not pay a query per row for something it never shows.
+    if role in (Role.PURCHASING, Role.MANAGER, Role.DIRECTOR):
+        from app.api.v1.endpoints.supplier_price_requests import (
+            supplier_requests_for_pr,
+        )
+        out["supplier_requests"] = await supplier_requests_for_pr(db, pr.id)
+    return out
 
 
 @router.patch("/{pr_id}")

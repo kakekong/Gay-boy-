@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText,
@@ -897,6 +897,13 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
           </div>
         )}
 
+        {/* The vendor side of this job, one click away. Only sent to the
+            desks that can open a supplier request, so its absence is the
+            signal — sales never sees which vendor serves their customer. */}
+        {Array.isArray(pr.supplier_requests) && (
+          <SupplierRequestsStrip rows={pr.supplier_requests} />
+        )}
+
         <div className="mt-4 flex items-center gap-2">
           <span className="overline">{t("Items", "Barang")}</span>
           {canEditItems && editItems === null && (
@@ -1487,6 +1494,133 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             onClose={() => setActivityOpen(false)}
           />
         </Modal>
+      )}
+    </div>
+  );
+}
+
+
+/* ── The supplier requests raised off this price request ─────────────────── */
+
+interface SupplierRequestLink {
+  id: string;
+  number: string;
+  status: string;
+  supplier_id: string;
+  supplier_name: string | null;
+  currency: string;
+  sent_at: string | null;
+  quoted_at: string | null;
+  valid_until: string | null;
+  quoted_lead_days: number | null;
+  lines: number;
+  lines_quoted: number;
+  quoted_total: number | null;
+  is_joint: boolean;
+}
+
+const SPR_CHIP: Record<string, string> = {
+  draft:     "bg-ink-100 text-ink-700",
+  sent:      "bg-amber-50 text-amber-800",
+  quoted:    "bg-blue-50 text-blue-700",
+  applied:   "bg-emerald-50 text-emerald-700",
+  closed:    "bg-ink-100 text-ink-600",
+  cancelled: "bg-red-50 text-red-700",
+};
+
+/** A figure in the currency the vendor quoted it in. Printing "Rp" in front
+ *  of a yuan price is the confusion the approval box was just cured of. */
+function vendorMoney(n: number, currency: string): string {
+  if (!currency || currency === "IDR") {
+    return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+  }
+  return `${currency} ${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }).format(n || 0)}`;
+}
+
+/**
+ * Which vendors were asked about this job, and what each of them said.
+ *
+ * A price request is the customer side of a job and these are the vendor
+ * side. The only way from one to the other used to be finding the supplier
+ * request by number on the purchasing board; this puts them a click apart,
+ * with enough on each row — who, how far along, and the price if it is in —
+ * that most of the time nobody needs to click at all.
+ */
+function SupplierRequestsStrip({ rows }: { rows: SupplierRequestLink[] }) {
+  const t = useT();
+  // Answered first, cheapest first among those, then whoever is still
+  // thinking — the order somebody reading this actually wants.
+  const sorted = [...rows].sort((a, b) => {
+    const aq = a.quoted_total != null, bq = b.quoted_total != null;
+    if (aq !== bq) return aq ? -1 : 1;
+    if (aq && bq && a.currency === b.currency) {
+      return (a.quoted_total as number) - (b.quoted_total as number);
+    }
+    return 0;
+  });
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2">
+        <span className="overline">
+          {t("Supplier price requests", "Permintaan harga ke pemasok")}
+        </span>
+        <span className="chip bg-ink-100 text-ink-600">{rows.length}</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="mt-2 text-sm muted">
+          {t("Not sent to any supplier yet. Ask suppliers from the Purchasing board.",
+             "Belum dikirim ke pemasok mana pun. Tanyakan ke pemasok dari papan Pembelian.")}
+        </div>
+      ) : (
+        <ul className="mt-2 divide-y divide-ink-100 rounded-lg border border-ink-200">
+          {sorted.map((r) => (
+            <li key={r.id}>
+              <Link
+                to={`/purchasing/price-requests/${r.id}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5
+                           hover:bg-ink-50 transition-colors"
+              >
+                <span className="font-mono text-xs text-brand-700">{r.number}</span>
+                <span className="text-sm text-ink-800 min-w-0 truncate">
+                  {r.supplier_name ?? "—"}
+                </span>
+                <span className={clsx("chip capitalize",
+                  SPR_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
+                  {t(r.status, r.status)}
+                </span>
+                {r.is_joint && (
+                  <span className="chip bg-violet-50 text-violet-700"
+                        title={t("This request also covers other jobs; only this one's lines are counted here.",
+                                 "Permintaan ini juga mencakup pekerjaan lain; hanya baris milik pekerjaan ini yang dihitung di sini.")}>
+                    {t("joint", "gabungan")}
+                  </span>
+                )}
+                <span className="text-xs muted tabular-nums">
+                  {t(`${r.lines_quoted}/${r.lines} answered`,
+                     `${r.lines_quoted}/${r.lines} dijawab`)}
+                </span>
+                {r.quoted_lead_days != null && (
+                  <span className="text-xs muted tabular-nums">
+                    {t(`${r.quoted_lead_days} days`, `${r.quoted_lead_days} hari`)}
+                  </span>
+                )}
+                <span className="ml-auto text-sm tabular-nums font-semibold text-ink-900">
+                  {r.quoted_total != null
+                    ? vendorMoney(r.quoted_total, r.currency)
+                    : <span className="font-normal text-xs muted">
+                        {/* Nobody is waiting on a request that is closed —
+                            it ended without a full answer. */}
+                        {["closed", "cancelled", "applied"].includes(r.status)
+                          ? t("no full price", "tanpa harga lengkap")
+                          : t("awaiting their price", "menunggu harga mereka")}
+                      </span>}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

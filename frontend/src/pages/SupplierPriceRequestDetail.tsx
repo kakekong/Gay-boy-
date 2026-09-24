@@ -492,16 +492,23 @@ export default function SupplierPriceRequestDetailPage() {
             {(r.source_price_requests ?? []).length ? (
               <span className="flex flex-wrap gap-1">
                 {r.source_price_requests.map((s2) => (
-                  <span key={s2.id} className="font-mono text-xs">
+                  // Back to the customer side of the job — the same page the
+                  // price request links here from, so the two are one click
+                  // apart in both directions.
+                  <Link key={s2.id} to={`/price-requests?open=${s2.id}`}
+                        className="font-mono text-xs text-brand-700 hover:underline">
                     {s2.number}
                     <span className="muted">
                       {" "}({s2.lines.length})
                     </span>
-                  </span>
+                  </Link>
                 ))}
               </span>
-            ) : r.price_request_number ? (
-              <span className="font-mono text-xs">{r.price_request_number}</span>
+            ) : r.price_request_number && r.price_request_id ? (
+              <Link to={`/price-requests?open=${r.price_request_id}`}
+                    className="font-mono text-xs text-brand-700 hover:underline">
+                {r.price_request_number}
+              </Link>
             ) : (
               <span className="muted">{t("standalone enquiry", "permintaan mandiri")}</span>
             )}

@@ -221,6 +221,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
+| `test_pr_supplier_links.py` | a price request lists its supplier requests (joint ones included, counting only this job's lines, no total until fully answered) for the roles that can open them and not for sales; the supplier-request list filter finds joint requests; the supplier page reads `quoted_price` |
 | `test_won_to_finance.py` | marking a deal Won is finance's sign-off: the request is addressed to them, reaches their inbox AND their bell, approving it wins the deal and opens the project, a manager cannot reach past it, the director can still settle one, and finance marking it directly closes the queued request |
 | `verify_order.py` | project phases D/E work in either order |
 | `test_link_attach.py` | link (URL) attachments + who may attach |
@@ -551,6 +552,15 @@ more things to preserve: the claim freezes
 `basis_amount`/`rate_pct`/`amount` at filing time (re-deriving on read would
 restate approved pay when a payment is later reversed), and approval
 re-checks the gate because a claim can outlive the payment that justified it.
+
+**Supplier-request lines keep the vendor's price in `quoted_price`.**
+Not `unit_price` — that is a PO's field. The supplier page's "Their price"
+column read `unit_price` and showed nothing for every answered request until
+this was caught; its test had only checked an *unanswered* one, which passes
+whatever the field is called. When a test asserts "shows nothing", pair it
+with one that asserts it shows something. Link lookups from a price request
+to its supplier requests go through `_touching()` (header link OR
+`source_pr_ids`) — matching the header alone misses every joint request.
 
 **One pending approval per document — use `file_or_revise()`.**
 A repeated edit must revise the request already waiting, not queue another:
