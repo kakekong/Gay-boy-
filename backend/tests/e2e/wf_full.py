@@ -21,17 +21,18 @@ async def login(c,e):
     r=await c.post("/auth/login",json={"email":e,"password":"test-pass-123"})
     assert r.status_code==200,f"{e}:{r.text}"; return {"Authorization":f"Bearer {r.json()['access_token']}"}
 
-async def approve_in_inbox(c, H, target_substr, target_id=None):
+async def approve_in_inbox(c, H, target_substr, target_id=None, as_role="director"):
     """Approve a pending request. Match on target_id when given — the inbox can
     hold leftovers of the same type from earlier runs, and approving one of
-    those silently leaves THIS run's document undecided."""
-    r=await c.get("/approvals",headers=H["director"]); inbox=r.json()
+    those silently leaves THIS run's document undecided. Mark-won is finance's
+    alone and never reaches the director's inbox, so pass as_role="finance"."""
+    r=await c.get("/approvals",headers=H[as_role]); inbox=r.json()
     reqs=inbox if isinstance(inbox,list) else inbox.get("items",inbox.get("data",[]))
     req=next((x for x in reqs
               if target_substr in str(x.get("target_type","")).lower()
               and (target_id is None or str(x.get("target_id"))==str(target_id))),None)
     if not req: return None,reqs
-    r=await c.post(f"/approvals/{req['id']}/approve",headers=H["director"],json={"notes":""})
+    r=await c.post(f"/approvals/{req['id']}/approve",headers=H[as_role],json={"notes":""})
     return r,req
 
 async def main():
@@ -106,7 +107,7 @@ async def main():
         (ok(f"export.{e}: {len(r.content)}B {r.headers.get('content-type')}") if r.status_code==200 and r.content
             else bad(f"export.{e} HTTP{r.status_code}"))
 
-    step("B5 customer PO first, then mark Won -> director approval -> won")
+    step("B5 customer PO first, then mark Won -> finance approval -> won")
     # Won rests on the customer's order: the PO is filed here, and the PO's own
     # director approval (which spawns the project) still happens in phase C.
     po_pre=J(await c.post("/customer-pos",headers=H["sales1"],json={"customer_id":cust,"quotation_id":q,
@@ -115,7 +116,7 @@ async def main():
     (ok(f"customer PO filed {po_pre.get('number')}") if po_pre.get("id")
         else bad(f"customer PO not filed: {str(po_pre)[:120]}"))
     r=await c.post(f"/quotations/{q}/won",headers=H["sales1"]); print(f"     won click HTTP {r.status_code} status={J(r).get('status')}")
-    ra,req=await approve_in_inbox(c,H,"won",q)
+    ra,req=await approve_in_inbox(c,H,"won",q,as_role="finance")
     if ra is None: bad("no won approval in inbox")
     else:
         b=J(await c.get(f"/quotations/{q}",headers=H["sales1"]))
