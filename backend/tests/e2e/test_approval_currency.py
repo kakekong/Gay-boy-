@@ -182,6 +182,95 @@ async def main():
               for v in seen.values() if v),
           str(seen))
 
+    # ══ the edit that does NOT move the currency ═════════════════════════
+    # The case that was reported: somebody changes the conversion rate on a
+    # foreign PO and edits the lines. The currency never moves — and that is
+    # exactly when it is easiest to lose, because nothing in the change
+    # mentions it and the only thing left saying "this is not rupiah" is the
+    # document itself.
+    print("\n── an edit that leaves the currency alone ──")
+    r = await a_po("CNY", 2200.0, 600.0, qty=3, tag=f"C{TAG}")
+    check("a CNY purchase order can be raised", r.status_code in (200, 201),
+          f"{r.status_code} {why(r)}")
+    cny_no = f"PO-CNY-C{TAG}"
+    # Approve the create so the edit is an edit rather than a second create.
+    pc, _ = await preview_for(cny_no)
+    rows = await queue()
+    creating = next((x for x in rows
+                     if x["target_type"] == "supplier_po"
+                     and (x.get("target_label") or "") == cny_no), None)
+    if creating:
+        await c.post(f"/approvals/{creating['id']}/approve", headers=d)
+
+    pos = J(await c.get("/purchasing/po", headers=d))
+    po_rows = pos if isinstance(pos, list) else (pos.get("items") or [])
+    cny = next((x for x in po_rows if x.get("number") == cny_no), None)
+    check("the CNY order is open and editable", cny is not None,
+          str([x.get("number") for x in po_rows])[:160])
+    if cny:
+        # Only the rate. It applies at once — it changes nothing agreed with
+        # the vendor — so this should not queue anything at all.
+        r = await c.patch(f"/purchasing/po/{cny['id']}", headers=pur,
+                          json={"fx_rate": 3000.0})
+        check("a rate-only change is accepted", r.status_code == 200,
+              f"{r.status_code} {why(r)}")
+        check("...and applies straight away rather than queueing, because the "
+              "bank moved, not the order",
+              not J(r).get("pending_approval"), str(J(r).get("pending_approval")))
+
+        # Now the lines, which do queue.
+        r = await c.patch(f"/purchasing/po/{cny['id']}", headers=pur, json={
+            "items": [{"description": f"CHAIN 12MM C{TAG}", "qty": 3,
+                       "unit_price": 600.0}],
+            "total": 1800.0})
+        check("editing the lines queues for the director", r.status_code == 200,
+              f"{r.status_code} {why(r)}")
+
+        rows = await queue()
+        edit = next((x for x in rows
+                     if x["target_type"] == "supplier_po"
+                     and (x.get("payload") or {}).get("action") == "update"
+                     and cny_no in (x.get("target_label") or "")), None)
+        check("...and the director has it", edit is not None,
+              str([(x.get('target_label'), (x.get('payload') or {}).get('action'))
+                   for x in rows if x['target_type'] == 'supplier_po'])[:200])
+        if edit:
+            pe = J(await c.get(f"/approvals/{edit['id']}/preview", headers=d))
+            check("the preview still says CNY — the change never mentioned the "
+                  "currency, so the document's own is what holds",
+                  pe.get("currency") == "CNY", str(pe.get("currency")))
+            check("...at the rate as it now stands, not the one it was raised at",
+                  abs(float(pe.get("fx_rate") or 0) - 3000.0) < 0.01,
+                  str(pe.get("fx_rate")))
+            check("...so the rupiah it costs reflects the new rate",
+                  abs(float(pe.get("total_idr") or 0) - 1800.0 * 3000.0) < 1,
+                  str(pe.get("total_idr")))
+            line = (pe.get("items") or [{}])[0]
+            check("...and the LINE prices are CNY, which is where it was lost",
+                  abs(float(line.get("unit_price") or 0) - 600.0) < 0.01,
+                  str(line.get("unit_price")))
+
+    # ══ the row above the preview ════════════════════════════════════════
+    # The mark-won row prints the quotation's total straight onto the card,
+    # and quotations are not always rupiah either.
+    print("\n── the list row, not just the preview ──")
+    rows = await queue()
+    for row in rows[:30]:
+        check_once = row.get("currency")
+        if check_once:
+            break
+    check("every queued row states its currency",
+          all(x.get("currency") for x in rows), 
+          str([(x['target_type'], x.get('currency')) for x in rows
+               if not x.get('currency')])[:200])
+    spo_rows = [x for x in rows if x["target_type"] == "supplier_po"]
+    cny_row = next((x for x in spo_rows
+                    if cny_no in (x.get("target_label") or "")), None)
+    if cny_row:
+        check("...and a CNY order's row says CNY, so the card above the "
+              "preview cannot contradict it",
+              cny_row.get("currency") == "CNY", str(cny_row.get("currency")))
+
     # ══ an edit that moves the currency ══════════════════════════════════
     print("\n── an edit that changes the currency itself ──")
     # Find the JPY PO and have purchasing propose a move to USD. A non-director

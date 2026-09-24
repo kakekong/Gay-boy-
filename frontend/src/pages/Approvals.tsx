@@ -24,6 +24,9 @@ interface ApprovalRow {
   target_type: string;
   target_id: string;
   target_label: string | null;
+  /** What the money on this row is in. Quotations can be non-IDR, and the
+   *  mark-won row prints their total. */
+  currency?: string | null;
   required_role: string;
   reason: string;
   payload: Record<string, any>;
@@ -219,9 +222,6 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
   // Releasing a delivery order: the goods leave under it, and the sheet the
   // driver carries is generated the moment this is approved.
   const isDeliveryOrder = r.target_type === "delivery_order";
-  const fmtIdr = (n: number) =>
-    "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
-
   // Friendly labels for project-shipping fields so the director sees
   // "Estimated ship from origin", not "est_ship_from_origin".
   const PROJECT_FIELD_LABELS: Record<string, string> = {
@@ -387,7 +387,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               <div className="text-sm">
                 {T("Mark this deal as")}{" "}<b>{T("Won")}</b>
                 {typeof r.payload?.total === "number" && (
-                  <> {T("· total")}{" "}<b className="tabular-nums">{fmtIdr(r.payload.total)}</b></>
+                  <> {T("· total")}{" "}<b className="tabular-nums">{money(r.payload.total, r.currency)}</b></>
                 )}
               </div>
               {r.reason && <div className="text-xs muted italic">{r.reason}</div>}

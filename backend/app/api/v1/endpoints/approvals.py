@@ -371,9 +371,21 @@ async def inbox(
         ):
             payload["from_stage"] = cust.stage
             payload["to_stage"] = payload["changes"]["stage"]
+        # What the money on this row is denominated in.
+        #
+        # The row prints a total straight out of the request's payload, and
+        # that payload is frozen at filing time — so the currency is read off
+        # the live document instead, which means requests filed before this
+        # existed render correctly too. IDR is the answer for everything with
+        # no money of its own, so the screen never has to assume.
+        row_currency = "IDR"
         if r.target_type == "quotation_won":
             qq = quotations.get(r.target_id)
             target_label = qq.number if qq else None
+            row_currency = (getattr(qq, "currency", None) or "IDR") if qq else "IDR"
+        elif r.target_type in ("quotation", "discount", "quotation_edit"):
+            qq = all_quotes.get(r.target_id)
+            row_currency = (getattr(qq, "currency", None) or "IDR") if qq else "IDR"
         elif r.target_type == "purchase_request":
             pp = prs.get(r.target_id)
             target_label = pp.number if pp else None
@@ -386,6 +398,10 @@ async def inbox(
         elif r.target_type == "supplier_po":
             sp = supplier_pos.get(r.target_id)
             target_label = sp.number if sp else None
+            # An edit can propose a different currency; the row is about the
+            # change, so it reports the one being proposed.
+            proposed = ((r.payload or {}).get("changes") or {}).get("currency")
+            row_currency = proposed or (sp.currency or "IDR") if sp else "IDR"
         elif r.target_type == "delivery_order":
             dd = dos.get(r.target_id)
             target_label = dd.number if dd else None
@@ -399,6 +415,7 @@ async def inbox(
             "target_type": r.target_type,
             "target_id": str(r.target_id),
             "target_label": target_label,
+            "currency": row_currency,
             "required_role": r.required_role,
             "reason": r.reason,
             "payload": payload,
@@ -610,6 +627,7 @@ async def preview_request(
                     "number": "PO number", "po_date": "PO date",
                     "eta": "Expected arrival", "quoted_lead_days": "Lead time (days)",
                     "currency": "Currency", "total": "Total", "status": "Status",
+                    "fx_rate": "Exchange rate (Rp per unit)",
                 }
 
                 # A change can move the currency itself, and then the two sides
