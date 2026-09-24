@@ -208,7 +208,7 @@ A supplier request is a copy of the job's lines, taken when it was made and neve
   - PR-backed drafts: line prices are fixed by the approved PR.
 
   **Why `won` is editable.** It used to sit with lost and cancelled, which read as "the deal is finished". It is the opposite: a won quotation is the *live* deal — a project runs against it, the price request behind it is kept in step with it, and purchasing buys to that request. It is exactly the document a customer rings about to add four more of item eight, and locking it meant that change had nowhere to land: the edit was refused, so nothing reached the price request or the project either. Two consequences ride along — the price request and the project's order card follow the edit automatically (§6.1b), and because winning a quotation **posts revenue to the ledger**, a change to a posted quotation's figures is **reversed and re-posted** so the accounts stop holding the old total. The original entries stay, the reversal sits beside them, the new posting follows.
-- **Mark won**: sales' click files a `quotation_won` request to **finance**, not the director. Approval flips the quote to Won, posts revenue to the ledger, opens the project and bumps the stage — winning is the moment the deal becomes money, so the sign-off sits with the desk that lives with the ledger, the project and the invoice schedule that follows. Finance can also mark it Won directly from the quotation, which closes any request already queued. The director keeps the ability to settle one (they can settle any request) but nothing waits on them for it.
+- **Mark won**: sales' click files a `quotation_won` request to **finance**, not the director. Approval flips the quote to Won, posts revenue to the ledger, opens the project and bumps the stage — winning is the moment the deal becomes money, so the sign-off sits with the desk that lives with the ledger, the project and the invoice schedule that follows. Finance can also mark it Won directly from the quotation, which closes any request already queued. The request is **finance's alone**: it does not appear in the director's approval inbox, their bell or the Approvals badge. The director can still mark a deal Won directly from the quotation (which closes any queued request), and an answer they give to a request still counts — nothing waits on them for it.
 - **Mark lost**: requires a written reason (feeds the Lost-deals report); blocked while a Mark-won request is pending and on won/closed quotes — the two outcomes are mutually exclusive, enforced in UI and API.
 - **Exports**: PDF and Excel with the company header, PIC addressing and totals. **Every export writes an `export` activity** to the customer timeline (who, which quote, which format, when).
 - **Quote import**: line items can be imported from an existing Excel/PDF quotation document instead of typed by hand.
@@ -414,7 +414,8 @@ A single `ApprovalRequest` table (target type + id, requester, required role, re
 | Decision | Approver |
 |---|---|
 | Quotation submit, customer PO (regular), supplier PO, price-request pricing, shipping/delivery date changes, quotation edits | **Director only** |
-| **Mark-won**, down-payment customer PO | **Finance** (director may also settle) |
+| **Mark-won** | **Finance** only — not shown in the director's inbox |
+| Down-payment customer PO | **Finance** (director may also settle) |
 | DP customer PO, faktur pajak, payment verification | **Finance** (director backstop) |
 | Manual CRM stage moves, manager-tier data changes | **Manager or director** |
 

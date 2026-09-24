@@ -168,19 +168,39 @@ async def main():
     gone, _ = await won_request_for(qid, fin)
     check("...and it leaves finance's queue", gone is None, str(gone))
 
-    # ══ the director can still settle one ════════════════════════════════
-    print("\n── the director is still able, just not waited on ──")
+    # ══ the director is not waited on — it is not in their inbox at all ══
+    print("\n── it stays out of the director's inbox ──")
     qid2, qno2 = await a_quote(f"D{TAG}")
     await c.post(f"/quotations/{qid2}/won", headers=s1)
-    req2, _ = await won_request_for(qid2, d)
-    check("the director can see a finance-addressed request", req2 is not None)
+    req2, _ = await won_request_for(qid2, fin)
+    check("finance has the second request", req2 is not None)
+    dreq, drows = await won_request_for(qid2, d)
+    check("the director's approval inbox does NOT show it — it is finance's alone",
+          dreq is None, str(dreq)[:160])
+    check("...while the director's inbox still works for their own requests",
+          isinstance(drows, list), str(drows)[:160])
+    dnotes = J(await c.get("/notifications", headers=d))
+    dhit = [i for i in (dnotes.get("items") or [])
+            if i.get("kind") == "approval" and req2 and str(req2["id"]) in str(i.get("id"))]
+    check("...nor does the director's bell (so the sidebar badge doesn't count it either)",
+          not dhit, str(dhit)[:160])
     if req2:
+        # Out of the inbox is not out of reach: the director can settle
+        # anything, and an answer they give still counts.
         r = await c.post(f"/approvals/{req2['id']}/approve", headers=d)
-        check("...and settle it, because they can settle anything",
+        check("the director can still settle it if they do answer it",
               r.status_code == 200, f"{r.status_code} {why(r)}")
         q2 = J(await c.get(f"/quotations/{qid2}", headers=d))
         check("...with the same effect", q2.get("status") == "won",
               str(q2.get("status")))
+
+    # The director's own Mark won still applies at once.
+    qid4, _ = await a_quote(f"W{TAG}")
+    r = await c.post(f"/quotations/{qid4}/won", headers=d)
+    q4 = J(await c.get(f"/quotations/{qid4}", headers=d))
+    check("the director marking a deal Won themselves applies at once",
+          r.status_code == 200 and q4.get("status") == "won",
+          f"{r.status_code} {q4.get('status')}")
 
     # ══ finance marking it directly ══════════════════════════════════════
     print("\n── finance marking it won without going through the queue ──")

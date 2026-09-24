@@ -599,6 +599,14 @@ entirely), and the **copy** that names the desk on the requesting screen. The
 first three are silent failures: the request exists, nothing errors, and the
 person it waits on never arrives. Check all four when you move one.
 
+**The director's inbox is "everything" minus `FINANCE_ONLY_TARGETS`.**
+`core/approval.scope_to_inbox()` is the one per-role filter for `GET /approvals`
+(and so the sidebar badge, which counts it) and the bell. Mark-won
+(`quotation_won`) is finance's alone: the user did not want it sitting in the
+director's queue as well. `decide()` still accepts a director's answer —
+hiding is presentation, not permission. To make another finance request
+finance-only, add its `target_type` to the tuple; don't filter in one place.
+
 **Money in the approval preview carries its currency.** `preview_request`
 returns `currency`, `fx_rate` and `total_idr` on every shape, defaulting to
 `"IDR"` — the frontend formats from those and never assumes. This existed as a

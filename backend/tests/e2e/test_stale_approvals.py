@@ -18,7 +18,7 @@ async def main():
     from app.main import app
     import uuid
     c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://t/api/v1",timeout=40)
-    s=await login(c,"sales1@demo.local"); d=await login(c,"director@demo.local")
+    s=await login(c,"sales1@demo.local"); d=await login(c,"director@demo.local"); fin=await login(c,"finance@demo.local")
     tag=uuid.uuid4().hex[:6]
 
     # Build an approved quotation owned by sales1
@@ -45,8 +45,9 @@ async def main():
         rows=inbox if isinstance(inbox,list) else inbox.get("items",[])
         return [x for x in rows if x.get("target_type")=="quotation_won" and str(x.get("target_id"))==q]
 
-    inbox=J(await c.get("/approvals",headers=d))
-    check("request is in the director inbox", len(won_reqs(inbox))==1, str(len(won_reqs(inbox))))
+    # Mark-won is finance's alone — it sits in their inbox, not the director's.
+    inbox=J(await c.get("/approvals",headers=fin))
+    check("request is in the finance inbox", len(won_reqs(inbox))==1, str(len(won_reqs(inbox))))
 
     # 2. Director instead marks it won DIRECTLY from the quotation page
     r=await c.post(f"/quotations/{q}/won",headers=d)
@@ -54,7 +55,7 @@ async def main():
     check("quote is won", J(await c.get(f"/quotations/{q}",headers=s)).get("status")=="won", "not won")
 
     # 3. THE BUG: is the now-pointless request still sitting in the inbox?
-    inbox=J(await c.get("/approvals",headers=d))
+    inbox=J(await c.get("/approvals",headers=fin))
     left=won_reqs(inbox)
     check("stale mark-won request cleared from inbox", len(left)==0,
           f"{len(left)} stale request(s) still pending on an already-won quote")

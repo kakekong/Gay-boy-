@@ -23,8 +23,9 @@ async def build_project(c,H):
     # The customer's PO is the evidence Won rests on, so it is filed first.
     cpo=J(await c.post("/customer-pos",headers=H["s"],json={"customer_id":cust,"quotation_id":q,"number":f"PO-{uuid.uuid4().hex[:8]}","items":[{"description":"X","qty":1,"unit_price":200}],"is_downpayment":False}))["id"]
     await c.post(f"/quotations/{q}/won",headers=H["s"])
-    inbox=J(await c.get("/approvals",headers=H["d"])); reqs=inbox if isinstance(inbox,list) else inbox.get("items",[])
-    wr=next(x for x in reqs if x.get("target_type")=="quotation_won" and str(x.get("target_id"))==str(q)); await c.post(f"/approvals/{wr['id']}/approve",headers=H["d"],json={"notes":""})
+    # Mark-won is finance's to sign off, and only finance's inbox holds it.
+    inbox=J(await c.get("/approvals",headers=H["f"])); reqs=inbox if isinstance(inbox,list) else inbox.get("items",[])
+    wr=next(x for x in reqs if x.get("target_type")=="quotation_won" and str(x.get("target_id"))==str(q)); await c.post(f"/approvals/{wr['id']}/approve",headers=H["f"],json={"notes":""})
     proj=J(await c.post(f"/customer-pos/{cpo}/approve",headers=H["d"],json={"notes":""}))["project_id"]
     return proj
 
@@ -57,7 +58,7 @@ async def main():
     from app.scripts.seed import ensure_schema; await ensure_schema()
     from app.main import app
     c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://t/api/v1",timeout=40)
-    H={"d":await login(c,"director@demo.local"),"s":await login(c,"sales1@demo.local"),"p":await login(c,"purchasing@demo.local"),"a":await login(c,"admin@demo.local")}
+    H={"d":await login(c,"director@demo.local"),"s":await login(c,"sales1@demo.local"),"p":await login(c,"purchasing@demo.local"),"a":await login(c,"admin@demo.local"),"f":await login(c,"finance@demo.local")}
 
     ok=[0,0]
     def check(label,cond):

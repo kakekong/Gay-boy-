@@ -527,13 +527,13 @@ const ROLES: RoleSection[] = [
     ],
     rules: [
       "You CAN clear manual customer stage-move requests and manager-tier data changes — they accept a manager or director decision.",
-      "Deal documents are director-only: quotations, customer POs, supplier POs, Mark-won, price-request pricing, and shipping-date changes all wait for the director, not you.",
+      "Deal documents are director-only: quotations, customer POs, supplier POs, price-request pricing, and shipping-date changes all wait for the director, not you. Mark-won is finance's to sign off, and only finance sees it queued.",
       "You see every role's notifications and stage tasks for oversight — sales', purchasing's, finance's and admin's queues all reach your bell.",
       "On the shipping timeline you can edit any field, but like everyone below director your date changes wait for the director's approval before the customer sees them.",
     ],
     rules_id: [
       "Anda BISA menyelesaikan permintaan pindah-tahap manual pelanggan dan perubahan data tingkat manajer — keduanya menerima keputusan manajer atau direktur.",
-      "Dokumen deal hanya direktur: penawaran, PO pelanggan, PO supplier, tindak lanjut sales, Mark-won, penetapan harga PR, dan perubahan tanggal kirim semuanya menunggu direktur, bukan Anda.",
+      "Dokumen deal hanya direktur: penawaran, PO pelanggan, PO supplier, tindak lanjut sales, penetapan harga PR, dan perubahan tanggal kirim semuanya menunggu direktur, bukan Anda. Mark-won disetujui keuangan, dan hanya keuangan yang melihat antreannya.",
       "Anda melihat notifikasi dan tugas tahap semua peran untuk pengawasan — antrean sales, pembelian, keuangan, dan admin semuanya masuk lonceng Anda.",
       "Di linimasa pengiriman Anda bisa mengedit semua kolom, tapi seperti semua di bawah direktur, perubahan tanggal Anda menunggu persetujuan direktur sebelum terlihat pelanggan.",
     ],
@@ -748,9 +748,9 @@ const TROUBLES: { problem: string; problem_id: string; answer: string; answer_id
   },
   {
     problem: "Clicked Mark won but nothing changed",
-    problem_id: "Klik Mark won / catat tindak lanjut tapi tidak berubah",
-    answer: "It needs Director approval — it's waiting in /approvals, and the quote flips to Won once the Director approves. (Follow-ups are different: those are recorded as soon as you save them.)",
-    answer_id: "Keduanya sekarang butuh persetujuan Direktur — sedang menunggu di /approvals. Penawaran jadi Menang (dan tindak lanjut tercatat) setelah Direktur menyetujui.",
+    problem_id: "Klik Mark won tapi tidak berubah",
+    answer: "It needs finance's approval — it's waiting in finance's /approvals, and the quote flips to Won once finance approves. (Follow-ups are different: those are recorded as soon as you save them.)",
+    answer_id: "Mark won butuh persetujuan keuangan — sedang menunggu di /approvals milik keuangan, dan penawaran jadi Menang setelah keuangan menyetujui. (Tindak lanjut berbeda: langsung tercatat saat disimpan.)",
   },
   {
     problem: "Marked Won but no project appeared",

@@ -53,6 +53,7 @@ async def main():
         r = await c.post("/auth/login", json={"email": e, "password": "test-pass-123"})
         return {"Authorization": f"Bearer {r.json()['access_token']}"}
     d = await login("director@demo.local")
+    fin = await login("finance@demo.local")
     s1 = await login("sales1@demo.local")
     s2 = await login("sales2@demo.local")
     pur = await login("purchasing@demo.local")
@@ -231,12 +232,13 @@ async def main():
     r = await c.post(f"/quotations/{q2['id']}/won", headers=s2)
     check("sales files a mark-won request", r.status_code in (200, 202),
           str(r.status_code))
-    appr = J(await c.get("/approvals", headers=d))
+    # Mark-won is finance's to decide, and only in their inbox.
+    appr = J(await c.get("/approvals", headers=fin))
     arows = appr if isinstance(appr, list) else appr.get("data", [])
     ask = next((a for a in arows if a.get("target_type") == "quotation_won"
                 and str(a.get("target_id")) == q2["id"]), None)
-    check("...the director has it to decide", ask is not None, str(len(arows)))
-    dec = await c.post(f"/approvals/{ask['id']}/approve", headers=d,
+    check("...finance has it to decide", ask is not None, str(len(arows)))
+    dec = await c.post(f"/approvals/{ask['id']}/approve", headers=fin,
                        json={"notes": "yes"})
     check("...and decides it", dec.status_code == 200, f"{dec.status_code} {J(dec)}"[:140])
 

@@ -120,10 +120,8 @@ async def list_notifications(
         )
         # Same filter the inbox applies, so the bell and the page agree about
         # what is waiting on you.
-        if role == Role.MANAGER:
-            appr_stmt = appr_stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
-        elif role == Role.FINANCE:
-            appr_stmt = appr_stmt.where(ApprovalRequest.required_role == Role.FINANCE.value)
+        from app.core.approval import scope_to_inbox
+        appr_stmt = scope_to_inbox(appr_stmt, role)
         for a in (await db.scalars(appr_stmt)).all():
             items.append({
                 "id": f"approval:{a.id}",

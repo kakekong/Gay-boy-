@@ -206,18 +206,18 @@ async def main():
         "items": [{"description": f"CHAIN {tag}", "qty": 2, "unit_price": 1000}],
         "is_downpayment": False})
     r = await c.post(f"/quotations/{quote2}/won", headers=s1)
-    check("sales' mark-won is queued for the director", r.status_code == 202,
+    check("sales' mark-won is queued for finance", r.status_code == 202,
           f"{r.status_code} {J(r)}"[:140])
     check("...and starts nothing on its own", not await projects_for(quote2),
           "a request is not a decision")
 
-    req = next((a for a in J(await c.get("/approvals", headers=d))
+    req = next((a for a in J(await c.get("/approvals", headers=fin))
                 if a.get("target_type") == "quotation_won"
                 and a.get("target_id") == quote2), None)
-    check("the request is in the director's queue", req is not None)
+    check("the request is in finance's queue", req is not None)
     if req:
-        r = await c.post(f"/approvals/{req['id']}/approve", headers=d)
-        check("...the director signs it off", r.status_code == 200,
+        r = await c.post(f"/approvals/{req['id']}/approve", headers=fin)
+        check("...finance signs it off", r.status_code == 200,
               f"{r.status_code} {J(r)}"[:140])
         check("...and the job starts then", len(await projects_for(quote2)) == 1,
               str(len(await projects_for(quote2))))

@@ -183,14 +183,11 @@ async def inbox(
     stmt = select(ApprovalRequest).where(
         ApprovalRequest.status == ApprovalStatus.PENDING.value
     )
-    if Role(user.role) == Role.MANAGER:
-        # manager sees manager-level approvals; director sees all
-        stmt = stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
-    elif Role(user.role) == Role.FINANCE:
-        # DP customer-PO approvals are addressed to finance (decide() already
-        # enforces it) — without this they were filed to a queue finance
-        # couldn't open.
-        stmt = stmt.where(ApprovalRequest.required_role == Role.FINANCE.value)
+    # Manager: manager-level requests. Finance: the ones addressed to them (DP
+    # customer POs, Mark-won). Director: everything except what is finance's
+    # alone — see FINANCE_ONLY_TARGETS.
+    from app.core.approval import scope_to_inbox
+    stmt = scope_to_inbox(stmt, Role(user.role))
     rows = (await db.scalars(stmt.order_by(ApprovalRequest.created_at.asc()))).all()
     if not rows:
         return []

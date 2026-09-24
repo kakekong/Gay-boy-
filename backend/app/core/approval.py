@@ -27,6 +27,33 @@ class ApprovalRule:
     reason: str
 
 
+# Requests addressed to finance that are finance's alone — they do not also
+# sit in the director's inbox. The director can settle anything, so every
+# finance request used to show there too, and a Mark-won read as one more
+# thing queued behind the director when the point of sending it to finance
+# was that it isn't. The director still wins a deal directly from the
+# quotation page, and `decide()` still accepts their answer if one is given.
+FINANCE_ONLY_TARGETS = ("quotation_won",)
+
+
+def scope_to_inbox(stmt, role: Role):
+    """Narrow a pending-ApprovalRequest query to what `role` should be shown.
+
+    One filter for the approvals page, its sidebar badge (which counts that
+    page) and the bell, so all three agree about what is waiting on you.
+    """
+    if role == Role.MANAGER:
+        return stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
+    if role == Role.FINANCE:
+        return stmt.where(ApprovalRequest.required_role == Role.FINANCE.value)
+    if role == Role.DIRECTOR:
+        return stmt.where(~(
+            (ApprovalRequest.required_role == Role.FINANCE.value)
+            & ApprovalRequest.target_type.in_(FINANCE_ONLY_TARGETS)
+        ))
+    return stmt
+
+
 def evaluate_discount(discount_pct: float) -> ApprovalRule:
     """Return required approver based on configured thresholds."""
     if discount_pct <= settings.DISCOUNT_AUTO_MAX:

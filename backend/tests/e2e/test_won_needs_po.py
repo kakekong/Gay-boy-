@@ -49,6 +49,7 @@ async def main():
         r = await c.post("/auth/login", json={"email": e, "password": "test-pass-123"})
         return {"Authorization": f"Bearer {r.json()['access_token']}"}
     d = await login("director@demo.local")
+    fin = await login("finance@demo.local")
     s1 = await login("sales1@demo.local")
     pur = await login("purchasing@demo.local")
     adm = await login("admin@demo.local")
@@ -129,15 +130,15 @@ async def main():
         "items": [{"description": f"Sprocket {tag}", "qty": 2,
                    "unit_price": 5_000_000}], "is_downpayment": False}))
     await c.post(f"/quotations/{q3['id']}/won", headers=s1)
-    rows = J(await c.get("/approvals", headers=d))
+    rows = J(await c.get("/approvals", headers=fin))
     rows = rows if isinstance(rows, list) else (rows.get("data") or [])
     ask = next((a for a in rows if a.get("target_type") == "quotation_won"
                 and str(a.get("target_id")) == q3["id"]), None)
-    check("the rep's request is with the director", ask is not None, str(len(rows)))
+    check("the rep's request is with finance", ask is not None, str(len(rows)))
     await c.post(f"/customer-pos/{po3['id']}/reject", headers=d,
                  json={"notes": "customer withdrew it"})
     if ask:
-        r = await c.post(f"/approvals/{ask['id']}/approve", headers=d, json={"notes": ""})
+        r = await c.post(f"/approvals/{ask['id']}/approve", headers=fin, json={"notes": ""})
         check("approving it is accepted rather than erroring",
               r.status_code in (200, 202), str(r.status_code))
         check("...but the quotation was NOT won, because the evidence went",

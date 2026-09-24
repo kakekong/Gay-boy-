@@ -751,7 +751,7 @@ async def revise_quotation(
     if _won_pending:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "A Mark-won request is pending with the director — wait for that "
+            "A Mark-won request is pending with finance — wait for that "
             "decision before posting a revision.",
         )
     if q.status in ("won", "cancelled", "superseded"):
@@ -1080,7 +1080,7 @@ async def mark_lost(q_id: UUID, reason: str,
     if not await _may_see(db, user, q):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     # Won and Lost are mutually exclusive: a won/closed quote can't flip
-    # to lost, and while a Mark-won request sits in the director's queue
+    # to lost, and while a Mark-won request sits in finance's queue
     # the outcome is theirs to decide — Lost is blocked until then.
     if q.status in ("won", "lost", "cancelled", "superseded"):
         raise HTTPException(
@@ -1097,8 +1097,8 @@ async def mark_lost(q_id: UUID, reason: str,
     if won_pending:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "A Mark-won request is pending with the director — wait for "
-            "that decision (or ask the director to reject it) before "
+            "A Mark-won request is pending with finance — wait for "
+            "that decision (or ask finance to reject it) before "
             "marking the quotation Lost.",
         )
     q.status = "lost"
