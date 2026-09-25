@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Receipt, Building2, FileText, Briefcase, Calendar,
   Loader2, AlertCircle, Check, X, TrendingUp, Wallet, AlertTriangle,
-  Download, Pencil, Send,
+  Download, Pencil, Send, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -301,6 +301,38 @@ export default function CustomerPODetailPage() {
     }),
   });
 
+  // Director only. Takes this PO and nothing else: the project belongs to
+  // the deal, so it stays, and whatever this PO lent it (printed number, date,
+  // invoices) moves to the PO that is left.
+  const del = useMutation({
+    mutationFn: () => api.delete(`/customer-pos/${id}`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-pos"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-all"] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-for-quote"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      const back = q.data?.quotation_id ? `/quotations/${q.data.quotation_id}` : "/customer-pos";
+      nav(back);
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message
+        ?? e?.response?.data?.detail
+        ?? tt("Could not delete the PO", "Gagal menghapus PO"),
+    }),
+  });
+
+  function onDelete() {
+    const p0 = q.data;
+    if (!p0) return;
+    const msg = p0.project_id
+      ? tt(`Delete customer PO ${p0.number}? The project stays. If the project's paperwork names this PO, it switches to the other PO on the deal (or clears if there is none).`,
+           `Hapus PO pelanggan ${p0.number}? Proyek tetap ada. Jika dokumen proyek memakai nomor PO ini, akan diganti ke PO lain pada deal ini (atau dikosongkan bila tidak ada).`)
+      : tt(`Delete customer PO ${p0.number}? This cannot be undone.`,
+           `Hapus PO pelanggan ${p0.number}? Tindakan ini tidak bisa dibatalkan.`);
+    if (window.confirm(msg)) del.mutate();
+  }
+
   function onDpReject() {
     setFlash(null);
     if (!reason.trim()) {
@@ -398,6 +430,15 @@ export default function CustomerPODetailPage() {
               <div className="text-[10px] uppercase muted tracking-wider">{t("Total", "Total")}</div>
               <div className="text-xl font-semibold tabular-nums">{idr(p.total)}</div>
             </div>
+            {me?.role === "director" && (
+              <button className="btn-ghost text-red-600" disabled={del.isPending}
+                      onClick={onDelete}
+                      title={t("Delete this PO. The project is kept.",
+                               "Hapus PO ini. Proyeknya tetap ada.")}>
+                {del.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                {t("Delete", "Hapus")}
+              </button>
+            )}
           </div>
         </div>
 

@@ -64,7 +64,7 @@ async def pnl(
     # committed to buying goods, even if the journal hasn't caught up.
     COMMITTED_PROJECT_STATUSES = (
         "purchasing", "production", "qc", "packaging",
-        "invoiced", "delivered", "paid", "closed",
+        "delivered", "invoiced", "paid", "closed",
     )
     committed_projects = (await db.scalars(
         select(Project).where(

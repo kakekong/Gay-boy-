@@ -1255,7 +1255,9 @@ function WonNextStepCard({
             </p>
           )}
         </div>
-        {!hasApproved && (
+        {/* One PO per deal — once one is on file (pending, approved or sent
+            back), it is fixed or deleted, not joined by a second. */}
+        {rows.length === 0 && (
           <button className="btn-primary" onClick={() => setOpen(true)}>
             <CheckCircle2 size={14} /> {T("Submit customer PO")}</button>
         )}

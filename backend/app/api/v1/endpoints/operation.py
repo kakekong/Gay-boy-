@@ -2338,8 +2338,12 @@ async def approve_documents(
                            after={"number": inv.number,
                                   "faktur_pajak_no": fp_no or None,
                                   "with_delivery_order": True})
-    if invs_done:
-        advance_project_status(p, "invoiced")
+    if invs_done or dos_done:
+        # Delivered before invoiced, decided from the facts — see
+        # services/project_stage.py.
+        from app.services.project_stage import settle_delivery_and_invoice
+        await db.flush()
+        await settle_delivery_and_invoice(db, p)
     if not dos_done and not invs_done:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Nothing on this project is waiting for a signature.")
@@ -2369,8 +2373,11 @@ async def mark_customer_received(project_id: UUID,
         do.status = "delivered"
         if not do.delivered_at:
             do.delivered_at = datetime.now(UTC)
-    # Customer-received is the trigger for the 'delivered' project status.
-    advance_project_status(p, "delivered")
+    # Customer-received is the trigger for the 'delivered' project status —
+    # and for 'invoiced' too when the invoice was approved ahead of it.
+    from app.services.project_stage import settle_delivery_and_invoice
+    await db.flush()
+    await settle_delivery_and_invoice(db, p)
     await db.flush()
     return {"ok": True, "customer_received_at": p.customer_received_at}
 
@@ -3423,7 +3430,8 @@ async def mark_delivered(do_id: UUID,
         if remaining == 0:
             project = await db.get(Project, d.project_id)
             if project:
-                advance_project_status(project, "delivered")
+                from app.services.project_stage import settle_delivery_and_invoice
+                await settle_delivery_and_invoice(db, project)
     return {"ok": True, "delivered_at": d.delivered_at,
             "verified_at": d.verified_at}
 

@@ -84,11 +84,16 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
 # Purchasing files the supplier PO first (that trigger sets 'purchasing').
 # Then the supplier posts a drawing (→ drawing), the director approves it
 # (→ drawing_approved), ops does the physical work (production → QC →
-# packaging), finance invoices (→ invoiced) and admin confirms delivery
-# (→ delivered), then verified payment closes it out (→ paid → closed).
+# packaging), admin confirms delivery (→ delivered), finance invoices
+# (→ invoiced), then verified payment closes it out (→ paid → closed).
+#
+# Delivered comes before invoiced: the goods reach the customer and the
+# invoice follows them. Because advancing is forward-only, a job invoiced
+# ahead of delivery sits at 'invoiced' and its delivery does not pull it
+# back; a delivered job moves on to 'invoiced' when finance invoices it.
 PROJECT_STATUS_ORDER: list[str] = [
     "new", "purchasing", "drawing", "drawing_approved",
-    "production", "qc", "packaging", "invoiced", "delivered", "paid", "closed",
+    "production", "qc", "packaging", "delivered", "invoiced", "paid", "closed",
 ]
 
 

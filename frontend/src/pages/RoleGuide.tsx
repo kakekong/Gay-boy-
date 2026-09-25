@@ -337,8 +337,8 @@ const ROLES: RoleSection[] = [
       "(faktur, pembayaran, akun) sekarang mejanya keuangan, bukan Anda.",
     flow: [
       { title: "Open Projects → work the active ones", title_id: "Buka Proyek → kerjakan yang aktif",
-        detail: "Projects move ONE stage at a time, forward only: new → purchasing → drawing → drawing approved → production → QC → packaging → invoiced → delivered → paid → closed.",
-        detail_id: "Proyek bergerak SATU tahap sekali jalan, hanya maju: baru → pembelian → gambar → gambar disetujui → produksi → QC → pengemasan → difakturkan → terkirim → lunas → tutup." },
+        detail: "Projects move ONE stage at a time, forward only: new → purchasing → drawing → drawing approved → production → QC → packaging → delivered → invoiced → paid → closed.",
+        detail_id: "Proyek bergerak SATU tahap sekali jalan, hanya maju: baru → pembelian → gambar → gambar disetujui → produksi → QC → pengemasan → terkirim → difakturkan → lunas → tutup." },
       { title: "Operation board → advance work orders through the stages", title_id: "Papan Operasi → jalankan work order melalui tiap tahap",
         detail: "Receiving → Warehousing → QC → Packaging → Delivery. You can only file a WO for a stage the project has actually reached.",
         detail_id: "Penerimaan → Penyimpanan → QC → Pengemasan → Pengiriman. WO hanya bisa dibuat untuk tahap yang sudah dicapai proyek." },

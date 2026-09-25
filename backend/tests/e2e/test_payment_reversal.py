@@ -15,7 +15,9 @@ posted to the ledger — cash down, receivable back up. Everything downstream
 then follows from arithmetic that was already there: the invoice stops
 saying paid because the sum no longer covers it, it reappears in the
 collections queue and the payment picker, and the project that payment had
-walked to closed comes back to delivered.
+walked to closed comes back to the stage before money — invoiced if the
+goods were delivered, the stage before delivery if they were not (this
+job never was, so it goes back to packaging).
 
 What is checked here is that all of that actually happens, that both facts
 survive on the record rather than one erasing the other, that the books
@@ -154,8 +156,10 @@ async def main():
           abs(float(body.get("amount") or 0) + total) < 0.01, str(body.get("amount")))
     check("...and the invoice is unpaid again, not merely 'partial'",
           body.get("invoice_status") == "approved", str(body.get("invoice_status")))
-    check("...the project comes back to delivered — the goods went, the money didn't",
-          body.get("project_status") == "delivered", str(body.get("project_status")))
+    # Delivered comes before invoiced now, and this job was paid without ever
+    # being marked delivered — so it goes back to waiting for delivery.
+    check("...the project comes back off paid — to the stage before delivery, since it never was",
+          body.get("project_status") == "packaging", str(body.get("project_status")))
     check("...and nothing was said about keeping a deposit's job open",
           body.get("project_kept_open") is False, str(body.get("project_kept_open")))
 
@@ -245,7 +249,7 @@ async def main():
           str(got.get("paid_amount")))
     proj = J(await c.get(f"/operation/projects/{pid2}", headers=adm))
     check("...and the project off 'closed' again",
-          proj.get("status") == "delivered", str(proj.get("status")))
+          proj.get("status") == "packaging", str(proj.get("status")))
 
     # ══ what the delete endpoint has been promising ══════════════════════
     print("\n── the door the delete guard kept pointing at ──")

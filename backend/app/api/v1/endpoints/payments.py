@@ -531,8 +531,9 @@ async def reverse_payment_entry(
     new_inv_status = await _recompute_invoice_status(db, p.invoice_id)
 
     # Payment is what walked the project to paid → closed. If the invoice no
-    # longer stands paid, neither does the project: it goes back to
-    # 'delivered', the stage before money. `advance_project_status` is
+    # longer stands paid, neither does the project: it goes back to the
+    # stage before money — 'invoiced' if the goods were delivered, the stage
+    # before delivery if not. `advance_project_status` is
     # forward-only by design and will not do this, so it is set explicitly —
     # and only from paid/closed, so a project somebody has since moved on
     # elsewhere is left where it is.
@@ -542,7 +543,8 @@ async def reverse_payment_entry(
         project = await db.get(Project, inv.project_id)
         if project:
             if new_inv_status != "paid" and project.status in ("paid", "closed"):
-                project.status = "delivered"
+                from app.services.project_stage import stage_before_payment
+                project.status = await stage_before_payment(db, project)
             project_status = project.status
 
     # The deposit that started a job is deliberately not unwound here.

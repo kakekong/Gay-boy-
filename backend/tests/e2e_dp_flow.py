@@ -152,9 +152,25 @@ async def main():
     })
     check("sales blocked from direct quotation create (409)", r.status_code == 409, str(r.status_code))
 
+    async def fresh_quote():
+        """An approved quotation of its own. A deal takes one customer PO, so
+        each PO below is a separate deal rather than a second PO on `quote`."""
+        r = await director.post("/quotations", json={
+            "customer_id": cust_id,
+            "items": [{"line_no": 1, "source": "custom", "description": "Test gearbox",
+                       "qty": 2, "uom": "pcs", "unit_price": 5_000_000,
+                       "cost_estimate": 0, "spec": {}}],
+            "discount_pct": 0, "tax_pct": 11,
+        })
+        q = r.json()
+        await director.post(f"/quotations/{q['id']}/submit")
+        await director.post(f"/quotations/{q['id']}/approve", json={"notes": ""})
+        return q
+
     async def file_po(number: str, dp: bool):
+        q = await fresh_quote()
         r = await sales.post("/customer-pos", json={
-            "customer_id": cust_id, "quotation_id": quote["id"], "number": number,
+            "customer_id": cust_id, "quotation_id": q["id"], "number": number,
             "items": [{"description": "Test gearbox", "qty": 2, "unit_price": 5_000_000}],
             "is_downpayment": dp,
         })

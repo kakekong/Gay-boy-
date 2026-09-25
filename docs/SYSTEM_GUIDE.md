@@ -260,7 +260,9 @@ The director still sees DP POs in the approvals feed for visibility; a decision 
 
 ### 8.1 Project pipeline
 
-`new → purchasing → drawing → drawing_approved → production → qc → packaging → invoiced → delivered → paid → closed`
+`new → purchasing → drawing → drawing_approved → production → qc → packaging → delivered → invoiced → paid → closed`
+
+Delivered comes before invoiced — goods reach the customer, the invoice follows. Advancing is forward-only, so a job invoiced before delivery stays at `invoiced` when it is delivered, and a delivered job moves to `invoiced` when finance invoices it. Reversing a payment drops a paid job back to `invoiced`.
 
 - Advancement is **one stage at a time, forward-only**; boot-time repairs guarantee a restart can never regress a project's stage.
 - **Every stage carries a "how to move on" guide.** The card under the stage chips names the exact action that advances the project, who may do it, where the button lives, and any hard prerequisite the API enforces (e.g. import documents must be director-approved before Confirm delivery). It follows the project's own stage by default; clicking any chip reads that stage's guide instead, so you can look ahead without changing anything.
@@ -299,6 +301,12 @@ A purchasing PO can be raised in yen, dollars or yuan, and the director's approv
 The preview now carries the document's **currency**, its **fx rate**, and the **rupiah equivalent** of the total. Line prices, line totals and the total print in the currency they are in; a foreign total shows `≈ Rp X at <rate>` beneath it, because what a foreign order costs *us* is the figure the decision actually turns on. Rupiah documents are unchanged.
 
 On an **edit** that changes the currency, the money shown is the money being decided on — the proposed currency and rate — and the value it replaces stays in the old one, so `Total: JPY 1,200,000.00 → USD 8,000.00` reads as the change it is. Quotations carry a currency too and are covered by the same mechanism; everything with no money of its own answers `IDR`.
+
+### 8.3e One customer PO per deal
+
+A quotation takes **one** customer PO — including across its revisions. Filing a second is refused and the message names the PO already on file (a rejected one says to fix and resubmit it). On the quotation page the *Submit customer PO* button disappears once a PO exists.
+
+The **director** can delete a customer PO from its page. **The project stays**: the project is opened by marking the quotation Won, so it belongs to the deal, not to the paper. If the project's printed PO number, date and value came from the deleted PO they switch to the PO that is left, or the number and date clear (the value is kept) when none is. Invoices issued against the deleted PO move to the remaining one; with no PO left to take them, the delete is refused until the invoice is dealt with. The *Delete records* maintenance tool follows the same rule — deleting a PO there no longer takes its project.
 
 ### 8.3d A PO without a project, given one later
 

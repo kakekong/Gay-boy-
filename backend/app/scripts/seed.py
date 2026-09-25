@@ -615,6 +615,58 @@ COLUMN_MIGRATIONS: list[str] = [
             UPDATE users SET employee_id = new_id WHERE id = r.id;
         END LOOP;
     END $mig$""",
+
+    # ── One-off data fixes, recorded so they run exactly once ────────────
+    # For a fix that can move data backwards and so must not re-run every
+    # boot. Each one checks its key here first and writes it when done.
+    """CREATE TABLE IF NOT EXISTS data_fixes (
+           key VARCHAR(80) PRIMARY KEY,
+           applied_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+
+    # ── Delivered now comes before invoiced ──────────────────────────────
+    # The stage order was … packaging → invoiced → delivered → paid, and is
+    # now … packaging → delivered → invoiced → paid. The two names do not just
+    # swap: under the old order 'delivered' meant "invoiced and delivered" and
+    # 'invoiced' meant "invoiced, not delivered yet". So each existing job is
+    # re-placed from what actually happened (same rule as
+    # services/project_stage.py):
+    #   delivered and invoiced  → invoiced
+    #   delivered only          → delivered
+    #   invoiced, not delivered → packaging (waiting to be delivered)
+    # Only jobs at those two stages are touched; paid/closed and anything
+    # earlier stay where they are.
+    """DO $fix$
+    BEGIN
+        IF EXISTS (SELECT 1 FROM data_fixes
+                    WHERE key = 'project_stage_delivered_before_invoiced') THEN
+            RETURN;
+        END IF;
+        UPDATE projects p
+           SET status = CASE
+                 WHEN f.delivered AND f.invoiced THEN 'invoiced'
+                 WHEN f.delivered THEN 'delivered'
+                 ELSE 'packaging' END
+          FROM (
+              SELECT p2.id,
+                     (p2.status = 'delivered'
+                      OR p2.customer_received_at IS NOT NULL
+                      OR (EXISTS (SELECT 1 FROM delivery_orders d
+                                   WHERE d.project_id = p2.id)
+                          AND NOT EXISTS (SELECT 1 FROM delivery_orders d
+                                           WHERE d.project_id = p2.id
+                                             AND d.status <> 'delivered'))
+                     ) AS delivered,
+                     EXISTS (SELECT 1 FROM invoices i
+                              WHERE i.project_id = p2.id
+                                AND i.type <> 'dp'
+                                AND i.status IN ('approved', 'partial', 'issued',
+                                                 'overdue', 'paid')) AS invoiced
+                FROM projects p2
+               WHERE p2.status IN ('delivered', 'invoiced')
+          ) f
+         WHERE f.id = p.id;
+        INSERT INTO data_fixes (key) VALUES ('project_stage_delivered_before_invoiced');
+    END $fix$""",
 ]
 
 

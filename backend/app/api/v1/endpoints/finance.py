@@ -189,7 +189,11 @@ async def approve_invoice(
 
     project = await db.get(Project, inv.project_id) if inv.project_id else None
     if project:
-        advance_project_status(project, "invoiced")
+        # Invoiced comes after delivered: an invoice approved before the goods
+        # arrive moves nothing until they do.
+        from app.services.project_stage import settle_delivery_and_invoice
+        await db.flush()
+        await settle_delivery_and_invoice(db, project)
     await db.flush()
     return {"ok": True, "status": inv.status,
             "faktur_pajak_no": inv.faktur_pajak_no,

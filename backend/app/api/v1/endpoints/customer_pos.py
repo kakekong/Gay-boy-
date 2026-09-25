@@ -263,7 +263,7 @@ async def create_customer_po(
     # win first meant a rep ticked Won on their own say-so and the paperwork
     # caught up later, or didn't. So a PO may be filed against any quotation
     # the customer has actually been given: approved, sent, or already won
-    # (a second PO against a won quote is normal — staged orders).
+    # (won first, PO after — though only ever one PO per deal; see below).
     _PO_READY = ("approved", "sent", "won")
     if quotation.status not in _PO_READY:
         raise HTTPException(
@@ -274,6 +274,22 @@ async def create_customer_po(
         )
     if not payload.number.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO number required")
+
+    # One PO per deal. A second one used to be allowed for staged orders, and
+    # in practice it was the same PO typed twice with a digit wrong — both
+    # approved, both hung off one project. Revisions of the quotation count as
+    # the same deal.
+    from app.services.customer_po_removal import existing_po_for_deal
+    already = await existing_po_for_deal(db, quotation.id)
+    if already is not None:
+        fix = ("fix that one and resubmit it"
+               if already.status == "rejected"
+               else "edit that one, or ask the director to delete it first")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This quotation already has customer PO {already.number} "
+            f"({already.status.replace('_', ' ')}). A deal takes one PO — {fix}.",
+        )
 
     # Uniqueness scoped to the customer — two different customers using
     # the same PO number "001" is fine, but the same customer can't have
@@ -502,6 +518,65 @@ async def reject_customer_po(
             "Please give a reason for rejecting — the requester will see it.",
         )
     return await _decide_customer_po(po_id, False, payload.notes, db, user)
+
+
+@router.delete("/{po_id}")
+async def delete_customer_po(
+    po_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_director_only),
+):
+    """Delete one customer PO and nothing else — the project stays.
+
+    The project belongs to the deal (marking the quotation Won is what opens
+    it), not to the paper the customer sent, so a PO filed twice or filed
+    wrong can go without the job going with it. What the PO gave the project
+    moves to the PO that is left: its printed number, date and value, and any
+    invoice issued against it. With no PO left, the number and date clear and
+    the value stays; an invoice with nowhere to go refuses the delete.
+    """
+    from app.core.audit import record as audit_record
+    from app.api.v1.endpoints.maintenance import _drop_files
+    from app.models.attachment import Attachment
+    from app.models.comment import EntityComment
+    from app.services.customer_po_removal import release_from_project
+    from sqlalchemy import delete as sqldelete
+
+    po = await db.get(CustomerPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer PO not found")
+
+    snapshot = {
+        "number": po.number, "status": po.status, "total": float(po.total or 0),
+        "po_date": po.po_date.isoformat() if po.po_date else None,
+        "quotation_id": str(po.quotation_id) if po.quotation_id else None,
+        "project_id": str(po.project_id) if po.project_id else None,
+        "items": po.items,
+    }
+    released = await release_from_project(db, po, relink_invoices=True)
+
+    # Its own paper trail goes with it: the scan of the PO, its discussion,
+    # and any approval still waiting on it (which would otherwise sit in a
+    # queue pointing at nothing).
+    paths = [p for (p,) in (await db.execute(
+        select(Attachment.storage_path).where(
+            Attachment.owner_type == "customer_po", Attachment.owner_id == po.id)
+    )).all() if p]
+    await db.execute(sqldelete(Attachment).where(
+        Attachment.owner_type == "customer_po", Attachment.owner_id == po.id))
+    await db.execute(sqldelete(EntityComment).where(
+        EntityComment.owner_type == "customer_po", EntityComment.owner_id == po.id))
+    await db.execute(sqldelete(ApprovalRequest).where(
+        ApprovalRequest.target_type == "customer_po",
+        ApprovalRequest.target_id == po.id,
+        ApprovalRequest.status == ApprovalStatus.PENDING.value))
+
+    await db.delete(po)
+    await audit_record(db, actor=user, action="delete", entity="customer_po",
+                       entity_id=po_id, before=snapshot, after=released)
+    await db.commit()
+    await _drop_files(paths)
+    return {"deleted": snapshot["number"], **released}
 
 
 @router.post("/{po_id}/create-project", response_model=CustomerPOOut)

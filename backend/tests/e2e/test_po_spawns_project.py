@@ -145,12 +145,15 @@ async def main():
           (await po_now(po2["id"])).get("project_id") == won_proj,
           str((await po_now(po2['id'])).get("project_id")))
 
-    print("\n── a second order against the same quotation joins the job ──")
-    po2b = await file_po(cust2, q2, number=f"PO-{TAG}-{n[0]}-B")
-    await c.post(f"/customer-pos/{po2b['id']}/approve", headers=d, json={"decision": "approve"})
-    check("the addition does not mint a second project",
-          (await po_now(po2b["id"])).get("project_id") == won_proj,
-          str((await po_now(po2b['id'])).get("project_id")))
+    print("\n── a second order against the same quotation is refused ──")
+    # One PO per deal: a second one was, in practice, the same PO typed twice.
+    r = await c.post("/customer-pos", headers=s1, json={
+        "customer_id": cust2, "quotation_id": q2["id"],
+        "number": f"PO-{TAG}-{n[0]}-B", "items": [{"description": "X", "qty": 1,
+                                                   "unit_price": 1}],
+        "is_downpayment": False})
+    check("a second PO on the same quotation is refused, so no second project either",
+          r.status_code == 409, f"{r.status_code} {r.text[:140]}")
 
     print("\n── and approving one twice changes nothing ──")
     r = await c.post(f"/customer-pos/{po['id']}/approve", headers=d, json={"decision": "approve"})

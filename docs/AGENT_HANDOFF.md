@@ -221,6 +221,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
+| `test_one_po_per_deal.py` | a second customer PO on a quotation (or its revision) is refused naming the first; the director deletes a PO and the project stays, its PO number moving to the survivor (or clearing, value kept), invoices following it or refusing the delete; maintenance no longer pulls the project; delivered-before-invoiced settles from facts; the one-off re-sort of existing projects runs once |
 | `test_pr_quotation_links.py` | a price request lists every quotation made from it (`linked_quotations`, newest version first, revisions included) on the detail and the list; `pr.quotation_id` stays the first one; purchasing gets no links |
 | `test_pr_supplier_links.py` | a price request lists its supplier requests (joint ones included, counting only this job's lines, no total until fully answered) for the roles that can open them and not for sales; the supplier-request list filter finds joint requests; the supplier page reads `quoted_price` |
 | `test_closed_spr_catches_up.py` | a closed supplier request reports items the job gained, refreshes, reopens (quoted/draft) and keeps the vendor's prices; split, hand-picked and pre-marker split requests never claim new items; cancelled stays refused |
@@ -416,8 +417,29 @@ becomes Won — the director's direct path in `quotations.mark_won` and the
 the quotation. `customer_pos._spawn_project` is the same idea from the PO's
 side: it attaches to the project the Won already made and only creates one
 when there is nothing to attach to (a PO with no quotation, and the DP flow).
-Approving a PO twice, or filing a second PO against the same quotation, must
-never mint a second job — that used to happen and had to grow a guard.
+Approving a PO twice must never mint a second job — that used to happen and
+had to grow a guard.
+
+**One customer PO per deal, and deleting one keeps the project.** Filing a
+second PO against a quotation — or any revision of it — is a 409 naming the
+one on file (`services/customer_po_removal.existing_po_for_deal`). Staged
+orders used to be allowed; in practice it was the same PO typed twice with a
+digit wrong, both approved onto one project. `DELETE /customer-pos/{id}` is
+the director's: the project stays, and `release_from_project` moves what the
+PO lent it (printed number/date/value, invoices) to the PO that is left, or
+clears number and date (value kept) when none is; an invoice with nowhere to
+go refuses the delete. The data-maintenance closure no longer pulls a PO's
+project in — the project belongs to the deal (Won opens it), not the paper.
+
+**Delivered comes before invoiced.** `PROJECT_STATUS_ORDER` is
+`… packaging → delivered → invoiced → paid`. Neither event moves a project
+alone: invoice approval and delivery confirmation both call
+`services/project_stage.settle_delivery_and_invoice`, which decides from the
+facts (customer received / every DO delivered; an approved non-DP invoice).
+An invoice approved early moves nothing until delivery. Existing projects
+were re-sorted once on deploy by the `project_stage_delivered_before_invoiced`
+fix in `seed.py`, recorded in the new `data_fixes` table — use that table for
+any future data fix that must not re-run every boot.
 **Down-payment orders keep the old timing on purpose**: the project appears
 when sales confirm the deposit landed, because not starting before the money
 arrives is the entire point of a deposit.

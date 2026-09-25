@@ -350,6 +350,14 @@ async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
     await wipe(SupplierPriceRequest, SupplierPriceRequest.id, plan.get("sprs") or set())
     await wipe(RFQ, RFQ.id, plan["rfqs"])
     await wipe(PurchaseRequest, PurchaseRequest.id, plan["preqs"])
+    # A PO going while its project stays gives back what it lent the project
+    # (printed number, date, value) to the PO that is left, or clears them.
+    if plan["cpos"]:
+        from app.services.customer_po_removal import release_from_project
+        for po in (await db.scalars(
+                select(CustomerPO).where(CustomerPO.id.in_(plan["cpos"])))).all():
+            if po.project_id and po.project_id not in plan["projects"]:
+                await release_from_project(db, po, relink_invoices=False)
     await wipe(CustomerPO, CustomerPO.id, plan["cpos"])
     await wipe(Project, Project.id, plan["projects"])               # WO/drawings/DO cascade
     await wipe(Quotation, Quotation.id, plan["quotes"])             # items cascade
@@ -480,8 +488,11 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
             projects |= await _ids(db, select(Project.id).where(
                 Project.quotation_id.in_(quotes)))
         if cpos:
-            projects |= await _ids(db, select(CustomerPO.project_id).where(
-                CustomerPO.id.in_(cpos)))
+            # A PO does NOT pull its project in. The project belongs to the
+            # deal — marking the quotation Won opens it — and deleting a PO
+            # filed twice must not take the job down with it. The project's
+            # PO fields are handed back in `_execute_plan` instead. Deleting
+            # the quotation (or naming the project) still takes the project.
             invoices |= await _ids(db, select(Invoice.id).where(
                 Invoice.customer_po_id.in_(cpos)))
         if projects:

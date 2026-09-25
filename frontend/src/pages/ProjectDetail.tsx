@@ -40,7 +40,7 @@ const STATUS_CHIP: Record<string, string> = {
 // production/QC/packaging → finance/admin close out → payment.
 const PIPELINE_STAGES = [
   "new", "purchasing", "drawing", "drawing_approved",
-  "production", "qc", "packaging", "invoiced", "delivered", "paid", "closed",
+  "production", "qc", "packaging", "delivered", "invoiced", "paid", "closed",
 ];
 
 // What actually moves a project out of each stage. Every line mirrors the
@@ -111,15 +111,6 @@ const STAGE_GUIDE: Record<string, StageGuide> = {
             "Work order → work order baru, tahap 'pengemasan'"],
   },
   packaging: {
-    who: ["Finance", "Keuangan"],
-    action: ["Approve the invoice with its faktur pajak number — approval is the trigger, not issuing.",
-             "Setujui faktur dengan nomor faktur pajaknya — persetujuan itu pemicunya, bukan penerbitan."],
-    where: ["Finance → Pending invoices",
-            "Keuangan → Faktur menunggu"],
-    needs: ["The final invoice has to be issued first, and issuing it needs QC recorded as a pass.",
-            "Faktur final harus diterbitkan dulu, dan penerbitannya butuh QC tercatat lulus."],
-  },
-  invoiced: {
     who: ["Admin", "Admin"],
     action: ["Confirm the customer received the goods. This also closes any open delivery orders.",
              "Konfirmasi pelanggan sudah menerima barang. Ini juga menutup semua surat jalan terbuka."],
@@ -129,6 +120,15 @@ const STAGE_GUIDE: Record<string, StageGuide> = {
            "Unggah bukti pengiriman dan minta direktur memverifikasinya sebelum konfirmasi."],
   },
   delivered: {
+    who: ["Finance", "Keuangan"],
+    action: ["Approve the invoice with its faktur pajak number — approval is the trigger, not issuing.",
+             "Setujui faktur dengan nomor faktur pajaknya — persetujuan itu pemicunya, bukan penerbitan."],
+    where: ["Finance → Pending invoices",
+            "Keuangan → Faktur menunggu"],
+    needs: ["The final invoice has to be issued first, and issuing it needs QC recorded as a pass.",
+            "Faktur final harus diterbitkan dulu, dan penerbitannya butuh QC tercatat lulus."],
+  },
+  invoiced: {
     who: ["Finance", "Keuangan"],
     action: ["Record the payment once you can see it in the bank. Paying in full closes the project outright.",
              "Catat pembayaran begitu terlihat di rekening. Pelunasan penuh langsung menutup proyek."],

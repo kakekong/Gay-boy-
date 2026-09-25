@@ -120,8 +120,8 @@ PROJECT_TO_CUSTOMER_STAGE: dict[str, str] = {
     "production": "purchasing",
     "qc": "purchasing",
     "packaging": "purchasing",
-    "invoiced": "invoicing",
     "delivered": "invoicing",
+    "invoiced": "invoicing",
     "paid": "payment",
     "closed": "closed_won",
 }
