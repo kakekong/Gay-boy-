@@ -229,11 +229,19 @@ async def main():
 
     # A corrected amount the order lines no longer explain.
     print("\n── an invoice whose figure was corrected ──")
-    # A second invoice on a project that already has one: deliberate here, so
-    # it says so. A repeat press is refused.
-    r = await c.post(f"/operation/projects/{proj}/issue-invoice", headers=adm,
-                     data={"invoice_type": "final", "additional": "true"})
-    inv2 = J(r)["invoice"]["id"]
+    # A project is billed once now, so the second invoice this needs is made
+    # the way the pre-rule duplicates were: a copy written straight in.
+    from app.core.db import SessionLocal
+    from app.models.finance import Invoice
+    async with SessionLocal() as db:
+        src = await db.get(Invoice, uuid.UUID(inv_id))
+        dup = Invoice(number=f"{src.number}-B", project_id=src.project_id,
+                      customer_id=src.customer_id, customer_po_id=src.customer_po_id,
+                      type=src.type, amount=src.amount, tax_amount=src.tax_amount,
+                      total=src.total, status="pending_finance")
+        db.add(dup)
+        await db.commit()
+        inv2 = str(dup.id)
     await c.patch(f"/finance/invoices/{inv2}", headers=adm,
                   json={"amount": 1_234_567, "tax_amount": 0})
     await c.post(f"/finance/invoices/{inv2}/approve", headers=fin,

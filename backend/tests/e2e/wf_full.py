@@ -222,17 +222,21 @@ async def main():
     # ===== PHASE H: Invoice/faktur/payment =====
     step("H1a CHECK: can ADMIN issue the invoice? (workflow says yes; code set = {finance,director})")
     r=await c.post(f"/operation/projects/{proj}/issue-invoice",headers=H["admin"],
-                   data={"invoice_type":"single","amount":3000000});
+                   data={"invoice_type":"single","amount":3000000}); r_probe=r
     print(f"     admin issue-invoice HTTP {r.status_code}: {J(r).get('errors',[{}])[0].get('message') if r.status_code>=400 else 'allowed'}")
     if r.status_code==403: bad("ADMIN cannot issue invoice, but workflow doc + error message say admin can (role set excludes admin)")
 
     step("H1b finance issues the invoice + DO")
-    # H1a above is a permission probe that really does issue one, so this is a
-    # SECOND invoice on the project and has to say so — a repeat press is
-    # refused now, which is the point of that guard.
+    # H1a above is a permission probe that really does issue one. A project is
+    # billed once, so finance's press is refused and the probe's invoice is
+    # the one carried on.
     r=await c.post(f"/operation/projects/{proj}/issue-invoice",headers=H["finance"],
                    data={"invoice_type":"single","amount":3000000,
-                         "create_delivery_order":"true","additional":"true"}); b=J(r)
+                         "create_delivery_order":"true"}); b=J(r)
+    if r_probe.status_code==201:
+        if r.status_code==409: ok("second invoice on the project refused (one per project)")
+        else: bad(f"second invoice on one project was NOT refused: HTTP{r.status_code}")
+        r=r_probe; b=J(r)
     inv=b.get("invoice",{}).get("id") or b.get("id") or b.get("invoice_id")
     ok(f"HTTP{r.status_code} invoice={inv} status={b.get('invoice',{}).get('status') or b.get('status')}") \
         if r.status_code==201 else bad(f"HTTP{r.status_code} {b}")

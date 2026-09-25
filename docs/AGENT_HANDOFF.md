@@ -221,6 +221,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
+| `test_invoice_dupes_and_po_price.py` | (updated) one invoice per project: a second final/single is refused, the old `additional` flag no longer gets round it, one DP may sit beside it and only one; a rejected invoice can be replaced |
 | `test_delivery_wo_after_do.py` | a delivery work order is refused with no delivery order, and with one raised but unreleased; moving a WO into delivery likewise; after finance releases it all three go through; a pre-rule delivery WO cannot be completed; the director and admin cannot release a DO by button or inbox |
 | `test_one_po_per_deal.py` | a second customer PO on a quotation (or its revision) is refused naming the first; the director deletes a PO and the project stays, its PO number moving to the survivor (or clearing, value kept), invoices following it or refusing the delete; maintenance no longer pulls the project; delivered-before-invoiced settles from facts; the one-off re-sort of existing projects runs once |
 | `test_pr_quotation_links.py` | a price request lists every quotation made from it (`linked_quotations`, newest version first, revisions included) on the detail and the list; `pr.quotation_id` stays the first one; purchasing gets no links |
@@ -622,6 +623,12 @@ the per-item `roles` list, and it redirected finance away from `/approvals`
 entirely), and the **copy** that names the desk on the requesting screen. The
 first three are silent failures: the request exists, nothing errors, and the
 person it waits on never arrives. Check all four when you move one.
+
+**One invoice per project.** `issue_invoice` refuses a second final/single
+invoice on a project (they share one slot) and a second DP; a rejected one
+doesn't count. The `additional` form field is gone — it used to let a second
+invoice through on purpose. Drivers that need a duplicate to exercise delete
+paths write one straight into the table, as the pre-rule pairs were.
 
 **Delivery orders are released by finance and nobody else.** Beyond
 `FINANCE_ONLY_TARGETS` (hidden from the director's inbox) there is

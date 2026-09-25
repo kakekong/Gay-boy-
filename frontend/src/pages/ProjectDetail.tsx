@@ -556,17 +556,12 @@ export default function ProjectDetailPage() {
        *  False means "bill against the DO already on the project", which is
        *  the two-step path and what the server insists on otherwise. */
       createDeliveryOrder?: boolean;
-      /** Deliberately raise ANOTHER invoice of this type — a part shipment,
-       *  an instalment. Without it the server refuses a repeat press, which
-       *  is what produced pairs of identical invoices on one project. */
-      additional?: boolean;
     }) => {
       const fd = new FormData();
       if (body.amount != null) fd.append("amount", String(body.amount));
       if (body.invoiceFile) fd.append("invoice_file", body.invoiceFile);
       if (body.doFile) fd.append("delivery_order_file", body.doFile);
       fd.append("invoice_type", body.invoiceType ?? "final");
-      if (body.additional) fd.append("additional", "true");
       // A DP invoice is billed BEFORE delivery, so it never carries a DO.
       const withDo = (body.invoiceType ?? "final") !== "dp"
         && body.createDeliveryOrder === true;
@@ -574,24 +569,9 @@ export default function ProjectDetailPage() {
       return api.post(`/operation/projects/${id}/issue-invoice`, fd);
     },
     onSuccess: refresh,
-    onError: (e: any, vars: any) => {
-      // The server refuses a second invoice of the same type unless it is
-      // asked for deliberately. Offer that here rather than making the
-      // refusal a dead end — and ask, because the whole reason the guard
-      // exists is that a double-click is not an intention.
-      const msg: string = e?.response?.data?.errors?.[0]?.message ?? "";
-      if (e?.response?.status === 409 && msg.includes("already has")
-          && !vars?.additional) {
-        if (confirm(`${msg}\n\n${tt(
-          "Raise another one anyway?",
-          "Tetap buat satu lagi?",
-        )}`)) {
-          issueInvoice.mutate({ ...vars, additional: true });
-        }
-        return;
-      }
-      onErr(e);
-    },
+    // A project is billed once — a second invoice is refused, and the
+    // message names the one already there. No "raise another anyway".
+    onError: onErr,
   });
   // The delivery order on its own — the first of the two documents.
   const issueDeliveryOrder = useMutation({
@@ -787,6 +767,9 @@ export default function ProjectDetailPage() {
   const canViewDrawing = true;
   const dos = data.data.deliveries ?? [];
   const inv = data.data.invoices ?? [];
+  // One invoice per project (plus one down payment) — see issue-invoice.
+  const alreadyBilled = inv.some((iv: any) => iv.status !== "rejected"
+    && (invType === "dp" ? iv.type === "dp" : ["final", "single"].includes(iv.type)));
   const prs = data.data.purchase_requests ?? [];
   const supplierPOs: any[] = data.data.supplier_pos ?? [];
   const priceReq = data.data.price_request ?? null;
@@ -2119,6 +2102,22 @@ export default function ProjectDetailPage() {
                   )}
                 </div>
               )}
+              {/* A project is billed once: one invoice, plus at most one down
+                  payment beside it. The server refuses a second either way. */}
+              {(() => {
+                const billed = inv.find((iv: any) => iv.status !== "rejected"
+                  && (invType === "dp" ? iv.type === "dp"
+                                       : ["final", "single"].includes(iv.type)));
+                return billed ? (
+                  <div className="text-xs text-ink-700 bg-ink-50 border border-ink-200 rounded px-2 py-1">
+                    {invType === "dp"
+                      ? t(`This project already has its down-payment invoice — ${billed.number}. Only one is allowed.`,
+                          `Proyek ini sudah punya faktur DP — ${billed.number}. Hanya boleh satu.`)
+                      : t(`This project already has its invoice — ${billed.number}. A project is billed once; delete that one first if it is wrong.`,
+                          `Proyek ini sudah punya faktur — ${billed.number}. Satu proyek ditagih sekali; hapus faktur itu dulu bila salah.`)}
+                  </div>
+                ) : null;
+              })()}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input className="input" placeholder={t("Amount (blank = quotation total)", "Jumlah (kosong = total penawaran)")}
                   value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
@@ -2152,6 +2151,7 @@ export default function ProjectDetailPage() {
                   ? "btn-ghost" : "btn-primary"}
                   disabled={
                     issueInvoice.isPending
+                    || alreadyBilled
                     || (invType === "final" && !p.qc_passed_at)
                     || (invType === "final" && dos.length === 0)
                   }
@@ -2174,7 +2174,7 @@ export default function ProjectDetailPage() {
                 </button>
                 {invType === "final" && dos.length === 0 && (
                   <button className="btn-primary"
-                    disabled={issueInvoice.isPending || !p.qc_passed_at}
+                    disabled={issueInvoice.isPending || alreadyBilled || !p.qc_passed_at}
                     title={t("Raise both now — the delivery order is still filed first.",
                              "Terbitkan keduanya sekaligus — surat jalan tetap dibuat lebih dulu.")}
                     onClick={() => issueInvoice.mutate(

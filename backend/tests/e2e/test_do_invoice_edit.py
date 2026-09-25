@@ -108,12 +108,26 @@ async def main():
     print("\n── admin presses Issue twice ──")
     first = J(await c.post(f"/operation/projects/{proj}/issue-invoice",
                            headers=adm, data={"invoice_type": "final"}))
-    # A repeat press is refused now — that is the point of the guard. This
-    # driver is about correcting a duplicate that exists, so it asks for the
-    # second one deliberately to get into that state.
-    second = J(await c.post(f"/operation/projects/{proj}/issue-invoice",
-                            headers=adm, data={"invoice_type": "final",
-                                               "additional": "true"}))
+    # A second invoice on a project is refused outright now — a project is
+    # billed once. This driver is about correcting a duplicate that already
+    # exists (production holds pairs from before the rule), so it makes one
+    # the way they were made: a copy of the first, written straight in.
+    r = await c.post(f"/operation/projects/{proj}/issue-invoice",
+                     headers=adm, data={"invoice_type": "final"})
+    check("a second press is refused — one invoice per project",
+          r.status_code == 409, f"{r.status_code} {J(r)}"[:150])
+    from app.core.db import SessionLocal
+    from app.models.finance import Invoice
+    async with SessionLocal() as db:
+        src = await db.get(Invoice, uuid.UUID(first["invoice"]["id"]))
+        dup = Invoice(number=f"{src.number}-DUP", project_id=src.project_id,
+                      customer_id=src.customer_id, customer_po_id=src.customer_po_id,
+                      type=src.type, amount=src.amount, tax_amount=src.tax_amount,
+                      total=src.total, status=src.status, issue_date=src.issue_date,
+                      due_date=src.due_date)
+        db.add(dup)
+        await db.commit()
+        second = {"invoice": {"id": str(dup.id)}}
     f0 = await full(proj)
     check("the project now carries two invoices", len(f0["invoices"]) == 2,
           str(len(f0["invoices"])))

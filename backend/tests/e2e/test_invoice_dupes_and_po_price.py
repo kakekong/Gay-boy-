@@ -7,9 +7,9 @@ exists — but nothing ever taught the invoice, so pressing Issue twice produced
 two real documents for one shipment. Both can be approved, and a customer can
 end up with two bills for the same goods.
 
-A genuine second invoice is a real thing: a part shipment billed on its own, a
-staged instalment. So this refuses the *repeat*, not the idea — `additional`
-says "I mean another one", which a double-click never does.
+It used to refuse only the *repeat*, with an `additional` flag for a second
+one on purpose. Since then a project is billed ONCE: one final/single invoice,
+plus at most one down payment beside it, and no flag gets round that.
 
 The same hole was on the deposit route, where a DP invoice is issued against
 the customer PO before any project exists, and it is closed the same way.
@@ -119,13 +119,17 @@ async def main():
     check("still one invoice", len(await invoices(p1)) == 1,
           str(len(await invoices(p1))))
 
-    print("\n── but a deliberate second one is allowed ──")
+    print("\n── and there is no way round it any more ──")
     r = await c.post(f"/operation/projects/{p1}/issue-invoice", headers=adm,
                      data={"invoice_type": "final", "additional": "true",
                            "amount": "250000"})
-    check("saying 'additional' raises it", r.status_code == 201,
+    check("the old 'additional' flag no longer raises a second one",
+          r.status_code == 409, f"{r.status_code} {why(r)}")
+    r = await c.post(f"/operation/projects/{p1}/issue-invoice", headers=adm,
+                     data={"invoice_type": "single"})
+    check("...nor does switching to a 'single' invoice", r.status_code == 409,
           f"{r.status_code} {why(r)}")
-    check("...and now there are two, on purpose", len(await invoices(p1)) == 2,
+    check("...one invoice on the project, still", len(await invoices(p1)) == 1,
           str(len(await invoices(p1))))
 
     print("\n── a rejected one does not block a replacement ──")
@@ -141,6 +145,16 @@ async def main():
                      data={"invoice_type": "final"})
     check("...and a fresh one can be issued without the flag",
           r.status_code == 201, f"{r.status_code} {why(r)}")
+
+    print("\n── the down payment is the one invoice allowed beside it ──")
+    r = await c.post(f"/operation/projects/{p2}/issue-invoice", headers=adm,
+                     data={"invoice_type": "dp", "amount": "1000"})
+    check("a down-payment invoice can sit beside the project's invoice",
+          r.status_code == 201, f"{r.status_code} {why(r)}")
+    r = await c.post(f"/operation/projects/{p2}/issue-invoice", headers=adm,
+                     data={"invoice_type": "dp", "amount": "1000"})
+    check("...but only one of those too", r.status_code == 409,
+          f"{r.status_code} {why(r)}")
 
     # ══ the deposit route ════════════════════════════════════════════════
     print("\n── the same on the deposit route ──")
@@ -159,8 +173,10 @@ async def main():
     # ══ the faktur pajak number ══════════════════════════════════════════
     print("\n── one faktur pajak number, one invoice ──")
     fp = f"010.000-26.{TAG}"
-    ivs = await invoices(p1)
-    a_id, b_id = ivs[0]["id"], ivs[1]["id"]
+    # Two invoices on two projects now — one project cannot hold two.
+    a_id = (await invoices(p1))[0]["id"]
+    b_id = next(x["id"] for x in await invoices(p2)
+                if x["status"] != "rejected" and x.get("type") != "dp")
     r = await c.post(f"/finance/invoices/{a_id}/approve", headers=fin,
                      data={"faktur_pajak_no": fp})
     check("the first invoice takes the number", r.status_code < 300,
@@ -200,7 +216,7 @@ async def main():
           .get("may_delete") is False, "manager")
     check("...and the row carries the invoice to open before binning it",
           row_b and row_b.get("status") == "approved"
-          and row_b.get("project_id") == p1, str(row_b)[:200])
+          and row_b.get("project_id") == p2, str(row_b)[:200])
 
     r = await c.delete(f"/finance/invoices/{b_id}", headers=mgr)
     check("the manager's press would be refused anyway",

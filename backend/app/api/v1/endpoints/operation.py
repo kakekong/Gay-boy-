@@ -2078,14 +2078,6 @@ async def issue_invoice(
     due_date: str | None = Form(None),
     courier: str | None = Form(None),
     create_delivery_order: bool = Form(True),
-    additional: bool = Form(
-        False,
-        description=(
-            "Deliberately raise ANOTHER invoice of this type on a project "
-            "that already has one — a second shipment, a staged instalment. "
-            "Without it a repeat press is refused."
-        ),
-    ),
     invoice_type: str = Form(
         "final",
         description=(
@@ -2143,34 +2135,31 @@ async def issue_invoice(
     if not p.customer_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Project has no customer.")
 
-    # One press, one bill.
+    # One invoice per project.
     #
-    # The delivery order already refused to duplicate itself — a second press
-    # bills against the sheet that exists. The invoice had no such guard, so
-    # pressing Issue twice produced two invoices for the same amount on the
-    # same project, which is what the pairs in the screenshots were. It is
-    # worse than clutter: both are real documents, both can be approved, and
-    # a customer can end up with two bills for one shipment.
-    #
-    # A genuine second invoice is a real thing — a part shipment billed on its
-    # own, a staged instalment — so this refuses the repeat rather than the
-    # idea. `additional=true` says "I mean another one", which a double-click
-    # never does.
-    existing_inv = (await db.scalars(
+    # Pressing Issue twice used to produce two invoices for the same amount on
+    # the same project — both real, both approvable, two bills for one job.
+    # The first guard refused only a repeat of the same type and let a second
+    # one through on purpose ("additional"); that door is closed now. A
+    # project is billed once: one final (or single) invoice. The only invoice
+    # that may sit beside it is the down payment — the deposit taken before
+    # delivery, which the final invoice then balances — and there is one of
+    # those at most too. A rejected invoice does not count; it is replaced.
+    slot = ("dp",) if itype == "dp" else ("final", "single")
+    first = (await db.scalars(
         select(Invoice).where(
             Invoice.project_id == project_id,
-            Invoice.type == itype,
+            Invoice.type.in_(slot),
             Invoice.status != "rejected",
         ).order_by(Invoice.created_at.asc())
-    )).all()
-    if existing_inv and not additional:
-        first = existing_inv[0]
+    )).first()
+    if first is not None:
+        what = "a down-payment invoice" if itype == "dp" else "an invoice"
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"This project already has a {itype} invoice — {first.number} for "
-            f"{float(first.total or 0):,.0f}. Use it, or delete it first. "
-            "If you really need a second one (a part shipment, an "
-            "instalment), tick 'additional'.",
+            f"This project already has {what} — {first.number} for "
+            f"{float(first.total or 0):,.0f}. A project is billed once: use "
+            "that one, or delete it first if it is wrong.",
         )
 
     # The delivery order comes first. A down-payment invoice is billed before
