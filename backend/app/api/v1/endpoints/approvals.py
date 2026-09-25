@@ -29,8 +29,9 @@ async def pending_documents(
 ):
     """Director-decision documents that DON'T flow through ApprovalRequest.
 
-    Finance gets one section only — delivery orders never released — because
-    releasing a delivery order is theirs alone; the rest are the director's.
+    Finance gets the delivery-order sections — sheets never released and
+    proofs waiting for verification — because every delivery-order sign-off is
+    theirs alone; the rest are the director's.
 
     Drawings, logistics/import docs, delivery-proof verification and
     pending-director price requests are all status-based queues decided on
@@ -92,8 +93,8 @@ async def pending_documents(
                 "at": p.updated_at or p.created_at,
             })
 
-    # 3. Delivery proofs uploaded but not yet verified.
-    dorows = [] if is_finance else (await db.execute(
+    # 3. Delivery proofs uploaded but not yet verified — finance's to verify.
+    dorows = [] if not is_finance else (await db.execute(
         select(DeliveryOrder, Project)
         .join(Project, DeliveryOrder.project_id == Project.id)
         .where(DeliveryOrder.verified_at.is_(None),

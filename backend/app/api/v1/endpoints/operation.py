@@ -532,13 +532,13 @@ async def project_full(project_id: UUID,
                 "verified_at": do.verified_at,
                 "verified_by": str(do.verified_by) if do.verified_by else None,
                 "verified_by_name": deciders.get(do.verified_by) if do.verified_by else None,
-                # The director's release of the sheet itself — what the page
+                # Finance's release of the sheet itself — what the page
                 # keys "print this" off, and what freezes the row.
                 "approved_at": do.approved_at,
                 "approved_by": str(do.approved_by) if do.approved_by else None,
                 "approved_by_name": (deciders.get(do.approved_by)
                                      if do.approved_by else None),
-                # Where the release stands with the director: pending in their
+                # Where the release stands with finance: pending in their
                 # inbox, or sent back with a reason the desk has to read
                 # before it corrects the sheet and asks again.
                 "approval": do_approvals.get(do.id),
@@ -1918,7 +1918,7 @@ async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
     if file is not None:
         await _save_attachment(db, file=file, owner_type="delivery_order",
                                owner_id=do.id, user=user, label="delivery_order")
-    # The director has to release it before it prints, and until now the only
+    # Finance has to release it before it prints, and until now the only
     # way they learned a delivery order was waiting was somebody opening the
     # project and seeing the grey chip. File it as an approval request so it
     # lands in the inbox with everything else that needs their signature.
@@ -3020,7 +3020,7 @@ def _do_settled(d: DeliveryOrder) -> str | None:
         return ("This delivery is already marked delivered — the goods have "
                 "gone out under this document.")
     if d.verified_at:
-        return ("The director has already verified the shipping proof on "
+        return ("Finance has already verified the shipping proof on "
                 "this delivery order. Upload new proof if the shipment "
                 "changed; that withdraws the verification.")
     if d.approved_at:
@@ -3359,7 +3359,7 @@ async def unapprove_delivery(do_id: UUID,
         )
     d.approved_by = None
     d.approved_at = None
-    # It needs releasing again, so it goes back in front of the director
+    # It needs releasing again, so it goes back in front of finance
     # rather than sitting on the project page hoping to be noticed.
     p = await db.get(Project, d.project_id) if d.project_id else None
     await _file_do_approval(db, d, requester=user, project=p)
@@ -3427,18 +3427,23 @@ async def delete_delivery(do_id: UUID,
 async def mark_delivered(do_id: UUID,
                          db: AsyncSession = Depends(get_db),
                          user: User = Depends(get_current_user)):
-    """Mark a DO delivered. Requires director verification of the shipping
-    proof first — director's own click verifies + marks in one step."""
+    """Mark a DO delivered. Requires finance to have verified the shipping
+    proof first — finance's own click verifies + marks in one step.
+
+    Every sign-off on a delivery order is finance's: releasing the sheet,
+    verifying the proof that comes back, and closing it out. The director
+    used to verify the proof; that step moved to finance with the rest.
+    """
     d = await db.get(DeliveryOrder, do_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    is_director = Role(user.role) == Role.DIRECTOR
-    if not d.verified_at and not is_director:
+    is_finance = Role(user.role) in _DO_APPROVERS
+    if not d.verified_at and not is_finance:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Director must verify the shipping proof first.",
+            "Finance must verify the shipping proof first.",
         )
-    if not d.verified_at and is_director:
+    if not d.verified_at and is_finance:
         d.verified_by = user.id
         d.verified_at = datetime.now(UTC)
     d.status = "delivered"
@@ -3473,10 +3478,10 @@ async def upload_delivery_proof(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Admin uploads the shipping/delivery proof (POD, courier slip, …) so the
-    director can verify it. Optional courier + tracking number fields update
-    the DO at the same time. Clears any prior verification so the director
-    has to re-confirm the new proof."""
+    """Admin uploads the shipping/delivery proof (POD, courier slip, …) so
+    finance can verify it. Optional courier + tracking number fields update
+    the DO at the same time. Clears any prior verification so finance has to
+    re-confirm the new proof."""
     if Role(user.role) not in _ADMIN_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin only")
     d = await db.get(DeliveryOrder, do_id)
@@ -3503,11 +3508,15 @@ async def verify_delivery(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Director verifies the uploaded shipping proof. After this, anyone can
-    Mark delivered (or the director can do both in one click)."""
-    if Role(user.role) not in {Role.DIRECTOR, Role.MANAGER, Role.ADMIN}:
+    """Finance verifies the uploaded shipping proof. After this, anyone who
+    may can Mark delivered (or finance does both in one click).
+
+    Finance's alone, like releasing the sheet: the director, manager and
+    admin used to verify, and the "needs director verification" wait was the
+    one delivery-order step finance could not close themselves."""
+    if Role(user.role) not in _DO_APPROVERS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the director (or management) can verify.")
+                            "Verifying the delivery proof is finance's.")
     d = await db.get(DeliveryOrder, do_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND)

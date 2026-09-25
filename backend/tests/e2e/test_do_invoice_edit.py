@@ -203,7 +203,7 @@ async def main():
     print("\n── once the director has verified it ──")
     await c.post(f"/operation/deliveries/{keep_do}/proof", headers=adm,
                  files={"file": (f"pod-{tag}.pdf", io.BytesIO(PDF), "application/pdf")})
-    await c.post(f"/operation/deliveries/{keep_do}/verify", headers=d)
+    await c.post(f"/operation/deliveries/{keep_do}/verify", headers=fin)  # verifying the proof is finance's
     r = await c.patch(f"/operation/deliveries/{keep_do}", headers=adm,
                       json={"courier": "Someone else"})
     check("editing a verified DO is refused", r.status_code == 409,

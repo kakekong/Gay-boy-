@@ -116,8 +116,8 @@ const STAGE_GUIDE: Record<string, StageGuide> = {
              "Konfirmasi pelanggan sudah menerima barang. Ini juga menutup semua surat jalan terbuka."],
     where: ["The Delivery card below → Customer received",
             "Kartu Pengiriman di bawah → Pelanggan menerima"],
-    note: ["Upload the delivery proof and let the director verify it before confirming.",
-           "Unggah bukti pengiriman dan minta direktur memverifikasinya sebelum konfirmasi."],
+    note: ["Upload the delivery proof and let finance verify it before confirming.",
+           "Unggah bukti pengiriman dan minta keuangan memverifikasinya sebelum konfirmasi."],
   },
   delivered: {
     who: ["Finance", "Keuangan"],
@@ -252,7 +252,7 @@ export default function ProjectDetailPage() {
   // The desk that issues delivery orders, and so the desk that fixes a
   // wrong one or withdraws a duplicate — while nobody has signed off on it.
   const canEditDelivery = ["admin", "director", "manager"].includes(role);
-  // Releasing the document itself is the director's signature on company
+  // Releasing the document itself is finance's signature on company
   // paperwork; the manager stands in.
   // Matches _DO_APPROVERS on the server: the delivery order is finance's,
   // and finance's alone.
@@ -438,7 +438,7 @@ export default function ProjectDetailPage() {
     mutationFn: (doId: string) => api.delete(`/operation/deliveries/${doId}`),
     onSuccess: refresh, onError: onErr,
   });
-  // The director releasing the sheet for issue — after which the system
+  // Finance releasing the sheet for issue — after which the system
   // generates it and the row is frozen to match the paper.
   const approveDelivery = useMutation({
     mutationFn: (doId: string) => api.post(`/operation/deliveries/${doId}/approve`),
@@ -2237,10 +2237,12 @@ export default function ProjectDetailPage() {
             <tbody>
               {dos.map((d: any) => {
                 const proof = doProof[d.id] ?? {};
-                const isDirector = role === "director";
+                // Every sign-off on a delivery order is finance's: releasing
+                // it, verifying the proof, and closing it out.
+                const isFinance = role === "finance";
                 const isVerified = !!d.verified_at;
                 const isDelivered = d.status === "delivered";
-                // Settled = the director verified the proof, or it has gone
+                // Settled = finance verified the proof, or it has gone
                 // out as delivered. Before that the document is still ours.
                 const isApproved = !!d.approved_at;
                 const settled = isVerified || isDelivered || isApproved;
@@ -2305,9 +2307,9 @@ export default function ProjectDetailPage() {
                           : (d.files ?? []).length > 0 ? t("awaiting verify", "menunggu verifikasi")
                           : isApproved ? t("approved — sheet issued", "disetujui — surat jalan terbit")
                           : d.approval?.status === "rejected"
-                            ? t("sent back by the director", "dikembalikan direktur")
+                            ? t("sent back by finance", "dikembalikan keuangan")
                             : d.approval?.status === "pending"
-                              ? t("with the director", "di meja direktur")
+                              ? t("with finance", "di meja keuangan")
                               : t("waiting for approval", "menunggu persetujuan")}
                       </span>
                       {/* Why it came back. Without it the desk sees a red chip
@@ -2371,7 +2373,7 @@ export default function ProjectDetailPage() {
                                   courier: proof.courier, tracking: proof.tracking },
                                 { onSuccess: () => setDoProof((m) => ({ ...m, [d.id]: {} })) },
                               )}>
-                              {t("Upload — director will verify", "Unggah — direktur akan verifikasi")}
+                              {t("Upload — finance will verify", "Unggah — keuangan akan verifikasi")}
                             </button>
                           </div>
                         </details>
@@ -2461,8 +2463,8 @@ export default function ProjectDetailPage() {
                         </div>
                       )}
                       {isDelivered ? null
-                        : isDirector ? (
-                          // Director can both verify and mark delivered. Their
+                        : isFinance ? (
+                          // Finance can both verify and mark delivered. Their
                           // single click does both when no verification exists yet.
                           <button className="btn-primary py-1 px-2 text-xs"
                             disabled={markDelivered.isPending || verifyDelivery.isPending}
@@ -2480,9 +2482,9 @@ export default function ProjectDetailPage() {
                           // No proof uploaded yet — admin's next step is upload.
                           <span className="muted text-xs">{t("Upload proof to proceed", "Unggah bukti untuk lanjut")}</span>
                         ) : (
-                          // Proof is in; just waiting on director to verify.
+                          // Proof is in; just waiting on finance to verify.
                           <span className="chip bg-amber-50 text-amber-700 text-[11px]">
-                            {t("Awaiting director verification", "Menunggu verifikasi direktur")}
+                            {t("Awaiting finance verification", "Menunggu verifikasi keuangan")}
                           </span>
                         )}
                     </td>

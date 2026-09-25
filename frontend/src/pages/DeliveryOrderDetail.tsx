@@ -262,12 +262,12 @@ export default function DeliveryOrderDetailPage() {
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <div>
             <div className="font-medium">
-              {t("Waiting for the director to release it",
-                 "Menunggu direktur menerbitkannya")}
+              {t("Waiting for finance to approve it",
+                 "Menunggu persetujuan keuangan")}
             </div>
             <div className="text-xs mt-0.5">
-              {t("It is in the approvals inbox. Nothing prints until it is approved — the sheet is generated from what the director signs off.",
-                 "Sudah ada di kotak persetujuan. Belum ada yang bisa dicetak sampai disetujui — surat jalan dibuat dari yang ditandatangani direktur.")}
+              {t("It is in finance's approvals inbox — only finance can approve a delivery order. Nothing prints, and the delivery work order can't start, until it is approved.",
+                 "Sudah ada di kotak persetujuan keuangan — hanya keuangan yang bisa menyetujui surat jalan. Belum ada yang bisa dicetak, dan work order pengiriman belum bisa dimulai, sampai disetujui.")}
             </div>
           </div>
         </div>
@@ -675,7 +675,7 @@ function StatusChip({ d }: { d: DO }) {
     : d.verified_at ? t("proof verified", "bukti terverifikasi")
     : d.approved_at ? t("released", "diterbitkan")
     : d.approval?.status === "rejected" ? t("sent back", "dikembalikan")
-    : t("waiting for the director", "menunggu direktur");
+    : t("waiting for finance", "menunggu keuangan");
   const tone = d.status === "delivered" ? "bg-emerald-50 text-emerald-700"
     : d.verified_at ? "bg-cyan-50 text-cyan-700"
     : d.approved_at ? "bg-blue-50 text-blue-700"

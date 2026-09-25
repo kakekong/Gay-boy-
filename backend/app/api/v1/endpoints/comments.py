@@ -61,7 +61,7 @@ _THREAD_ROLES: dict[str, set[Role]] = {
                       Role.MANAGER, Role.DIRECTOR},
     "invoice":       {Role.SALES, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},
     # The delivery order's own screen. Narrower than the invoice beside it:
-    # the sheet is raised by the admin desk, released by the director and
+    # the sheet is raised by the admin desk, released by finance and
     # billed against by finance, and sales never sees the deliveries table
     # on the project page either.
     "delivery_order": {Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR},

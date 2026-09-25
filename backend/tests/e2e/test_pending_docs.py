@@ -20,7 +20,10 @@ async def main():
     from datetime import date
     from app.main import app
     c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://t/api/v1",timeout=40)
-    d=await login(c,"director@demo.local")
+    # Verifying a delivery proof is finance's, so the proof queue is on
+    # finance's documents list — the director's no longer carries it.
+    d=await login(c,"finance@demo.local")
+    director=await login(c,"director@demo.local")
 
     # A project still in-flight with an unverified delivery order + uploaded proof.
     async with SessionLocal() as db:
@@ -39,6 +42,8 @@ async def main():
     # In-flight → the proof SHOULD appear
     items=(await c.get("/approvals/pending-documents",headers=d)).json()
     check("proof shown while project in-flight (packaging)", has_do(items), "not shown")
+    ditems=(await c.get("/approvals/pending-documents",headers=director)).json()
+    check("...on finance's list, not the director's", not has_do(ditems), "shown to director")
 
     # Close the project (simulate the paid->closed auto-advance) — proof should drop
     async with SessionLocal() as db:
@@ -47,7 +52,7 @@ async def main():
     check("proof GONE after project closed", not has_do(items), "still shown after close")
 
     # Also gone for 'delivered' and 'paid'
-    for st in ("delivered","paid"):
+    for st in ("delivered","invoiced","paid"):
         async with SessionLocal() as db:
             p=await db.get(Project, proj_id); p.status=st; await db.commit()
         items=(await c.get("/approvals/pending-documents",headers=d)).json()

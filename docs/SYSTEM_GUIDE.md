@@ -341,7 +341,7 @@ Lane ownership:
 - Operations records the QC decision (pass/fail with findings). **Passing QC unlocks the final invoice + delivery order** (issued by finance).
 - **Releasing a delivery order is finance's alone.** It sits in finance's Approvals inbox (not the director's), and nobody else — admin, manager or director — can release it, from the button or the inbox. Only a released delivery order prints.
 - **The delivery work order comes after the delivery order.** Filing a delivery WO, moving a WO into delivery, or completing one is refused until the job has a delivery order that finance has released. The work-order form hides the delivery stage until then and says why.
-- Admin uploads the **delivery proof** (POD/courier slip); the **director verifies** it; then delivery can be confirmed ("customer received") → `delivered`.
+- Admin uploads the **delivery proof** (POD/courier slip); **finance verifies** it (finance only — the director, managers and admin no longer can; finance can verify and mark delivered in one click); then delivery can be confirmed ("customer received") → `delivered`. Every delivery-order sign-off is finance's: releasing it, verifying its proof, closing it out. Proofs waiting for verification show on finance's Approvals page, not the director's.
 
 ---
 
@@ -432,7 +432,7 @@ A single `ApprovalRequest` table (target type + id, requester, required role, re
 | DP customer PO, faktur pajak, payment verification | **Finance** (director backstop) |
 | Manual CRM stage moves, manager-tier data changes | **Manager or director** |
 
-The **/approvals inbox** (manager/director) lists pending requests **plus a documents queue** for status-based gates: submitted drawings, import-document scans, delivery proofs awaiting verification, and price requests pending director pricing — each deep-linked.
+The **/approvals inbox** (manager/director) lists pending requests **plus a documents queue** for status-based gates: submitted drawings, import-document scans, and price requests pending director pricing — each deep-linked. Finance's documents queue carries the delivery-order ones instead: sheets never released and delivery proofs awaiting verification.
 
 ### 10.1b One live proposal per document
 
@@ -547,7 +547,7 @@ A **supplier's page** answers the same question from the other side: alongside t
    - *DP*: finance approves → DP invoice on the PO → customer pays → sales confirms deposit → **project spawns**.
 6. **Purchasing** raises the supplier PO (director approves), books origin shipping (director approves dates), completes import documents. **Supplier** uploads the drawing and ETA via the portal.
 7. Drawing approved → production → **work orders** flow Receiving → Warehousing → QC on the ops board.
-8. **QC passes** → **finance issues the final invoice + delivery order**; **admin stamps arrivals**, uploads the **delivery proof**, the **director verifies**, admin confirms "customer received" → `delivered`.
+8. **QC passes** → **finance issues the final invoice + delivery order**; **admin stamps arrivals**, uploads the **delivery proof**, **finance verifies**, admin confirms "customer received" → `delivered`.
 9. **Finance approves the invoice with the faktur pajak number.** The customer pays — portal claim or manual entry.
 10. Full payment auto-advances the project **`paid → closed`**; the deal stage lands on `closed_won`. Every step is traceable backwards: project → PO → quotation → PR, with notes at each gate — and every actor was notified at their moment, on their phone.
 

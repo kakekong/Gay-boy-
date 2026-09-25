@@ -11,7 +11,9 @@ to raise one; with one raised but unreleased it is refused and says finance
 has to release it; moving another WO into delivery is refused the same way;
 once finance releases it all three go through; a delivery WO that predates
 the rule cannot be completed on a job with no released delivery order; and
-the finance-only release holds against the director on both routes.
+the finance-only release holds against the director on both routes; and the
+delivery proof is finance's to verify as well — nobody else can, and the
+director's one-click verify-and-deliver is finance's now.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -141,6 +143,26 @@ async def main():
                       params={"completed": True})
     check("...and completed", r.status_code == 200 and J(r).get("completed_at"),
           f"{r.status_code} {why(r)}")
+
+    print("\n── the delivery proof is finance's to verify too ──")
+    mgr = await login("manager@demo.local")
+    PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"
+    r = await c.post(f"/operation/deliveries/{do_id}/proof", headers=adm,
+                     files={"file": (f"pod-{TAG}.pdf", PDF, "application/pdf")})
+    check("admin uploads the proof", r.status_code == 200, f"{r.status_code} {why(r)}")
+    for who, hdr in (("the director", d), ("a manager", mgr), ("admin", adm)):
+        r = await c.post(f"/operation/deliveries/{do_id}/verify", headers=hdr)
+        check(f"{who} cannot verify it", r.status_code == 403, str(r.status_code))
+    r = await c.patch(f"/operation/deliveries/{do_id}/delivered", headers=d)
+    check("the director's old one-click verify-and-deliver is gone",
+          r.status_code == 409 and "finance" in why(r).lower(), f"{r.status_code} {why(r)}")
+    r = await c.patch(f"/operation/deliveries/{do_id}/delivered", headers=fin)
+    check("finance verifies and marks it delivered in one click",
+          r.status_code == 200 and J(r).get("verified_at"), f"{r.status_code} {why(r)}")
+    docs = J(await c.get("/approvals/pending-documents", headers=d))
+    check("proofs waiting to be verified are off the director's list",
+          not [x for x in docs if x.get("kind") == "delivery_proof"],
+          str([x.get("title") for x in docs])[:160])
 
     print("\n── a delivery WO from before the rule ──")
     proj2 = await a_job(f"B{TAG}")

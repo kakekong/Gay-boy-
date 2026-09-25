@@ -488,7 +488,7 @@ async def apply_to_target(
                     changes["project_id"] = new_project_id
                 applied["applied_changes"] = list(changes.keys())
     elif req.target_type == "delivery_order":
-        # The director's release of a delivery order, taken from the inbox
+        # Finance's release of a delivery order, taken from the inbox
         # instead of the project page. Approving it is the same act as the
         # Approve DO button: the sheet the driver carries is generated from
         # this row at this moment, so the signature is stamped on the row.

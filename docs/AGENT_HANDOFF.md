@@ -637,6 +637,9 @@ but finance for those, the director included — `delivery_order` is the one
 entry. The release button (`_DO_APPROVERS`) was already finance-only; the
 inbox was the way round it. Finance's `/approvals/pending-documents` returns
 only the never-released delivery orders; the director's no longer does.
+**Verifying the delivery proof** is finance's too (`/deliveries/{id}/verify`
+is `_DO_APPROVERS` only, and `PATCH …/delivered` lets finance verify-and-mark
+in one click, the shortcut the director used to have).
 A **delivery work order** needs a released delivery order on the job
 (`_assert_delivery_order_released` in `operation.py`) — on create, on a
 stage change into delivery, and on completing one.
