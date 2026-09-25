@@ -33,7 +33,14 @@ class ApprovalRule:
 # thing queued behind the director when the point of sending it to finance
 # was that it isn't. The director still wins a deal directly from the
 # quotation page, and `decide()` still accepts their answer if one is given.
-FINANCE_ONLY_TARGETS = ("quotation_won",)
+FINANCE_ONLY_TARGETS = ("quotation_won", "delivery_order")
+
+# ...and of those, the ones nobody else may decide at all — not even the
+# director, who can otherwise settle anything. Releasing a delivery order is
+# finance's signature on the sheet the customer signs for, so it is theirs
+# alone; the direct Approve DO button has always been finance-only, and the
+# inbox must not be a way round it.
+FINANCE_EXCLUSIVE_TARGETS = ("delivery_order",)
 
 
 def scope_to_inbox(stmt, role: Role):
@@ -197,6 +204,8 @@ async def decide(
         raise ValueError("approval request not found")
     if req.status != ApprovalStatus.PENDING.value:
         raise ValueError("approval already decided")
+    if req.target_type in FINANCE_EXCLUSIVE_TARGETS and decider_role != Role.FINANCE:
+        raise PermissionError("only finance can approve this")
     if Role(req.required_role) == Role.DIRECTOR and decider_role != Role.DIRECTOR:
         raise PermissionError("director approval required")
     if Role(req.required_role) == Role.MANAGER and decider_role not in (Role.MANAGER, Role.DIRECTOR):

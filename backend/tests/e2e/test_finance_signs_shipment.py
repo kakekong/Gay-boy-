@@ -18,10 +18,10 @@ What that changes, and what it does not:
   and to issue. Reading is not signing.
 * **The director is not a second answer.** A backstop that is never the
   right person to ask is just another version of "whose job is this", so the
-  direct buttons are finance's alone. The generic approvals inbox still lets
-  the director decide any pending request — that is a property of the
-  approval system, not a rule about shipments, and a queue nobody can clear
-  is worse. The cost is real: with finance away, nothing here gets signed.
+  direct buttons are finance's alone — and since then the approvals inbox
+  too: a delivery order is not in the director's inbox, and the director is
+  refused if they call the approval API on one. The cost is real: with
+  finance away, nothing here gets signed.
 * **Admin still issues and still cannot approve.** Issuing is not approving,
   and that is the one separation left.
 
@@ -203,19 +203,26 @@ async def main():
     check("the director cannot use it either", r.status_code == 403,
           f"{r.status_code} {why(r)}")
 
-    # The one door left open, deliberately: a pending request in the generic
-    # approvals inbox is still decidable by the director. That is how the
-    # approval system works everywhere, and a queue nobody can clear when
-    # finance is away is worse than this rule bent once.
-    print("\n── except the approvals inbox, which is everyone's backstop ──")
+    # The inbox used to be the one door left open — a finance-addressed
+    # request was decidable by the director too. Releasing a delivery order
+    # is finance's ALONE now, so that door is shut as well.
+    print("\n── not even through the approvals inbox ──")
     p6, do6, inv6 = await a_shipment("F")
     rows = J(await c.get("/approvals", headers=d))
     req = [x for x in (rows if isinstance(rows, list) else [])
            if x.get("target_type") == "delivery_order" and x.get("target_id") == do6]
-    check("the director sees the waiting sheet", len(req) == 1, str(len(req)))
-    r = await c.post(f"/approvals/{req[0]['id']}/approve", headers=d)
-    check("...and can still clear it from there", r.status_code == 200,
-          f"{r.status_code} {why(r)}")
+    check("the director's inbox does not show the waiting sheet", not req, str(len(req)))
+    frows = J(await c.get("/approvals", headers=fin))
+    freq = [x for x in (frows if isinstance(frows, list) else [])
+            if x.get("target_type") == "delivery_order" and x.get("target_id") == do6]
+    check("...finance's does", len(freq) == 1, str(len(freq)))
+    if freq:
+        r = await c.post(f"/approvals/{freq[0]['id']}/approve", headers=d)
+        check("...and the director is refused if they try the API directly",
+              r.status_code == 403, f"{r.status_code} {why(r)}")
+        r = await c.post(f"/approvals/{freq[0]['id']}/approve", headers=fin)
+        check("...while finance clears it from there", r.status_code == 200,
+              f"{r.status_code} {why(r)}")
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

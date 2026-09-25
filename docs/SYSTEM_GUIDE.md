@@ -339,6 +339,8 @@ Lane ownership:
 ### 8.6 QC and delivery
 
 - Operations records the QC decision (pass/fail with findings). **Passing QC unlocks the final invoice + delivery order** (issued by finance).
+- **Releasing a delivery order is finance's alone.** It sits in finance's Approvals inbox (not the director's), and nobody else — admin, manager or director — can release it, from the button or the inbox. Only a released delivery order prints.
+- **The delivery work order comes after the delivery order.** Filing a delivery WO, moving a WO into delivery, or completing one is refused until the job has a delivery order that finance has released. The work-order form hides the delivery stage until then and says why.
 - Admin uploads the **delivery proof** (POD/courier slip); the **director verifies** it; then delivery can be confirmed ("customer received") → `delivered`.
 
 ---

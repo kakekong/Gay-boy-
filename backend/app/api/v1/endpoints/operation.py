@@ -2494,6 +2494,38 @@ def _assert_wo_allowed_for_project(p: "Project", stage: str) -> None:
         )
 
 
+async def _assert_delivery_order_released(db: AsyncSession, project_id, stage: str) -> None:
+    """A delivery work order comes after the delivery order, not before it.
+
+    The delivery WO is the goods physically going out, and the delivery order
+    is the document they go out under — the sheet the driver carries and the
+    customer signs. So the WO waits until a delivery order exists on the job
+    AND finance has released it (only a released one prints). Applies to
+    filing a delivery WO, moving one into delivery, and completing one.
+    """
+    if (stage or "").lower() != "delivery" or not project_id:
+        return
+    released = await db.scalar(
+        select(func.count(DeliveryOrder.id)).where(
+            DeliveryOrder.project_id == project_id,
+            DeliveryOrder.approved_at.is_not(None),
+        )
+    )
+    if released:
+        return
+    raised = await db.scalar(
+        select(func.count(DeliveryOrder.id)).where(DeliveryOrder.project_id == project_id)
+    )
+    raise HTTPException(
+        status.HTTP_409_CONFLICT,
+        ("The delivery order on this job hasn't been released by finance yet — "
+         "the delivery work order waits for that."
+         if raised else
+         "Raise the delivery order first — the delivery work order comes after "
+         "it, and it has to be released by finance."),
+    )
+
+
 # ─── Receiving: what turned up, and what the shelf says ──────────────────────
 #
 # A purchase order puts its goods into stock the moment it opens, so the count
@@ -2729,6 +2761,7 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
     # (purchasing / drawing / drawing_approved). Ops WOs only make sense
     # once physical work is starting.
     _assert_wo_allowed_for_project(p, payload.stage)
+    await _assert_delivery_order_released(db, project_id, payload.stage)
     w = WorkOrder(project_id=project_id, code=payload.code,
                   stage=payload.stage, notes=payload.notes)
     db.add(w)
@@ -2763,6 +2796,12 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
         p_for_check = await db.get(Project, w.project_id)
         if p_for_check:
             _assert_wo_allowed_for_project(p_for_check, stage)
+    # Into delivery, or completing one already there: the delivery order has
+    # to be out first.
+    if stage is not None:
+        await _assert_delivery_order_released(db, w.project_id, stage)
+    elif completed and not w.completed_at:
+        await _assert_delivery_order_released(db, w.project_id, w.stage)
     if stage is not None:  w.stage = stage
     if notes is not None:  w.notes = notes
     if completed and not w.completed_at:

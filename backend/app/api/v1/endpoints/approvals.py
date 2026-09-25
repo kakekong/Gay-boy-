@@ -25,9 +25,12 @@ router = APIRouter(
 @router.get("/pending-documents")
 async def pending_documents(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR)),
+    user: User = Depends(require(Role.MANAGER, Role.DIRECTOR, Role.FINANCE)),
 ):
     """Director-decision documents that DON'T flow through ApprovalRequest.
+
+    Finance gets one section only — delivery orders never released — because
+    releasing a delivery order is theirs alone; the rest are the director's.
 
     Drawings, logistics/import docs, delivery-proof verification and
     pending-director price requests are all status-based queues decided on
@@ -44,10 +47,12 @@ async def pending_documents(
     # a still-"pending" drawing / shipping doc / unverified delivery proof is
     # stale and should drop out of the decision queue (this is why a delivery
     # proof kept showing after the project closed).
-    DONE_PROJECT = ("delivered", "paid", "closed")
+    # Delivered comes before invoiced now, so both count as past delivery.
+    DONE_PROJECT = ("delivered", "invoiced", "paid", "closed")
+    is_finance = Role(user.role) == Role.FINANCE
 
     # 1. Drawings awaiting sign-off (decided on the project page).
-    drows = (await db.execute(
+    drows = [] if is_finance else (await db.execute(
         select(Drawing, Project)
         .join(Project, Drawing.project_id == Project.id)
         .where(Drawing.status == "submitted",
@@ -66,7 +71,7 @@ async def pending_documents(
         })
 
     # 2. Logistics / import documents at 'pending' (per-project JSONB).
-    lrows = (await db.scalars(
+    lrows = [] if is_finance else (await db.scalars(
         select(Project).where(
             Project.is_deleted.is_(False),
             Project.status.not_in(DONE_PROJECT),
@@ -88,7 +93,7 @@ async def pending_documents(
             })
 
     # 3. Delivery proofs uploaded but not yet verified.
-    dorows = (await db.execute(
+    dorows = [] if is_finance else (await db.execute(
         select(DeliveryOrder, Project)
         .join(Project, DeliveryOrder.project_id == Project.id)
         .where(DeliveryOrder.verified_at.is_(None),
@@ -121,7 +126,8 @@ async def pending_documents(
     # approval request and shows as a full card above — this catches the ones
     # raised before that existed, which would otherwise sit on their project
     # page forever waiting for somebody to notice the grey chip.
-    unreleased = (await db.execute(
+    # Finance's alone — they are the only ones who can release one.
+    unreleased = [] if not is_finance else (await db.execute(
         select(DeliveryOrder, Project)
         .join(Project, DeliveryOrder.project_id == Project.id)
         .where(DeliveryOrder.approved_at.is_(None),
@@ -148,8 +154,8 @@ async def pending_documents(
             items.append({
                 "kind": "delivery_order",
                 "title": f"Delivery order {d.number} — {p.code}",
-                "body": "Raised but not released. Nothing prints until you "
-                        "approve it.",
+                "body": "Raised but not released. Nothing prints — and the "
+                        "delivery work order can't start — until you approve it.",
                 "link": f"/deliveries/{d.id}",
                 "at": d.created_at,
             })

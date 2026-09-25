@@ -1,4 +1,8 @@
-"""The delivery order goes to the director's inbox, and has a screen of its own.
+"""The delivery order goes to the approvals inbox, and has a screen of its own.
+
+Since then: releasing one is finance's ALONE. It sits in finance's inbox, not
+the director's, and the director is refused both from the inbox API and the
+release button.
 
 Asked for, on a row of the project's Deliveries table: *"Make approval to
 director inbox and make it approve and make it so that its more visible and
@@ -104,8 +108,10 @@ async def main():
     async def full(hdr=None):
         return J(await c.get(f"/operation/projects/{proj}/full", headers=hdr or d))
 
+    # Releasing a delivery order is finance's alone now — the inbox that holds
+    # it is theirs, and the director's does not show it.
     async def inbox(hdr=None):
-        return J(await c.get("/approvals", headers=hdr or d))
+        return J(await c.get("/approvals", headers=hdr or fin))
 
     # ══ raising one files it with the director ═══════════════════════════════
     print("\n── the admin desk raises a delivery order ──")
@@ -135,20 +141,23 @@ async def main():
 
     # It is on the bell, which is what "more visible" means when nobody is
     # looking at the approvals page.
-    notif = J(await c.get("/notifications", headers=d))
+    notif = J(await c.get("/notifications", headers=fin))
     blob = str(notif)
     check("...and the notification bell counts it", do_no in blob or
           any("approval" in str(k).lower() for k in (notif or {})), blob[:220])
 
-    # The manager's queue is manager-level work; this one is the director's.
-    check("a manager's inbox does not carry the director's release",
+    check("the director's inbox does not carry it — it is finance's alone",
+          not [x for x in J(await c.get("/approvals", headers=d))
+               if x.get("target_id") == do_id],
+          "shown to the director")
+    check("a manager's inbox does not carry it either",
           not [x for x in J(await c.get("/approvals", headers=mgr))
                if x.get("target_id") == do_id],
           "shown to the manager")
 
     # ══ what the director is actually deciding ═══════════════════════════════
     print("\n── the preview ──")
-    pv = J(await c.get(f"/approvals/{req['id']}/preview", headers=d))
+    pv = J(await c.get(f"/approvals/{req['id']}/preview", headers=fin))
     check("the preview is the document, not the request",
           pv.get("title") == do_no, str(pv.get("title")))
     check("...naming the customer", f"PT Kirim {tag}" == (pv.get("subtitle") or ""),
@@ -199,8 +208,13 @@ async def main():
           str(r.status_code))
 
     # ══ approving it from the inbox releases it ══════════════════════════════
-    print("\n── the director approves it from the inbox ──")
+    print("\n── finance approves it from the inbox ──")
     r = await c.post(f"/approvals/{req['id']}/approve", headers=d)
+    check("the director cannot approve it, even through the inbox API",
+          r.status_code == 403, f"{r.status_code} {J(r)}"[:150])
+    r = await c.post(f"/operation/deliveries/{do_id}/approve", headers=d)
+    check("...nor with the release button", r.status_code == 403, str(r.status_code))
+    r = await c.post(f"/approvals/{req['id']}/approve", headers=fin)
     check("the decision goes through", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:170])
     check("...and says what it did to the document",
@@ -247,9 +261,9 @@ async def main():
                                           "uom": "EA"}]}))["delivery_order"]
     req2 = next(x for x in await inbox() if x["target_id"] == do2["id"])
     why = f"Wrong site address — {tag}"
-    r = await c.post(f"/approvals/{req2['id']}/reject", headers=d,
+    r = await c.post(f"/approvals/{req2['id']}/reject", headers=fin,
                      params={"notes": why})
-    check("the director can send it back", r.status_code == 200,
+    check("finance can send it back", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
     row2 = next(x for x in (await full())["deliveries"] if x["id"] == do2["id"])
     check("...which releases nothing", not row2["approved_at"], str(row2)[:150])
@@ -264,9 +278,9 @@ async def main():
     check("the desk can still correct it — that is what a rejection is for",
           r.status_code == 200, f"{r.status_code} {J(r)}"[:150])
     again = [x for x in await inbox() if x["target_id"] == do2["id"]]
-    check("...and correcting it asks the director again",
+    check("...and correcting it asks finance again",
           len(again) == 1, str(len(again)))
-    docs = J(await c.get("/approvals/pending-documents", headers=d))
+    docs = J(await c.get("/approvals/pending-documents", headers=fin))
     check("...without also nagging from the documents list — it is a card now",
           not [x for x in docs if x.get("kind") == "delivery_order"
                and do2["number"] in x.get("title", "")],

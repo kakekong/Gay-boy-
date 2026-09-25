@@ -1391,10 +1391,14 @@ export default function ProjectDetailPage() {
           // Mirrors the backend guard exactly so the UI never offers a stage
           // the server will 409 on.
           const curIdx = PIPELINE_STAGES.indexOf(p.status);
-          const allowedStages = WO_STAGES.filter((s) => {
-            const min = WO_STAGE_MIN_PROJECT_STATUS[s];
-            return curIdx >= PIPELINE_STAGES.indexOf(min);
-          });
+          // The delivery WO also waits for a delivery order that finance has
+          // released — the server refuses it otherwise.
+          const hasReleasedDo = dos.some((d: any) => !!d.approved_at);
+          const stageReached = (s: string) =>
+            curIdx >= PIPELINE_STAGES.indexOf(WO_STAGE_MIN_PROJECT_STATUS[s]);
+          const allowedStages = WO_STAGES.filter((s) =>
+            stageReached(s) && (s !== "delivery" || hasReleasedDo));
+          const deliveryWaitsOnDo = stageReached("delivery") && !hasReleasedDo;
           const canFileAny = canManageWO && allowedStages.length > 0;
           // If the currently-selected stage isn't allowed anymore, snap
           // back to the first allowed one so the button submits a valid
@@ -1418,6 +1422,15 @@ export default function ProjectDetailPage() {
               {blockedReason && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   {blockedReason}
+                </div>
+              )}
+              {canManageWO && deliveryWaitsOnDo && (
+                <div className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs text-ink-700">
+                  {dos.length
+                    ? t("The delivery work order unlocks once finance releases the delivery order.",
+                        "Work order pengiriman terbuka setelah keuangan menyetujui surat jalan.")
+                    : t("The delivery work order comes after the delivery order — raise one on this project, and it unlocks once finance releases it.",
+                        "Work order pengiriman dibuat setelah surat jalan — buat surat jalan pada proyek ini, lalu terbuka setelah keuangan menyetujuinya.")}
                 </div>
               )}
               <div className={clsx(
