@@ -566,6 +566,44 @@ async def _scoped(pr_id: UUID, db: AsyncSession, user: User) -> PriceRequest:
     return pr
 
 
+async def quotations_for_prs(db: AsyncSession, pr_ids) -> dict[str, list[dict]]:
+    """Every quotation made from each price request, newest version first.
+
+    `pr.quotation_id` names only the first quotation built from a request.
+    A revision is a new quotation row (R2, R3…) that carries the same
+    `price_request_id`, so a request whose deal was revised pointed at a
+    superseded quote and nothing else — the live one had no road back. This
+    reads the quotation side instead, which every version fills in.
+    """
+    from app.models.quotation import Quotation
+
+    ids = [i for i in pr_ids if i]
+    if not ids:
+        return {}
+    rows = (await db.scalars(
+        select(Quotation)
+        .where(Quotation.price_request_id.in_(ids))
+        .order_by(Quotation.version.desc(), Quotation.created_at.desc())
+    )).all()
+    out: dict[str, list[dict]] = {}
+    for q in rows:
+        out.setdefault(str(q.price_request_id), []).append({
+            "id": str(q.id),
+            "number": q.number,
+            "status": q.status,
+            "version": q.version,
+            "total": float(q.total or 0),
+            "currency": getattr(q, "currency", None) or "IDR",
+        })
+    return out
+
+
+def _may_open_quotations(role: Role) -> bool:
+    # Purchasing is customer-blind and has no quotations page; a link they
+    # could only bounce off is worse than none.
+    return role != Role.PURCHASING
+
+
 @router.get("")
 async def list_price_requests(
     status_eq: str | None = None,
@@ -590,7 +628,13 @@ async def list_price_requests(
         # so sales sees only the PRs filed against this customer.
         stmt = stmt.where(PriceRequest.customer_id == customer_id)
     rows = (await db.scalars(stmt)).all()
-    return [await _serialize(db, pr, role) for pr in rows]
+    out = [await _serialize(db, pr, role) for pr in rows]
+    # The list's Quotation column — one query for the page, not one per row.
+    if _may_open_quotations(role):
+        linked = await quotations_for_prs(db, [pr.id for pr in rows])
+        for row in out:
+            row["linked_quotations"] = linked.get(row["id"], [])
+    return out
 
 
 @router.get("/catalog")
@@ -633,6 +677,9 @@ async def get_price_request(
             supplier_requests_for_pr,
         )
         out["supplier_requests"] = await supplier_requests_for_pr(db, pr.id)
+    # ...and the customer side: every quotation made from it, revisions too.
+    if _may_open_quotations(role):
+        out["linked_quotations"] = (await quotations_for_prs(db, [pr.id])).get(str(pr.id), [])
     return out
 
 

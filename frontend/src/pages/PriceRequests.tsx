@@ -234,6 +234,7 @@ export default function PriceRequestsPage() {
                   <th className="th">{role === "purchasing" ? t("Order", "Pesanan") : t("Customer", "Pelanggan")}</th>
                   <th className="th">{t("Lines", "Baris")}</th>
                   <th className="th">{T("Status")}</th>
+                  {role !== "purchasing" && <th className="th">{t("Quotation", "Penawaran")}</th>}
                   {role !== "purchasing" && <th className="th text-right">{t("Sell total", "Total jual")}</th>}
                 </tr>
               </thead>
@@ -249,6 +250,23 @@ export default function PriceRequestsPage() {
                         {sl(pr.status)}
                       </span>
                     </td>
+                    {role !== "purchasing" && (
+                      <td className="td">
+                        {(() => {
+                          const q = currentQuote(pr.linked_quotations);
+                          if (!q) return <span className="muted">—</span>;
+                          return (
+                            <Link to={`/quotations/${q.id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1.5 hover:underline">
+                              <span className="font-mono text-xs text-brand-700">{q.number}</span>
+                              <span className={clsx("chip capitalize text-[10px]",
+                                QUOTE_CHIP[q.status] ?? "bg-ink-100 text-ink-700")}>{sl(q.status)}</span>
+                            </Link>
+                          );
+                        })()}
+                      </td>
+                    )}
                     {role !== "purchasing" && (
                       <td className="td text-right tabular-nums">
                         {pr.sell_total != null ? idr(pr.sell_total) : "—"}
@@ -792,6 +810,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const canProposeCost = isPurchasing && !stillDraft && !canCost && !revPending;
   const costRevising = costRev !== null;
   const editingLocked = editItems !== null && !stillDraft;
+  const liveQuote = currentQuote(pr.linked_quotations);
 
   return (
     <div className="space-y-5">
@@ -846,9 +865,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 <ClipboardList size={14} /> {tt("Log activity", "Catat aktivitas")}
               </button>
             )}
-            {pr.quotation_id ? (
-              <button className="btn-ghost" onClick={() => nav(`/quotations/${pr.quotation_id}`)}>
-                <FileText size={14} /> {tt("View quotation", "Lihat penawaran")}
+            {liveQuote || pr.quotation_id ? (
+              <button className="btn-primary"
+                      onClick={() => nav(`/quotations/${liveQuote?.id ?? pr.quotation_id}`)}>
+                <FileText size={14} /> {tt("Open quotation", "Buka penawaran")}
+                {liveQuote && <span className="font-mono text-xs opacity-80">{liveQuote.number}</span>}
               </button>
             ) : pr.status === "approved"
               && (role === "sales" || role === "director" || role === "manager" || role === "admin") ? (
@@ -900,6 +921,10 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
         {/* The vendor side of this job, one click away. Only sent to the
             desks that can open a supplier request, so its absence is the
             signal — sales never sees which vendor serves their customer. */}
+        {Array.isArray(pr.linked_quotations) && (
+          <QuotationsStrip rows={pr.linked_quotations} />
+        )}
+
         {Array.isArray(pr.supplier_requests) && (
           <SupplierRequestsStrip rows={pr.supplier_requests} />
         )}
@@ -1517,6 +1542,77 @@ interface SupplierRequestLink {
   lines_quoted: number;
   quoted_total: number | null;
   is_joint: boolean;
+}
+
+type QuotationLink = {
+  id: string;
+  number: string;
+  status: string;
+  version: number;
+  total: number;
+  currency: string;
+};
+
+const QUOTE_CHIP: Record<string, string> = {
+  draft:            "bg-ink-100 text-ink-700",
+  pending_approval: "bg-amber-50 text-amber-700",
+  approved:         "bg-emerald-50 text-emerald-700",
+  rejected:         "bg-red-50 text-red-700",
+  sent:             "bg-blue-50 text-blue-700",
+  won:              "bg-emerald-100 text-emerald-800",
+  lost:             "bg-red-100 text-red-800",
+  superseded:       "bg-ink-200 text-ink-600",
+  cancelled:        "bg-ink-200 text-ink-600",
+};
+
+/** The quotation the list row should point at: the newest version still in
+ *  play, falling back to the newest of any kind. */
+function currentQuote(rows: QuotationLink[] | undefined): QuotationLink | null {
+  if (!rows?.length) return null;
+  return rows.find((q) => !["superseded", "cancelled"].includes(q.status)) ?? rows[0];
+}
+
+/**
+ * The customer side of this job: every quotation made from the request.
+ *
+ * The header's one link used to follow `pr.quotation_id`, which names only
+ * the first quotation built — a revised deal left it pointing at a
+ * superseded R1 while the live R2 had no road back. This lists them all,
+ * newest first, so the one that matters is the top row.
+ */
+function QuotationsStrip({ rows }: { rows: QuotationLink[] }) {
+  const t = useT();
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2">
+        <span className="overline">{t("Quotations", "Penawaran")}</span>
+        <span className="chip bg-ink-100 text-ink-600">{rows.length}</span>
+      </div>
+      <ul className="mt-2 divide-y divide-ink-100 rounded-lg border border-ink-200">
+        {rows.map((q) => (
+          <li key={q.id}>
+            <Link
+              to={`/quotations/${q.id}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5
+                         hover:bg-ink-50 transition-colors"
+            >
+              <span className="font-mono text-xs text-brand-700">{q.number}</span>
+              {q.version > 1 && (
+                <span className="text-xs muted">{t(`revision ${q.version}`, `revisi ${q.version}`)}</span>
+              )}
+              <span className={clsx("chip capitalize", QUOTE_CHIP[q.status] ?? "bg-ink-100 text-ink-700")}>
+                {sl(q.status)}
+              </span>
+              <span className="ml-auto text-sm tabular-nums font-semibold text-ink-900">
+                {vendorMoney(q.total, q.currency)}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 const SPR_CHIP: Record<string, string> = {

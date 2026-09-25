@@ -221,6 +221,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_refresh_shapes.py` | `/auth/refresh` accepts the token in the body and in the query string, so the two halves can deploy in either order without signing everybody out — and still refuses an access token, a forgery and an expired one |
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
+| `test_pr_quotation_links.py` | a price request lists every quotation made from it (`linked_quotations`, newest version first, revisions included) on the detail and the list; `pr.quotation_id` stays the first one; purchasing gets no links |
 | `test_pr_supplier_links.py` | a price request lists its supplier requests (joint ones included, counting only this job's lines, no total until fully answered) for the roles that can open them and not for sales; the supplier-request list filter finds joint requests; the supplier page reads `quoted_price` |
 | `test_closed_spr_catches_up.py` | a closed supplier request reports items the job gained, refreshes, reopens (quoted/draft) and keeps the vendor's prices; split, hand-picked and pre-marker split requests never claim new items; cancelled stays refused |
 | `test_won_to_finance.py` | marking a deal Won is finance's sign-off: the request is addressed to them, reaches their inbox AND their bell, approving it wins the deal and opens the project, a manager cannot reach past it, the director can still settle one, and finance marking it directly closes the queued request |
@@ -906,6 +907,14 @@ Lines on the old project (or none) move with the header; lines explicitly on a
 different job stay. `project_id: null` clears it. Code that reads
 `po.project_id` must tolerate `None` — deleting a project already nulled it, so
 that was never a safe assumption; now it is simply common.
+
+**`pr.quotation_id` is the FIRST quotation, not the current one.** A
+revision is a new `Quotation` row with the same `price_request_id`, and
+nothing moves `pr.quotation_id` along. To go from a request to its live
+quote, read the quotation side: `price_requests.quotations_for_prs()` (bulk,
+newest version first) is what the detail and list return as
+`linked_quotations`. Don't use the key `quotations` on a PR payload — PATCH
+responses already use it for the draft-sync report.
 
 **A price request has a buy side now, and it is a separate document.**
 `PriceRequest` (PR-…) is the sell side: what a customer wants, what it costs
