@@ -1214,10 +1214,23 @@ async def get_po(
             rep = await db.get(User, cust.sales_pic_id)
             if rep:
                 sales_rep = {"id": str(rep.id), "name": rep.full_name}
+    # Where the order stands with the supplier's money — finance and
+    # management only; purchasing does not see what has been paid.
+    payable = None
+    if Role(_u.role) in (Role.FINANCE, Role.MANAGER, Role.DIRECTOR):
+        from sqlalchemy import func as _f
+        from app.models.purchasing import SupplierPayment
+        paid = float(await db.scalar(
+            select(_f.coalesce(_f.sum(SupplierPayment.amount), 0))
+            .where(SupplierPayment.po_id == po.id)) or 0)
+        owed = float(po.payable_amount or 0)
+        payable = {"received_value": owed, "paid": paid,
+                   "outstanding": max(round(owed - paid, 2), 0.0)}
     return {
         "id": str(po.id),
         "number": po.number,
         "status": po.status,
+        "payable": payable,
         "supplier_id": str(po.supplier_id),
         "supplier_name": supplier.name if supplier else None,
         "supplier_category": supplier.category if supplier else None,

@@ -5,7 +5,9 @@ import {
   Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
+import { Link } from "react-router-dom";
 import { api } from "@/api/client";
+import { money } from "@/lib/money";
 import { UnitSelect } from "@/components/UnitSelect";
 import { Modal } from "@/components/Modal";
 import { InventoryItemForm } from "@/components/forms/InventoryItemForm";
@@ -20,6 +22,9 @@ interface Item {
   category: string | null;
   uom: string;
   unit_cost: number | null;
+  cost_currency?: string | null;
+  cost_fx_rate?: number | null;
+  unit_cost_idr?: number | null;
   current_stock: number;
   reorder_point: number;
   reorder_qty: number;
@@ -175,7 +180,10 @@ export default function InventoryPage() {
                     <td className="td font-mono text-xs">{i.sku}</td>
                     <td className="td">
                       <div className="font-medium">
-                        {i.name}
+                        {/* Each item has its own page: what moved its count, and why. */}
+                        <Link to={`/inventory/${i.id}`} className="hover:underline text-brand-800">
+                          {i.name}
+                        </Link>
                         {i.link && (
                           <a href={i.link} target="_blank" rel="noreferrer noopener"
                             className="ml-1.5 text-brand-700 hover:underline text-xs font-normal">
@@ -193,7 +201,16 @@ export default function InventoryPage() {
                       {i.reorder_point} {i.uom}
                     </td>
                     {showCost && (
-                      <td className="td text-right tabular-nums">{T("Rp")}{" "}{idr(i.unit_cost ?? 0)}</td>
+                      <td className="td text-right tabular-nums">
+                        {/* The price in the currency it was bought in, and in
+                            rupiah beside it when that is a different one. */}
+                        <div>{money(i.unit_cost, i.cost_currency)}</div>
+                        {i.cost_currency && i.cost_currency !== "IDR" && (
+                          <div className="text-[11px] muted">
+                            {i.unit_cost_idr != null ? `≈ ${money(i.unit_cost_idr, "IDR")}` : T("no rate yet")}
+                          </div>
+                        )}
+                      </td>
                     )}
                     <td className="td">
                       <span className={clsx("chip ring-1", M.tone)}>

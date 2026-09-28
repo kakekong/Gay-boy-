@@ -49,6 +49,7 @@ const PurchasingPage       = lazy(() => import("@/pages/Purchasing"));
 const PurchaseOrdersPage      = lazy(() => import("@/pages/PurchaseOrders"));
 const PurchaseOrderDetailPage = lazy(() => import("@/pages/PurchaseOrderDetail"));
 const DeliveryOrderDetailPage = lazy(() => import("@/pages/DeliveryOrderDetail"));
+const InventoryItemPage       = lazy(() => import("@/pages/InventoryItemDetail"));
 const CustomerPOsPage         = lazy(() => import("@/pages/CustomerPOs"));
 const CustomerPODetailPage    = lazy(() => import("@/pages/CustomerPODetail"));
 const PORecapPage             = lazy(() => import("@/pages/PORecap"));
@@ -231,6 +232,7 @@ function MainApp() {
           <Route path="/employees/:id" element={<EmployeeDetailPage />} />
           <Route path="/salary" element={<SalaryPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/inventory/:id" element={<InventoryItemPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/mentions" element={<MentionsPage />} />
           <Route path="/help" element={<HelpPage />} />

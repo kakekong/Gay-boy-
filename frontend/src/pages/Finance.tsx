@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { money } from "@/lib/money";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { useAuthStore } from "@/store/auth";
 import { T, t } from "@/store/lang";
@@ -44,27 +45,41 @@ export default function FinancePage() {
 }
 
 /**
- * Utang usaha — what we owe suppliers for goods received.
+ * Utang usaha — every purchasing PO and where it stands with the supplier.
  *
- * Receiving a purchasing PO's goods posts their value as owed (Persediaan up,
- * Utang Usaha up). This is where it lands for finance, and where it is paid
- * down: each payment brings Utang Usaha and the bank down together.
+ * Every order is here, received or not: what was ordered, what has arrived
+ * and is therefore owed (receiving posts it — Persediaan up, Utang Usaha
+ * up), what has been paid, and what is still to come. A payment can go
+ * ahead of delivery, up to the order's value, since suppliers often want a
+ * down payment before they ship.
  */
+const PAYABLE_CHIP: Record<string, [string, string, string]> = {
+  unpaid:        ["Owed", "Terutang", "bg-red-50 text-red-700"],
+  partial:       ["Part paid", "Dibayar sebagian", "bg-amber-50 text-amber-800"],
+  not_received:  ["Not received yet", "Belum diterima", "bg-ink-100 text-ink-600"],
+  prepaid:       ["Paid ahead", "Dibayar di muka", "bg-blue-50 text-blue-700"],
+  paid_received: ["Received part paid", "Yang diterima lunas", "bg-emerald-50 text-emerald-700"],
+  paid:          ["Paid", "Lunas", "bg-emerald-100 text-emerald-800"],
+};
+
 function Payables() {
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
+  const [show, setShow] = useState<"all" | "owed" | "open" | "paid">("open");
   const [paying, setPaying] = useState<string | null>(null);
   const [form, setForm] = useState({ amount: "", paid_at: "", method: "Transfer", reference: "" });
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
   const list = useQuery({
-    queryKey: ["payables"],
-    queryFn: () => api.get("/finance/payables").then((r) => r.data as {
+    queryKey: ["payables", show],
+    queryFn: () => api.get("/finance/payables", { params: { show } }).then((r) => r.data as {
       items: Array<{
-        po_id: string; po_number: string; supplier_name: string | null;
+        po_id: string; po_number: string; po_status: string; po_date: string | null;
+        supplier_name: string | null; currency: string; fx_rate: number | null;
+        order_total: number; order_total_idr: number | null;
         received_value: number; paid: number; outstanding: number;
-        last_received_at: string | null; status: string;
+        not_yet_received: number | null; last_received_at: string | null; status: string;
       }>;
-      total_outstanding: number;
+      total_outstanding: number; total_ordered: number;
     }),
   });
   const pay = useMutation({
@@ -91,26 +106,36 @@ function Payables() {
         <div>
           <div className="font-semibold flex items-center gap-2">
             <ReceiptText size={16} className="text-brand-600" />
-            {t("Utang usaha — owed to suppliers", "Utang usaha — kewajiban ke pemasok")}
+            {t("Utang usaha — purchasing POs", "Utang usaha — PO pembelian")}
           </div>
           <p className="text-xs muted mt-0.5 max-w-2xl">
-            {t("Goods received on a purchasing PO are owed for from the moment they arrive. Record the payment here when the money goes out.",
-               "Barang yang diterima dari PO pembelian menjadi utang sejak tiba. Catat pembayarannya di sini saat uang keluar.")}
+            {t("Every purchasing PO. What has been received is owed; pay it here when the money goes out — or ahead of delivery, up to the order's value.",
+               "Semua PO pembelian. Yang sudah diterima menjadi utang; catat pembayarannya di sini — atau di muka sebelum barang tiba, sampai nilai PO.")}
           </p>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider muted">{t("Outstanding", "Belum dibayar")}</div>
-          <div className="text-lg font-semibold tabular-nums">{idr(list.data?.total_outstanding ?? 0)}</div>
+        <div className="flex gap-5 text-right">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider muted">{t("Owed now", "Terutang")}</div>
+            <div className="text-lg font-semibold tabular-nums">{idr(list.data?.total_outstanding ?? 0)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider muted">{t("Ordered (listed)", "Dipesan (tampil)")}</div>
+            <div className="text-lg font-semibold tabular-nums muted">{idr(list.data?.total_ordered ?? 0)}</div>
+          </div>
         </div>
+      </div>
+      <div className="flex gap-1.5 flex-wrap">
+        {([["open", "Not fully paid", "Belum lunas"], ["owed", "Owed now", "Terutang"],
+           ["paid", "Paid", "Lunas"], ["all", "All", "Semua"]] as const).map(([k, en, id]) => (
+          <button key={k} className={clsx("chip", show === k ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-700")}
+            onClick={() => setShow(k)}>{t(en, id)}</button>
+        ))}
       </div>
       {err && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{err}</div>}
       {list.isLoading ? (
         <div className="text-sm muted flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
       ) : rows.length === 0 ? (
-        <div className="text-sm muted">
-          {t("Nothing owed — no received goods are waiting to be paid.",
-             "Tidak ada utang — tidak ada barang diterima yang menunggu dibayar.")}
-        </div>
+        <div className="text-sm muted">{t("No purchasing POs here.", "Tidak ada PO pembelian di sini.")}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -118,63 +143,87 @@ function Payables() {
               <tr>
                 <th className="th">{t("PO", "PO")}</th>
                 <th className="th">{t("Supplier", "Pemasok")}</th>
-                <th className="th">{t("Last received", "Terakhir diterima")}</th>
-                <th className="th text-right">{t("Received value", "Nilai diterima")}</th>
+                <th className="th text-right">{t("Order", "Nilai PO")}</th>
+                <th className="th text-right">{t("Received (owed)", "Diterima (utang)")}</th>
                 <th className="th text-right">{t("Paid", "Dibayar")}</th>
-                <th className="th text-right">{t("Outstanding", "Sisa")}</th>
+                <th className="th text-right">{t("Owed now", "Terutang")}</th>
+                <th className="th">{t("Status", "Status")}</th>
                 <th className="th"></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <Fragment key={r.po_id}>
-                  <tr className="border-t border-ink-100">
-                    <td className="td font-mono text-xs">
-                      <Link to={`/purchase-orders/${r.po_id}`} className="text-brand-700 hover:underline">{r.po_number}</Link>
-                    </td>
-                    <td className="td">{r.supplier_name ?? "—"}</td>
-                    <td className="td muted">{r.last_received_at ?? "—"}</td>
-                    <td className="td text-right tabular-nums">{idr(r.received_value)}</td>
-                    <td className="td text-right tabular-nums">{idr(r.paid)}</td>
-                    <td className="td text-right tabular-nums font-semibold">{idr(r.outstanding)}</td>
-                    <td className="td text-right">
-                      <button className="btn-ghost text-xs"
-                        onClick={() => {
-                          setPaying(paying === r.po_id ? null : r.po_id);
-                          setForm({ amount: String(Math.round(r.outstanding)), paid_at: "",
-                                    method: "Transfer", reference: "" });
-                        }}>
-                        <Banknote size={13} /> {t("Pay", "Bayar")}
-                      </button>
-                    </td>
-                  </tr>
-                  {paying === r.po_id && (
-                    <tr className="bg-ink-50/50">
-                      <td className="td" colSpan={7}>
-                        <div className="flex flex-wrap items-end gap-2">
-                          <label className="text-[11px]">{t("Amount (Rp)", "Jumlah (Rp)")}
-                            <input className="input text-sm w-40" type="number" min={0} value={form.amount}
-                              onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
-                          <label className="text-[11px]">{t("Date", "Tanggal")}
-                            <input className="input text-sm" type="date" value={form.paid_at}
-                              onChange={(e) => setForm({ ...form, paid_at: e.target.value })} /></label>
-                          <label className="text-[11px]">{t("Method", "Metode")}
-                            <input className="input text-sm w-32" value={form.method}
-                              onChange={(e) => setForm({ ...form, method: e.target.value })} /></label>
-                          <label className="text-[11px]">{t("Reference", "Referensi")}
-                            <input className="input text-sm w-40" value={form.reference}
-                              onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
-                          <button className="btn-primary text-sm" disabled={pay.isPending || !Number(form.amount)}
-                            onClick={() => pay.mutate(r.po_id)}>
-                            {pay.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
-                            {t("Record payment", "Catat pembayaran")}
+              {rows.map((r) => {
+                const chip = PAYABLE_CHIP[r.status] ?? [r.status, r.status, "bg-ink-100"];
+                const left = (r.order_total_idr ?? r.received_value) - r.paid;
+                return (
+                  <Fragment key={r.po_id}>
+                    <tr className="border-t border-ink-100 align-top">
+                      <td className="td font-mono text-xs">
+                        <Link to={`/purchase-orders/${r.po_id}`} className="text-brand-700 hover:underline">{r.po_number}</Link>
+                        {r.po_date && <div className="text-[10px] muted font-sans">{r.po_date}</div>}
+                      </td>
+                      <td className="td">{r.supplier_name ?? "—"}</td>
+                      <td className="td text-right tabular-nums">
+                        {r.currency !== "IDR" && (
+                          <div className="text-[11px] muted">{money(r.order_total, r.currency)}</div>
+                        )}
+                        {r.order_total_idr != null ? idr(r.order_total_idr)
+                          : <span className="text-[11px] text-amber-700">{t("no rate yet", "kurs belum ada")}</span>}
+                      </td>
+                      <td className="td text-right tabular-nums">
+                        {idr(r.received_value)}
+                        {r.last_received_at && <div className="text-[10px] muted">{r.last_received_at}</div>}
+                      </td>
+                      <td className="td text-right tabular-nums">{idr(r.paid)}</td>
+                      <td className="td text-right tabular-nums font-semibold">{idr(r.outstanding)}</td>
+                      <td className="td"><span className={clsx("chip", chip[2])}>{t(chip[0], chip[1])}</span></td>
+                      <td className="td text-right">
+                        {r.status !== "paid" && left > 0.5 && (
+                          <button className="btn-ghost text-xs"
+                            onClick={() => {
+                              setPaying(paying === r.po_id ? null : r.po_id);
+                              setForm({ amount: String(Math.round(r.outstanding > 0 ? r.outstanding : left)),
+                                        paid_at: "", method: "Transfer", reference: "" });
+                            }}>
+                            <Banknote size={13} /> {t("Pay", "Bayar")}
                           </button>
-                        </div>
+                        )}
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              ))}
+                    {paying === r.po_id && (
+                      <tr className="bg-ink-50/50">
+                        <td className="td" colSpan={8}>
+                          <div className="flex flex-wrap items-end gap-2">
+                            <label className="text-[11px]">{t("Amount (Rp)", "Jumlah (Rp)")}
+                              <input className="input text-sm w-40" type="number" min={0} value={form.amount}
+                                onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+                            <label className="text-[11px]">{t("Date", "Tanggal")}
+                              <input className="input text-sm" type="date" value={form.paid_at}
+                                onChange={(e) => setForm({ ...form, paid_at: e.target.value })} /></label>
+                            <label className="text-[11px]">{t("Method", "Metode")}
+                              <input className="input text-sm w-32" value={form.method}
+                                onChange={(e) => setForm({ ...form, method: e.target.value })} /></label>
+                            <label className="text-[11px]">{t("Reference", "Referensi")}
+                              <input className="input text-sm w-40" value={form.reference}
+                                onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+                            <button className="btn-primary text-sm" disabled={pay.isPending || !Number(form.amount)}
+                              onClick={() => pay.mutate(r.po_id)}>
+                              {pay.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                              {t("Record payment", "Catat pembayaran")}
+                            </button>
+                            {r.outstanding <= 0.5 && (
+                              <span className="text-[11px] text-blue-700">
+                                {t("Nothing received yet — this is a payment ahead of delivery.",
+                                   "Belum ada barang diterima — ini pembayaran di muka.")}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

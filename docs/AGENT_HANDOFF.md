@@ -222,6 +222,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
 | `test_invoice_dupes_and_po_price.py` | (updated) one invoice per project: a second final/single is refused, the old `additional` flag no longer gets round it, one DP may sit beside it and only one; a rejected invoice can be replaced |
+| `test_inventory_and_payables.py` | completing the receiving WO receives uncounted lines (200 in, DO 100 out → 100 left); an RMB PO prices the item in CNY with its rupiah equivalent; the item history page (running balance, links to PO and DO, cost hidden from sales); every PO in payables before receipt, prepayment up to the order value; the payables backfill from receipts runs once |
 | `test_paperwork_and_stages.py` | DO prefill offers the customer's addresses and U/P; the DO sheet goes to the picked address with U/P, part codes and "Prepared by" = raiser; page two is the Surat Jalan Ekspedisi (peti count in words, rows, return note); one WO per stage; Delivered → Invoiced on invoice approval; invoice lists goods with KODE BARANG, the discount as POTONGAN HARGA, full bill-to |
 | `test_delivery_wo_after_do.py` | a delivery work order is refused with no delivery order, and with one raised but unreleased; moving a WO into delivery likewise; after finance releases it all three go through; a pre-rule delivery WO cannot be completed; the director and admin cannot release a DO by button or inbox |
 | `test_one_po_per_deal.py` | a second customer PO on a quotation (or its revision) is refused naming the first; the director deletes a PO and the project stays, its PO number moving to the survivor (or clearing, value kept), invoices following it or refusing the delete; maintenance no longer pulls the project; delivered-before-invoiced settles from facts; the one-off re-sort of existing projects runs once |
@@ -635,6 +636,15 @@ finance's view and pay-down (`ledger.post_supplier_payment`). Existing stock was
 re-based once by `stock_sync.rebase_to_receipts` from `seed.ensure_schema`
 (Python data fix, keyed in `data_fixes`). Old receipts were not back-filled as
 payables. Work orders are one per stage (`_assert_stage_free`).
+
+**Inventory cost has a currency.** `InventoryItem.cost_currency` /
+`cost_fx_rate`; `unit_cost` is in that currency and APIs also return
+`unit_cost_idr`. `stock_sync._item_for` takes `currency`/`fx_rate` from the PO
+(`po_money`). Receiving has one path, `operation._receive_goods` (panel and
+receiving-WO completion via `_receive_rest_on_completion`). `/finance/payables`
+lists every non-cancelled PO; payments may run ahead of receipt up to the order
+value. One-off backfills in `seed.ensure_schema`: `payables_from_receipts`
+(`services/payables.py`) and `inventory_cost_currency`.
 
 **One invoice per project.** `issue_invoice` refuses a second final/single
 invoice on a project (they share one slot) and a second DP; a rejected one

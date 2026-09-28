@@ -104,10 +104,20 @@ async def _next_sku(db: AsyncSession) -> str:
     return str(highest + 1)
 
 
+def po_money(po) -> tuple[str, float | None]:
+    """The currency a PO's prices are in, and its rupiah rate."""
+    cur = (getattr(po, "currency", None) or "IDR").upper()
+    if cur == "IDR":
+        return "IDR", None
+    rate = float(getattr(po, "fx_rate", None) or 0) or None
+    return cur, rate
+
+
 async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
                     unit_cost: float | None, category: str | None = None,
                     supplier_hint: str | None = None, sku: str | None = None,
-                    link: str | None = None) -> InventoryItem:
+                    link: str | None = None, currency: str | None = None,
+                    fx_rate: float | None = None) -> InventoryItem:
     """The inventory item this line is about, creating it if it is new.
 
     A stated SKU wins over the name: it is the identifier somebody chose,
@@ -129,6 +139,10 @@ async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
         # somebody already knows.
         if unit_cost:
             found.unit_cost = float(unit_cost)
+            # The price and its currency travel together — an RMB price must
+            # never be left labelled as rupiah.
+            found.cost_currency = (currency or "IDR").upper()
+            found.cost_fx_rate = fx_rate if found.cost_currency != "IDR" else None
         if uom and not found.uom:
             found.uom = uom
         # Same for the details a price request supplies and a purchase order
@@ -144,6 +158,8 @@ async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
         category=(category or None) and category[:120],
         uom=(uom or "pcs")[:20],
         unit_cost=float(unit_cost or 0),
+        cost_currency=(currency or "IDR").upper() if unit_cost else "IDR",
+        cost_fx_rate=(fx_rate if unit_cost and (currency or "IDR").upper() != "IDR" else None),
         current_stock=0,
         supplier_hint=supplier_hint,
         link=(link or None) and link[:1000],
@@ -252,6 +268,7 @@ async def receive_purchase_order(db: AsyncSession, po, user: User | None = None,
             unit_cost=line.get("unit_price") or line.get("unit_cost"),
             category=line.get("category"), sku=line.get("sku"),
             link=line.get("link"),
+            currency=po_money(po)[0], fx_rate=po_money(po)[1],
         )
         if move_stock:
             await _move(db, item, delta=qty, reason="po_in", reference=ref,
@@ -324,6 +341,7 @@ async def sync_received(db: AsyncSession, po, received: dict[int, float],
             unit_cost=line.get("unit_price") or line.get("unit_cost"),
             category=line.get("category"), sku=line.get("sku"),
             link=line.get("link"),
+            currency=po_money(po)[0], fx_rate=po_money(po)[1],
         )
         # A line whose part the PO has not moved yet contributes nothing, which
         # is the right starting point: the delta is then the whole receipt.
@@ -393,6 +411,7 @@ async def rebase_to_receipts(db: AsyncSession, user: User | None = None) -> dict
                     unit_cost=line.get("unit_price") or line.get("unit_cost"),
                     category=line.get("category"), sku=line.get("sku"),
                     link=line.get("link"),
+                    currency=po_money(po)[0], fx_rate=po_money(po)[1],
                 )
                 target[item.id] = target.get(item.id, 0.0) + qty_in
         have = await po_contribution(db, po)
@@ -524,3 +543,39 @@ async def reverse(db: AsyncSession, reference: str, reason: str,
 async def stock_snapshot(db: AsyncSession, item_id: UUID) -> float:
     item = await db.get(InventoryItem, item_id)
     return float(item.current_stock or 0) if item else 0.0
+
+
+async def backfill_item_currency(db: AsyncSession) -> int:
+    """Label existing items with the currency their price was bought in.
+
+    Items priced off a foreign-currency order before the currency was kept
+    carry that order's number as a bare "rupiah" figure. Each item takes the
+    currency and rate of the latest supplier PO line naming it (by SKU, else
+    by name) whose price is the one the item holds.
+    """
+    from app.models.purchasing import SupplierPO
+
+    pos = (await db.scalars(
+        select(SupplierPO).where(SupplierPO.currency != "IDR")
+        .order_by(SupplierPO.created_at.asc()))).all()
+    if not pos:
+        return 0
+    items = (await db.scalars(select(InventoryItem))).all()
+    by_sku = {(i.sku or "").strip(): i for i in items if (i.sku or "").strip()}
+    by_name = {_key(i.name): i for i in items}
+    fixed = 0
+    for po in pos:                         # oldest first: the latest order wins
+        cur, rate = po_money(po)
+        for line in (po.items or []):
+            item = by_sku.get((line.get("sku") or "").strip()) \
+                or by_name.get(_key(line.get("description") or line.get("name")))
+            price = float(line.get("unit_price") or line.get("unit_cost") or 0)
+            if item is None or not price:
+                continue
+            if abs(float(item.unit_cost or 0) - price) < 0.005 \
+                    and (item.cost_currency or "IDR") == "IDR":
+                item.cost_currency = cur
+                item.cost_fx_rate = rate
+                fixed += 1
+    await db.flush()
+    return fixed

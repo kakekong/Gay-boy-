@@ -616,6 +616,10 @@ COLUMN_MIGRATIONS: list[str] = [
         END LOOP;
     END $mig$""",
 
+    # ── Inventory cost keeps the currency it was bought in ──────────────
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_currency VARCHAR(8) NOT NULL DEFAULT 'IDR'",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_fx_rate NUMERIC(18,6)",
+
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
 
@@ -723,6 +727,26 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('stock_enters_on_receiving')"))
             await db.commit()
             print(f"Stock re-based to receipts: {res}")
+    async with SessionLocal() as db:
+        # Every purchasing PO shows under utang usaha; orders received before
+        # receiving posted payables get what their receipts say arrived.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'payables_from_receipts'")):
+            from app.services.payables import backfill_payables
+            res = await backfill_payables(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('payables_from_receipts')"))
+            await db.commit()
+            print(f"Utang usaha back-filled from receipts: {res}")
+        # Inventory prices keep the currency they were bought in.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'inventory_cost_currency'")):
+            from app.services.stock_sync import backfill_item_currency
+            n = await backfill_item_currency(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('inventory_cost_currency')"))
+            await db.commit()
+            print(f"Inventory prices labelled with their currency: {n}")
 
 
 async def main() -> None:

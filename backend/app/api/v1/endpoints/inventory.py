@@ -110,6 +110,24 @@ async def _next_pr_number(db: AsyncSession) -> str:
     return f"{prefix}{seq + 1:04d}"
 
 
+def _cost_fields(r, show: bool) -> dict:
+    """The price in the currency it was bought in, and in rupiah.
+
+    `unit_cost` stays in the purchase currency (an RMB part keeps its RMB
+    price); `unit_cost_idr` is what that is in rupiah at the order's rate.
+    Rupiah prices read the same in both.
+    """
+    if not show:
+        return {"unit_cost": None, "cost_currency": None, "cost_fx_rate": None,
+                "unit_cost_idr": None}
+    cost = float(r.unit_cost or 0)
+    cur = (r.cost_currency or "IDR").upper()
+    rate = float(r.cost_fx_rate) if r.cost_fx_rate else None
+    idr = cost if cur == "IDR" else (cost * rate if rate else None)
+    return {"unit_cost": cost, "cost_currency": cur, "cost_fx_rate": rate,
+            "unit_cost_idr": round(idr, 2) if idr is not None else None}
+
+
 def _may_see_cost(user: User) -> bool:
     """Whether this user may see what stock cost us.
 
@@ -238,7 +256,7 @@ async def list_items(
             "uom": r.uom,
             # None, not zero: a nought in a money column reads as "this cost
             # nothing", which is a different lie from "not yours to see".
-            "unit_cost": float(r.unit_cost or 0) if show_cost else None,
+            **_cost_fields(r, show_cost),
             "current_stock": float(r.current_stock or 0),
             "reorder_point": float(r.reorder_point or 0),
             "reorder_qty": float(r.reorder_qty or 0),
@@ -272,7 +290,9 @@ async def summary(db: AsyncSession = Depends(get_db),
     if _may_see_cost(_u):
         value = float(await db.scalar(
             select(func.coalesce(
-                func.sum(InventoryItem.current_stock * InventoryItem.unit_cost), 0)
+                # In rupiah: a foreign price is converted at its own rate.
+                func.sum(InventoryItem.current_stock * InventoryItem.unit_cost
+                         * func.coalesce(InventoryItem.cost_fx_rate, 1)), 0)
             ).where(active)
         ) or 0)
     return {"tracked": tracked, "low": low, "out": out_of,
@@ -300,7 +320,7 @@ async def get_item(item_id: UUID,
     return {
         "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
         "uom": r.uom,
-        "unit_cost": float(r.unit_cost or 0) if _may_see_cost(_u) else None,
+        **_cost_fields(r, _may_see_cost(_u)),
         "current_stock": float(r.current_stock or 0),
         "reorder_point": float(r.reorder_point or 0),
         "reorder_qty": float(r.reorder_qty or 0),
@@ -331,6 +351,67 @@ async def list_movements(item_id: UUID,
         }
         for m in rows
     ]
+
+
+@router.get("/{item_id}/history")
+async def item_history(item_id: UUID,
+                       db: AsyncSession = Depends(get_db),
+                       _u: User = Depends(get_current_user)):
+    """The item's page: what it is, and every movement that made its count.
+
+    Oldest first with a running balance, so each line says what the shelf
+    held after it — and each names the document that caused it, linked where
+    that document has a page (a purchase order, a delivery order).
+    """
+    from app.models.operation import DeliveryOrder
+    from app.models.purchasing import SupplierPO
+
+    r = await db.get(InventoryItem, item_id)
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    rows = (await db.scalars(
+        select(InventoryMovement).where(InventoryMovement.item_id == item_id)
+        .order_by(InventoryMovement.created_at.asc())
+    )).all()
+    refs = {m.reference for m in rows if m.reference}
+    pos = {p.number: p for p in (await db.scalars(
+        select(SupplierPO).where(SupplierPO.number.in_(refs)))).all()} if refs else {}
+    dos = {d.number: d for d in (await db.scalars(
+        select(DeliveryOrder).where(DeliveryOrder.number.in_(refs)))).all()} if refs else {}
+    users = {u.id: u.full_name for u in (await db.scalars(
+        select(User).where(User.id.in_({m.user_id for m in rows if m.user_id})))).all()}
+    show_cost = _may_see_cost(_u)
+    bal = 0.0
+    out = []
+    for m in rows:
+        bal += float(m.delta)
+        link = None
+        kind = None
+        if m.reference in pos:
+            link, kind = f"/purchase-orders/{pos[m.reference].id}", "purchase_order"
+        elif m.reference in dos:
+            link, kind = f"/deliveries/{dos[m.reference].id}", "delivery_order"
+        out.append({
+            "id": str(m.id), "at": m.created_at, "delta": float(m.delta),
+            "balance": round(bal, 4), "reason": m.reason,
+            "reference": m.reference, "reference_kind": kind, "link": link,
+            "by": users.get(m.user_id), "notes": m.notes,
+        })
+    out.reverse()                           # newest first on the page
+    return {
+        "item": {
+            "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
+            "uom": r.uom, **_cost_fields(r, show_cost),
+            "current_stock": float(r.current_stock or 0),
+            "reorder_point": float(r.reorder_point or 0),
+            "location": r.location, "supplier_hint": r.supplier_hint,
+            "link": r.link, "notes": r.notes, "stock_status": _status(r),
+        },
+        "movements": out,
+        # The movements are the record; say so when the total disagrees.
+        "ledger_total": round(bal, 4),
+        "in_step": abs(bal - float(r.current_stock or 0)) < 1e-6,
+    }
 
 
 @router.post("", status_code=201)

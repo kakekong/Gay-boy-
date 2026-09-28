@@ -134,6 +134,11 @@ class InventoryItem(Base, UUIDPK, TimestampMixin):
     # same page again.
     link: Mapped[str | None] = mapped_column(String(1000))
     unit_cost: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    # The currency `unit_cost` is in — the one the part was bought in — and
+    # the rupiah rate for it. A part bought in RMB used to be shown as that
+    # number of rupiah. Rupiah value = unit_cost × (cost_fx_rate or 1).
+    cost_currency: Mapped[str] = mapped_column(String(8), default="IDR", nullable=False)
+    cost_fx_rate: Mapped[float | None] = mapped_column(Numeric(18, 6))
     current_stock: Mapped[float] = mapped_column(Numeric(18, 4), default=0, nullable=False)
     reorder_point: Mapped[float] = mapped_column(Numeric(18, 4), default=0, nullable=False)
     reorder_qty: Mapped[float] = mapped_column(Numeric(18, 4), default=0, nullable=False)

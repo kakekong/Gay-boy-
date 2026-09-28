@@ -936,19 +936,44 @@ async def record_payment(invoice_id: UUID, amount: float, method: str | None = N
 # down. Purchasing never sees it — the router gate above is finance and
 # management only.
 
+def _po_total(p) -> float:
+    """The order's total in its own currency — the header figure, or the sum
+    of its lines when the header was never filled in."""
+    return float(p.total or 0) or sum(
+        float(i.get("qty") or 0) * float(i.get("unit_price") or 0)
+        for i in (p.items or []))
+
+
+def _po_total_idr(p) -> float | None:
+    """The order's total in rupiah — its own figure when it is rupiah, at its
+    rate when it is not, None when a foreign order has no rate yet."""
+    total = _po_total(p)
+    if (p.currency or "IDR").upper() == "IDR":
+        return round(total, 2)
+    return round(total * float(p.fx_rate), 2) if p.fx_rate else None
+
+
 @router.get("/payables")
 async def list_payables(
-    include_paid: bool = False,
+    show: str = "all",
     db: AsyncSession = Depends(get_db),
 ):
+    """Every purchasing PO, and where it stands with the supplier.
+
+    Every order is listed — not only the received ones — so finance sees the
+    whole book: what was ordered, what has arrived and is therefore owed
+    (utang usaha), what has been paid, and what is still to come. `show`:
+    `all` (default), `owed` (something received and unpaid), `open` (not
+    fully paid), `paid`.
+    """
     from app.models.purchasing import GoodsReceipt, Supplier, SupplierPayment, SupplierPO
 
     pos = (await db.scalars(
-        select(SupplierPO).where(SupplierPO.payable_amount > 0)
-        .order_by(SupplierPO.updated_at.desc())
+        select(SupplierPO).where(SupplierPO.status.not_in(("cancelled", "draft")))
+        .order_by(SupplierPO.created_at.desc())
     )).all()
     if not pos:
-        return {"items": [], "total_outstanding": 0.0}
+        return {"items": [], "total_outstanding": 0.0, "total_ordered": 0.0}
     ids = [p.id for p in pos]
     paid = dict((await db.execute(
         select(SupplierPayment.po_id, func.coalesce(func.sum(SupplierPayment.amount), 0))
@@ -962,24 +987,49 @@ async def list_payables(
         select(Supplier).where(Supplier.id.in_({p.supplier_id for p in pos if p.supplier_id}))
     )).all()}
     items = []
-    total_out = 0.0
+    total_out = total_ordered = 0.0
     for p in pos:
         owed = float(p.payable_amount or 0)
         done = float(paid.get(p.id) or 0)
         out = round(owed - done, 2)
-        if out <= 0.004 and not include_paid:
-            continue
-        total_out += max(out, 0)
-        items.append({
-            "po_id": str(p.id), "po_number": p.number,
+        order_idr = _po_total_idr(p)
+        if order_idr and done >= order_idr - 0.01:
+            state = "paid"
+        elif owed <= 0.004:
+            state = "prepaid" if done > 0 else "not_received"
+        elif out <= 0.004:
+            state = "paid_received"      # everything received so far is paid
+        else:
+            state = "partial" if done > 0 else "unpaid"
+        row = {
+            "po_id": str(p.id), "po_number": p.number, "po_status": p.status,
+            "po_date": p.po_date,
             "supplier_id": str(p.supplier_id) if p.supplier_id else None,
             "supplier_name": sups.get(p.supplier_id),
             "currency": p.currency, "fx_rate": float(p.fx_rate) if p.fx_rate else None,
-            "received_value": owed, "paid": done, "outstanding": out,
+            "order_total": round(_po_total(p), 2),
+            "order_total_idr": order_idr,
+            "received_value": owed, "paid": done, "outstanding": max(out, 0.0),
+            "not_yet_received": (round(order_idr - owed, 2) if order_idr is not None
+                                 else None),
             "last_received_at": last_rcv.get(p.id),
-            "status": "paid" if out <= 0.004 else ("partial" if done > 0 else "unpaid"),
-        })
-    return {"items": items, "total_outstanding": round(total_out, 2)}
+            "status": state,
+        }
+        if show == "owed" and out <= 0.004:
+            continue
+        if show == "open" and state == "paid":
+            continue
+        if show == "paid" and state != "paid":
+            continue
+        total_out += max(out, 0)
+        total_ordered += order_idr or 0
+        items.append(row)
+    # What is owed now first, then what is still to come, then settled.
+    rank = {"unpaid": 0, "partial": 1, "not_received": 2, "prepaid": 3,
+            "paid_received": 4, "paid": 5}
+    items.sort(key=lambda r: rank.get(r["status"], 9))
+    return {"items": items, "total_outstanding": round(total_out, 2),
+            "total_ordered": round(total_ordered, 2)}
 
 
 class SupplierPaymentIn(BaseModel):
@@ -1012,17 +1062,21 @@ async def pay_supplier(
     paid = float(await db.scalar(
         select(func.coalesce(func.sum(SupplierPayment.amount), 0))
         .where(SupplierPayment.po_id == po.id)) or 0)
+    # Payable up to the whole order: suppliers often want a down payment
+    # before they ship, which is paying ahead of what has been received.
+    order_idr = _po_total_idr(po)
+    ceiling = max(order_idr or 0.0, float(po.payable_amount or 0))
+    left = round(ceiling - paid, 2)
+    if left <= 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{po.number} is already paid in full.")
+    if payload.amount > left + 0.01:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"That is more than {po.number} is worth — "
+            f"Rp {left:,.0f} is left to pay on the order.")
     outstanding = round(float(po.payable_amount or 0) - paid, 2)
-    if outstanding <= 0:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Nothing is owed on {po.number} — either it is paid in full or "
-            "nothing has been received against it yet.")
-    if payload.amount > outstanding + 0.01:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"That is more than is owed on {po.number} — "
-            f"Rp {outstanding:,.0f} is outstanding for what has been received.")
     when = date.today()
     if payload.paid_at:
         try:
@@ -1048,4 +1102,5 @@ async def pay_supplier(
     await db.flush()
     return {"ok": True, "id": str(pay.id), "po_number": po.number,
             "paid": round(paid + pay.amount, 2),
-            "outstanding": round(outstanding - pay.amount, 2)}
+            "outstanding": max(round(outstanding - pay.amount, 2), 0.0),
+            "left_on_order": round(left - pay.amount, 2)}

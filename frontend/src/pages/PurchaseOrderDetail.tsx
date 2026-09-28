@@ -422,6 +422,12 @@ export default function PurchaseOrderDetailPage() {
             <div className="text-right">
               <div className="text-[10px] uppercase muted tracking-wider">{T("Total")}</div>
               <div className="text-xl font-semibold tabular-nums">{money(p.total, p.currency)}</div>
+              {/* Utang usaha on this order — finance and management only. */}
+              {(p as any).payable && (
+                <Link to="/finance#payables" className="block text-[11px] text-brand-700 hover:underline mt-0.5">
+                  {`Utang usaha: ${money((p as any).payable.outstanding, "IDR")} ${tt("owed", "terutang")} · ${money((p as any).payable.paid, "IDR")} ${tt("paid", "dibayar")}`}
+                </Link>
+              )}
             </div>
           </div>
         </div>
