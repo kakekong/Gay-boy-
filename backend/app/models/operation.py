@@ -202,3 +202,15 @@ class DeliveryOrder(Base, UUIDPK, TimestampMixin):
     # are actually going, which is routinely a site address and not the
     # customer's office on the letterhead.
     remarks: Mapped[str | None] = mapped_column(Text)
+    # The address this shipment goes to, picked when the sheet is raised —
+    # the site, the office, the tax address, or one typed for this delivery.
+    # It heads the sheet (KEPADA) and the expedition letter.
+    ship_to: Mapped[str | None] = mapped_column(Text)
+    # "U/P" — who at the destination takes the goods, with a phone number.
+    attention: Mapped[str | None] = mapped_column(Text)
+    # The Surat Jalan Ekspedisi's rows: one per peti/koli handed to the
+    # expedition — [{"label","description","qty","note"}]. Empty means one
+    # package per line, which the sheet works out on its own.
+    packages: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # Who raised it — "Prepared by" on the sheet. Not whoever approved it.
+    prepared_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))

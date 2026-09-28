@@ -111,6 +111,14 @@ class Settings(BaseSettings):
     # already printed on the invoices the company sends out; override them in
     # the environment if the account ever changes, and the sheet says the
     # account is unset rather than printing a stale one if they are cleared.
+    # The note at the foot of the Surat Jalan Ekspedisi: where the signed
+    # white copy of the delivery order comes back to.
+    COMPANY_DO_RETURN_NOTE: str = (
+        "TOLONG DO INI SETELAH DI TERIMA, MOHON DO (SURAT JALAN) PUTIH, DI KIRIM "
+        "KEMBALI KE ALAMAT KANTOR KITA DI : JL. KAPUK RAYA NO.89, KOMPLEK "
+        "PERGUDANGAN DUTA INDAH KAPUK 1 NO. B11, JAKARTA UTARA. "
+        "UP : IBU EVONE (081933234903)."
+    )
     COMPANY_BANK_NAME: str = "Bank BCA"
     COMPANY_BANK_BRANCH: str = "KCP Niaga Grisenda, Jakarta"
     COMPANY_BANK_ACCOUNT_NO: str = "578-5523889"

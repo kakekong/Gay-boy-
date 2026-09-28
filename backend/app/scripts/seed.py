@@ -616,6 +616,12 @@ COLUMN_MIGRATIONS: list[str] = [
         END LOOP;
     END $mig$""",
 
+    # ── Delivery order: where it goes, to whom, and the expedition page ──
+    "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS ship_to TEXT",
+    "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS attention TEXT",
+    "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS packages JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS prepared_by UUID",
+
     # ── One-off data fixes, recorded so they run exactly once ────────────
     # For a fix that can move data backwards and so must not re-run every
     # boot. Each one checks its key here first and writes it when done.
@@ -667,6 +673,17 @@ COLUMN_MIGRATIONS: list[str] = [
          WHERE f.id = p.id;
         INSERT INTO data_fixes (key) VALUES ('project_stage_delivered_before_invoiced');
     END $fix$""",
+    # A job at 'delivered' whose invoice was approved should be at 'invoiced'.
+    # The live rule only looked at customer-received / delivery orders, so a
+    # job that reached 'delivered' any other way stayed there after its invoice
+    # was approved. Forward-only and idempotent, so it simply runs each boot.
+    """UPDATE projects p
+          SET status = 'invoiced'
+        WHERE p.status = 'delivered'
+          AND EXISTS (SELECT 1 FROM invoices i
+                       WHERE i.project_id = p.id AND i.type <> 'dp'
+                         AND i.status IN ('approved', 'partial', 'issued',
+                                          'overdue', 'paid'))""",
 ]
 
 

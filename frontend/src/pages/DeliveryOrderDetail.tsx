@@ -50,6 +50,9 @@ interface DO {
   status: string;
   items: DOLine[];
   remarks: string | null;
+  attention?: string | null;
+  packages?: Array<{ label: string | null; description: string | null; qty: string | null; note: string | null }>;
+  address_options?: Array<{ label: string; address: string }>;
   created_at: string;
   delivered_at: string | null;
   approved_at: string | null;
@@ -86,6 +89,9 @@ export default function DeliveryOrderDetailPage() {
   const [draftItems, setDraftItems] = useState<DOLine[]>([]);
   const [editingRemarks, setEditingRemarks] = useState(false);
   const [draftRemarks, setDraftRemarks] = useState("");
+  const [editingShip, setEditingShip] = useState(false);
+  const [draftShip, setDraftShip] = useState("");
+  const [draftAttention, setDraftAttention] = useState("");
   const [sheet, setSheet] = useState<{ url: string; name: string; title: string } | null>(null);
 
   const q = useQuery({
@@ -112,6 +118,7 @@ export default function DeliveryOrderDetailPage() {
       refresh();
       setFlash({ kind: "ok", text: t("Saved.", "Tersimpan.") });
       setEditingNumber(false);
+      setEditingShip(false);
       setEditingItems(false);
       setEditingRemarks(false);
     },
@@ -608,6 +615,64 @@ export default function DeliveryOrderDetailPage() {
               </tr>
             </tfoot>
           </table>
+        )}
+      </div>
+
+      {/* The address the sheet is made out to (KEPADA), and who takes the
+          goods (U/P) — both also head the expedition letter on page two. */}
+      <div className="card p-5 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="font-semibold flex items-center gap-2">
+            <MapPin size={15} className="text-brand-600" />
+            {t("Ship to", "Kirim ke")}
+          </div>
+          {d.may.edit && !editingShip && (
+            <button className="btn-ghost"
+              onClick={() => {
+                setDraftShip(d.ship_to ?? ""); setDraftAttention(d.attention ?? "");
+                setEditingShip(true);
+              }}>
+              <Pencil size={13} /> {t("Edit", "Ubah")}
+            </button>
+          )}
+        </div>
+        {editingShip ? (
+          <div className="space-y-2">
+            {(d.address_options ?? []).length > 0 && (
+              <select className="input text-sm"
+                aria-label={t("Pick an address", "Pilih alamat")}
+                value={(d.address_options ?? []).some((a) => a.address === draftShip) ? draftShip : "__custom"}
+                onChange={(e) => { if (e.target.value !== "__custom") setDraftShip(e.target.value); }}>
+                {(d.address_options ?? []).map((a) => (
+                  <option key={a.address} value={a.address}>
+                    {a.label} — {a.address.split("\n")[0].slice(0, 60)}
+                  </option>
+                ))}
+                <option value="__custom">{t("Another address (type below)", "Alamat lain (ketik di bawah)")}</option>
+              </select>
+            )}
+            <textarea className="input text-sm" rows={3} value={draftShip}
+              aria-label={t("Ship-to address", "Alamat tujuan")}
+              onChange={(e) => setDraftShip(e.target.value)} />
+            <input className="input text-sm" value={draftAttention}
+              aria-label={t("U/P", "U/P")}
+              placeholder={t("U/P — who receives it, with a phone number", "U/P — penerima, dengan nomor HP")}
+              onChange={(e) => setDraftAttention(e.target.value)} />
+            <div className="flex gap-2">
+              <button className="btn-primary" disabled={patch.isPending}
+                onClick={() => patch.mutate({ ship_to: draftShip, attention: draftAttention })}>
+                <Save size={13} /> {t("Save", "Simpan")}
+              </button>
+              <button className="btn-ghost" onClick={() => setEditingShip(false)}>
+                {t("Cancel", "Batal")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm whitespace-pre-wrap space-y-1">
+            <div>{d.ship_to || <span className="muted">{t("No address yet.", "Belum ada alamat.")}</span>}</div>
+            {d.attention && <div className="text-xs"><span className="muted">U/P :</span> {d.attention}</div>}
+          </div>
         )}
       </div>
 

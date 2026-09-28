@@ -248,8 +248,31 @@ async def main():
                  data={"faktur_pajak_no": f"010.000-26.B{tag}"})
     sheet = pdf_text((await c.get(f"/finance/invoices/{inv2}/pdf",
                                   headers=fin)).content)
-    check("the sheet states the job as one line at the invoiced figure",
-          "1.234.567" in sheet, sheet[:800])
+    # Billed LESS than the lines: that is a price reduction, and it prints as
+    # one — the goods, then POTONGAN HARGA, then the net — the way the faktur
+    # pajak lists it, rather than collapsing into a "Pekerjaan" line.
+    check("a lowered amount still prints the goods",
+          "CHAIN SPROCKET" in sheet.upper(), sheet[:800])
+    check("...then the reduction as POTONGAN HARGA, down to the billed figure",
+          "POTONGAN HARGA" in sheet.upper() and "1.234.567" in sheet, sheet[:900])
+
+    # Billed MORE than the lines: nothing on the sheet explains the extra, so
+    # it states the job as one line at the invoiced figure.
+    async with SessionLocal() as db:
+        src = await db.get(Invoice, uuid.UUID(inv_id))
+        up = Invoice(number=f"{src.number}-C", project_id=src.project_id,
+                     customer_id=src.customer_id, customer_po_id=src.customer_po_id,
+                     type=src.type, amount=9_876_543, tax_amount=0,
+                     total=9_876_543, status="pending_finance")
+        db.add(up)
+        await db.commit()
+        inv3 = str(up.id)
+    await c.post(f"/finance/invoices/{inv3}/approve", headers=fin,
+                 data={"faktur_pajak_no": f"010.000-26.C{tag}"})
+    sheet = pdf_text((await c.get(f"/finance/invoices/{inv3}/pdf",
+                                  headers=fin)).content)
+    check("a raised amount states the job as one line at the invoiced figure",
+          "9.876.543" in sheet, sheet[:800])
     check("...rather than order lines that contradict the total",
           "CHAIN SPROCKET" not in sheet.upper(), sheet[:800])
 

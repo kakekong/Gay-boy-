@@ -19,7 +19,15 @@ hands the goods over and the person who takes them.
 
 The Remarks column is where the real destination goes. Head office is on the
 letterhead; the goods go to a site, which on the paper sheet was written into
-Remarks by hand every time.
+Remarks by hand every time. The address the sheet is made out to is the one
+picked when it was raised (site, office, tax address, or typed), and the
+part code prints in front of each description.
+
+**Page two is the Surat Jalan Ekspedisi** — the letter the expedition
+company carries: "mohon kirimkan barang kami sebanyak N peti", one row per
+peti with what is in it and the customer's PO number, the consignee with
+their U/P, three signature boxes (us, the expedition, the receiver), and the
+note asking for the signed white copy back at the office.
 """
 
 from io import BytesIO
@@ -29,7 +37,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle,
+    BaseDocTemplate, Frame, PageBreak, PageTemplate, Paragraph, Spacer, Table,
+    TableStyle,
 )
 
 from app.services.quotation_pdf import (
@@ -40,6 +49,41 @@ from app.services.quotation_pdf import (
 
 class _Doc(BaseDocTemplate):
     footer_label = "SURAT JALAN"
+
+
+_ONES = ["", "SATU", "DUA", "TIGA", "EMPAT", "LIMA", "ENAM", "TUJUH",
+         "DELAPAN", "SEMBILAN", "SEPULUH", "SEBELAS"]
+
+
+def terbilang(n: int) -> str:
+    """A small whole number in Indonesian words, as the letter writes it."""
+    n = int(n)
+    if n < 12:
+        return _ONES[n] or "NOL"
+    if n < 20:
+        return f"{_ONES[n - 10]} BELAS"
+    if n < 100:
+        tens, ones = divmod(n, 10)
+        return f"{_ONES[tens]} PULUH" + (f" {_ONES[ones]}" if ones else "")
+    if n < 200:
+        return "SERATUS" + (f" {terbilang(n - 100)}" if n - 100 else "")
+    if n < 1000:
+        h, r = divmod(n, 100)
+        return f"{_ONES[h]} RATUS" + (f" {terbilang(r)}" if r else "")
+    return str(n)
+
+
+def default_packages(rows: list[dict], po_number: str | None) -> list[dict]:
+    """One peti per line when nobody listed the packages by hand."""
+    out = []
+    for i, r in enumerate(rows, 1):
+        qty = float(r.get("qty") or 0)
+        uom = (r.get("uom") or "").upper()
+        name = " ".join(x for x in (r.get("sku"), r.get("description")) if x)
+        out.append({"label": f"PETI {i}", "description": name,
+                    "qty": f"{qty:g} {uom}".strip(),
+                    "note": f"PO NO: {po_number}" if po_number else None})
+    return out
 
 
 def _draw_draft(canvas, doc) -> None:
@@ -72,6 +116,9 @@ def build_delivery_order_pdf(
     courier: str | None, tracking_no: str | None,
     prepared_by: str, preparer_signature: bytes | None = None,
     draft: bool = False,
+    attention: str | None = None,
+    packages: list[dict] | None = None,
+    return_note: str | None = None,
 ) -> bytes:
     buf = BytesIO()
     doc = _Doc(
@@ -136,6 +183,8 @@ def build_delivery_order_pdf(
     to_html = f"<b>{(customer_name or '—').upper()}</b>"
     if (customer_address or "").strip():
         to_html += "<br/>" + customer_address.strip().replace("\n", "<br/>")
+    if attention:
+        to_html += f'<br/><font color="#55585E">U/P</font> : {attention}'
     if customer_phone:
         to_html += f'<br/><font color="#55585E">TELP</font> : {customer_phone}'
     if customer_fax:
@@ -168,7 +217,10 @@ def build_delivery_order_pdf(
         units.add(uom.upper())
         data.append([
             Paragraph(str(i), cell),
-            Paragraph(str(r.get("description") or "—"), cell),
+            # The part code first, then the name — "IPK301494 CHAIN FEEDER …",
+            # the way the company's own sheets write it.
+            Paragraph(" ".join(x for x in (r.get("sku"), r.get("description") or "—")
+                               if x), cell),
             Paragraph(f"{qty:g}", cell),
             Paragraph(uom, cell),
             # The destination rides on the first line, the way it was always
@@ -250,6 +302,89 @@ def build_delivery_order_pdf(
         ]),
     )
     flow.append(sign_row)
+
+    # ══ Page two: the Surat Jalan Ekspedisi ═════════════════════════════════
+    pkgs = [p for p in (packages or []) if (p.get("description") or p.get("qty"))]
+    if not pkgs:
+        pkgs = default_packages(rows, po_number)
+    flow.append(PageBreak())
+    flow.append(Paragraph("SURAT JALAN EKSPEDISI", title))
+    flow.append(Paragraph(
+        f'<font size="9" color="#55585E">{number}</font>',
+        ParagraphStyle("sub2", parent=body, alignment=1)))
+    flow.append(_OrangeRule(width=40 * mm, thickness=2.2))
+    flow.append(Spacer(1, 4 * mm))
+    flow.append(Paragraph(f"JAKARTA, {do_date.upper()}",
+                          ParagraphStyle("date", parent=body, alignment=2)))
+    flow.append(Spacer(1, 3 * mm))
+    flow.append(Paragraph("KEPADA YTH :", body))
+    flow.append(Paragraph(f"<b>{(courier or 'EKSPEDISI ..........................').upper()}</b>",
+                          body))
+    flow.append(Spacer(1, 4 * mm))
+    n = len(pkgs)
+    flow.append(Paragraph(
+        f"MOHON KIRIMKAN BARANG KAMI SEBANYAK : <b>{n} ({terbilang(n)}) PETI</b> "
+        "SEBAGAI BERIKUT :", body))
+    flow.append(Spacer(1, 2.5 * mm))
+    ehead = ["PETI NO", "NAMA BARANG", "QTY", "KETERANGAN"]
+    edata = [[Paragraph(f'<font color="#FFFFFF"><b>{h}</b></font>', cell) for h in ehead]]
+    for i, pk in enumerate(pkgs, 1):
+        edata.append([
+            Paragraph(pk.get("label") or f"PETI {i}", cell),
+            Paragraph(str(pk.get("description") or "—"), cell),
+            Paragraph(str(pk.get("qty") or ""), cell),
+            Paragraph(str(pk.get("note") or (f"PO NO: {po_number}" if po_number else "")),
+                      cell),
+        ])
+    flow.append(Table(edata, colWidths=[content_w * 0.11, content_w * 0.45,
+                                        content_w * 0.18, content_w * 0.26],
+                      repeatRows=1, style=TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("GRID", (0, 0), (-1, -1), 0.4, RULE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.6 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6 * mm),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2 * mm),
+    ])))
+    flow.append(Spacer(1, 5 * mm))
+    consignee = f"<b>KEPADA :</b><br/><b>{(customer_name or '—').upper()}</b>"
+    if (customer_address or "").strip():
+        consignee += "<br/>" + customer_address.strip().replace("\n", "<br/>")
+    if attention:
+        consignee += f"<br/><b>U/P : {attention.upper()}</b>"
+    flow.append(Paragraph(consignee, body))
+    flow.append(Spacer(1, 5 * mm))
+    flow.append(Paragraph("TERIMA KASIH ATAS PERHATIAN DAN KERJA SAMANYA.", body))
+    flow.append(Spacer(1, 6 * mm))
+    e_ink = (fitted_flowable(preparer_signature, max_w_mm=box_w / mm, max_h_mm=14)
+             if preparer_signature else None)
+    flow.append(Table(
+        [[Paragraph("Hormat kami,", small), "",
+          Paragraph("Diterima oleh,", small), "",
+          Paragraph("Penerima barang,", small)],
+         [e_ink if e_ink is not None else Spacer(1, 14 * mm), "",
+          Spacer(1, 14 * mm), "", Spacer(1, 14 * mm)],
+         [Paragraph(f"<b>{prepared_by or '—'}</b>", body), "",
+          Paragraph("&nbsp;", body), "", Paragraph("&nbsp;", body)],
+         [Paragraph("PT. Transmisi Enjinering", small), "",
+          Paragraph(f'<font color="#55585E">{(courier or "Ekspedisi")}</font>', small), "",
+          Paragraph(f'<font color="#55585E">{(customer_name or "")}</font>', small)]],
+        colWidths=[box_w, content_w * 0.05, box_w, content_w * 0.05, box_w],
+        style=TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ("LINEBELOW", (0, 1), (0, 1), 0.5, colors.HexColor("#9AA0A8")),
+            ("LINEBELOW", (2, 1), (2, 1), 0.5, colors.HexColor("#9AA0A8")),
+            ("LINEBELOW", (4, 1), (4, 1), 0.5, colors.HexColor("#9AA0A8")),
+        ]),
+    ))
+    if return_note:
+        flow.append(Spacer(1, 6 * mm))
+        flow.append(Paragraph(f"<b>NB :</b> {return_note}", small))
 
     doc.build(flow)
     return buf.getvalue()

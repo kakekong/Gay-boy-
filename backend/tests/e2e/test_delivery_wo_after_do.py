@@ -137,8 +137,12 @@ async def main():
     wo = J(r)
     r = await c.patch(f"/operation/work-orders/{pk['id']}", headers=adm,
                       params={"stage": "delivery"})
-    check("...and a WO can be moved into delivery", r.status_code == 200,
+    check("...but not a second one into delivery — each stage has one work order",
+          r.status_code == 409 and "already has a delivery" in why(r),
           f"{r.status_code} {why(r)}")
+    r = await delivery_wo(f"WO-DLV-{TAG}-4")
+    check("...and a second delivery work order is refused outright",
+          r.status_code == 409, f"{r.status_code} {why(r)}")
     r = await c.patch(f"/operation/work-orders/{wo['id']}", headers=adm,
                       params={"completed": True})
     check("...and completed", r.status_code == 200 and J(r).get("completed_at"),

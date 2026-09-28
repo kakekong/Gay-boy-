@@ -24,6 +24,7 @@ import { useT, T } from "@/store/lang";
 
 interface Line {
   line_no: number;
+  sku?: string | null;
   description: string;
   uom: string;
   qty_ordered: number;
@@ -47,6 +48,12 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
   const [courier, setCourier] = useState("");
   const [tracking, setTracking] = useState("");
   const [remarks, setRemarks] = useState("");
+  // Where this shipment goes — one of the customer's addresses, or typed.
+  const [shipTo, setShipTo] = useState("");
+  const [attention, setAttention] = useState("");
+  // The peti handed to the expedition. Left empty, the expedition letter
+  // lists one peti per line on its own.
+  const [packages, setPackages] = useState<Array<{ label: string; description: string; qty: string; note: string }>>([]);
   const [rows, setRows] = useState<Line[]>([]);
   const [picked, setPicked] = useState<Set<number>>(new Set());
 
@@ -57,6 +64,8 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
         suggested_number: string; suggested_split: number;
         remarks: string | null; items: Line[]; qc_passed: boolean;
         project_code: string;
+        addresses: Array<{ label: string; address: string }>;
+        ship_to: string | null; attention: string | null;
       }),
     enabled: open && !!projectId,
     staleTime: 0,
@@ -71,6 +80,9 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
     setNumber(d.suggested_number);
     setSplit(String(d.suggested_split));
     setRemarks(d.remarks ?? "");
+    setShipTo(d.ship_to ?? "");
+    setAttention(d.attention ?? "");
+    setPackages([]);
     setRows(d.items.map((i) => ({ ...i })));
     setPicked(new Set(d.items.filter((i) => i.qty > 0).map((i) => i.line_no)));
     setErr(null);
@@ -83,8 +95,11 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
       courier: courier.trim() || null,
       tracking_no: tracking.trim() || null,
       remarks: remarks.trim() || null,
+      ship_to: shipTo.trim() || null,
+      attention: attention.trim() || null,
+      packages: packages.filter((p) => p.description.trim() || p.qty.trim()),
       items: rows.filter((r) => picked.has(r.line_no)).map((r) => ({
-        description: r.description, qty: Number(r.qty) || 0, uom: r.uom,
+        description: r.description, qty: Number(r.qty) || 0, uom: r.uom, sku: r.sku ?? null,
       })),
     }),
     onSuccess: () => { onDone(); onClose(); },
@@ -188,6 +203,50 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
             </label>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-[11px] font-medium text-ink-600 mb-1">
+                {t("Ship to — the address the sheet is made out to", "Kirim ke — alamat tujuan surat jalan")}
+              </span>
+              <select className="input text-sm mb-1.5"
+                aria-label={t("Pick an address", "Pilih alamat")}
+                value={(prefill.data?.addresses ?? []).some((a) => a.address === shipTo) ? shipTo : "__custom"}
+                onChange={(e) => {
+                  if (e.target.value === "__custom") return;
+                  const prev = shipTo;
+                  setShipTo(e.target.value);
+                  // Keep the Remarks column in step when it still says the
+                  // old address (or nothing) — never overwrite what was typed.
+                  if (!remarks.trim() || remarks.includes(prev)) {
+                    setRemarks(`BARANG DI KIRIM KE:\n${e.target.value}`);
+                  }
+                }}>
+                {(prefill.data?.addresses ?? []).map((a) => (
+                  <option key={a.address} value={a.address}>
+                    {a.label} — {a.address.split("\n")[0].slice(0, 60)}
+                  </option>
+                ))}
+                <option value="__custom">{t("Another address (type below)", "Alamat lain (ketik di bawah)")}</option>
+              </select>
+              <textarea className="input" rows={3} value={shipTo}
+                aria-label={t("Ship-to address", "Alamat tujuan")}
+                onChange={(e) => setShipTo(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="block text-[11px] font-medium text-ink-600 mb-1">
+                {t("U/P — who receives it, with a phone number", "U/P — penerima, dengan nomor HP")}
+              </span>
+              <input className="input" value={attention}
+                aria-label={t("Attention", "U/P")}
+                placeholder={t("e.g. Bapak Agus (Tim Gudang) — HP 0822…", "cth. Bapak Agus (Tim Gudang) — HP 0822…")}
+                onChange={(e) => setAttention(e.target.value)} />
+              <span className="block text-[10px] muted mt-1">
+                {t("Prints on the delivery order and on the expedition letter (Surat Jalan Ekspedisi).",
+                   "Tercetak di surat jalan dan di Surat Jalan Ekspedisi.")}
+              </span>
+            </label>
+          </div>
+
           <label className="block">
             <span className="block text-[11px] font-medium text-ink-600 mb-1">
               {t("Deliver to — prints in the Remarks column", "Kirim ke — tercetak di kolom Remarks")}
@@ -198,6 +257,51 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
                              "cth. BARANG DI KIRIM KE: SITE OFFICE, …")}
               onChange={(e) => setRemarks(e.target.value)} />
           </label>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] font-medium text-ink-600 mb-1">
+                {t("Peti for the expedition letter (optional)", "Peti untuk Surat Jalan Ekspedisi (opsional)")}
+              </div>
+              <button type="button" className="btn-ghost text-xs py-0.5"
+                onClick={() => setPackages((cur) => [...cur, {
+                  label: `PETI ${cur.length + 1}`, description: "", qty: "", note: "",
+                }])}>
+                + {t("Add peti", "Tambah peti")}
+              </button>
+            </div>
+            {packages.length === 0 ? (
+              <div className="text-[11px] muted">
+                {t("None listed — the expedition letter puts one peti per line below.",
+                   "Belum ada — Surat Jalan Ekspedisi akan memakai satu peti per baris di bawah.")}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {packages.map((pk, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-1.5">
+                    <input className="input text-xs col-span-2" value={pk.label}
+                      aria-label={`Peti ${i + 1}`}
+                      onChange={(e) => setPackages((c) => c.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+                    <input className="input text-xs col-span-5" value={pk.description}
+                      placeholder={t("What is in it", "Isi peti")}
+                      aria-label={`${t("Contents", "Isi")} ${i + 1}`}
+                      onChange={(e) => setPackages((c) => c.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} />
+                    <input className="input text-xs col-span-2" value={pk.qty}
+                      placeholder="21,416 MTR = 8 ROL"
+                      aria-label={`Qty ${i + 1}`}
+                      onChange={(e) => setPackages((c) => c.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} />
+                    <input className="input text-xs col-span-2" value={pk.note}
+                      placeholder={t("Note (PO no.)", "Keterangan (No. PO)")}
+                      aria-label={`${t("Note", "Keterangan")} ${i + 1}`}
+                      onChange={(e) => setPackages((c) => c.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} />
+                    <button type="button" className="btn-ghost text-xs col-span-1 text-red-600"
+                      aria-label={t("Remove", "Hapus")}
+                      onClick={() => setPackages((c) => c.filter((_, j) => j !== i))}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div>
             <div className="text-[11px] font-medium text-ink-600 mb-1">
@@ -232,6 +336,7 @@ export function NewDeliveryOrderModal({ open, projectId, onClose, onDone }: Prop
                             onChange={() => toggle(r.line_no)} />
                         </td>
                         <td className="td">
+                          {r.sku && <span className="font-mono text-[11px] text-ink-500 mr-1.5">{r.sku}</span>}
                           {r.description}
                           {r.sent_on.length > 0 && (
                             <div className="text-[10px] text-amber-700 inline-flex items-center gap-1 mt-0.5">

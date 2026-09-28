@@ -560,11 +560,11 @@ async def invoice_pdf(
     if po:
         order_number = po.number
         rows = [dict(i) for i in (po.items or [])]
-    if not rows and project and project.quotation_id:
-        from app.models.quotation import Quotation
-        q = await db.get(Quotation, project.quotation_id)
-        if q:
-            rows = [dict(i) for i in (q.items or [])]
+    from app.services.item_codes import fill_item_codes, quotation_rows
+    quote_rows = await quotation_rows(db, project)
+    if not rows:
+        rows = quote_rows
+    rows = await fill_item_codes(db, rows, project, quote_rows)
 
     signer = await db.get(User, inv.approved_by) if inv.approved_by else user
     from app.services.invoice_pdf import build_invoice_pdf
@@ -574,8 +574,7 @@ async def invoice_pdf(
         issue_date=(inv.issue_date or date.today()).strftime("%d %B %Y"),
         due_date=inv.due_date.strftime("%d %B %Y") if inv.due_date else None,
         customer_name=cust.company_name if cust else "—",
-        customer_address=(cust.tax_address or cust.company_address or "")
-        if cust else "",
+        customer_address=_bill_to(cust),
         order_number=order_number,
         project_code=project.code if project else None,
         invoice_type=inv.type,
@@ -597,6 +596,36 @@ async def invoice_pdf(
         headers={"Content-Disposition":
                  f'inline; filename="Invoice-{inv.number}.pdf"'},
     )
+
+
+def _bill_to(cust) -> str:
+    """Everything the customer record holds about who is being billed.
+
+    It used to print one field — the tax address, or failing that the office
+    address — so an invoice could go out with a Jakarta office and nothing
+    else while the faktur pajak beside it named a Kalimantan tax address and
+    an NPWP. The sheet now carries the lot: the office address, the NPWP and
+    the address registered to it when that differs, and a phone number.
+    """
+    if cust is None:
+        return ""
+    parts: list[str] = []
+    office = (cust.company_address or "").strip()
+    tax_addr = (cust.tax_address or "").strip()
+    if office:
+        parts.append(office)
+    if cust.tax_id:
+        parts.append(f"NPWP : {cust.tax_id}")
+    if tax_addr and tax_addr.lower() != office.lower():
+        label = f"Alamat NPWP ({cust.tax_name}) : " if (cust.tax_name or "").strip() \
+            and cust.tax_name.strip().lower() != (cust.company_name or "").strip().lower() \
+            else "Alamat NPWP : "
+        parts.append(label + tax_addr)
+    if not office and not tax_addr and (cust.delivery_address or "").strip():
+        parts.append(cust.delivery_address.strip())
+    if (cust.phone or "").strip():
+        parts.append(f"TELP : {cust.phone.strip()}")
+    return "\n".join(parts)
 
 
 @invoice_desk.delete("/invoices/{invoice_id}", status_code=204)

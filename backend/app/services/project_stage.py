@@ -22,9 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 INVOICED_STATUSES = ("approved", "partial", "issued", "overdue", "paid")
 
 
-async def delivery_done(db: AsyncSession, project) -> bool:
+async def delivery_done(db: AsyncSession, project, *, trust_status: bool = True) -> bool:
     from app.models.operation import DeliveryOrder
 
+    # A job already standing at delivered (or past it) was delivered — however
+    # it got there. Without this, a job marked delivered before the facts
+    # below were recorded never moved on when its invoice was approved: it
+    # sat at Delivered with an approved invoice beside it.
+    if trust_status and project.status in ("delivered", "invoiced", "paid", "closed"):
+        return True
     if project.customer_received_at is not None:
         return True
     total, open_ = (await db.execute(
@@ -62,4 +68,7 @@ async def settle_delivery_and_invoice(db: AsyncSession, project) -> str:
 async def stage_before_payment(db: AsyncSession, project) -> str:
     """Where a job goes back to when its payment is reversed: `invoiced` if
     it was delivered, otherwise the stage before delivery."""
-    return "invoiced" if await delivery_done(db, project) else "packaging"
+    # From the facts only: the job is at paid/closed, which says nothing
+    # about whether the goods ever went.
+    return ("invoiced" if await delivery_done(db, project, trust_status=False)
+            else "packaging")

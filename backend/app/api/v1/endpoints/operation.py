@@ -16,7 +16,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
 from app.models.attachment import Attachment
-from app.models.crm import Customer
+from app.models.crm import Customer, CustomerContact
 from app.models.finance import Invoice
 from app.models.operation import (
     DeliveryOrder, Drawing, Project, WorkOrder, advance_project_status,
@@ -543,6 +543,8 @@ async def project_full(project_id: UUID,
                 # before it corrects the sheet and asks again.
                 "approval": do_approvals.get(do.id),
                 "remarks": do.remarks,
+                "ship_to": do.ship_to, "attention": do.attention,
+                "packages": list(do.packages or []),
             } for do in deliveries
         ],
         "purchase_requests": [
@@ -1772,12 +1774,24 @@ async def _do_lines(db: AsyncSession, p: Project) -> list[dict]:
     signed by whoever is on the gate at the site — it says what arrived, and
     it is not the place to publish what the customer is paying for it.
     """
-    # The SKU travels with the line where the upstream document has one, so
-    # the shelf is found by identifier rather than by matching the same
-    # string a fourth time. Never printed — it is for the stock ledger.
+    # The SKU travels with the line, so the shelf is found by identifier
+    # rather than by matching the same string a fourth time — and it prints,
+    # as the part code in front of the description, the way the company's
+    # own sheets have always written it.
+    from app.services.item_codes import fill_item_codes
+    rows = await fill_item_codes(db, await _billing_lines(db, p), p)
     return [{"description": i.get("description"), "qty": float(i.get("qty") or 0),
-             "uom": i.get("uom") or "EA", "sku": i.get("sku")}
-            for i in await _billing_lines(db, p)]
+             "uom": i.get("uom") or "EA", "sku": i.get("sku")} for i in rows]
+
+
+async def _default_ship_to(db: AsyncSession, p: Project) -> str | None:
+    if not p.customer_id:
+        return None
+    cust = await db.get(Customer, p.customer_id)
+    if not cust:
+        return None
+    return ((cust.delivery_address or "").strip()
+            or (cust.company_address or "").strip() or None)
 
 
 async def _ship_to_note(db: AsyncSession, p: Project) -> str | None:
@@ -1789,6 +1803,74 @@ async def _ship_to_note(db: AsyncSession, p: Project) -> str | None:
         return None
     addr = (cust.delivery_address or "").strip()
     return f"BARANG DI KIRIM KE:\n{addr}" if addr else None
+
+
+async def _address_options(db: AsyncSession, p: Project) -> list[dict]:
+    """The addresses a delivery order may go to, for the picker.
+
+    The customer's delivery (site) address, office and tax address, and any
+    address an earlier delivery order for this customer went to — a site
+    somebody typed once is a site the next shipment goes to as well.
+    """
+    if not p.customer_id:
+        return []
+    cust = await db.get(Customer, p.customer_id)
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(label: str, addr: str | None):
+        a = (addr or "").strip()
+        if a and a.lower() not in seen:
+            seen.add(a.lower())
+            out.append({"label": label, "address": a})
+
+    if cust:
+        add("Delivery address (site)", cust.delivery_address)
+        add("Office", cust.company_address)
+        add("Tax (NPWP) address", cust.tax_address)
+    earlier = (await db.scalars(
+        select(DeliveryOrder.ship_to)
+        .join(Project, DeliveryOrder.project_id == Project.id)
+        .where(Project.customer_id == p.customer_id,
+               DeliveryOrder.ship_to.is_not(None))
+        .order_by(DeliveryOrder.created_at.desc()).limit(20)
+    )).all()
+    for a in earlier:
+        add("Used on an earlier delivery order", a)
+    return out
+
+
+async def _default_attention(db: AsyncSession, p: Project) -> str | None:
+    """U/P: the customer's primary contact, with their number."""
+    if not p.customer_id:
+        return None
+    c = (await db.scalars(
+        select(CustomerContact).where(CustomerContact.customer_id == p.customer_id)
+        .order_by(CustomerContact.is_primary.desc(), CustomerContact.created_at.asc())
+        .limit(1))).first()
+    if not c:
+        return None
+    phone = c.phone or c.whatsapp
+    return c.name + (f" — HP {phone}" if phone else "")
+
+
+class DeliveryPackageIn(BaseModel):
+    """One peti/koli on the Surat Jalan Ekspedisi."""
+    label: str | None = None
+    description: str | None = None
+    qty: str | None = None
+    note: str | None = None
+
+
+def _clean_packages(rows) -> list[dict]:
+    out = []
+    for r in rows or []:
+        r = r if isinstance(r, dict) else r.model_dump()
+        if not any((str(r.get(k) or "")).strip() for k in ("description", "qty")):
+            continue
+        out.append({k: (str(r.get(k) or "")).strip() or None
+                    for k in ("label", "description", "qty", "note")})
+    return out
 
 
 class DeliveryLineIn(BaseModel):
@@ -1892,7 +1974,10 @@ async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
                                 number: str | None = None,
                                 items: list[dict] | None = None,
                                 remarks: str | None = None,
-                                split_index: int | None = None) -> DeliveryOrder:
+                                split_index: int | None = None,
+                                ship_to: str | None = None,
+                                attention: str | None = None,
+                                packages: list[dict] | None = None) -> DeliveryOrder:
     """File a delivery order for this project.
 
     Everything is optional and everything has an answer: the caller states
@@ -1910,9 +1995,16 @@ async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
         # here — the customer said what they ordered on their PO, and their
         # record says where deliveries go.
         items=items if items is not None else await _do_lines(db, p),
-        remarks=(remarks.strip() if (remarks or "").strip()
-                 else await _ship_to_note(db, p)),
+        # Where it goes: the address picked for this shipment, else the
+        # customer's delivery (site) address.
+        ship_to=((ship_to or "").strip() or await _default_ship_to(db, p)),
+        attention=((attention or "").strip() or await _default_attention(db, p)),
+        packages=packages or [],
+        prepared_by=user.id,
     )
+    do.remarks = (remarks.strip() if (remarks or "").strip()
+                  else (f"BARANG DI KIRIM KE:\n{do.ship_to}" if do.ship_to
+                        else await _ship_to_note(db, p)))
     db.add(do)
     await db.flush()
     if file is not None:
@@ -1958,7 +2050,8 @@ async def delivery_order_prefill(
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
 
-    ordered = await _billing_lines(db, p)
+    from app.services.item_codes import fill_item_codes
+    ordered = await fill_item_codes(db, await _billing_lines(db, p), p)
     sent: dict[str, float] = {}
     covered_by: dict[str, list[str]] = {}
     for d in await _open_delivery_orders(db, project_id):
@@ -1974,6 +2067,7 @@ async def delivery_order_prefill(
         done = sent.get(key, 0.0)
         items.append({
             "line_no": i,
+            "sku": it.get("sku"),
             "description": it.get("description"),
             "uom": it.get("uom") or "EA",
             "qty_ordered": qty,
@@ -1990,6 +2084,10 @@ async def delivery_order_prefill(
         "remarks": await _ship_to_note(db, p),
         "items": items,
         "qc_passed": bool(p.qc_passed_at),
+        # Where it can go — pick one, or type another.
+        "addresses": await _address_options(db, p),
+        "ship_to": await _default_ship_to(db, p),
+        "attention": await _default_attention(db, p),
     }
 
 
@@ -2001,6 +2099,9 @@ class DeliveryOrderIn(BaseModel):
     tracking_no: str | None = None
     remarks: str | None = None
     items: list[DeliveryLineIn] | None = None
+    ship_to: str | None = None
+    attention: str | None = None
+    packages: list[DeliveryPackageIn] | None = None
 
 
 @router.post("/projects/{project_id}/delivery-order", status_code=201)
@@ -2049,7 +2150,9 @@ async def issue_delivery_order(
                 "it — an empty sheet is nothing for the customer to sign.",
             )
         items = [{"description": i.description, "qty": float(i.qty or 0),
-                  "uom": (i.uom or "EA")} for i in rows]
+                  "uom": (i.uom or "EA"), "sku": i.sku} for i in rows]
+        from app.services.item_codes import fill_item_codes
+        items = await fill_item_codes(db, items, p)
 
     number = (payload.number or "").strip() or None
     if number:
@@ -2063,11 +2166,14 @@ async def issue_delivery_order(
     do = await _raise_delivery_order(
         db, p, user=user, courier=payload.courier,
         tracking_no=payload.tracking_no, number=number, items=items,
-        remarks=payload.remarks, split_index=payload.split_index)
+        remarks=payload.remarks, split_index=payload.split_index,
+        ship_to=payload.ship_to, attention=payload.attention,
+        packages=_clean_packages(payload.packages))
     return {"delivery_order": {
         "id": str(do.id), "number": do.number, "split_index": do.split_index,
         "courier": do.courier, "tracking_no": do.tracking_no,
-        "items": do.items, "remarks": do.remarks}}
+        "items": do.items, "remarks": do.remarks, "ship_to": do.ship_to,
+        "attention": do.attention, "packages": do.packages}}
 
 
 @router.post("/projects/{project_id}/issue-invoice", status_code=201)
@@ -2483,6 +2589,31 @@ def _assert_wo_allowed_for_project(p: "Project", stage: str) -> None:
         )
 
 
+async def _assert_stage_free(db: AsyncSession, project_id, stage: str,
+                             exclude_id=None) -> None:
+    """One work order per stage per project — none of them is repeated.
+
+    Each stage is a single step on the job (receiving, warehousing, QC,
+    packaging, delivery); a second card for the same step splits the shop
+    floor's ticks across two and lets one be completed while the other says
+    the step is still open.
+    """
+    stage = (stage or "").lower()
+    if not stage or not project_id:
+        return
+    stmt = select(WorkOrder).where(WorkOrder.project_id == project_id,
+                                   func.lower(WorkOrder.stage) == stage)
+    if exclude_id is not None:
+        stmt = stmt.where(WorkOrder.id != exclude_id)
+    other = (await db.scalars(stmt)).first()
+    if other is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This project already has a {stage} work order ({other.code}). "
+            "Each stage has one work order — use that one.",
+        )
+
+
 async def _assert_delivery_order_released(db: AsyncSession, project_id, stage: str) -> None:
     """A delivery work order comes after the delivery order, not before it.
 
@@ -2750,6 +2881,7 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
     # (purchasing / drawing / drawing_approved). Ops WOs only make sense
     # once physical work is starting.
     _assert_wo_allowed_for_project(p, payload.stage)
+    await _assert_stage_free(db, project_id, payload.stage)
     await _assert_delivery_order_released(db, project_id, payload.stage)
     w = WorkOrder(project_id=project_id, code=payload.code,
                   stage=payload.stage, notes=payload.notes)
@@ -2788,6 +2920,8 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
     # Into delivery, or completing one already there: the delivery order has
     # to be out first.
     if stage is not None:
+        if (stage or "").lower() != (w.stage or "").lower():
+            await _assert_stage_free(db, w.project_id, stage, exclude_id=w.id)
         await _assert_delivery_order_released(db, w.project_id, stage)
     elif completed and not w.completed_at:
         await _assert_delivery_order_released(db, w.project_id, w.stage)
@@ -2995,6 +3129,9 @@ class DeliveryEdit(BaseModel):
     # gets them.
     items: list[DeliveryLineIn] | None = None
     remarks: str | None = None
+    ship_to: str | None = None
+    attention: str | None = None
+    packages: list[DeliveryPackageIn] | None = None
 
 
 # Who may correct or withdraw a delivery order. Admin issue them, and the
@@ -3092,6 +3229,8 @@ async def delivery_order_detail(do_id: UUID,
         "id": str(d.id), "number": d.number, "split_index": d.split_index,
         "courier": d.courier, "tracking_no": d.tracking_no,
         "status": d.status, "items": list(d.items or []), "remarks": d.remarks,
+        "attention": d.attention,
+        "packages": list(d.packages or []),
         "created_at": d.created_at,
         "delivered_at": d.delivered_at,
         "approved_at": d.approved_at,
@@ -3105,7 +3244,9 @@ async def delivery_order_detail(do_id: UUID,
         "project_status": p.status if p else None,
         "customer_id": str(cust.id) if cust else None,
         "customer_name": cust.company_name if cust else None,
-        "ship_to": (cust.delivery_address or None) if cust else None,
+        # The address picked for this shipment, else the customer's site.
+        "ship_to": d.ship_to or ((cust.delivery_address or None) if cust else None),
+        "address_options": await _address_options(db, p) if p else [],
         "po_number": po_number,
         "files": files,
         # Where it stands with the director, and — when it came back — why.
@@ -3177,7 +3318,14 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
                                 "A delivery order needs at least one line")
         d.items = [{"description": i["description"],
                     "qty": float(i.get("qty") or 0),
-                    "uom": (i.get("uom") or "EA")} for i in data["items"]]
+                    "uom": (i.get("uom") or "EA"), "sku": i.get("sku")}
+                   for i in data["items"]]
+    if "ship_to" in data:
+        d.ship_to = (data["ship_to"] or "").strip() or None
+    if "attention" in data:
+        d.attention = (data["attention"] or "").strip() or None
+    if "packages" in data and data["packages"] is not None:
+        d.packages = _clean_packages(data["packages"])
 
     # A sheet the director sent back is corrected here, and correcting it is
     # how it asks again — otherwise a rejection would be a dead end with no
@@ -3216,6 +3364,11 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
 _DO_APPROVERS = {Role.FINANCE}
 
 
+async def _with_codes(db: AsyncSession, rows: list[dict], p) -> list[dict]:
+    from app.services.item_codes import fill_item_codes
+    return await fill_item_codes(db, rows, p)
+
+
 @router.get("/deliveries/{do_id}/pdf")
 async def delivery_order_pdf(do_id: UUID,
                              draft: bool = False,
@@ -3244,7 +3397,7 @@ async def delivery_order_pdf(do_id: UUID,
     if not d.approved_at and not draft:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "This delivery order hasn't been approved yet — the director "
+            "This delivery order hasn't been approved yet — finance "
             "releases it, and the sheet is generated from what they approved. "
             "Add ?draft=1 to see what is waiting to be released.",
         )
@@ -3264,7 +3417,21 @@ async def delivery_order_pdf(do_id: UUID,
         if cpo:
             po_number = cpo.number
 
-    approver = await db.get(User, d.approved_by) if d.approved_by else None
+    # "Prepared by" is whoever raised the sheet — not whoever approved it. A
+    # delivery order approved by the director used to print the director as
+    # its preparer. Rows from before `prepared_by` existed take the person who
+    # filed its approval request, which is the same person.
+    preparer_id = d.prepared_by
+    if preparer_id is None:
+        from app.models.approval import ApprovalRequest
+        preparer_id = await db.scalar(
+            select(ApprovalRequest.requested_by).where(
+                ApprovalRequest.target_type == "delivery_order",
+                ApprovalRequest.target_id == d.id,
+            ).order_by(ApprovalRequest.created_at.asc()).limit(1))
+    approver = await db.get(User, preparer_id or d.approved_by) \
+        if (preparer_id or d.approved_by) else None
+    from app.core.config import settings as _settings
     from app.services.delivery_order_pdf import build_delivery_order_pdf
     from app.services.signature import load_for as _load_signature
     pdf = build_delivery_order_pdf(
@@ -3272,12 +3439,16 @@ async def delivery_order_pdf(do_id: UUID,
         do_date=(d.approved_at.date().strftime("%d %B %Y")
                  if d.approved_at else date.today().strftime("%d %B %Y")),
         customer_name=cust.company_name if cust else "—",
-        customer_address=(cust.company_address or "") if cust else "",
+        customer_address=(d.ship_to or (cust.delivery_address if cust else None)
+                          or (cust.company_address if cust else None) or ""),
         customer_phone=(cust.phone or None) if cust else None,
         customer_fax=None,
+        attention=d.attention,
+        packages=list(d.packages or []),
+        return_note=_settings.COMPANY_DO_RETURN_NOTE,
         po_number=po_number,
         project_code=p.code if p else None,
-        rows=list(d.items or []),
+        rows=await _with_codes(db, list(d.items or []), p),
         remarks=d.remarks,
         courier=d.courier, tracking_no=d.tracking_no,
         # An unreleased sheet carries nobody's name and nobody's signature —

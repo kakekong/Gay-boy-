@@ -15,13 +15,18 @@ Two decisions worth stating.
 off the customer's PO where there is one — same words, same quantities — so
 the invoice can be checked against the order without translation.
 
-**The lines are only printed when they add up to what is being billed.** An
-invoice's amount can be corrected after issue (a revised quantity, tax the
-customer is exempt from), and once it has been, the order lines no longer
-explain the figure. Printing them anyway would produce a sheet whose middle
-contradicts its total, so when they disagree the sheet states the job as one
-line at the invoiced amount instead. A document that adds up is worth more
-than a document with detail in it.
+**The lines are the goods, with their codes.** Each line prints its KODE
+BARANG (the part's SKU) and its name, the way the faktur pajak lists them —
+never a single "Pekerjaan PRJ-…" line standing in for what was sold.
+
+**A discount is printed as a discount.** The customer's PO carries list
+prices and the quotation a discount, so the lines add up to more than what
+is billed. That used to make the sheet give up and print one LOT line at the
+billed figure; now the lines print, then the potongan harga, then the net —
+exactly as the faktur pajak does it. Only when the lines add up to *less*
+than the billed amount (something was added after the fact that no line
+explains) does the sheet fall back to one line, because a middle that
+contradicts the total is worse than no detail.
 
 The faktur pajak number goes on when finance signs off, and prints here
 because that is the number the customer's tax people will ask for.
@@ -53,11 +58,15 @@ class _Doc(BaseDocTemplate):
 _TOLERANCE = 100.0
 
 
+def _lines_total(rows: list[dict]) -> float:
+    return sum(float(r.get("qty") or 0) * float(r.get("unit_price") or 0)
+               for r in rows)
+
+
 def lines_explain_total(rows: list[dict], amount: float) -> bool:
-    """Whether these order lines still add up to what is being billed."""
-    total = sum(float(r.get("qty") or 0) * float(r.get("unit_price") or 0)
-                for r in rows)
-    return abs(total - float(amount or 0)) <= _TOLERANCE
+    """Whether these order lines add up to what is being billed — exactly, or
+    down to it through a discount (lines worth more than the billed net)."""
+    return _lines_total(rows) + _TOLERANCE >= float(amount or 0)
 
 
 def build_invoice_pdf(
@@ -152,6 +161,11 @@ def build_invoice_pdf(
 
     printable = [r for r in (rows or [])
                  if float(r.get("qty") or 0) or float(r.get("unit_price") or 0)]
+    discount = 0.0
+    if kind != "dp" and printable and lines_explain_total(printable, amount):
+        gross = _lines_total(printable)
+        if gross - float(amount or 0) > _TOLERANCE:
+            discount = gross - float(amount or 0)
     if kind == "dp" or not printable or not lines_explain_total(printable, amount):
         printable = [{
             "description": ("Uang muka pekerjaan" if kind == "dp"
@@ -160,18 +174,20 @@ def build_invoice_pdf(
             "qty": 1, "uom": "LOT", "unit_price": float(amount or 0),
         }]
 
-    head = ["BANYAKNYA", "NAMA BARANG", "HARGA SATUAN", "JUMLAH"]
+    head = ["BANYAKNYA", "KODE BARANG", "NAMA BARANG", "HARGA SATUAN", "JUMLAH"]
     data = [[Paragraph(f'<font color="#FFFFFF"><b>{h}</b></font>', cell) for h in head]]
     for r in printable:
         qty = float(r.get("qty") or 0)
         unit = float(r.get("unit_price") or 0)
         data.append([
             Paragraph(f"{qty:g} {(r.get('uom') or 'PCS').upper()}", cell),
+            Paragraph(str(r.get("sku") or "—"), cell),
             Paragraph(str(r.get("description") or "—"), cell),
             Paragraph(_idr_plain(unit), cell),
             Paragraph(_idr_plain(qty * unit), cell),
         ])
-    col_w = [content_w * 0.13, content_w * 0.47, content_w * 0.20, content_w * 0.20]
+    col_w = [content_w * 0.12, content_w * 0.13, content_w * 0.35,
+             content_w * 0.20, content_w * 0.20]
     flow.append(Table(data, colWidths=col_w, repeatRows=1, style=TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
         ("GRID", (0, 0), (-1, -1), 0.4, RULE),
@@ -189,10 +205,15 @@ def build_invoice_pdf(
         figure = f"<b>{_idr_plain(value)}</b>" if bold else _idr_plain(value)
         return [Paragraph(text, cell), Paragraph(figure, cell)]
 
+    money = []
+    if discount:
+        money.append([""] + money_row("JUMLAH", float(amount or 0) + discount))
+        money.append([""] + money_row("POTONGAN HARGA", -discount))
+    money += [[""] + money_row("SUB BRUTO", amount),
+              [""] + money_row("PPN", tax_amount),
+              [""] + money_row("SUB TOTAL", total, bold=True)]
     flow.append(Table(
-        [[""] + money_row("SUB BRUTO", amount),
-         [""] + money_row("PPN", tax_amount),
-         [""] + money_row("SUB TOTAL", total, bold=True)],
+        money,
         colWidths=[content_w * 0.60, content_w * 0.20, content_w * 0.20],
         style=TableStyle([
             ("BACKGROUND", (1, 0), (-1, -1), PANEL),

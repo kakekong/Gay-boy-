@@ -1379,9 +1379,14 @@ export default function ProjectDetailPage() {
           const hasReleasedDo = dos.some((d: any) => !!d.approved_at);
           const stageReached = (s: string) =>
             curIdx >= PIPELINE_STAGES.indexOf(WO_STAGE_MIN_PROJECT_STATUS[s]);
+          // One work order per stage — a stage already on the board is not
+          // offered again (the server refuses it too).
+          const takenStages = new Set(wos.map((w: any) => (w.stage || "").toLowerCase()));
           const allowedStages = WO_STAGES.filter((s) =>
-            stageReached(s) && (s !== "delivery" || hasReleasedDo));
-          const deliveryWaitsOnDo = stageReached("delivery") && !hasReleasedDo;
+            stageReached(s) && !takenStages.has(s)
+            && (s !== "delivery" || hasReleasedDo));
+          const deliveryWaitsOnDo = stageReached("delivery") && !hasReleasedDo
+            && !takenStages.has("delivery");
           const canFileAny = canManageWO && allowedStages.length > 0;
           // If the currently-selected stage isn't allowed anymore, snap
           // back to the first allowed one so the button submits a valid
@@ -1394,6 +1399,11 @@ export default function ProjectDetailPage() {
                 "Only purchasing, admin or director can file work orders.",
                 "Hanya pembelian, admin, atau direktur yang dapat membuat work order.",
               )
+            : allowedStages.length === 0 && stageReached("receiving")
+              ? (deliveryWaitsOnDo ? null : t(
+                  "Every stage this project has reached already has its work order — each stage has one.",
+                  "Setiap tahap yang sudah dicapai proyek ini sudah punya work order — satu work order per tahap.",
+                ))
             : allowedStages.length === 0
               ? t(
                   `The project is still at '${p.status.replace(/_/g, " ")}'. Work orders will unlock once it reaches production — advance the earlier stages (purchasing → drawing → drawing_approved → production) first.`,
