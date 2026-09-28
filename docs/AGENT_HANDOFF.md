@@ -222,6 +222,7 @@ d = await login(c, "director@demo.local")   # password from DEMO_SEED_PASSWORD
 | `test_approval_currency.py` | the director's approval preview reports the document's own currency, rate and rupiah equivalent — a JPY purchase order does not read as rupiah, an IDR one is unchanged, and a currency-changing edit shows each side of the arrow in its own money |
 | `test_edits_dont_pile_up.py` | editing one document three times leaves ONE approval holding the newest values, not three rows where approving the oldest applies a stale figure — for supplier POs and project dates, with a reason line that differs per edit |
 | `test_invoice_dupes_and_po_price.py` | (updated) one invoice per project: a second final/single is refused, the old `additional` flag no longer gets round it, one DP may sit beside it and only one; a rejected invoice can be replaced |
+| `test_paperwork_and_stages.py` | DO prefill offers the customer's addresses and U/P; the DO sheet goes to the picked address with U/P, part codes and "Prepared by" = raiser; page two is the Surat Jalan Ekspedisi (peti count in words, rows, return note); one WO per stage; Delivered → Invoiced on invoice approval; invoice lists goods with KODE BARANG, the discount as POTONGAN HARGA, full bill-to |
 | `test_delivery_wo_after_do.py` | a delivery work order is refused with no delivery order, and with one raised but unreleased; moving a WO into delivery likewise; after finance releases it all three go through; a pre-rule delivery WO cannot be completed; the director and admin cannot release a DO by button or inbox |
 | `test_one_po_per_deal.py` | a second customer PO on a quotation (or its revision) is refused naming the first; the director deletes a PO and the project stays, its PO number moving to the survivor (or clearing, value kept), invoices following it or refusing the delete; maintenance no longer pulls the project; delivered-before-invoiced settles from facts; the one-off re-sort of existing projects runs once |
 | `test_pr_quotation_links.py` | a price request lists every quotation made from it (`linked_quotations`, newest version first, revisions included) on the detail and the list; `pr.quotation_id` stays the first one; purchasing gets no links |
@@ -623,6 +624,17 @@ the per-item `roles` list, and it redirected finance away from `/approvals`
 entirely), and the **copy** that names the desk on the requesting screen. The
 first three are silent failures: the request exists, nothing errors, and the
 person it waits on never arrives. Check all four when you move one.
+
+**Stock enters on receiving; receiving creates utang usaha.**
+`stock_sync.receive_purchase_order` now only registers a PO's parts
+(`move_stock=False`); `sync_received` (the receiving work order) is the stock-in.
+`record_receiving` also posts the receipt's value via
+`ledger.post_goods_receipt` (110401 Persediaan / 210101 Utang Usaha) and bumps
+`SupplierPO.payable_amount`; `SupplierPayment` rows + `/finance/payables` are
+finance's view and pay-down (`ledger.post_supplier_payment`). Existing stock was
+re-based once by `stock_sync.rebase_to_receipts` from `seed.ensure_schema`
+(Python data fix, keyed in `data_fixes`). Old receipts were not back-filled as
+payables. Work orders are one per stage (`_assert_stage_free`).
 
 **One invoice per project.** `issue_invoice` refuses a second final/single
 invoice on a project (they share one slot) and a second DP; a rejected one

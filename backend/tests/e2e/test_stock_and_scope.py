@@ -143,7 +143,15 @@ async def main():
           sku == sku_before, f"{sku} vs {sku_before}")
     check("...with a generated SKU in the company's own series",
           bool(sku) and sku.isdigit() and int(sku) > 100_000, str(sku))
-    check("...and the ordered quantity on the shelf", have == 10.0, str(have))
+    check("...and nothing on the shelf yet — stock enters on receiving",
+          have == 0.0, str(have))
+
+    # The receiving work order records what arrived; that is what goes in.
+    r = await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
+        "po_id": po["id"], "lines": [{"line_no": 1, "qty": 10}]})
+    check("the ten are received", r.status_code == 200, f"{r.status_code} {J(r)}"[:150])
+    have, _ = await stock_of(part)
+    check("...and the received quantity is on the shelf", have == 10.0, str(have))
     row = [x for x in _inv_items(J(await c.get("/inventory", headers=d,
                                               params={"q": part})))
            if x["name"] == part][0]
@@ -151,8 +159,8 @@ async def main():
           float(row["unit_cost"]) == 250_000.0, str(row["unit_cost"]))
     movs = J(await c.get(f"/inventory/{row['id']}/movements", headers=d))
     check("...written down as a movement naming the PO",
-          any(m["reason"] == "po_in" and m["reference"] == po["number"]
-              for m in movs), str(movs)[:200])
+          any(m["reason"] == "gr_sync" and m["reference"] == po["number"]
+              and m["delta"] == 10.0 for m in movs), str(movs)[:200])
 
     # ══ a delivery order takes them off it ═══════════════════════════════════
     print("\n── delivering ──")
@@ -189,7 +197,11 @@ async def main():
     r = await c.patch(f"/purchasing/po/{po['id']}", headers=d,
                       json={"status": "open"})
     have, _ = await stock_of(part)
-    check("reopening it puts them back", have == 10.0, str(have))
+    check("reopening it puts nothing back — nothing new arrived", have == 0.0, str(have))
+    await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
+        "po_id": po["id"], "lines": [{"line_no": 1, "qty": 10}]})
+    have, _ = await stock_of(part)
+    check("...receiving it again does", have == 10.0, str(have))
 
     # ══ what admin and sales may see of the cost ═════════════════════════════
     print("\n── the unit cost column ──")

@@ -431,8 +431,8 @@ async def apply_to_target(
             if action == "create":
                 po.status = "open" if approve else "cancelled"
                 applied["new_status"] = po.status
-                # Releasing the PO is what puts its goods on the shelf — the
-                # same act that told the supplier to send them.
+                # Releasing the PO registers its parts in the catalogue; the
+                # goods enter stock when they are received, not here.
                 if approve:
                     from app.services.stock_sync import receive_purchase_order
                     # No actor here — apply_to_target takes the request, not

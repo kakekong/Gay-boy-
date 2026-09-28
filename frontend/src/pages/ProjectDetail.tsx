@@ -3320,16 +3320,15 @@ function SkipDrawingRow({
 /**
  * What arrived, ticked off against what was ordered.
  *
- * A supplier order puts its goods into stock the moment it opens, so the count
- * reads "what we have plus what is on its way" — the figure somebody promising
- * a delivery date needs. The gap that leaves is the one everybody hits: order
- * ten, five turn up, and the shelf still says ten until a person notices.
+ * This is where goods enter stock. A supplier order moves no quantity when it
+ * opens; the receiving work order records what actually arrived, and that is
+ * what goes into inventory — against the goods receipt, the paperwork of
+ * receiving. The same act makes the supplier owed for it: utang usaha, which
+ * lands in finance's payables list.
  *
- * This is where the person notices. Every line on every supplier order feeding
- * the job, with what was ordered and what the shelf currently credits to it.
- * Tick the lines that arrived, correct the quantity, sync. Stock moves to what
- * is actually in the building — a correction, not a second addition, so
- * pressing it when everything arrived moves nothing.
+ * Every line on every supplier order feeding the job, with what was ordered
+ * and what has been received so far. Tick the lines that arrived, set the
+ * quantity, record. Recording the same figure twice moves nothing.
  *
  * Quantities start at the ordered figure because that is the common case: the
  * whole delivery turned up and there is nothing to type. A short delivery is
@@ -3356,12 +3355,14 @@ function ReceivingPanel({ projectId, onDone }: {
       api.post(`/operation/projects/${projectId}/receiving`, body).then((r) => r.data),
     onSuccess: (res: any) => {
       const moved = res?.stock_changed?.length ?? 0;
+      const owed = Number(res?.payable_added || 0);
+      const idrTxt = "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(owed));
       setErr(null);
       setFlash(moved
-        ? tt(`Recorded. ${moved} item(s) corrected in stock.`,
-             `Tercatat. ${moved} barang dikoreksi di stok.`)
-        : tt("Recorded. Stock already matched — nothing to correct.",
-             "Tercatat. Stok sudah sesuai — tidak ada koreksi."));
+        ? tt(`Received. ${moved} item(s) into stock${owed ? ` — ${idrTxt} added to utang usaha for finance` : ""}.`,
+             `Diterima. ${moved} barang masuk stok${owed ? ` — ${idrTxt} menjadi utang usaha di keuangan` : ""}.`)
+        : tt("Recorded. Nothing new arrived — stock already says this.",
+             "Tercatat. Tidak ada tambahan — stok sudah sesuai."));
       qc.invalidateQueries({ queryKey: ["receiving", projectId] });
       qc.invalidateQueries({ queryKey: ["inventory"] });
       onDone();

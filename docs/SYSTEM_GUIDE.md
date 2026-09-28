@@ -347,6 +347,18 @@ Lane ownership:
 
 ## 9. Finance
 
+### 8.7 Receiving, stock and utang usaha
+
+- **Stock enters on receiving, not on ordering.** A purchasing PO opening registers its parts in the catalogue (with a SKU) and moves no quantity. The **receiving work order** records what actually arrived — that goes into inventory, against the goods receipt. A **delivery order** takes it out again. Existing stock was re-based once, on deploy, to what the goods receipts say arrived (`data_fixes` key `stock_enters_on_receiving`).
+- **Received goods become utang usaha.** Each receipt posts its value — quantity that arrived × the PO line's price × the rate, in rupiah — to Persediaan (110401) and Utang Usaha (210101), and adds it to the PO's `payable_amount`. Finance sees it on the Finance page (**Utang usaha — owed to suppliers**) and in their bell, and records the payment there (Utang Usaha and the bank go down together). Purchasing cannot open it. Receipts from before this change were not back-filled as payables.
+- **One work order per stage** per project — a second receiving/QC/packaging/delivery WO is refused, and the form only offers stages not already on the board.
+
+### 8.8 The paperwork
+
+- **Invoice sheet:** the goods, with KODE BARANG (the part's SKU, taken from the quotation or price request when the customer's PO line has none), not a single "Pekerjaan PRJ-…" line. When the lines add up to more than the billed amount (a quotation discount), it prints JUMLAH, **POTONGAN HARGA**, then SUB BRUTO / PPN / SUB TOTAL, as the faktur pajak does; only an amount the lines cannot reach falls back to one line. KEPADA carries the office address, NPWP and its address, and phone.
+- **Delivery order:** the ship-to address is **picked when it is raised** (customer's site, office or tax address, one used on an earlier DO, or typed), with a **U/P** contact (defaults to the primary contact). The sheet is made out to that address, prints the part code before each description, and **"Prepared by" is whoever raised it**, not the approver. **Page two is the Surat Jalan Ekspedisi**: to the expedition company (the courier field), "N (terbilang) peti", one row per peti (listed when raising the DO, or one per line if none), the consignee with U/P, three signature boxes, and the return-the-white-copy note (`COMPANY_DO_RETURN_NOTE`).
+- **Delivered → Invoiced:** a job at Delivered moves to Invoiced when its invoice is approved, however it reached Delivered.
+
 ### 9.1 Invoices
 
 - **Finance owns invoice issuing** (director as backstop). Two flavours:

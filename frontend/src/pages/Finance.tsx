@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -37,7 +37,148 @@ export default function FinancePage() {
       <EFakturExport />
       <PendingInvoiceApprovals />
       <MoneyIn />
+      <Payables />
       <ArAging />
+    </div>
+  );
+}
+
+/**
+ * Utang usaha — what we owe suppliers for goods received.
+ *
+ * Receiving a purchasing PO's goods posts their value as owed (Persediaan up,
+ * Utang Usaha up). This is where it lands for finance, and where it is paid
+ * down: each payment brings Utang Usaha and the bank down together.
+ */
+function Payables() {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const [paying, setPaying] = useState<string | null>(null);
+  const [form, setForm] = useState({ amount: "", paid_at: "", method: "Transfer", reference: "" });
+  const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+  const list = useQuery({
+    queryKey: ["payables"],
+    queryFn: () => api.get("/finance/payables").then((r) => r.data as {
+      items: Array<{
+        po_id: string; po_number: string; supplier_name: string | null;
+        received_value: number; paid: number; outstanding: number;
+        last_received_at: string | null; status: string;
+      }>;
+      total_outstanding: number;
+    }),
+  });
+  const pay = useMutation({
+    mutationFn: (poId: string) => api.post(`/finance/payables/${poId}/pay`, {
+      amount: Number(form.amount) || 0,
+      paid_at: form.paid_at || null,
+      method: form.method || null,
+      reference: form.reference || null,
+    }),
+    onSuccess: () => {
+      setErr(null); setPaying(null);
+      qc.invalidateQueries({ queryKey: ["payables"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+      ?? t("The payment could not be recorded.", "Pembayaran tidak bisa dicatat."),
+    ),
+  });
+  const rows = list.data?.items ?? [];
+  return (
+    <div id="payables" className="card p-5 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <ReceiptText size={16} className="text-brand-600" />
+            {t("Utang usaha — owed to suppliers", "Utang usaha — kewajiban ke pemasok")}
+          </div>
+          <p className="text-xs muted mt-0.5 max-w-2xl">
+            {t("Goods received on a purchasing PO are owed for from the moment they arrive. Record the payment here when the money goes out.",
+               "Barang yang diterima dari PO pembelian menjadi utang sejak tiba. Catat pembayarannya di sini saat uang keluar.")}
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-wider muted">{t("Outstanding", "Belum dibayar")}</div>
+          <div className="text-lg font-semibold tabular-nums">{idr(list.data?.total_outstanding ?? 0)}</div>
+        </div>
+      </div>
+      {err && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{err}</div>}
+      {list.isLoading ? (
+        <div className="text-sm muted flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {T("Loading…")}</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm muted">
+          {t("Nothing owed — no received goods are waiting to be paid.",
+             "Tidak ada utang — tidak ada barang diterima yang menunggu dibayar.")}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60">
+              <tr>
+                <th className="th">{t("PO", "PO")}</th>
+                <th className="th">{t("Supplier", "Pemasok")}</th>
+                <th className="th">{t("Last received", "Terakhir diterima")}</th>
+                <th className="th text-right">{t("Received value", "Nilai diterima")}</th>
+                <th className="th text-right">{t("Paid", "Dibayar")}</th>
+                <th className="th text-right">{t("Outstanding", "Sisa")}</th>
+                <th className="th"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <Fragment key={r.po_id}>
+                  <tr className="border-t border-ink-100">
+                    <td className="td font-mono text-xs">
+                      <Link to={`/purchase-orders/${r.po_id}`} className="text-brand-700 hover:underline">{r.po_number}</Link>
+                    </td>
+                    <td className="td">{r.supplier_name ?? "—"}</td>
+                    <td className="td muted">{r.last_received_at ?? "—"}</td>
+                    <td className="td text-right tabular-nums">{idr(r.received_value)}</td>
+                    <td className="td text-right tabular-nums">{idr(r.paid)}</td>
+                    <td className="td text-right tabular-nums font-semibold">{idr(r.outstanding)}</td>
+                    <td className="td text-right">
+                      <button className="btn-ghost text-xs"
+                        onClick={() => {
+                          setPaying(paying === r.po_id ? null : r.po_id);
+                          setForm({ amount: String(Math.round(r.outstanding)), paid_at: "",
+                                    method: "Transfer", reference: "" });
+                        }}>
+                        <Banknote size={13} /> {t("Pay", "Bayar")}
+                      </button>
+                    </td>
+                  </tr>
+                  {paying === r.po_id && (
+                    <tr className="bg-ink-50/50">
+                      <td className="td" colSpan={7}>
+                        <div className="flex flex-wrap items-end gap-2">
+                          <label className="text-[11px]">{t("Amount (Rp)", "Jumlah (Rp)")}
+                            <input className="input text-sm w-40" type="number" min={0} value={form.amount}
+                              onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+                          <label className="text-[11px]">{t("Date", "Tanggal")}
+                            <input className="input text-sm" type="date" value={form.paid_at}
+                              onChange={(e) => setForm({ ...form, paid_at: e.target.value })} /></label>
+                          <label className="text-[11px]">{t("Method", "Metode")}
+                            <input className="input text-sm w-32" value={form.method}
+                              onChange={(e) => setForm({ ...form, method: e.target.value })} /></label>
+                          <label className="text-[11px]">{t("Reference", "Referensi")}
+                            <input className="input text-sm w-40" value={form.reference}
+                              onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+                          <button className="btn-primary text-sm" disabled={pay.isPending || !Number(form.amount)}
+                            onClick={() => pay.mutate(r.po_id)}>
+                            {pay.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                            {t("Record payment", "Catat pembayaran")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

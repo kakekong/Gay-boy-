@@ -16,9 +16,10 @@ they have three different right answers:
   before the ledger existed. The figure is probably right and the explanation
   is missing, so the explanation gets written and the count does not move.
   Deleting these because no document justifies them throws away real stock.
-* **A live order never counted in** — the shelf is short by goods somebody
-  ordered. Replayed through the ordinary path, so it is indistinguishable from
-  an order that worked first time.
+* **A received order never counted in** — the goods receipts say it arrived,
+  and the shelf is short by it. Stock enters on receiving, so the receipts are
+  replayed through the ordinary receiving path, indistinguishable from a
+  receipt that worked first time.
 
 And the one it must NOT touch: a hand adjustment after a physical count is a
 legitimate movement with no order behind it. A reconciliation that "corrects"
@@ -104,6 +105,9 @@ async def main():
         "supplier_id": sup, "project_id": proj, "po_date": "2026-09-08",
         "items": [{"description": f"Drift Part {TAG}", "qty": 12,
                    "unit_price": 1000, "uom": "pcs"}]}))
+    # Stock enters on receiving, so the twelve are received first.
+    await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
+        "po_id": po["id"], "lines": [{"line_no": 1, "qty": 12}]})
     drift_sku = None
     async with SessionLocal() as db:
         item = await db.scalar(select(InventoryItem).where(
@@ -124,11 +128,13 @@ async def main():
     check("an item holds a figure nothing explains",
           await stock_of(opening_sku) == 40, str(await stock_of(opening_sku)))
 
-    # (3) A LIVE ORDER NEVER COUNTED IN: an open PO with no po_in behind it.
+    # (3) A RECEIVED ORDER NEVER COUNTED IN: receipts on file, no movements.
     po2 = J(await c.post("/purchasing/po", headers=d, json={
         "supplier_id": sup, "project_id": proj, "po_date": "2026-09-08",
         "items": [{"description": f"Missed Part {TAG}", "qty": 7,
                    "unit_price": 900, "uom": "pcs"}]}))
+    await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
+        "po_id": po2["id"], "lines": [{"line_no": 1, "qty": 7}]})
     missed_sku = None
     async with SessionLocal() as db:
         item = await db.scalar(select(InventoryItem).where(

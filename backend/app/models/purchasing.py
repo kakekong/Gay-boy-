@@ -206,6 +206,26 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # multi-job order shows up on all of them.
     project_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="open", nullable=False, index=True)
+    # Utang usaha: what we owe the supplier for goods received on this order,
+    # in rupiah. Grows with each goods receipt (value of what arrived), and is
+    # what finance pays down with SupplierPayment rows.
+    payable_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+
+
+class SupplierPayment(Base, UUIDPK, TimestampMixin):
+    """Finance paying a supplier against a received purchase order."""
+    __tablename__ = "supplier_payments"
+
+    po_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("supplier_pos.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    paid_at: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    method: Mapped[str | None] = mapped_column(String(40))
+    reference: Mapped[str | None] = mapped_column(String(120))
+    notes: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
 class GoodsReceipt(Base, UUIDPK, TimestampMixin):

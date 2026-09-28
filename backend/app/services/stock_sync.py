@@ -15,12 +15,22 @@ Four documents, four different jobs:
 
 * a **submitted price request** puts the *product* in the catalogue and no
   quantity at all — a customer wanting something is not us having it;
-* an **open supplier PO** puts its lines into stock, creating the item — with
-  a generated SKU — if the price request has not already;
-* **receiving** corrects that to what actually turned up: order ten, five
-  arrive, and the shelf loses five. Not a second addition — see `sync_received`
-  — because the order already counted them;
+* an **open supplier PO** registers its lines in the catalogue, creating the
+  item — with a generated SKU — if the price request has not already, and
+  moves **no quantity**;
+* **receiving** — the receiving work order — puts what actually turned up
+  into stock: order ten, five arrive, and the shelf gains five. That is the
+  moment the goods exist here, against the goods receipt that says so, and it
+  is the moment the supplier is owed for them (utang usaha — see
+  `record_receiving`);
 * a **delivery order** takes them out again.
+
+**Stock rises on receiving, not on ordering.** It used to rise when the PO
+opened, so the count read "what we have plus what is on its way" and receiving
+corrected it. That was asked to change: goods go into inventory when they are
+received, against the paperwork of receiving, and a delivery order takes them
+out. Existing stock was re-based once to what the receipts say
+(`rebase_to_receipts`).
 
 Three decisions worth stating.
 
@@ -218,10 +228,16 @@ async def _already_moved(db: AsyncSession, reference: str, reason: str) -> bool:
     return done > undone
 
 
-async def receive_purchase_order(db: AsyncSession, po, user: User | None = None) -> list[str]:
-    """Put an open supplier PO's lines into stock. Returns the SKUs touched."""
+async def receive_purchase_order(db: AsyncSession, po, user: User | None = None,
+                                 *, move_stock: bool = False) -> list[str]:
+    """Register an open supplier PO's lines in the catalogue. Returns the SKUs.
+
+    Moves no quantity by default: goods enter stock when they are received
+    (`sync_received`), not when they are ordered. `move_stock=True` keeps the
+    old behaviour for anything that still needs it.
+    """
     ref = po.number
-    if await _already_moved(db, ref, "po_in"):
+    if move_stock and await _already_moved(db, ref, "po_in"):
         return []
     touched: list[str] = []
     changed = False
@@ -237,8 +253,9 @@ async def receive_purchase_order(db: AsyncSession, po, user: User | None = None)
             category=line.get("category"), sku=line.get("sku"),
             link=line.get("link"),
         )
-        await _move(db, item, delta=qty, reason="po_in", reference=ref,
-                    user=user, notes=f"Ordered on {ref}")
+        if move_stock:
+            await _move(db, item, delta=qty, reason="po_in", reference=ref,
+                        user=user, notes=f"Ordered on {ref}")
         # The line now says which part of the catalogue it is, so the PO can
         # be read against the shelf without matching strings a second time.
         if line.get("sku") != item.sku:
@@ -271,19 +288,15 @@ async def po_contribution(db: AsyncSession, po) -> dict[UUID, float]:
 
 async def sync_received(db: AsyncSession, po, received: dict[int, float],
                         user: User | None = None) -> list[dict]:
-    """Correct the count to what actually turned up.
+    """Put what actually turned up into stock.
 
-    A purchase order puts its goods on the shelf the moment it opens — see the
-    module docstring; that is deliberate and it is what makes the count reflect
-    what has been *committed*. It is also a promise the supplier may not keep.
-    Order ten and five arrive, and the shelf says ten until somebody notices.
-
-    So receiving is a correction, not a second addition. `received` maps a PO
-    line number to the quantity actually in the building, and this moves each
+    `received` maps a PO line number to the quantity now in the building for
+    that line (a running total, not this delivery alone), and this moves each
     item to exactly that: `delta = received − whatever this PO has contributed
-    so far`. Ordered ten, received five, and the shelf loses five. A later
-    delivery of the missing five adds them back. Receiving all ten moves
-    nothing at all, which is the common case and should cost nothing.
+    so far`. Nothing has been contributed before the first receipt, so the
+    first receipt adds everything that arrived; a second delivery adds the
+    rest; a corrected count moves the difference either way. Running it twice
+    moves nothing the second time.
 
     Lines absent from `received` are left alone — that is the difference
     between "five arrived" and "nothing has been said about this line yet", and
@@ -339,6 +352,67 @@ async def sync_received(db: AsyncSession, po, received: dict[int, float],
         po.items = lines
     await db.flush()
     return out
+
+
+async def rebase_to_receipts(db: AsyncSession, user: User | None = None) -> dict:
+    """Re-base every order's stock contribution on its goods receipts.
+
+    The one-off move from "stock rises when the PO opens" to "stock rises
+    when it is received". Every order ends contributing exactly what its
+    receipts say arrived — nothing for an order with no receipt, however long
+    it has been open — written as movements against the order's number like
+    every other change, so the ledger shows the re-basing rather than a
+    number that jumped.
+    """
+    from app.models.purchasing import GoodsReceipt, SupplierPO
+
+    pos = (await db.scalars(select(SupplierPO))).all()
+    changed_pos = moved = 0
+    for po in pos:
+        if not (po.number or "").strip():
+            continue
+        receipts = (await db.scalars(
+            select(GoodsReceipt).where(GoodsReceipt.po_id == po.id)
+            .order_by(GoodsReceipt.created_at.asc()))).all()
+        received: dict[int, float] = {}
+        for gr in receipts:
+            for row in (gr.items or []):
+                try:
+                    received[int(row.get("line_no"))] = float(row.get("qty") or 0)
+                except (TypeError, ValueError):
+                    continue
+        target: dict = {}
+        if po.status != "cancelled":
+            for idx, line in enumerate(po.items or [], start=1):
+                name = line.get("description") or line.get("name")
+                if not (name or "").strip():
+                    continue
+                qty_in = received.get(idx, 0.0)
+                item = await _item_for(
+                    db, name=name, uom=line.get("uom"),
+                    unit_cost=line.get("unit_price") or line.get("unit_cost"),
+                    category=line.get("category"), sku=line.get("sku"),
+                    link=line.get("link"),
+                )
+                target[item.id] = target.get(item.id, 0.0) + qty_in
+        have = await po_contribution(db, po)
+        touched = False
+        for item_id in set(have) | set(target):
+            delta = target.get(item_id, 0.0) - have.get(item_id, 0.0)
+            if abs(delta) < 1e-9:
+                continue
+            item = await db.get(InventoryItem, item_id)
+            if item is None:
+                continue
+            await _move(db, item, delta=delta, reason="gr_sync", reference=po.number,
+                        user=user,
+                        notes=f"Re-based to received on {po.number} — stock "
+                              "now enters on receiving, not on ordering")
+            moved += 1
+            touched = True
+        changed_pos += touched
+    await db.flush()
+    return {"orders": changed_pos, "movements": moved}
 
 
 async def withdraw_purchase_order(db: AsyncSession, po,

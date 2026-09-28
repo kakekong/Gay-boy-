@@ -188,6 +188,33 @@ async def list_notifications(
                 "at": po.dp_finance_approved_at or po.created_at,
             })
 
+    # 1b-ii. Utang usaha: goods received on a purchasing PO and not yet paid.
+    # Receiving posts the value as owed; finance hears about it here.
+    if role == Role.FINANCE:
+        from app.models.purchasing import Supplier, SupplierPayment, SupplierPO
+        paid_sq = (select(SupplierPayment.po_id,
+                          func.coalesce(func.sum(SupplierPayment.amount), 0).label("paid"))
+                   .group_by(SupplierPayment.po_id).subquery())
+        owed = (await db.execute(
+            select(SupplierPO, Supplier.name, func.coalesce(paid_sq.c.paid, 0))
+            .outerjoin(Supplier, SupplierPO.supplier_id == Supplier.id)
+            .outerjoin(paid_sq, paid_sq.c.po_id == SupplierPO.id)
+            .where(SupplierPO.payable_amount > func.coalesce(paid_sq.c.paid, 0) + 0.01)
+            .order_by(SupplierPO.updated_at.desc()).limit(20)
+        )).all()
+        for po, sup_name, done in owed:
+            out = float(po.payable_amount or 0) - float(done or 0)
+            items.append({
+                "id": f"payable:{po.id}",
+                "kind": "payment_due",
+                "severity": "medium",
+                "title": f"Utang usaha: {po.number}",
+                "body": f"{sup_name or 'Supplier'} · goods received — "
+                        f"Rp {out:,.0f} to pay",
+                "link": "/finance#payables",
+                "at": po.updated_at or po.created_at,
+            })
+
     # 1c. The deposit cleared — for the rep whose job just started.
     #
     # Sales does not see the deposit invoice: it is finance's document from

@@ -616,6 +616,9 @@ COLUMN_MIGRATIONS: list[str] = [
         END LOOP;
     END $mig$""",
 
+    # ── Utang usaha: what we owe suppliers for goods received ───────────
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
+
     # ── Delivery order: where it goes, to whom, and the expedition page ──
     "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS ship_to TEXT",
     "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS attention TEXT",
@@ -702,6 +705,24 @@ async def ensure_schema() -> None:
                 # Don't block seed on a single bad migration; report so we can fix it.
                 print(f"  ! migration skipped: {stmt[:80]}…  ({exc.__class__.__name__})")
     print(f"Ran {len(COLUMN_MIGRATIONS)} column migration(s) (no-op when up-to-date).")
+
+    # One-off data fixes that need Python rather than SQL, recorded in
+    # data_fixes so each runs exactly once per database.
+    from app.core.db import SessionLocal
+    async with SessionLocal() as db:
+        done = await db.scalar(text(
+            "SELECT 1 FROM data_fixes WHERE key = 'stock_enters_on_receiving'"))
+        if not done:
+            # Stock used to rise when a supplier PO opened; it now rises when
+            # the goods are received. Re-base every order's contribution on
+            # its goods receipts, so an order nothing has arrived on stops
+            # counting as stock.
+            from app.services.stock_sync import rebase_to_receipts
+            res = await rebase_to_receipts(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('stock_enters_on_receiving')"))
+            await db.commit()
+            print(f"Stock re-based to receipts: {res}")
 
 
 async def main() -> None:

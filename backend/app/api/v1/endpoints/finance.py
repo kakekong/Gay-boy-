@@ -926,3 +926,126 @@ async def record_payment(invoice_id: UUID, amount: float, method: str | None = N
         ),
         db=db, me=user,
     )
+
+
+# ─── Utang usaha — what we owe suppliers ─────────────────────────────────────
+#
+# A purchasing PO whose goods have been received is owed for: receiving posts
+# the value to Persediaan and Utang Usaha and adds it to the order's
+# `payable_amount`. This is finance's view of that, and the place they pay it
+# down. Purchasing never sees it — the router gate above is finance and
+# management only.
+
+@router.get("/payables")
+async def list_payables(
+    include_paid: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.purchasing import GoodsReceipt, Supplier, SupplierPayment, SupplierPO
+
+    pos = (await db.scalars(
+        select(SupplierPO).where(SupplierPO.payable_amount > 0)
+        .order_by(SupplierPO.updated_at.desc())
+    )).all()
+    if not pos:
+        return {"items": [], "total_outstanding": 0.0}
+    ids = [p.id for p in pos]
+    paid = dict((await db.execute(
+        select(SupplierPayment.po_id, func.coalesce(func.sum(SupplierPayment.amount), 0))
+        .where(SupplierPayment.po_id.in_(ids)).group_by(SupplierPayment.po_id)
+    )).all())
+    last_rcv = dict((await db.execute(
+        select(GoodsReceipt.po_id, func.max(GoodsReceipt.received_at))
+        .where(GoodsReceipt.po_id.in_(ids)).group_by(GoodsReceipt.po_id)
+    )).all())
+    sups = {s.id: s.name for s in (await db.scalars(
+        select(Supplier).where(Supplier.id.in_({p.supplier_id for p in pos if p.supplier_id}))
+    )).all()}
+    items = []
+    total_out = 0.0
+    for p in pos:
+        owed = float(p.payable_amount or 0)
+        done = float(paid.get(p.id) or 0)
+        out = round(owed - done, 2)
+        if out <= 0.004 and not include_paid:
+            continue
+        total_out += max(out, 0)
+        items.append({
+            "po_id": str(p.id), "po_number": p.number,
+            "supplier_id": str(p.supplier_id) if p.supplier_id else None,
+            "supplier_name": sups.get(p.supplier_id),
+            "currency": p.currency, "fx_rate": float(p.fx_rate) if p.fx_rate else None,
+            "received_value": owed, "paid": done, "outstanding": out,
+            "last_received_at": last_rcv.get(p.id),
+            "status": "paid" if out <= 0.004 else ("partial" if done > 0 else "unpaid"),
+        })
+    return {"items": items, "total_outstanding": round(total_out, 2)}
+
+
+class SupplierPaymentIn(BaseModel):
+    amount: float
+    paid_at: str | None = None
+    method: str | None = None
+    reference: str | None = None
+    notes: str | None = None
+
+
+@router.post("/payables/{po_id}/pay", status_code=201)
+async def pay_supplier(
+    po_id: UUID,
+    payload: SupplierPaymentIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Finance records paying the supplier: Utang Usaha down, the bank down."""
+    from app.models.purchasing import Supplier, SupplierPayment, SupplierPO
+    from app.services.ledger import post_supplier_payment
+
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Paying a supplier is finance's.")
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
+    if payload.amount <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The amount must be above zero.")
+    paid = float(await db.scalar(
+        select(func.coalesce(func.sum(SupplierPayment.amount), 0))
+        .where(SupplierPayment.po_id == po.id)) or 0)
+    outstanding = round(float(po.payable_amount or 0) - paid, 2)
+    if outstanding <= 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Nothing is owed on {po.number} — either it is paid in full or "
+            "nothing has been received against it yet.")
+    if payload.amount > outstanding + 0.01:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"That is more than is owed on {po.number} — "
+            f"Rp {outstanding:,.0f} is outstanding for what has been received.")
+    when = date.today()
+    if payload.paid_at:
+        try:
+            when = date.fromisoformat(payload.paid_at)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "paid_at must be YYYY-MM-DD")
+    pay = SupplierPayment(po_id=po.id, paid_at=when, amount=round(payload.amount, 2),
+                          method=(payload.method or "").strip() or None,
+                          reference=(payload.reference or "").strip() or None,
+                          notes=(payload.notes or "").strip() or None,
+                          recorded_by=user.id)
+    db.add(pay)
+    await db.flush()
+    sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    await post_supplier_payment(db, amount=pay.amount, entry_date=when,
+                                po_number=po.number,
+                                supplier_name=sup.name if sup else None,
+                                payment_id=pay.id, created_by=user.id)
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="pay_supplier", entity="supplier_po",
+                       entity_id=po.id, after={"amount": pay.amount,
+                                               "paid_at": when.isoformat()})
+    await db.flush()
+    return {"ok": True, "id": str(pay.id), "po_number": po.number,
+            "paid": round(paid + pay.amount, 2),
+            "outstanding": round(outstanding - pay.amount, 2)}

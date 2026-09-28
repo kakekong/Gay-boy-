@@ -28,10 +28,11 @@ explanation is written — an `opening` movement for exactly what is there. The
 count does not move. Erasing these because no document justifies them would
 throw away real stock on a technicality.
 
-**Documents that never landed.** A supplier order that is open but whose goods
-were never counted in: the shelf is short by an order somebody placed. The
-order is replayed through the ordinary path, so it lands as `po_in` against its
-own number and is indistinguishable from one that worked first time.
+**Documents that never landed.** A supplier order whose goods receipts say
+something arrived, but whose movements don't add up to it: the shelf is short
+(or long) by what the receiving paperwork records. The receipts are re-applied
+through the ordinary receiving path. An order with no receipt puts nothing on
+the shelf — goods enter stock when they are received, not when ordered.
 
 What this deliberately does **not** do is decide that undocumented stock is
 wrong. A hand adjustment after a physical count is a legitimate movement with
@@ -203,8 +204,13 @@ async def _replay_missing_pos(db: AsyncSession, *, apply: bool,
     for po in pos:
         if not (po.number or "").strip():
             continue
-        if await _already_moved(db, po.number, "po_in"):
-            continue
+        receipted_now = await _receipted_quantities(db, po)
+        if not receipted_now:
+            continue                  # nothing received, nothing on the shelf
+        from app.services.stock_sync import po_contribution
+        have = sum((await po_contribution(db, po)).values())
+        if abs(have - sum(receipted_now.values())) < 1e-9:
+            continue                  # the shelf already says what arrived
         lines = [i for i in (po.items or [])
                  if float(i.get("qty") or 0) > 0
                  and ((i.get("description") or i.get("name") or "").strip())]
@@ -214,11 +220,9 @@ async def _replay_missing_pos(db: AsyncSession, *, apply: bool,
 
         ordered = sum(float(i.get("qty") or 0) for i in lines)
         receipted = await _receipted_quantities(db, po)
-        # What the shelf will hold afterwards: the receipts where a line has
-        # one, the ordered figure where it does not (nothing has been said
-        # about that line yet, which is not the same as "none arrived").
+        # What the shelf will hold afterwards: what the receipts say arrived.
         landing = sum(
-            receipted.get(idx, float(line.get("qty") or 0))
+            receipted.get(idx, 0.0)
             for idx, line in enumerate(po.items or [], start=1)
             if float(line.get("qty") or 0) > 0
             and ((line.get("description") or line.get("name") or "").strip())

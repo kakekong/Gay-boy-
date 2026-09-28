@@ -254,6 +254,15 @@ async def main():
     check("the director releases it", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:150])
 
+    released = await find_item(sku=MY_SKU)
+    check("releasing the order moves no stock — goods enter on receiving",
+          released and released["current_stock"] == 0, str(released))
+    # The receiving work order records the hundred metres that arrived.
+    r = await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
+        "po_id": po["id"], "lines": [{"line_no": 1, "qty": 100}]})
+    check("the hundred metres are received", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:150])
+
     cable2 = await find_item(sku=MY_SKU)
     check("the goods land on the row the price request created",
           cable2 and cable2["current_stock"] == 100, str(cable2))

@@ -2773,6 +2773,22 @@ class ReceiveIn(BaseModel):
     notes: str | None = None
 
 
+def _receipt_value(po, moved: list[dict]) -> float:
+    """Rupiah value of what this receipt changed: Σ delta × unit price × rate."""
+    rate = 1.0
+    if (po.currency or "IDR").upper() != "IDR":
+        rate = float(po.fx_rate or 0) or 1.0
+    lines = list(po.items or [])
+    total = 0.0
+    for m in moved:
+        idx = int(m.get("line_no") or 0) - 1
+        if not (0 <= idx < len(lines)):
+            continue
+        unit = float(lines[idx].get("unit_price") or lines[idx].get("unit_cost") or 0)
+        total += float(m.get("delta") or 0) * unit * rate
+    return round(total, 2)
+
+
 @router.post("/projects/{project_id}/receiving")
 async def record_receiving(
     project_id: UUID,
@@ -2853,6 +2869,21 @@ async def record_receiving(
         po.status = "received"
     await db.flush()
 
+    # Received goods are owed for: utang usaha, for the value of what arrived
+    # (the quantity that moved × the line's price, in rupiah). It lands in
+    # finance's payables list and the ledger — Persediaan up, Utang Usaha up.
+    payable = _receipt_value(po, moved)
+    if abs(payable) >= 0.005:
+        from app.models.purchasing import Supplier
+        from app.services.ledger import post_goods_receipt
+        sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+        po.payable_amount = round(float(po.payable_amount or 0) + payable, 2)
+        await post_goods_receipt(
+            db, value=payable, entry_date=gr.received_at or date_t.today(),
+            po_number=po.number, supplier_name=sup.name if sup else None,
+            receipt_id=gr.id, created_by=user.id)
+        await db.flush()
+
     from app.core.audit import record as audit_record
     await audit_record(
         db, actor=user, action="received", entity="supplier_po", entity_id=po.id,
@@ -2861,6 +2892,8 @@ async def record_receiving(
                           "delta": m["delta"]} for m in moved]},
     )
     return {"ok": True, "goods_receipt_id": str(gr.id), "po_number": po.number,
+            "payable_added": round(payable, 2),
+            "payable_amount": float(po.payable_amount or 0),
             "lines": moved,
             "stock_changed": [m for m in moved if abs(m["delta"]) > 1e-9]}
 

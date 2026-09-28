@@ -1153,11 +1153,9 @@ async def create_po(
     from app.models.operation import advance_project_status
     if project is not None:
         advance_project_status(project, "purchasing")
-    # An open PO is goods on their way, so the shelf count follows it — and
-    # each line becomes a catalogue item, with a generated SKU, the first
-    # time that part is ordered. A PO still waiting for the director does
-    # nothing to stock: it may yet be cancelled, and counting goods nobody
-    # was told to send is how an inventory stops being believed.
+    # Each line becomes a catalogue item, with a generated SKU, the first
+    # time that part is ordered. No quantity moves: goods enter stock when
+    # the receiving work order records them, not when they are ordered.
     if po.status == "open":
         from app.services.stock_sync import receive_purchase_order
         await receive_purchase_order(db, po, user)
@@ -1740,10 +1738,9 @@ async def update_po(
     if "status" in data and data["status"]:
         was_status = po.status
         po.status = data["status"]
-        # Stock follows the order's life: cancelling one takes its goods back
-        # off the shelf, and reopening a cancelled one puts them back. Each is
-        # written as its own movement against the PO number, so the ledger
-        # reads as what happened rather than as a number that shifted.
+        # Cancelling takes back whatever the order put on the shelf (what was
+        # received against it); reopening re-registers its parts. Stock itself
+        # only enters on receiving.
         from app.services.stock_sync import receive_purchase_order, withdraw_purchase_order
         if po.status == "cancelled" and was_status != "cancelled":
             # The net, not just the ordered quantity — an order that was

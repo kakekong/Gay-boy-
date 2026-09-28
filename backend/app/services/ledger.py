@@ -272,3 +272,67 @@ async def reverse_payment(
         )
         moves.append({**m, "role": role, "reversed": True})
     return moves
+
+
+# ─── Utang usaha: suppliers ───────────────────────────────────────────────────
+#
+# Goods received on a purchase order are owed for from the moment they are in
+# the building: inventory up, utang usaha up, for the value of what arrived.
+# Paying the supplier is the other half: utang usaha down, the bank down.
+INVENTORY_ACCOUNT = "110401"     # Persediaan
+PAYABLE_ACCOUNT = "210101"       # Utang Usaha IDR
+
+
+async def post_goods_receipt(
+    db: AsyncSession, *, value: float, entry_date: date, po_number: str,
+    supplier_name: str | None = None, receipt_id: UUID | None = None,
+    created_by: UUID | None = None,
+) -> list[dict]:
+    """Goods received: Persediaan up, Utang Usaha up, by `value` (rupiah).
+
+    A negative value (a receipt corrected downward) reverses the difference.
+    """
+    if abs(value) < 0.005:
+        return []
+    moves: list[dict] = []
+    who = f" — {supplier_name}" if supplier_name else ""
+    for acc_no, role in ((INVENTORY_ACCOUNT, "inventory"), (PAYABLE_ACCOUNT, "payable")):
+        m = await _bump(db, acc_no, value)
+        if not m:
+            continue
+        await journal_post(
+            db, entry_date=entry_date, account_no=m["account_no"],
+            account_type=m["account_type"], account_name=m["name"],
+            amount=m["delta"], source_type="goods_receipt", source_id=receipt_id,
+            source_ref=po_number,
+            memo=f"Goods received on {po_number}{who} ({role})",
+            created_by=created_by,
+        )
+        moves.append({**m, "role": role})
+    return moves
+
+
+async def post_supplier_payment(
+    db: AsyncSession, *, amount: float, entry_date: date, po_number: str,
+    supplier_name: str | None = None, payment_id: UUID | None = None,
+    created_by: UUID | None = None, cash_account_no: str = PAYMENT_CASH_DEFAULT,
+) -> list[dict]:
+    """Paying a supplier: Utang Usaha down, the bank down."""
+    if amount <= 0:
+        return []
+    moves: list[dict] = []
+    who = f" — {supplier_name}" if supplier_name else ""
+    for acc_no, role in ((PAYABLE_ACCOUNT, "payable"), (cash_account_no, "cash")):
+        m = await _bump(db, acc_no, -amount)
+        if not m:
+            continue
+        await journal_post(
+            db, entry_date=entry_date, account_no=m["account_no"],
+            account_type=m["account_type"], account_name=m["name"],
+            amount=m["delta"], source_type="supplier_payment", source_id=payment_id,
+            source_ref=po_number,
+            memo=f"Paid supplier for {po_number}{who} ({role})",
+            created_by=created_by,
+        )
+        moves.append({**m, "role": role})
+    return moves

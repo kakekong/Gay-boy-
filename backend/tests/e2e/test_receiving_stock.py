@@ -1,20 +1,17 @@
-"""Order ten, receive five, and the shelf says five.
+"""Order ten, receive five, and the shelf says five — and the supplier is owed.
 
-A supplier PO puts its goods into stock the moment it opens. That is
-deliberate — the count then reads "what we have plus what is on its way",
-which is the figure somebody promising a delivery date actually needs. The gap
-it leaves is the one everybody hits: order ten, five turn up, and the shelf
-still says ten until a person notices, which is exactly the way a stock figure
-stops being trusted.
+Goods enter stock when they are **received**, not when they are ordered. A
+supplier PO opening registers its parts in the catalogue and moves no
+quantity; the receiving work order records what actually arrived, and that is
+what goes into inventory. The same receipt makes the supplier owed for it:
+utang usaha, posted to the ledger and listed for finance, who pay it down.
 
-Receiving closes it. The receiving work order lists every line on every
-supplier order feeding the job; you tick what arrived, correct the quantities,
-and sync. What that must get right:
+The receiving work order lists every line on every supplier order feeding the
+job; you tick what arrived, set the quantities, and record. What that must get
+right:
 
-* **It is a correction, not a second addition.** The order already counted the
-  goods once. Receiving moves each line to the quantity in the building —
-  ordered ten, received five, the shelf loses five — so pressing sync when
-  everything arrived moves nothing at all.
+* **Stock is what arrived.** Ordered ten, received five: the shelf gains five.
+  Recording the same figure again moves nothing.
 * **It is idempotent.** The delta is computed from what the order currently
   contributes, so the second press is a no-op and the tenth is too.
 * **A line nobody has counted yet is not a line that received nothing.** Only
@@ -102,8 +99,8 @@ async def main():
         return float(it.get("current_stock") or 0) if it else None
 
     A, B = f"Chain A {TAG}", f"Chain B {TAG}"
-    check("opening the order puts the ordered quantity on the shelf",
-          await stock(A) == 10 and await stock(B) == 4,
+    check("opening the order puts nothing on the shelf — stock enters on receiving",
+          (await stock(A) or 0) == 0 and (await stock(B) or 0) == 0,
           f"A={await stock(A)} B={await stock(B)}")
 
     # ══ the receiving work order's list ══════════════════════════════════
@@ -116,8 +113,8 @@ async def main():
     lines = view["purchase_orders"][0]["lines"]
     check("...listing both lines with what was ordered",
           [l["ordered"] for l in lines] == [10, 4], str([l["ordered"] for l in lines]))
-    check("...and what the shelf currently credits to this order",
-          [l["counted_in"] for l in lines] == [10, 4],
+    check("...and that nothing has been received into stock yet",
+          all((l["counted_in"] or 0) == 0 for l in lines),
           str([l["counted_in"] for l in lines]))
     check("...with nothing received against it yet",
           all(l["last_received"] is None for l in lines),
@@ -133,11 +130,22 @@ async def main():
         "lines": [{"line_no": 1, "qty": 5}]})
     check("the receipt is recorded", r.status_code == 200, f"{r.status_code} {why(r)}")
     body = J(r)
-    check("...and it says what moved",
-          body["lines"][0]["delta"] == -5, str(body["lines"][0]))
+    check("...and it says what moved: five into stock",
+          body["lines"][0]["delta"] == 5, str(body["lines"][0]))
     check("the shelf now says five", await stock(A) == 5, str(await stock(A)))
-    check("...and the line nobody counted is untouched — not zeroed",
-          await stock(B) == 4, str(await stock(B)))
+    check("...and the line nobody counted is untouched",
+          (await stock(B) or 0) == 0, str(await stock(B)))
+
+    # Received goods are owed for: five at Rp 100.000 is Rp 500.000 of utang usaha.
+    check("the receipt makes the supplier owed for what arrived",
+          body.get("payable_added") == 500_000, str(body.get("payable_added")))
+    fin = await login("finance@demo.local")
+    pay = J(await c.get("/finance/payables", headers=fin))
+    row = next((x for x in pay.get("items", []) if x["po_id"] == po["id"]), None)
+    check("...and it is on finance's utang usaha list",
+          row is not None and row["outstanding"] == 500_000, str(row))
+    r = await c.get("/finance/payables", headers=pur)
+    check("...which purchasing cannot open", r.status_code == 403, str(r.status_code))
 
     check("a goods receipt exists for it", bool(body.get("goods_receipt_id")),
           str(body.get("goods_receipt_id")))
@@ -170,11 +178,33 @@ async def main():
     check("recording the full quantity works", r.status_code == 200,
           f"{r.status_code} {why(r)}")
     check("...the shelf is back to ten", await stock(A) == 10, str(await stock(A)))
-    check("...and the untouched line was already right, so it did not move",
+    check("...and the second line's four are in too",
           await stock(B) == 4, str(await stock(B)))
     changed = {m["line_no"]: m["delta"] for m in J(r)["stock_changed"]}
-    check("...only the line that actually changed is reported",
-          changed == {1: 5}, str(changed))
+    check("...each line reports what it added",
+          changed == {1: 5, 2: 4}, str(changed))
+    check("...and the payable grows by what arrived: 5 × 100.000 + 4 × 50.000",
+          J(r).get("payable_added") == 700_000 and J(r).get("payable_amount") == 1_200_000,
+          f"{J(r).get('payable_added')} / {J(r).get('payable_amount')}")
+
+    print("\n── finance pays the supplier ──")
+    r = await c.post(f"/finance/payables/{po['id']}/pay", headers=fin,
+                     json={"amount": 2_000_000, "paid_at": "2026-09-25"})
+    check("paying more than is owed is refused", r.status_code == 409,
+          f"{r.status_code} {why(r)}")
+    r = await c.post(f"/finance/payables/{po['id']}/pay", headers=pur,
+                     json={"amount": 100_000})
+    check("purchasing cannot record a supplier payment", r.status_code == 403,
+          str(r.status_code))
+    r = await c.post(f"/finance/payables/{po['id']}/pay", headers=fin,
+                     json={"amount": 1_000_000, "paid_at": "2026-09-25",
+                           "reference": f"TRF-{TAG}"})
+    check("finance records a part payment", r.status_code == 201 and
+          J(r).get("outstanding") == 200_000, f"{r.status_code} {J(r)}")
+    pay = J(await c.get("/finance/payables", headers=fin))
+    row = next((x for x in pay.get("items", []) if x["po_id"] == po["id"]), None)
+    check("...and the list shows what is left", row is not None
+          and row["paid"] == 1_000_000 and row["status"] == "partial", str(row))
 
     # ══ more than ordered ════════════════════════════════════════════════
     print("\n── and an over-delivery is recorded, not argued with ──")
@@ -208,8 +238,8 @@ async def main():
         "items": [{"description": f"Chain C {TAG}", "qty": 10, "unit_price": 90_000,
                    "uom": "pcs"}]}))
     C = f"Chain C {TAG}"
-    check("the second order puts ten on the shelf", await stock(C) == 10,
-          str(await stock(C)))
+    check("the second order puts nothing on the shelf yet",
+          (await stock(C) or 0) == 0, str(await stock(C)))
     await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
         "po_id": po2["id"], "lines": [{"line_no": 1, "qty": 5}]})
     check("...five arrive", await stock(C) == 5, str(await stock(C)))
@@ -222,11 +252,11 @@ async def main():
     print("\n── and reopening it, then syncing, gets back to the truth ──")
     r = await c.patch(f"/purchasing/po/{po2['id']}", headers=d, json={"status": "open"})
     check("it reopens", r.status_code == 200, f"{r.status_code} {why(r)}")
-    check("...with the ordered ten back on order", await stock(C) == 10,
-          str(await stock(C)))
+    check("...and reopening puts nothing on the shelf — nothing new arrived",
+          (await stock(C) or 0) == 0, str(await stock(C)))
     await c.post(f"/operation/projects/{proj}/receiving", headers=pur, json={
         "po_id": po2["id"], "lines": [{"line_no": 1, "qty": 5}]})
-    check("...and syncing receiving corrects it to five again",
+    check("...and recording the receipt puts the five back",
           await stock(C) == 5, str(await stock(C)))
 
     await c.aclose()

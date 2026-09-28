@@ -39,6 +39,7 @@ from app.models.purchasing import (  # noqa: F401
     RFQ,
     Supplier,
     SupplierPO,
+    SupplierPayment,
 )
 from app.models.quotation import Product, Quotation, QuotationItem  # noqa: F401
 from app.models.salary import Salary  # noqa: F401
