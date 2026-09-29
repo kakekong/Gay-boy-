@@ -55,6 +55,8 @@ class QuotationOut(BaseModel):
     # Injected by _load (not columns): the PR's human number for the
     # click-through chip, the revision lineage, and any newer revisions.
     price_request_number: str | None = None
+    # The list's Customer column and search — filled by the list endpoint.
+    customer_name: str | None = None
     parent_id: UUID | None = None
     parent_number: str | None = None
     revisions: list[dict] = Field(default_factory=list)

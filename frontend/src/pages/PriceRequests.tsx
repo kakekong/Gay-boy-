@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Tag, Plus, Trash2, Send, Check, X, Loader2, ArrowLeft, FileText,
-  Pencil, ClipboardList,
+  Pencil, ClipboardList, Search, Filter,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -163,6 +163,29 @@ export default function PriceRequestsPage() {
     queryFn: () => api.get("/price-requests").then((r) => r.data),
   });
 
+  // Search and filter the loaded list, the way the Customer POs page does,
+  // with the count beside them so it is clear how many there are. Search
+  // reaches the goods too — "which request was the 12T sprocket?" is the
+  // question people actually have.
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const rows = useMemo(() => {
+    let all: any[] = list.data ?? [];
+    if (statusFilter) all = all.filter((pr) => pr.status === statusFilter);
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      all = all.filter((pr) =>
+        (pr.number ?? "").toLowerCase().includes(needle)
+        || (pr.customer_name ?? "").toLowerCase().includes(needle)
+        || (pr.items ?? []).some((it: any) =>
+             (it.description ?? "").toLowerCase().includes(needle)
+             || (it.sku ?? "").toLowerCase().includes(needle))
+        || (pr.linked_quotations ?? []).some((q: any) =>
+             (q.number ?? "").toLowerCase().includes(needle)));
+    }
+    return all;
+  }, [list.data, search, statusFilter]);
+
   if (selected) {
     return (
       <PriceRequestDetail
@@ -224,14 +247,48 @@ export default function PriceRequestsPage() {
         />
       )}
 
-      <div className="card overflow-hidden">
+      <div className="card p-3 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label={t("Search price requests", "Cari permintaan harga")}
+            placeholder={role === "purchasing"
+              ? t("Search by request number, item or SKU…",
+                  "Cari berdasarkan nomor permintaan, barang, atau SKU…")
+              : t("Search by request number, customer, item, SKU or quotation…",
+                  "Cari berdasarkan nomor permintaan, pelanggan, barang, SKU, atau penawaran…")}
+            className="input pl-9"
+          />
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label={T("Status")}
+          className="input max-w-[200px]"
+        >
+          <option value="">{t("All statuses", "Semua status")}</option>
+          {Object.keys(STATUS_CHIP)
+            .filter((k) => !(role === "purchasing" && k === "draft"))
+            .map((k) => <option key={k} value={k}>{sl(k)}</option>)}
+        </select>
+        <div className="text-xs muted tabular-nums">
+          <Filter size={12} className="inline mr-1" />
+          {rows.length} {t("of", "dari")} {(list.data ?? []).length} {t("price requests", "permintaan harga")}
+        </div>
+      </div>
+
+      <div className="card overflow-hidden overflow-x-auto">
         {list.isLoading ? <div className="p-8 muted text-sm">{t("Loading…", "Memuat…")}</div>
           : (list.data ?? []).length === 0 ? <div className="p-8 text-center muted text-sm">{t("No price requests yet.", "Belum ada permintaan harga.")}</div>
+          : rows.length === 0 ? <div className="p-8 text-center muted text-sm">{t("No price requests match your search.", "Tidak ada permintaan harga yang cocok dengan pencarian Anda.")}</div>
           : (
             <table className="w-full text-sm">
               <thead className="bg-ink-50/60">
                 <tr>
                   <th className="th">{t("Number", "Nomor")}</th>
+                  <th className="th">{t("Date", "Tanggal")}</th>
                   <th className="th">{role === "purchasing" ? t("Order", "Pesanan") : t("Customer", "Pelanggan")}</th>
                   <th className="th">{t("Lines", "Baris")}</th>
                   <th className="th">{T("Status")}</th>
@@ -240,10 +297,13 @@ export default function PriceRequestsPage() {
                 </tr>
               </thead>
               <tbody>
-                {(list.data ?? []).map((pr: any) => (
+                {rows.map((pr: any) => (
                   <tr key={pr.id} className="border-t border-ink-100 hover:bg-ink-50/40 cursor-pointer"
                     onClick={() => setSelected(pr.id)}>
                     <td className="td font-mono text-xs">{pr.number}</td>
+                    <td className="td whitespace-nowrap text-xs muted">
+                      {pr.created_at ? new Date(pr.created_at).toLocaleDateString(locale()) : "—"}
+                    </td>
                     <td className="td">{pr.customer_name}</td>
                     <td className="td muted">{pr.items?.length ?? 0}</td>
                     <td className="td">

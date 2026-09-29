@@ -1235,7 +1235,29 @@ async def list_quotations(
     if customer_id:
         stmt = stmt.where(Quotation.customer_id == customer_id)
     rows = (await db.scalars(stmt)).all()
-    return [QuotationOut.model_validate(r) for r in rows]
+    # What the list shows and searches beside the number: the customer, the
+    # price request it came from, the rep — one query each for the page.
+    cust_ids = {r.customer_id for r in rows if r.customer_id}
+    pr_ids = {r.price_request_id for r in rows if r.price_request_id}
+    rep_ids = {r.sales_pic_id for r in rows if r.sales_pic_id}
+    names = dict((await db.execute(
+        select(Customer.id, Customer.company_name).where(Customer.id.in_(cust_ids))
+    )).all()) if cust_ids else {}
+    from app.models.price_request import PriceRequest
+    pr_nums = dict((await db.execute(
+        select(PriceRequest.id, PriceRequest.number).where(PriceRequest.id.in_(pr_ids))
+    )).all()) if pr_ids else {}
+    reps = dict((await db.execute(
+        select(User.id, User.full_name).where(User.id.in_(rep_ids))
+    )).all()) if rep_ids else {}
+    out = []
+    for r in rows:
+        o = QuotationOut.model_validate(r)
+        o.customer_name = names.get(r.customer_id)
+        o.price_request_number = pr_nums.get(r.price_request_id)
+        o.sales_pic_name = reps.get(r.sales_pic_id)
+        out.append(o)
+    return out
 
 
 @router.get("/stats")

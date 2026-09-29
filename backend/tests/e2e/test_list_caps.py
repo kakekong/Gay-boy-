@@ -64,6 +64,11 @@ async def main():
     rows = J(await c.get("/quotations", headers=d))
     check("the Quotations page is not cut at 50",
           isinstance(rows, list) and len(rows) >= 60, str(len(rows)))
+    mine = [x for x in rows if x["number"].startswith(f"Q-CAP-{TAG}")]
+    check("each row carries the customer's name for the list and its search",
+          mine and all(x["customer_name"] == f"PT Banyak {TAG}" for x in mine),
+          str(mine[:1]))
+    check("...and the sales rep's", mine and all(x["sales_pic_name"] for x in mine))
     rows = J(await c.get("/quotations", headers=d, params={"limit": 5}))
     check("...and a caller can still ask for fewer", len(rows) == 5, str(len(rows)))
 

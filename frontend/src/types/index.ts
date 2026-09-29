@@ -26,6 +26,10 @@ export interface Quotation {
   discount_pct: number;
   total: number;
   valid_until?: string;
+  customer_name?: string | null;
+  price_request_number?: string | null;
+  sales_pic_name?: string | null;
+  created_at?: string | null;
 }
 
 export interface AtRiskDeal {
