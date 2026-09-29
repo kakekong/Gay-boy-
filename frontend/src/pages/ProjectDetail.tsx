@@ -2804,8 +2804,11 @@ export default function ProjectDetailPage() {
 
       {/* What admin does need off this job is the customer's own PO document —
           the thing they invoice and ship against. It lives on the customer PO,
-          so it comes here rather than through the shelf above. */}
-      {canSeeCustomerDocs && data.data.customer_po?.id && (
+          so it comes here rather than through the shelf above. Sales too:
+          the signed PO scan is theirs to file (the server already lets a rep
+          upload and open files on their own customers' POs), and hiding it
+          here made a PO visible on its own page look missing from the job. */}
+      {(canSeeCustomerDocs || isSales) && data.data.customer_po?.id && (
         <AttachmentsSection
           ownerType="customer_po"
           ownerId={data.data.customer_po.id}
