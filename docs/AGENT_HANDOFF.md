@@ -637,6 +637,15 @@ re-based once by `stock_sync.rebase_to_receipts` from `seed.ensure_schema`
 (Python data fix, keyed in `data_fixes`). Old receipts were not back-filled as
 payables. Work orders are one per stage (`_assert_stage_free`).
 
+**Receiving lives in `services/receiving.py`** (`receive_goods`, `receive_rest`,
+`receive_if_past`, `sync_past_receiving`); `operation.py` aliases them. A job
+at QC or later (`PAST_RECEIVING`) receives un-recorded PO lines at ordered qty
+— hooked into QC recording, WO create/update, DO raise and
+`project_stage.settle_delivery_and_invoice`. Pre-existing data keeps being the
+recurring problem on this project: when a rule starts depending on a record
+(receipts, payables, currency), write the one-off sync for the rows that
+predate it, keyed in `data_fixes`, in the same change.
+
 **Inventory cost has a currency.** `InventoryItem.cost_currency` /
 `cost_fx_rate`; `unit_cost` is in that currency and APIs also return
 `unit_cost_idr`. `stock_sync._item_for` takes `currency`/`fx_rate` from the PO

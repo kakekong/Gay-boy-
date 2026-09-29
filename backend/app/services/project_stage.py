@@ -57,6 +57,9 @@ async def settle_delivery_and_invoice(db: AsyncSession, project) -> str:
     """Move the project forward to where delivery + invoicing put it."""
     from app.models.operation import advance_project_status
 
+    # Delivered or invoiced means the goods were in the building first.
+    from app.services.receiving import receive_if_past
+    await receive_if_past(db, project, None)
     delivered = await delivery_done(db, project)
     if delivered:
         advance_project_status(project, "delivered")

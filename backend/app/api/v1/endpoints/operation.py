@@ -2018,6 +2018,10 @@ async def _raise_delivery_order(db: AsyncSession, p: Project, *, user: User,
     # Goods leaving under this sheet leave the shelf with it. Parts the
     # catalogue doesn't know are skipped rather than invented — a delivery
     # order is not where an item is introduced.
+    # Goods leaving were received first — catch up any order nobody recorded,
+    # so the delivery order has stock to come out of.
+    from app.services.receiving import receive_rest
+    await receive_rest(db, p.id, user)
     from app.services.stock_sync import issue_delivery_order as _stock_out
     await _stock_out(db, do, user)
     return do
@@ -2515,6 +2519,9 @@ async def record_qc(project_id: UUID, payload: QCDecision,
     else:
         p.qc_passed_at = None
     await db.flush()
+    # Goods being QC'd were received: catch up any order nobody recorded.
+    from app.services.receiving import receive_if_past
+    await receive_if_past(db, p, user)
     return {"ok": True, "qc_decision": p.qc_decision,
             "qc_passed_at": p.qc_passed_at, "status": p.status}
 
@@ -2663,23 +2670,12 @@ async def _assert_delivery_order_released(db: AsyncSession, project_id, stage: s
 _RECEIVING_ROLES = {Role.PURCHASING, Role.ADMIN, Role.MANAGER, Role.DIRECTOR}
 
 
-async def _pos_for_project(db: AsyncSession, project_id: UUID) -> list:
-    """Every supplier PO feeding this job — single-job and shared alike."""
-    from app.models.purchasing import SupplierPO
-
-    rows = (await db.scalars(
-        select(SupplierPO).where(SupplierPO.project_id == project_id)
-    )).all()
-    seen = {p.id for p in rows}
-    # A vendor order covering several jobs names them all in `project_ids`; it
-    # still has to appear on each one's receiving list, or half a shipment
-    # becomes invisible to the job waiting for it.
-    shared = (await db.scalars(
-        select(SupplierPO).where(
-            SupplierPO.project_ids.contains([str(project_id)])
-        )
-    )).all()
-    return list(rows) + [p for p in shared if p.id not in seen]
+from app.services.receiving import (  # noqa: E402 — shared receiving path
+    pos_for_project as _pos_for_project,
+    receipt_value as _receipt_value,
+    receive_goods as _receive_goods,
+    receive_rest as _receive_rest_on_completion,
+)
 
 
 @router.get("/projects/{project_id}/receiving")
@@ -2771,96 +2767,6 @@ class ReceiveIn(BaseModel):
     lines: list[ReceiveLineIn] = []
     received_at: str | None = None
     notes: str | None = None
-
-
-def _receipt_value(po, moved: list[dict]) -> float:
-    """Rupiah value of what this receipt changed: Σ delta × unit price × rate."""
-    rate = 1.0
-    if (po.currency or "IDR").upper() != "IDR":
-        rate = float(po.fx_rate or 0) or 1.0
-    lines = list(po.items or [])
-    total = 0.0
-    for m in moved:
-        idx = int(m.get("line_no") or 0) - 1
-        if not (0 <= idx < len(lines)):
-            continue
-        unit = float(lines[idx].get("unit_price") or lines[idx].get("unit_cost") or 0)
-        total += float(m.get("delta") or 0) * unit * rate
-    return round(total, 2)
-
-
-async def _receive_goods(db: AsyncSession, po, received: dict[int, float],
-                         when, user: User):
-    """Record a receipt: stock in, a goods receipt filed, utang usaha owed.
-
-    The one path goods take into the building — the receiving panel and
-    completing the receiving work order both come through here.
-    """
-    from datetime import date as date_t
-
-    from app.models.purchasing import GoodsReceipt
-    from app.services.stock_sync import sync_received
-
-    moved = await sync_received(db, po, received, user)
-    gr = GoodsReceipt(
-        po_id=po.id,
-        received_at=when or date_t.today(),
-        items=[{"line_no": m["line_no"], "sku": m["sku"], "name": m["name"],
-                "ordered": m["ordered"], "qty": m["received"]} for m in moved],
-        status="received",
-    )
-    db.add(gr)
-    # The board should show the order has started arriving. A partial delivery
-    # is still an arrival — what is outstanding is visible on the lines.
-    if po.status in ("open", "pending_approval"):
-        po.status = "received"
-    await db.flush()
-
-    # Received goods are owed for: utang usaha, for the value of what arrived
-    # (the quantity that moved × the line's price, in rupiah). It lands in
-    # finance's payables list and the ledger — Persediaan up, Utang Usaha up.
-    payable = _receipt_value(po, moved)
-    if abs(payable) >= 0.005:
-        from app.models.purchasing import Supplier
-        from app.services.ledger import post_goods_receipt
-        sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
-        po.payable_amount = round(float(po.payable_amount or 0) + payable, 2)
-        await post_goods_receipt(
-            db, value=payable, entry_date=gr.received_at or date_t.today(),
-            po_number=po.number, supplier_name=sup.name if sup else None,
-            receipt_id=gr.id, created_by=user.id if user else None)
-        await db.flush()
-    return moved, gr, payable
-
-
-async def _receive_rest_on_completion(db: AsyncSession, project_id, user: User) -> list[dict]:
-    """Completing the receiving work order receives what nobody recorded.
-
-    The receiving panel is where a short delivery gets counted line by line.
-    But ticking the receiving work order complete says "the goods are in",
-    and until now it moved nothing — so an order for 200 that was ticked off
-    here never reached the shelf, and the delivery order that shipped 100 of
-    it had nothing to come out of. Every line on this job's supplier orders
-    with no receipt yet is received at its ordered quantity; lines somebody
-    already counted are left exactly as they were counted.
-    """
-    from app.services.stock_reconcile import _receipted_quantities
-
-    out = []
-    for po in await _pos_for_project(db, project_id):
-        if po.status in ("cancelled", "draft", "pending_approval"):
-            continue
-        have = await _receipted_quantities(db, po)
-        rest = {idx: float(line.get("qty") or 0)
-                for idx, line in enumerate(po.items or [], start=1)
-                if idx not in have and float(line.get("qty") or 0) > 0
-                and (line.get("project_id") in (None, str(project_id)))}
-        if not rest:
-            continue
-        moved, gr, payable = await _receive_goods(db, po, rest, None, user)
-        out.append({"po_number": po.number, "lines": len(rest),
-                    "payable_added": round(payable, 2)})
-    return out
 
 
 @router.post("/projects/{project_id}/receiving")
@@ -2972,6 +2878,9 @@ async def add_work_order(project_id: UUID, payload: WorkOrderIn,
     if bump:
         advance_project_status(p, bump)
     await db.flush()
+    # A job at QC or later has had its goods in — receive what nobody recorded.
+    from app.services.receiving import receive_if_past
+    await receive_if_past(db, p, user)
     return {"id": str(w.id), "code": w.code, "stage": w.stage}
 
 
@@ -3034,6 +2943,9 @@ async def update_work_order(wo_id: UUID, stage: str | None = None,
                     p.qc_passed_at = datetime.now(UTC)
                     if not p.qc_decision:
                         p.qc_decision = "pass"
+                from app.services.receiving import receive_if_past
+                await db.flush()
+                await receive_if_past(db, p, user)
     return {"ok": True, "id": str(w.id), "stage": w.stage,
             "completed_at": w.completed_at,
             "received": received_on_completion}

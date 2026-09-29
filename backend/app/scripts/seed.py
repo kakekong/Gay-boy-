@@ -747,6 +747,17 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('inventory_cost_currency')"))
             await db.commit()
             print(f"Inventory prices labelled with their currency: {n}")
+        # Projects already past receiving — at QC or later, or with the
+        # receiving work order ticked complete — whose supplier orders were
+        # never recorded as received: receive them now (stock in, owed).
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'receive_past_receiving_projects'")):
+            from app.services.receiving import sync_past_receiving
+            res = await sync_past_receiving(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('receive_past_receiving_projects')"))
+            await db.commit()
+            print(f"Past-receiving projects synced: {res}")
 
 
 async def main() -> None:

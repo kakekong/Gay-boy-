@@ -205,6 +205,49 @@ async def main():
         check("...once — running it again adds nothing",
               float(got.payable_amount or 0) == 50_000, str(got.payable_amount))
 
+    # ══ jobs already past receiving ══════════════════════════════════════
+    print("\n── existing jobs past receiving, never received ──")
+    from app.models.purchasing import SupplierPO as _SPO
+    po4 = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup, "project_id": proj, "po_date": "2026-08-05",
+        "items": [{"description": f"BUSH {TAG}", "qty": 30, "uom": "pcs",
+                   "unit_price": 2_000}]}))
+    async with SessionLocal() as db:
+        p = await db.get(Project, uuid.UUID(proj)); p.status = "invoiced"; await db.commit()
+    from app.services.receiving import sync_past_receiving
+    async with SessionLocal() as db:
+        res = await sync_past_receiving(db); await db.commit()
+    async with SessionLocal() as db:
+        got = await db.get(_SPO, uuid.UUID(po4["id"]))
+        check("a job already past receiving gets its unreceived order received",
+              got.status == "received" and float(got.payable_amount or 0) == 60_000,
+              f"{got.status} {got.payable_amount}")
+    pay = J(await c.get("/finance/payables", headers=fin))
+    row = next((x for x in pay["items"] if x["po_id"] == po4["id"]), None)
+    check("...and it shows as owed in utang usaha", row is not None
+          and row["status"] == "unpaid" and row["outstanding"] == 60_000, str(row))
+    async with SessionLocal() as db:
+        res2 = await sync_past_receiving(db); await db.commit()
+    async with SessionLocal() as db:
+        got = await db.get(_SPO, uuid.UUID(po4["id"]))
+        check("...once — syncing again adds nothing",
+              float(got.payable_amount or 0) == 60_000, str(got.payable_amount))
+
+    print("\n── a live job reaching QC ──")
+    po5 = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup, "project_id": proj, "po_date": "2026-09-10",
+        "items": [{"description": f"WASHER {TAG}", "qty": 10, "uom": "pcs",
+                   "unit_price": 500}]}))
+    async with SessionLocal() as db:
+        p = await db.get(Project, uuid.UUID(proj)); p.status = "production"; await db.commit()
+    r = await c.post(f"/operation/projects/{proj}/qc", headers=adm, json={"decision": "pass"})
+    check("recording QC is accepted", r.status_code == 200, f"{r.status_code} {why(r)}")
+    async with SessionLocal() as db:
+        got = await db.get(_SPO, uuid.UUID(po5["id"]))
+        check("...and the order feeding it is received, since QC needs the goods",
+              got.status == "received" and float(got.payable_amount or 0) == 5_000,
+              f"{got.status} {got.payable_amount}")
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
