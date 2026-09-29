@@ -11,6 +11,7 @@ import { api } from "@/api/client";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { ExportAddressDialog } from "@/components/ExportAddressDialog";
 import { CommentThread } from "@/components/CommentThread";
+import { DrawingSignOff } from "@/components/DrawingSignOff";
 import { useAuthStore } from "@/store/auth";
 import { useT, t as tt, T, locale } from "@/store/lang";
 
@@ -805,6 +806,12 @@ export default function CustomerPODetailPage() {
           fallbackName={p.customer_name}
         />
       </div>
+
+      {/* The project's drawings, signed off here as well as on the project
+          page — the order is where the director is looking when it moves. */}
+      {p.project_id && (
+        <DrawingSignOff projectId={p.project_id} projectCode={p.project_code} />
+      )}
 
       {/* Line items */}
       <div className="card overflow-hidden">

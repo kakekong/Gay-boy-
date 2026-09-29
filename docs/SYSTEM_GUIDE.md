@@ -282,6 +282,7 @@ Work orders progress through **Receiving → Warehousing → QC → Packaging �
 - **Two drawings, two audiences.** The **supplier drawing** is what the vendor sent us to make the part from; the **customer drawing** is what the customer approves, drawn up *from* the supplier's rather than being the same sheet forwarded on. The **director** files the supplier's for now; purchasing read it and see only that (the customer drawing carries the customer). Admin file the customer's and see only that. Sales *read* the customer's — they show it to the customer — and file neither. Manager/director see both and are the ones who turn a supplier drawing into the customer one, which keeps a link back to the sheet it came off. Suppliers upload via their portal (mirrored to the project).
 - Only the **customer** drawing's approval advances the project to `drawing_approved`; signing off a supplier sheet is an internal step and moves nothing.
 - Submitted drawings are approved internally (manager/director/admin) and/or by the customer on their portal. Drawing approval advances the project (`drawing → drawing_approved`).
+- **Signed off from the customer PO too.** The customer PO page shows its project's drawings (customer and supplier, whatever this role may open) with the same **Approve / Revise** buttons as the project page, and a count of those waiting. It is the same action on the same record — approving there moves the project exactly as on the project page. Uploading stays on the project page.
 
 ### 8.3b Supplier PO money — the lines own it
 
