@@ -35,8 +35,17 @@ async def quotation_rows(db: AsyncSession, project) -> list[dict]:
 
 
 async def fill_item_codes(db: AsyncSession, rows: list[dict], project,
-                          quote_rows: list[dict] | None = None) -> list[dict]:
-    """`rows` with a `sku` on every line the job's paperwork can name."""
+                          quote_rows: list[dict] | None = None,
+                          *, by_position: bool = True) -> list[dict]:
+    """`rows` with a `sku` on every line the job's paperwork can name.
+
+    Matched by name against the quotation, the price request and the job's
+    supplier orders. `by_position` adds the fallback "same line on the
+    quotation" — right for lines copied from the customer's PO (built off the
+    quotation, in its order, in the customer's words), and wrong for lines
+    somebody typed: a delivery order for PULLEY on a job quoted for GEAR must
+    not be given GEAR's code, because stock comes out by code.
+    """
     if quote_rows is None:
         quote_rows = await quotation_rows(db, project)
     codes = {_key(r.get("description")): r.get("sku")
@@ -47,7 +56,14 @@ async def fill_item_codes(db: AsyncSession, rows: list[dict], project,
         for it in (pr.items or []) if pr else []:
             if it.get("sku"):
                 codes.setdefault(_key(it.get("description")), it.get("sku"))
-    same_shape = len(quote_rows) == len(rows)
+    if project is not None:
+        from app.services.receiving import pos_for_project
+        for po in await pos_for_project(db, project.id):
+            for ln in (po.items or []):
+                if ln.get("sku"):
+                    codes.setdefault(_key(ln.get("description") or ln.get("name")),
+                                     ln.get("sku"))
+    same_shape = by_position and len(quote_rows) == len(rows)
     out = []
     for i, r in enumerate(rows):
         r = dict(r)

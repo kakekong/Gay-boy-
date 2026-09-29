@@ -2156,7 +2156,7 @@ async def issue_delivery_order(
         items = [{"description": i.description, "qty": float(i.qty or 0),
                   "uom": (i.uom or "EA"), "sku": i.sku} for i in rows]
         from app.services.item_codes import fill_item_codes
-        items = await fill_item_codes(db, items, p)
+        items = await fill_item_codes(db, items, p, by_position=False)
 
     number = (payload.number or "").strip() or None
     if number:
@@ -3105,13 +3105,17 @@ async def create_delivery(project_id: UUID, payload: DeliveryIn,
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    d = DeliveryOrder(
-        project_id=project_id, number=payload.number,
-        split_index=payload.split_index, courier=payload.courier,
-        tracking_no=payload.tracking_no, status="pending",
-    )
-    db.add(d)
-    await db.flush()
+    if await db.scalar(select(DeliveryOrder).where(DeliveryOrder.number == payload.number)):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"'{payload.number}' is already used by another delivery order")
+    # The older endpoint: it used to create a bare sheet with no approval
+    # request. It goes through the same path as every other delivery order
+    # now, but still without lines — it names a sheet, not a shipment, and
+    # copying the whole order onto it would take the whole order off the
+    # shelf. The lines are typed in with an edit, which moves the stock.
+    d = await _raise_delivery_order(
+        db, p, user=_user, courier=payload.courier, tracking_no=payload.tracking_no,
+        number=payload.number, split_index=payload.split_index, items=[])
     return {"id": str(d.id), "number": d.number}
 
 
@@ -3297,6 +3301,13 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     f"'{new_num}' is already used by another delivery order")
+            # Stock movements name the sheet by number; they follow the
+            # rename, or withdrawing it later could not find what to put back.
+            from sqlalchemy import update as _upd
+            from app.models.inventory import InventoryMovement
+            await db.execute(_upd(InventoryMovement)
+                             .where(InventoryMovement.reference == d.number)
+                             .values(reference=new_num))
             d.number = new_num
     if "split_index" in data and data["split_index"] is not None:
         if int(data["split_index"]) < 1:
@@ -3317,6 +3328,15 @@ async def update_delivery(do_id: UUID, payload: DeliveryEdit,
                     "qty": float(i.get("qty") or 0),
                     "uom": (i.get("uom") or "EA"), "sku": i.get("sku")}
                    for i in data["items"]]
+        # What left the shelf follows what the sheet now says: take the old
+        # lines' movement back, and move the new ones.
+        from app.services.item_codes import fill_item_codes
+        from app.services.stock_sync import issue_delivery_order as _stock_out
+        from app.services.stock_sync import reverse as _stock_reverse
+        _p = await db.get(Project, d.project_id) if d.project_id else None
+        d.items = await fill_item_codes(db, list(d.items), _p, by_position=False)
+        await _stock_reverse(db, d.number, "do_out", user)
+        await _stock_out(db, d, user)
     if "ship_to" in data:
         d.ship_to = (data["ship_to"] or "").strip() or None
     if "attention" in data:

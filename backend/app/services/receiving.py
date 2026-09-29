@@ -167,3 +167,124 @@ async def sync_past_receiving(db: AsyncSession) -> dict:
     await db.flush()
     return {"projects": len(projects), "orders_received": orders,
             "owed_added": round(lines_value, 2)}
+
+
+async def receive_po_rest(db: AsyncSession, po, user: User | None,
+                          when: date | None = None) -> dict | None:
+    """Receive every line of one order that has no receipt yet, at its
+    ordered quantity. For an order marked received (or closed) by hand, and
+    for orders with no project — which have no receiving work order to go
+    through. Lines already counted are left as counted."""
+    from app.services.stock_reconcile import _receipted_quantities
+
+    if po.status in ("cancelled", "draft"):
+        return None
+    have = await _receipted_quantities(db, po)
+    rest = {idx: float(line.get("qty") or 0)
+            for idx, line in enumerate(po.items or [], start=1)
+            if idx not in have and float(line.get("qty") or 0) > 0}
+    if not rest:
+        return None
+    moved, gr, payable = await receive_goods(db, po, rest, when, user)
+    return {"po_number": po.number, "lines": len(rest),
+            "payable_added": round(payable, 2)}
+
+
+async def sync_orders_marked_received(db: AsyncSession) -> dict:
+    """Orders set to received/closed by hand, with lines never received —
+    receive those lines, once. Their status said the goods were in; the
+    stock and utang usaha now say so too."""
+    from app.models.purchasing import SupplierPO
+
+    pos = (await db.scalars(select(SupplierPO).where(
+        SupplierPO.status.in_(("received", "closed"))))).all()
+    n, owed = 0, 0.0
+    for po in pos:
+        got = await receive_po_rest(db, po, None)
+        if got:
+            n += 1
+            owed += got["payable_added"]
+    await db.flush()
+    return {"orders": n, "owed_added": round(owed, 2)}
+
+
+async def receive_by_description(db: AsyncSession, po, items: list[dict],
+                                 when: date | None, user: User | None):
+    """The purchasing "Receive goods" form: lines named by description (or
+    SKU) with the quantity that arrived *this time*. Matched to the order's
+    lines and added on top of what was already received, then recorded
+    through the same path as everything else."""
+    import re
+
+    from app.services.stock_reconcile import _receipted_quantities
+
+    def key(x) -> str:
+        return re.sub(r"\s+", " ", (x or "").strip()).lower()
+
+    lines = list(po.items or [])
+    have = await _receipted_quantities(db, po)
+    received: dict[int, float] = {}
+    for it in items or []:
+        qty = float(it.get("qty") or 0)
+        if qty <= 0:
+            continue
+        want_sku = (it.get("sku") or "").strip()
+        want = key(it.get("description"))
+        idx = next((i for i, ln in enumerate(lines, start=1)
+                    if (want_sku and (ln.get("sku") or "").strip() == want_sku)
+                    or key(ln.get("description") or ln.get("name")) == want), None)
+        if idx is None:
+            continue
+        base = received.get(idx, have.get(idx, 0.0))
+        received[idx] = base + qty
+    if not received:
+        return None
+    return await receive_goods(db, po, received, when, user)
+
+
+async def po_status_changed(db: AsyncSession, po, was_status: str | None,
+                            user: User | None) -> dict | None:
+    """What a supplier PO's status change does to stock and utang usaha —
+    one place for the director's direct edit and an approved request, which
+    used to disagree (an approved cancellation left the goods on the shelf).
+
+    * cancelled → whatever the order put on the shelf comes off it;
+    * reopened from cancelled / released → its parts are (re)registered;
+    * set to received or closed by hand → every line nobody received is
+      received now, so the status and the stock and the money agree.
+    """
+    from app.services.stock_sync import receive_purchase_order, withdraw_purchase_order
+
+    now = po.status
+    if now == was_status:
+        return None
+    if now == "cancelled":
+        await withdraw_purchase_order(db, po, user)
+        return {"withdrawn": True}
+    if now == "open" and was_status in ("cancelled", "pending_approval"):
+        await receive_purchase_order(db, po, user)
+        return {"registered": True}
+    if now in ("received", "closed"):
+        return await receive_po_rest(db, po, user)
+    return None
+
+
+async def sync_delivery_stock(db: AsyncSession) -> dict:
+    """Delivery orders whose goods never came off the shelf — raised by the
+    older endpoint with no lines, or whose lines didn't match an item before
+    part codes were filled in. Take them out now, matched by part code."""
+    from app.models.operation import DeliveryOrder, Project
+    from app.services.item_codes import fill_item_codes
+    from app.services.stock_sync import _already_moved, issue_delivery_order
+
+    dos = (await db.scalars(select(DeliveryOrder))).all()
+    n = 0
+    for d in dos:
+        if not (d.items or []) or await _already_moved(db, d.number, "do_out"):
+            continue
+        p = await db.get(Project, d.project_id) if d.project_id else None
+        d.items = await fill_item_codes(db, list(d.items), p, by_position=False)
+        if await issue_delivery_order(db, d, None):
+            n += 1
+    await db.flush()
+    return {"delivery_orders": n}

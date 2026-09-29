@@ -49,7 +49,7 @@ from app.models.crm import Customer, CustomerContact
 from app.models.customer_po import CustomerPO
 from app.models.account import Account
 from app.models.finance import Invoice, LedgerEntry, Payment
-from app.models.inventory import InventoryItem
+from app.models.inventory import InventoryItem, InventoryMovement
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
 from app.models.price_request import PriceRequest
 from app.models.purchasing import (
@@ -730,3 +730,142 @@ async def records_delete(payload: RecordsIn, db: AsyncSession = Depends(get_db),
     await db.commit()
     await _drop_files(files)
     return {"deleted": plan["counts"], "files_cleared": len(files)}
+
+
+# ═══ Data health ═════════════════════════════════════════════════════════════
+#
+# The rules that arrived over time — one customer PO per deal, one invoice per
+# project, one work order per stage, stock on receiving, utang usaha on
+# receipt — were each given a one-off sync for the rows that predated them
+# where the right answer was knowable. What is left here is what a person has
+# to decide: duplicates (which one is the real one?), orders with no rate, and
+# anything the syncs should have caught but did not. Read-only.
+
+async def family_root_map(db: AsyncSession, quote_ids) -> dict:
+    """Each quotation → the first quotation of its revision chain (one deal)."""
+    parent = dict((await db.execute(select(Quotation.id, Quotation.parent_id))).all())
+    out = {}
+    for q in quote_ids:
+        cur, seen = q, set()
+        while parent.get(cur) and cur not in seen:
+            seen.add(cur)
+            cur = parent[cur]
+        out[q] = cur
+    return out
+
+
+@router.get("/data-health")
+async def data_health(db: AsyncSession = Depends(get_db)):
+    from app.models.operation import Project, WorkOrder
+    from app.models.purchasing import SupplierPO
+    from app.services.receiving import PAST_RECEIVING
+    from app.services.stock_reconcile import _receipted_quantities
+
+    checks: list[dict] = []
+
+    def add(key, title, advice, rows):
+        checks.append({"key": key, "title": title, "advice": advice,
+                       "count": len(rows), "rows": rows[:50]})
+
+    # Two customer POs on one deal (a quotation and its revisions).
+    cpos = (await db.scalars(select(CustomerPO).where(
+        CustomerPO.quotation_id.is_not(None)))).all()
+    roots = await family_root_map(db, {c.quotation_id for c in cpos})
+    by_deal: dict = {}
+    for cpo in cpos:
+        by_deal.setdefault(roots.get(cpo.quotation_id, cpo.quotation_id), []).append(cpo)
+    add("duplicate_customer_pos", "Deals with more than one customer PO",
+        "Open each PO and delete the one filed by mistake — the project stays.",
+        [{"label": ", ".join(p.number for p in v),
+          "link": f"/customer-pos/{v[0].id}"} for v in by_deal.values() if len(v) > 1])
+
+    # More than one invoice (final/single) or more than one DP on a project.
+    rows = (await db.execute(
+        select(Invoice.project_id, Invoice.type, func.count(Invoice.id),
+               func.string_agg(Invoice.number, ", "))
+        .where(Invoice.project_id.is_not(None), Invoice.status != "rejected")
+        .group_by(Invoice.project_id, Invoice.type))).all()
+    per: dict = {}
+    for pid, typ, n, nums in rows:
+        slot = "dp" if typ == "dp" else "bill"
+        cur = per.setdefault((pid, slot), [0, []])
+        cur[0] += n
+        cur[1].append(nums)
+    add("duplicate_invoices", "Projects billed more than once",
+        "Delete the duplicate invoice from the project's invoice card (not once paid).",
+        [{"label": ", ".join(v[1]), "link": f"/projects/{pid}"}
+         for (pid, slot), v in per.items() if v[0] > 1])
+
+    # Two work orders for the same stage on one project.
+    rows = (await db.execute(
+        select(WorkOrder.project_id, func.lower(WorkOrder.stage), func.count(WorkOrder.id),
+               func.string_agg(WorkOrder.code, ", "))
+        .group_by(WorkOrder.project_id, func.lower(WorkOrder.stage))
+        .having(func.count(WorkOrder.id) > 1))).all()
+    add("duplicate_work_orders", "Projects with two work orders for one stage",
+        "Delete the extra one on the project's work-order list.",
+        [{"label": f"{stage}: {codes}", "link": f"/projects/{pid}"}
+         for pid, stage, n, codes in rows])
+
+    # Foreign-currency orders with no rate — nothing on them converts to rupiah.
+    pos = (await db.scalars(select(SupplierPO).where(
+        SupplierPO.currency != "IDR", SupplierPO.fx_rate.is_(None),
+        SupplierPO.status != "cancelled"))).all()
+    add("po_without_rate", "Foreign-currency purchase orders with no exchange rate",
+        "Finance sets the rate on the PO — utang usaha and inventory value can't be shown in rupiah until then.",
+        [{"label": f"{p.number} ({p.currency})", "link": f"/purchase-orders/{p.id}"} for p in pos])
+
+    # Jobs past receiving whose orders still have unreceived lines.
+    projs = (await db.scalars(select(Project).where(
+        Project.is_deleted.is_(False), Project.status.in_(PAST_RECEIVING)))).all()
+    left = []
+    from app.services.receiving import pos_for_project
+    for p in projs:
+        for po in await pos_for_project(db, p.id):
+            if po.status in ("cancelled", "draft", "pending_approval"):
+                continue
+            have = await _receipted_quantities(db, po)
+            if any(idx not in have for idx, ln in enumerate(po.items or [], start=1)
+                   if float(ln.get("qty") or 0) > 0):
+                left.append({"label": f"{p.code} · {po.number}",
+                             "link": f"/purchase-orders/{po.id}"})
+    add("unreceived_past_receiving", "Jobs past receiving with lines never received",
+        "Record them on the job's receiving work order (or tick it complete).", left)
+
+    # Orders nothing can receive: no project, still open.
+    pos = (await db.scalars(select(SupplierPO).where(
+        SupplierPO.project_id.is_(None), SupplierPO.status == "open"))).all()
+    add("open_po_without_project", "Open purchase orders with no project",
+        "No receiving work order reaches these — set the PO to Received when the goods arrive, "
+        "or assign it to its project.",
+        [{"label": p.number, "link": f"/purchase-orders/{p.id}"} for p in pos])
+
+    # Stock below zero, and totals that disagree with their own movements.
+    neg = (await db.scalars(select(InventoryItem).where(
+        InventoryItem.is_active.is_(True), InventoryItem.current_stock < 0))).all()
+    add("negative_stock", "Items with stock below zero",
+        "More went out than was received — usually a receipt that was never recorded.",
+        [{"label": f"{i.sku} {i.name} ({float(i.current_stock):g})",
+          "link": f"/inventory/{i.id}"} for i in neg])
+    sums = dict((await db.execute(
+        select(InventoryMovement.item_id, func.coalesce(func.sum(InventoryMovement.delta), 0))
+        .group_by(InventoryMovement.item_id))).all())
+    items = (await db.scalars(select(InventoryItem).where(
+        InventoryItem.id.in_(list(sums) or [None])))).all()
+    add("stock_drift", "Items whose total disagrees with their history",
+        "Inventory → Reconcile sets the total to what the movements say.",
+        [{"label": f"{i.sku} {i.name}", "link": f"/inventory/{i.id}"}
+         for i in items if abs(float(i.current_stock or 0) - float(sums[i.id] or 0)) > 1e-6])
+
+    # Approved invoice on a job still before Invoiced (and past delivery).
+    rows = (await db.execute(
+        select(Project.id, Project.code, Project.status).join(Invoice, Invoice.project_id == Project.id)
+        .where(Project.is_deleted.is_(False), Project.status == "delivered",
+               Invoice.type != "dp",
+               Invoice.status.in_(("approved", "partial", "issued", "overdue", "paid")))
+        .distinct())).all()
+    add("invoiced_not_moved", "Delivered jobs with an approved invoice, not at Invoiced",
+        "These move on the next deploy; if one stays, tell the developer.",
+        [{"label": f"{code}", "link": f"/projects/{pid}"} for pid, code, st in rows])
+
+    return {"checks": checks, "problems": sum(c["count"] for c in checks)}

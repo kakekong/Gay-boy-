@@ -620,6 +620,17 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_currency VARCHAR(8) NOT NULL DEFAULT 'IDR'",
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_fx_rate NUMERIC(18,6)",
 
+    # ── Pending approvals follow the desk that now decides them ────────
+    # Mark-won moved from the director to finance, and so did releasing a
+    # delivery order — but requests already waiting kept the old addressee.
+    # A delivery-order request addressed to the director could then be
+    # decided by nobody: the director is refused (finance-only) and finance
+    # cannot take a director-addressed request. Idempotent — runs each boot.
+    """UPDATE approval_requests SET required_role = 'finance'
+        WHERE status = 'pending'
+          AND target_type IN ('quotation_won', 'delivery_order')
+          AND required_role <> 'finance'""",
+
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
 
@@ -758,6 +769,24 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('receive_past_receiving_projects')"))
             await db.commit()
             print(f"Past-receiving projects synced: {res}")
+        # Orders set to received/closed by hand never went through receiving.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'receive_orders_marked_received'")):
+            from app.services.receiving import sync_orders_marked_received
+            res = await sync_orders_marked_received(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('receive_orders_marked_received')"))
+            await db.commit()
+            print(f"Orders marked received synced: {res}")
+        # Delivery orders whose goods never came off the shelf.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'delivery_orders_stock_out'")):
+            from app.services.receiving import sync_delivery_stock
+            res = await sync_delivery_stock(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('delivery_orders_stock_out')"))
+            await db.commit()
+            print(f"Delivery orders taken out of stock: {res}")
 
 
 async def main() -> None:

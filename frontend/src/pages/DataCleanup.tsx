@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT } from "@/store/lang";
 import RecordDelete from "@/components/RecordDelete";
+import { Link } from "react-router-dom";
 
 interface Owner {
   id: string; full_name: string; email: string; role: string; is_active: boolean;
@@ -132,6 +133,8 @@ export default function DataCleanupPage() {
                 "Menghapus dokumen yang Anda pilih saja, beserta semua yang dibuat darinya.")}
         </p>
       </div>
+
+      <DataHealth />
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -370,6 +373,76 @@ export default function DataCleanupPage() {
             </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+
+/**
+ * What older records still disagree with today's rules.
+ *
+ * Each rule that arrived later came with a sync for the rows that predated
+ * it wherever the right answer was knowable. This lists what is left for a
+ * person to decide — duplicates, orders with no rate, and anything a sync
+ * should have caught — each linked to where it is fixed.
+ */
+function DataHealth() {
+  const t = useT();
+  const [open, setOpen] = useState<string | null>(null);
+  const q = useQuery({
+    queryKey: ["data-health"],
+    queryFn: () => api.get("/maintenance/data-health").then((r) => r.data as {
+      problems: number;
+      checks: Array<{ key: string; title: string; advice: string; count: number;
+                      rows: Array<{ label: string; link: string }> }>;
+    }),
+  });
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="font-semibold flex items-center gap-2">
+          <ListChecks size={16} className="text-brand-600" />
+          {t("Data health — older records vs today's rules", "Kesehatan data — catatan lama vs aturan sekarang")}
+        </div>
+        {q.data && (
+          <span className={clsx("chip", q.data.problems ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700")}>
+            {q.data.problems
+              ? t(`${q.data.problems} to look at`, `${q.data.problems} perlu dicek`)
+              : t("All in step", "Semua sesuai")}
+          </span>
+        )}
+      </div>
+      {q.isLoading ? (
+        <div className="text-sm muted flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t("Checking…", "Memeriksa…")}</div>
+      ) : (
+        <ul className="divide-y divide-ink-100 rounded-lg border border-ink-200">
+          {(q.data?.checks ?? []).map((c) => (
+            <li key={c.key} className="px-3 py-2">
+              <button type="button" className="w-full flex items-center justify-between gap-3 text-left"
+                disabled={!c.count} onClick={() => setOpen(open === c.key ? null : c.key)}>
+                <span className="flex items-center gap-2 text-sm">
+                  {c.count ? <AlertTriangle size={14} className="text-amber-600" />
+                           : <CheckCircle2 size={14} className="text-emerald-600" />}
+                  {c.title}
+                </span>
+                <span className={clsx("chip", c.count ? "bg-amber-50 text-amber-800" : "bg-ink-100 text-ink-600")}>{c.count}</span>
+              </button>
+              {open === c.key && c.count > 0 && (
+                <div className="mt-2 space-y-1.5 pl-6">
+                  <div className="text-xs muted">{c.advice}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.rows.map((r, i) => (
+                      <Link key={i} to={r.link} className="chip bg-ink-50 text-brand-700 hover:underline font-mono text-[11px]">
+                        {r.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

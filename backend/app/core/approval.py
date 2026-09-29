@@ -458,6 +458,7 @@ async def apply_to_target(
                 # in the same change are stamped with it.
                 has_project = "project_id" in changes
                 new_project_id = changes.pop("project_id", None)
+                was_status = po.status
                 for k, v in changes.items():
                     if k == "po_date":
                         po.po_date = None if v in (None, "") else date_t.fromisoformat(v)
@@ -487,6 +488,12 @@ async def apply_to_target(
                         applied["project"] = await assign_po_project(db, po, target)
                     changes["project_id"] = new_project_id
                 applied["applied_changes"] = list(changes.keys())
+                if "status" in changes:
+                    # Same consequences as the direct edit: an approved
+                    # cancellation takes the goods back off the shelf; an
+                    # approved "received" receives what nobody recorded.
+                    from app.services.receiving import po_status_changed
+                    await po_status_changed(db, po, was_status, None)
     elif req.target_type == "delivery_order":
         # Finance's release of a delivery order, taken from the inbox
         # instead of the project page. Approving it is the same act as the

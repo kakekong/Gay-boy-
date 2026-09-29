@@ -1754,15 +1754,11 @@ async def update_po(
         # Cancelling takes back whatever the order put on the shelf (what was
         # received against it); reopening re-registers its parts. Stock itself
         # only enters on receiving.
-        from app.services.stock_sync import receive_purchase_order, withdraw_purchase_order
-        if po.status == "cancelled" and was_status != "cancelled":
-            # The net, not just the ordered quantity — an order that was
-            # partly received has already been corrected downward, and
-            # reversing the original ten against a shelf holding five would
-            # drive the count negative.
-            await withdraw_purchase_order(db, po, user)
-        elif po.status == "open" and was_status in ("cancelled", "pending_approval"):
-            await receive_purchase_order(db, po, user)
+        # One helper for every status change, shared with the approval path:
+        # cancelling withdraws the order's stock; setting it received or
+        # closed by hand receives the lines nobody received (stock in, owed).
+        from app.services.receiving import po_status_changed
+        await po_status_changed(db, po, was_status, user)
     if "items" in data and data["items"] is not None:
         po.items = data["items"]
     # After the lines, so a change that sends both new lines and a new job
@@ -2038,18 +2034,22 @@ async def goods_receipt(
             received = date_t.fromisoformat(payload.received_at)
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "received_at must be YYYY-MM-DD")
-    gr = GoodsReceipt(
-        po_id=po_id,
-        received_at=received or date_t.today(),
-        items=payload.items or [],
-        status=payload.status or "received",
-    )
-    db.add(gr)
-    # Receiving goods moves the PO to 'received' so the board reflects progress.
-    if po.status in ("open", "pending_approval"):
-        po.status = "received"
+    # The same receiving path as the receiving work order: stock in, a goods
+    # receipt filed, the supplier owed. This form used to file a bare receipt
+    # that moved nothing — goods "received" here never reached the shelf or
+    # finance. Lines are matched to the order by SKU or description; the
+    # quantity is what arrived this time.
+    from app.services.receiving import receive_by_description
+    res = await receive_by_description(db, po, payload.items or [], received, _u)
+    if res is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"None of those lines match a line on {po.number} — name them as the "
+            "order does (or by SKU), with a quantity above zero.")
+    moved, gr, payable = res
     await db.flush()
-    return {"id": str(gr.id), "po_id": str(po_id), "status": gr.status}
+    return {"id": str(gr.id), "po_id": str(po_id), "status": gr.status,
+            "lines": moved, "payable_added": round(payable, 2)}
 
 
 # ─── QC (incoming inspection) ────────────────────────────────────────────────

@@ -646,6 +646,25 @@ recurring problem on this project: when a rule starts depending on a record
 (receipts, payables, currency), write the one-off sync for the rows that
 predate it, keyed in `data_fixes`, in the same change.
 
+**Every side door routes through the same service.** `receiving.po_status_changed`
+is the one place a supplier-PO status change has consequences (cancel →
+withdraw stock; open from cancelled/pending → register parts; received/closed →
+`receive_po_rest`). Both `purchasing.update_po` and the approval applier in
+`core/approval.py` call it. `POST /purchasing/po/{id}/gr` goes through
+`receive_by_description` (400 if no line matches). DO edits re-issue `do_out`
+(and a rename moves `InventoryMovement.reference`); the legacy
+`POST /operation/projects/{id}/delivery` uses `_raise_delivery_order(items=[])`.
+`item_codes.fill_item_codes(by_position=False)` for any typed/edited/backfilled
+DO lines — the positional fallback is only safe for lines copied from the
+customer PO. Boot fixes added: `receive_orders_marked_received`,
+`delivery_orders_stock_out`, plus a per-boot SQL re-addressing pending
+`quotation_won`/`delivery_order` approvals to finance. What can't be fixed
+without a human (duplicate POs/invoices/WOs, foreign POs with no rate, stock
+drift) is reported by director-only `GET /maintenance/data-health`, shown on
+DataCleanup.tsx. `tests/e2e/test_data_sync.py` builds legacy-shaped rows
+directly in the DB and runs the syncs against them — add to it when adding a
+new sync.
+
 **Inventory cost has a currency.** `InventoryItem.cost_currency` /
 `cost_fx_rate`; `unit_cost` is in that currency and APIs also return
 `unit_cost_idr`. `stock_sync._item_for` takes `currency`/`fx_rate` from the PO
