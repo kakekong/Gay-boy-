@@ -399,7 +399,7 @@ async def employee_projects(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
     me: User = Depends(_hr_or_director),
-    limit: int = 200,
+    limit: int | None = None,
 ):
     """Projects tied to the employee's customers. Project values are shown to
     the director only — HR sees the list without deal economics."""
@@ -482,7 +482,7 @@ async def employee_quotations(
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(_director),
     status_eq: str | None = None,
-    limit: int = 200,
+    limit: int | None = None,
 ):
     stmt = (
         select(Quotation, Customer)
@@ -515,7 +515,7 @@ async def employee_customers(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(_director),
-    limit: int = 200,
+    limit: int | None = None,
 ):
     rows = (await db.scalars(
         select(Customer).where(

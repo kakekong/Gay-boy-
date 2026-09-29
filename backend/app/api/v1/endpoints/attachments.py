@@ -369,7 +369,7 @@ async def list_all_attachments(
     me: User = Depends(get_current_user),
     owner_type: str | None = Query(None),
     q: str | None = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
+    limit: int = Query(200, ge=1, le=10000),
 ):
     """Director-only: every attachment in the system. Useful for auditing
     drawings/invoices/proofs uploaded by sales, suppliers, customers."""

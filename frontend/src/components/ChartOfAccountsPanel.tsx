@@ -42,7 +42,7 @@ export function ChartOfAccountsPanel({ defaultOpen = false }: {
 
   const accounts = useQuery({
     queryKey: ["accounts", "panel"],
-    queryFn: () => api.get("/accounts", { params: { limit: 500 } })
+    queryFn: () => api.get("/accounts", { params: { limit: 5000 } })
       .then((r) => (Array.isArray(r.data) ? r.data : r.data?.items ?? []) as Account[]),
     staleTime: 60_000,
     // Nothing is posted from here, so it need not be fetched until it is

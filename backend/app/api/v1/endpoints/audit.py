@@ -28,7 +28,7 @@ async def list_audit(
     entity: str | None = None,
     actor_id: UUID | None = None,
     action: str | None = None,
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=10000),
 ):
     stmt = select(AuditLog).order_by(AuditLog.occurred_at.desc()).limit(limit)
     if entity:

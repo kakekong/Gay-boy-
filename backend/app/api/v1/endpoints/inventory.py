@@ -244,7 +244,7 @@ async def list_items(
     ) or 0
     rows = (await db.scalars(
         stmt.order_by(InventoryItem.name.asc())
-        .limit(max(1, min(limit, 1000))).offset(max(0, offset))
+        .limit(max(1, min(limit, 10000))).offset(max(0, offset))
     )).all()
     show_cost = _may_see_cost(_u)
     out = []

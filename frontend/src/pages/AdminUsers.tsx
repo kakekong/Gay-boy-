@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { fetchAllCustomers } from "@/lib/fetchAll";
 import { useAuthStore } from "@/store/auth";
 import { startViewAs } from "@/lib/viewAs";
 import { T, t } from "@/store/lang";
@@ -138,14 +139,7 @@ export default function AdminUsersPage() {
   }, [form.employee_id, freeEmployees.data]);
   const customers = useQuery({
     queryKey: ["customers-min"],
-    queryFn: () => api.get("/customers", { params: { page_size: 200 } })
-      .then((r) => {
-        // Defensive: support both {data:[...]} and [...] shapes
-        const body = r.data;
-        if (Array.isArray(body)) return body as Customer[];
-        if (body && Array.isArray(body.data)) return body.data as Customer[];
-        return [] as Customer[];
-      }),
+    queryFn: () => fetchAllCustomers<Customer>().then((r) => r.data),
     enabled: formOpen,
     retry: false,
     refetchOnMount: "always",

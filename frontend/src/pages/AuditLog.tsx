@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Shield, Search, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { LoadMore } from "@/components/LoadMore";
 import { T, locale } from "@/store/lang";
 
 interface AuditRow {
@@ -51,11 +52,17 @@ export default function AuditLogPage() {
     queryKey: ["audit-actions"],
     queryFn: () => api.get("/audit/actions").then((r) => r.data as string[]),
   });
+  // The newest 100, then "Load more" — the search box only filters what is
+  // loaded, so older entries need a way in.
+  const [shown, setShown] = useState(100);
+  useEffect(() => { setShown(100); }, [entity, action]);
   const rows = useQuery({
-    queryKey: ["audit", entity, action],
+    queryKey: ["audit", entity, action, shown],
     queryFn: () => api.get("/audit", {
-      params: { entity: entity || undefined, action: action || undefined },
+      params: { entity: entity || undefined, action: action || undefined, limit: shown },
     }).then((r) => r.data as AuditRow[]),
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === entity && prevQuery?.queryKey[2] === action ? prev : undefined,
     refetchInterval: 30_000,
   });
 
@@ -158,6 +165,8 @@ export default function AuditLogPage() {
             </li>
           )}
         </ul>
+        <LoadMore shown={shown} loaded={rows.data?.length ?? 0}
+          fetching={rows.isFetching} onMore={() => setShown((n) => n + 100)} />
       </div>
     </div>
   );

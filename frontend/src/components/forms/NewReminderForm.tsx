@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
+import { fetchAllCustomers } from "@/lib/fetchAll";
 import type { Customer } from "@/types";
 import { T } from "@/store/lang";
 
@@ -26,10 +27,8 @@ interface Props {
 export function NewReminderForm({ defaultDate, preselectCustomerId, onClose }: Props) {
   const qc = useQueryClient();
   const customers = useQuery({
-    queryKey: ["customers"],
-    queryFn: () =>
-      api.get("/customers", { params: { page_size: 200 } })
-        .then((r) => r.data.data as Customer[]),
+    queryKey: ["customers", "all"],
+    queryFn: () => fetchAllCustomers<Customer>().then((r) => r.data),
   });
 
   const [customerId, setCustomerId] = useState(preselectCustomerId ?? "");

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, FileText, Download, Loader2, AlertCircle, Filter } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { LoadMore } from "@/components/LoadMore";
 import { useAuthStore } from "@/store/auth";
 import { T, locale } from "@/store/lang";
 
@@ -46,14 +47,19 @@ export default function AttachmentsAdminPage() {
   const [query, setQuery] = useState("");
   const isDirector = me?.role === "director";
 
+  // The newest 500, then "Load more" instead of a silent stop.
+  const [shown, setShown] = useState(500);
+  useEffect(() => { setShown(500); }, [ownerType, query]);
   const files = useQuery({
-    queryKey: ["all-attachments", ownerType, query],
+    queryKey: ["all-attachments", ownerType, query, shown],
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === ownerType && prevQuery?.queryKey[2] === query ? prev : undefined,
     queryFn: () =>
       api.get("/attachments/all", {
         params: {
           owner_type: ownerType || undefined,
           q: query || undefined,
-          limit: 500,
+          limit: shown,
         },
       }).then((r) => r.data as AttachmentRow[]),
     enabled: isDirector,
@@ -208,6 +214,8 @@ export default function AttachmentsAdminPage() {
             </tbody>
           </table>
         )}
+        <LoadMore shown={shown} loaded={files.data?.length ?? 0}
+          fetching={files.isFetching} onMore={() => setShown((n) => n + 500)} />
       </div>
     </div>
   );

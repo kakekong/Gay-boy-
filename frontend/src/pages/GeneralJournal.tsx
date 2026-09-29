@@ -13,7 +13,7 @@
  * — because "out by 250.000" is a number you can go and find, while "invalid
  * entry" is not.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen, Plus, Trash2, Loader2, AlertCircle, CheckCircle2, X, Undo2,
@@ -23,6 +23,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { AccountPicker } from "@/components/AccountPicker";
 import { ChartOfAccountsPanel } from "@/components/ChartOfAccountsPanel";
+import { LoadMore } from "@/components/LoadMore";
 import { useT, T, locale } from "@/store/lang";
 
 interface Line {
@@ -80,11 +81,17 @@ export default function GeneralJournalPage() {
   const [rows, setRows] = useState<Draft[]>([emptyRow(), emptyRow()]);
   const [formErr, setFormErr] = useState<string | null>(null);
 
+  // 100 at a time, with "Load more" — past the latest 100 entries used to
+  // be unreachable except by searching.
+  const [shown, setShown] = useState(100);
+  useEffect(() => { setShown(100); }, [period, search]);
   const list = useQuery({
-    queryKey: ["journals", period, search],
+    queryKey: ["journals", period, search, shown],
     queryFn: () => api.get("/journals", {
-      params: { period: period || undefined, q: search || undefined, limit: 100 },
+      params: { period: period || undefined, q: search || undefined, limit: shown },
     }).then((r) => r.data as { total: number; items: Entry[] }),
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === period && prevQuery?.queryKey[2] === search ? prev : undefined,
   });
 
   const detail = useQuery({
@@ -435,6 +442,9 @@ export default function GeneralJournalPage() {
             </tbody>
           </table>
         )}
+        <LoadMore shown={shown} loaded={list.data?.items.length ?? 0}
+          total={list.data?.total} fetching={list.isFetching}
+          onMore={() => setShown((n) => n + 100)} />
 
         {open && (
           <div className="border-t border-ink-200 bg-ink-50/40 p-4">

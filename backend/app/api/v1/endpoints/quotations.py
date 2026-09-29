@@ -1217,14 +1217,18 @@ async def list_quotations(
     user: User = Depends(get_current_user),
     status_eq: str | None = None,
     customer_id: UUID | None = None,
-    limit: int = 50,
+    # No default cap: the Quotations page and a customer's quotation list
+    # both read this and neither pages, so a cap of 50 quietly hid every
+    # older quotation with nothing on screen to say so.
+    limit: int | None = None,
 ):
     stmt = (
         select(Quotation)
         .options(selectinload(Quotation.items))
         .order_by(Quotation.created_at.desc())
-        .limit(limit)
     )
+    if limit:
+        stmt = stmt.limit(limit)
     stmt = sales_scope(user, stmt, Quotation.sales_pic_id, Quotation.customer_id)
     if status_eq:
         stmt = stmt.where(Quotation.status == status_eq)

@@ -385,7 +385,7 @@ async def list_assets(db: AsyncSession = Depends(get_db),
     total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = (await db.scalars(
         stmt.order_by(FixedAsset.acquired_on.desc(), FixedAsset.number.desc())
-        .limit(min(limit, 500)).offset(max(0, offset)))).all()
+        .limit(min(limit, 10000)).offset(max(0, offset)))).all()
     cats = await _cat_map(db, list(rows))
 
     # The register's totals, over everything that matches — not just the

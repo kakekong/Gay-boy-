@@ -1116,6 +1116,18 @@ what "your quotation request was approved" used to do for everyone below
 manager. `_TARGET_LINK` in `notifications.py` maps an approval's `target_type`
 to its document; extend it when you add a new approval type.
 
+**No silent row caps on a list someone reads.** A list endpoint with a default
+`limit` (or a server clamp like `min(limit, 500)`) behind a page that doesn't
+page hides the oldest rows with nothing on screen to say so — the customer
+list showing 50 of 87 after an import was the first case; Quotations (50),
+a customer's activity timeline (50, and "activities logged" capped at 100)
+and the employee pages (200) were the same. Rules: a list the UI shows whole
+takes no default cap (`limit: int | None = None`); a list that pages returns a
+`total` and the page shows `components/LoadMore.tsx`; server clamps sit well
+above anything "Load more" will ask for (10 000). Dropdowns and the customer
+board load every customer through `lib/fetchAll.ts` (`/customers` pages at
+500 max). `tests/e2e/test_list_caps.py` builds past the old caps.
+
 **Push notifications** — `app/services/webpush.py`. VAPID keys live in the DB,
 created under `pg_advisory_xact_lock(429173001)` with `ORDER BY created_at` so
 concurrent boots can't mint two keypairs. Background sends go through

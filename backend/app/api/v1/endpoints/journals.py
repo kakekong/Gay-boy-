@@ -132,7 +132,7 @@ async def list_entries(
     rows = (await db.scalars(
         stmt.order_by(JournalEntry.entry_date.desc(),
                       JournalEntry.number.desc())
-        .limit(min(limit, 500)).offset(offset)
+        .limit(min(limit, 10000)).offset(offset)
     )).all()
     return {"total": total, "items": [_entry_out(e) for e in rows]}
 

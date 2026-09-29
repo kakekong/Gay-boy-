@@ -15,7 +15,7 @@
  * shown rather than typed. The two answers differ, and the difference is
  * the fiscal reconciliation — not a bug to be tidied away.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { LoadMore } from "@/components/LoadMore";
 import { AccountPicker } from "@/components/AccountPicker";
 import { useT } from "@/store/lang";
 
@@ -163,9 +164,13 @@ function RegisterTab({ say, blame, qc }: Helpers) {
     queryKey: ["asset-categories"],
     queryFn: () => api.get("/assets/categories").then((r) => r.data as Category[]),
   });
+  // 200 at a time, with "Load more" rather than a silent stop at 200.
+  const [shown, setShown] = useState(200);
+  useEffect(() => { setShown(200); }, [q]);
   const list = useQuery({
-    queryKey: ["assets", q],
-    queryFn: () => api.get("/assets", { params: { q: q || undefined, limit: 200 } })
+    queryKey: ["assets", q, shown],
+    placeholderData: (prev, prevQuery) => prevQuery?.queryKey[1] === q ? prev : undefined,
+    queryFn: () => api.get("/assets", { params: { q: q || undefined, limit: shown } })
       .then((r) => r.data as {
         total: number; items: Asset[];
         summary: { cost: number; accumulated: number; book_value: number };
@@ -368,6 +373,9 @@ function RegisterTab({ say, blame, qc }: Helpers) {
                 ))}
               </tbody>
             </table>
+            <LoadMore shown={shown} loaded={list.data.items.length}
+              total={list.data.total} fetching={list.isFetching}
+              onMore={() => setShown((n) => n + 200)} />
           </div>
         )}
       </section>

@@ -644,17 +644,20 @@ async def list_activities(
     customer_id: UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-    limit: int = 50,
+    # The customer's whole history — the timeline doesn't page, so a cap
+    # dropped the oldest calls and visits without saying so.
+    limit: int | None = None,
 ):
     obj = await db.get(Customer, customer_id)
     if not obj or obj.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if not can_view_customer(user, obj.sales_pic_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
-    rows = (await db.scalars(
-        select(Activity).where(Activity.customer_id == customer_id)
-        .order_by(Activity.occurred_at.desc()).limit(limit)
-    )).all()
+    stmt = (select(Activity).where(Activity.customer_id == customer_id)
+            .order_by(Activity.occurred_at.desc()))
+    if limit:
+        stmt = stmt.limit(limit)
+    rows = (await db.scalars(stmt)).all()
     return [
         {
             "id": str(a.id),
@@ -770,11 +773,14 @@ async def _build_summary(db: AsyncSession, c: Customer,
     )
 
     # Activities
+    # All of them: this list is also the summary's count and the export's
+    # activity sheet, and a cap of 100 topped every busy customer out at
+    # "100 activities logged".
     activities = (await db.scalars(
         select(Activity).where(Activity.customer_id == c.id)
         .order_by(Activity.occurred_at.desc())
-        .limit(100)
     )).all()
+    activities_logged = len(activities)
     last_activity = activities[0].occurred_at if activities else None
     first_quote_at = quotes[-1].created_at if quotes else None
     days_known = ((datetime.now(UTC) - c.created_at).days
@@ -814,7 +820,7 @@ async def _build_summary(db: AsyncSession, c: Customer,
             "total_paid": total_paid,
             "outstanding_ar": outstanding,
             "overdue_invoices": overdue_count,
-            "activities_logged": len(activities),
+            "activities_logged": activities_logged,
             "last_activity_at": last_activity,
             "first_quotation_at": first_quote_at,
             "days_known": days_known,

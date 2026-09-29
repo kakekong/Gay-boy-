@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
@@ -319,14 +320,8 @@ function CreateForm({
   );
 
   const customers = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => api.get("/customers", { params: { page_size: 200 } }).then((r) => {
-      // /customers returns a paginated envelope {data:[...]}; tolerate a bare array too.
-      const body = r.data;
-      if (Array.isArray(body)) return body;
-      if (body && Array.isArray(body.data)) return body.data;
-      return [];
-    }),
+    queryKey: ["customers", "all"],
+    queryFn: () => fetchAllCustomers().then((r) => r.data),
   });
 
   const create = useMutation({

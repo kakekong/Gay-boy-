@@ -26,6 +26,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { AccountPicker } from "@/components/AccountPicker";
 import { ChartOfAccountsPanel } from "@/components/ChartOfAccountsPanel";
+import { LoadMore } from "@/components/LoadMore";
 import { useT, T, locale } from "@/store/lang";
 
 interface BankAccount { account_no: string; name: string; balance: number }
@@ -76,12 +77,18 @@ export default function CashBankPage() {
     queryKey: ["cash-accounts"],
     queryFn: () => api.get("/cash/accounts").then((r) => r.data as BankAccount[]),
   });
+  // 50 at a time, with "Load more" — it used to stop at the latest 50 and
+  // say nothing about the rest.
+  const [shown, setShown] = useState(50);
   const list = useQuery({
-    queryKey: ["cash-tx", tab],
+    queryKey: ["cash-tx", tab, shown],
     queryFn: () => api.get("/cash", {
-      params: { kind: tab === "statement" ? undefined : tab, limit: 50 },
+      params: { kind: tab === "statement" ? undefined : tab, limit: shown },
     }).then((r) => r.data as { total: number; items: Tx[] }),
     enabled: tab !== "statement",
+    // Keep the rows on screen while the next 50 load, but not across tabs.
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === tab ? prev : undefined,
   });
   const stmt = useQuery({
     queryKey: ["cash-statement", stmtAccount, unclearedOnly],
@@ -212,7 +219,7 @@ export default function CashBankPage() {
         {TABS.map(({ id, label, Icon }) => (
           <button key={id}
             className={clsx("btn-ghost", tab === id && "bg-brand-50 text-brand-700")}
-            onClick={() => setTab(id)}>
+            onClick={() => { setTab(id); setShown(50); }}>
             <Icon size={14} /> {label}
           </button>
         ))}
@@ -602,6 +609,9 @@ export default function CashBankPage() {
                 </tbody>
               </table>
             )}
+            <LoadMore shown={shown} loaded={list.data?.items.length ?? 0}
+              total={list.data?.total} fetching={list.isFetching}
+              onMore={() => setShown((n) => n + 50)} />
           </div>
         </>
       )}

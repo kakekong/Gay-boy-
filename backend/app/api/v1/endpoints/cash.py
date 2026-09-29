@@ -167,7 +167,7 @@ async def list_transactions(
     rows = (await db.scalars(
         stmt.order_by(CashTransaction.tx_date.desc(),
                       CashTransaction.number.desc())
-        .limit(min(limit, 500)).offset(max(0, offset))
+        .limit(min(limit, 10000)).offset(max(0, offset))
     )).all()
     return {"total": total, "items": [_tx_out(t) for t in rows]}
 

@@ -46,7 +46,7 @@ export function AccountPicker({
 
   const accounts = useQuery({
     queryKey: ["accounts", "picker"],
-    queryFn: () => api.get("/accounts", { params: { limit: 500 } })
+    queryFn: () => api.get("/accounts", { params: { limit: 5000 } })
       .then((r) => (Array.isArray(r.data) ? r.data : r.data?.items ?? []) as PickableAccount[]),
     staleTime: 60_000,
   });

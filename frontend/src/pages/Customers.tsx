@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { fetchAllCustomers } from "@/lib/fetchAll";
 import { StageBadge } from "@/components/StageBadge";
 import { UserLink } from "@/components/UserLink";
 import { PipelineView } from "@/components/PipelineView";
@@ -81,21 +82,20 @@ export default function CustomersPage() {
   const q = useQuery({
     queryKey: ["customers", view === "pipeline" ? "" : search,
                view === "pipeline" ? "" : stage, rep, page, pageSize, view],
-    queryFn: () =>
-      api
-        .get("/customers", {
-          params: {
-            // In pipeline mode we fetch all stages, search is applied client-side
-            q: view === "table" ? (search || undefined) : (search || undefined),
-            stage: view === "table" ? (stage || undefined) : undefined,
-            sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
-            unassigned: rep === "none" ? true : undefined,
-            rep_hint: hint || undefined,
-            page: view === "pipeline" ? 1 : page,
-            page_size: view === "pipeline" ? 500 : pageSize,
-          },
-        })
-        .then((r) => r.data),
+    queryFn: () => {
+      const params = {
+        q: search || undefined,
+        stage: view === "table" ? (stage || undefined) : undefined,
+        sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
+        unassigned: rep === "none" ? true : undefined,
+        rep_hint: hint || undefined,
+      };
+      // The board shows every stage at once and doesn't page, so it takes
+      // every customer — it used to take one page of 500 and drop the rest.
+      if (view === "pipeline") return fetchAllCustomers(params);
+      return api.get("/customers", { params: { ...params, page, page_size: pageSize } })
+        .then((r) => r.data);
+    },
   });
   const rows: Customer[] = q.data?.data ?? [];
   const total: number = q.data?.total ?? rows.length;

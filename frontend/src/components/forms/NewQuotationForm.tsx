@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
 import { useT, t as tt, T } from "@/store/lang";
 import type { Customer } from "@/types";
@@ -75,9 +76,8 @@ export function NewQuotationForm({ onClose, preselectCustomerId, quote }: Props)
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const customers = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => api.get("/customers", { params: { page_size: 200 } })
-      .then((r) => r.data.data as Customer[]),
+    queryKey: ["customers", "all"],
+    queryFn: () => fetchAllCustomers<Customer>().then((r) => r.data),
   });
 
   // Pull the picked customer's extra PICs (multi-PIC contacts) so the user
