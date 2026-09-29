@@ -210,6 +210,9 @@ async def list_items(
     q: str | None = None,
     category: str | None = None,
     only_low: bool = False,
+    # One status, as the list's filter picks it: ok | low | out. The same
+    # rule as `_status`, said in SQL.
+    stock_status: str | None = None,
     only_active: bool = True,
     limit: int = 200,
     offset: int = 0,
@@ -239,6 +242,14 @@ async def list_items(
             (InventoryItem.current_stock <= 0)
             | (InventoryItem.current_stock < InventoryItem.reorder_point)
         )
+    if stock_status == "out":
+        stmt = stmt.where(InventoryItem.current_stock <= 0)
+    elif stock_status == "low":
+        stmt = stmt.where(InventoryItem.current_stock > 0,
+                          InventoryItem.current_stock < InventoryItem.reorder_point)
+    elif stock_status == "ok":
+        stmt = stmt.where(InventoryItem.current_stock > 0,
+                          InventoryItem.current_stock >= InventoryItem.reorder_point)
     total = await db.scalar(
         select(func.count()).select_from(stmt.subquery())
     ) or 0

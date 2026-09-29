@@ -91,6 +91,26 @@ async def main():
         check(f"{path} accepts a page past its old ceiling", r.status_code == 200,
               f"{r.status_code} {str(J(r))[:120]}")
 
+    print("\n── inventory: filter by status and category ──")
+    from app.models.inventory import InventoryItem
+    async with SessionLocal() as db:
+        for tag, stock, rp in (("OK", 50, 10), ("LOW", 3, 10), ("OUT", 0, 10)):
+            db.add(InventoryItem(sku=f"CAP-{TAG}-{tag}", name=f"Cap part {TAG} {tag}",
+                                 category=f"cat-{TAG}", uom="pcs",
+                                 current_stock=stock, reorder_point=rp))
+        await db.commit()
+    async def skus(**params):
+        b = J(await c.get("/inventory", headers=d, params={"q": f"CAP-{TAG}", **params}))
+        return sorted(x["sku"].rsplit("-", 1)[1] for x in b["items"]), b["total"]
+    check("unfiltered, all three", (await skus())[0] == ["LOW", "OK", "OUT"])
+    check("in stock only", (await skus(stock_status="ok"))[0] == ["OK"])
+    check("low only", (await skus(stock_status="low"))[0] == ["LOW"])
+    check("out only", (await skus(stock_status="out"))[0] == ["OUT"])
+    check("needs attention is low and out", (await skus(only_low=True))[0] == ["LOW", "OUT"])
+    got, tot = await skus(category=f"cat-{TAG}", stock_status="low")
+    check("category and status together, with a total to count", got == ["LOW"] and tot == 1,
+          f"{got} {tot}")
+
     print("\n── every customer, for the pickers and the board ──")
     tot = J(await c.get("/customers", headers=d, params={"page_size": 1}))["total"]
     got, page = 0, 1

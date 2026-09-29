@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package, Plus, Search, AlertTriangle, CheckCircle2, ShoppingCart, Loader2,
-  Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw,
+  Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw, Filter,
 } from "lucide-react";
 import clsx from "clsx";
 import { Link } from "react-router-dom";
@@ -61,7 +61,11 @@ export default function InventoryPage() {
   const showCost = !!user && !["admin", "sales"].includes(user.role);
 
   const [q, setQ] = useState("");
-  const [onlyLow, setOnlyLow] = useState(false);
+  // One status at a time, the way the other lists filter: "needs
+  // attention" is the old low-stock checkbox (low or out together).
+  const [statusFilter, setStatusFilter] = useState<"" | "attention" | "ok" | "low" | "out">("");
+  const [category, setCategory] = useState("");
+  const t = useT();
   const [openNew, setOpenNew] = useState(false);
   const [openBulk, setOpenBulk] = useState(false);
   const [openRequest, setOpenRequest] = useState(false);
@@ -71,13 +75,29 @@ export default function InventoryPage() {
   // A page at a time. The catalogue gains a SKU for every purchase-order
   // line, so "load them all and filter in the browser" stops being free.
   const [shown, setShown] = useState(PAGE);
-  useEffect(() => { setShown(PAGE); }, [q, onlyLow]);
+  useEffect(() => { setShown(PAGE); }, [q, statusFilter, category]);
   const items = useQuery({
-    queryKey: ["inventory", q, onlyLow, shown],
+    queryKey: ["inventory", q, statusFilter, category, shown],
     queryFn: () => api.get("/inventory", {
-      params: { q: q || undefined, only_low: onlyLow || undefined, limit: shown },
+      params: {
+        q: q || undefined,
+        only_low: statusFilter === "attention" || undefined,
+        stock_status: ["ok", "low", "out"].includes(statusFilter) ? statusFilter : undefined,
+        category: category || undefined,
+        limit: shown,
+      },
     }).then((r) => r.data as { items: Item[]; total: number }),
+    // Keep the rows on screen while the next page loads.
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === q && prevQuery?.queryKey[2] === statusFilter
+        && prevQuery?.queryKey[3] === category ? prev : undefined,
   });
+  const categories = useQuery({
+    queryKey: ["inventory-categories"],
+    queryFn: () => api.get("/inventory/categories").then((r) => r.data as string[]),
+    staleTime: 5 * 60_000,
+  });
+  const filtering = !!(q.trim() || statusFilter || category);
   const rows = items.data?.items ?? [];
   const total = items.data?.total ?? 0;
 
@@ -149,11 +169,30 @@ export default function InventoryPage() {
         <div className="relative flex-1 min-w-[220px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)}
+            aria-label={t("Search inventory", "Cari inventaris")}
             placeholder={T("Search by SKU or name…")} className="input pl-9" />
         </div>
-        <label className="flex items-center gap-2 text-sm select-none cursor-pointer">
-          <input type="checkbox" checked={onlyLow} onChange={(e) => setOnlyLow(e.target.checked)} />
-          {T("Show only low / out of stock")}</label>
+        <select value={statusFilter} aria-label={T("Status")}
+          onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+          className="input max-w-[200px]">
+          <option value="">{t("All statuses", "Semua status")}</option>
+          <option value="attention">{t("Low or out of stock", "Menipis atau habis")}</option>
+          <option value="ok">{t("In stock", "Tersedia")}</option>
+          <option value="low">{t("Low", "Menipis")}</option>
+          <option value="out">{t("Out of stock", "Habis")}</option>
+        </select>
+        {(categories.data ?? []).length > 0 && (
+          <select value={category} aria-label={T("Category")}
+            onChange={(e) => setCategory(e.target.value)}
+            className="input max-w-[200px]">
+            <option value="">{t("All categories", "Semua kategori")}</option>
+            {(categories.data ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        <div className="text-xs muted tabular-nums">
+          <Filter size={12} className="inline mr-1" />
+          {items.data ? total : "…"} {t("of", "dari")} {stats.data?.tracked ?? "…"} {t("items", "barang")}
+        </div>
       </div>
 
       {/* Table */}
@@ -260,8 +299,10 @@ export default function InventoryPage() {
                   <td colSpan={8} className="td text-center muted py-12">
                     {items.isLoading
                       ? T("Loading…")
+                      : filtering
+                      ? t("No items match your search.", "Tidak ada barang yang cocok dengan pencarian Anda.")
                       : T("No inventory items yet.")}
-                    {canEdit && !items.isLoading && (
+                    {canEdit && !items.isLoading && !filtering && (
                       <> {T("Click")}{" "}<b>{T("+ New item")}</b> {T("to add one.")}</>
                     )}
                   </td>
