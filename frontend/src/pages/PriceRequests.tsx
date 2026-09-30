@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { QuotedMoney } from "@/components/QuotedMoney";
 import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
 import { ProductSuggestInput, type CatalogueHit } from "@/components/ProductSuggestInput";
@@ -1659,6 +1660,7 @@ interface SupplierRequestLink {
   lines: number;
   lines_quoted: number;
   quoted_total: number | null;
+  fx_rate?: number | null;
   is_joint: boolean;
 }
 
@@ -1822,7 +1824,7 @@ function SupplierRequestsStrip({ rows }: { rows: SupplierRequestLink[] }) {
                 )}
                 <span className="ml-auto text-sm tabular-nums font-semibold text-ink-900">
                   {r.quoted_total != null
-                    ? vendorMoney(r.quoted_total, r.currency)
+                    ? <QuotedMoney amount={r.quoted_total} currency={r.currency} rate={r.fx_rate} />
                     : <span className="font-normal text-xs muted">
                         {/* Nobody is waiting on a request that is closed —
                             it ended without a full answer. */}

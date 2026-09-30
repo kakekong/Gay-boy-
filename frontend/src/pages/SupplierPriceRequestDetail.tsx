@@ -20,6 +20,7 @@ import {
 import clsx from "clsx";
 import { CURRENCIES, money } from "@/lib/currency";
 import { api } from "@/api/client";
+import { QuotedMoney } from "@/components/QuotedMoney";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { DraftNotice } from "@/components/DraftNotice";
@@ -528,10 +529,8 @@ export default function SupplierPriceRequestDetailPage() {
             {/* In the vendor's currency, because that is the number they
                 said. Printing "Rp" in front of a yuan figure is the exact
                 confusion the exchange rate exists to resolve. */}
-            <span className="tabular-nums">
-              {r.quoted_total == null
-                ? "—" : money(r.quoted_total, r.currency || "IDR")}
-            </span>
+            <QuotedMoney amount={r.quoted_total} currency={r.currency}
+              rate={r.fx_rate} align="left" />
           </Cell>
           <Cell label={t("Lead time", "Waktu kirim")}>
             {r.quoted_lead_days == null
@@ -1005,14 +1004,8 @@ export default function SupplierPriceRequestDetailPage() {
                         side that are not the same money must not look like
                         they are. The rupiah each converts to is what the
                         comparison is really on, and follows below. */}
-                    {o.quoted_total == null
-                      ? "—" : money(o.quoted_total, o.currency || "IDR")}
-                    {(o.currency || "IDR") !== "IDR" && o.fx_rate != null
-                      && o.quoted_total != null && (
-                      <span className="block text-[11px] muted font-normal">
-                        {idr(o.quoted_total * Number(o.fx_rate))}
-                      </span>
-                    )}
+                    <QuotedMoney amount={o.quoted_total} currency={o.currency}
+                      rate={o.fx_rate != null ? Number(o.fx_rate) : null} />
                   </td>
                 </tr>
               ))}

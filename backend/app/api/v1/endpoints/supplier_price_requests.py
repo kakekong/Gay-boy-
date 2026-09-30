@@ -499,6 +499,7 @@ async def supplier_requests_for_pr(db: AsyncSession, pr_id: UUID) -> list[dict]:
             "supplier_id": str(r.supplier_id),
             "supplier_name": sup.name if sup else None,
             "currency": r.currency or "IDR",
+            "fx_rate": float(r.fx_rate) if r.fx_rate is not None else None,
             "sent_at": r.sent_at,
             "quoted_at": r.quoted_at,
             "valid_until": r.valid_until,

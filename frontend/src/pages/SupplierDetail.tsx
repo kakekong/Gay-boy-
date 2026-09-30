@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { QuotedMoney } from "@/components/QuotedMoney";
 import { downloadFile } from "@/lib/download";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
@@ -33,6 +34,7 @@ interface SupplierPR {
   quoted_lines: number;
   first_item: string | null;
   quoted_total: number | null;
+  fx_rate?: number | null;
 }
 
 /** A named person at the supplier, with their own line — same row shape the
@@ -54,6 +56,8 @@ interface PO {
   status: string;
   po_date: string | null;
   total: number;
+  currency?: string;
+  fx_rate?: number | null;
   project_id: string | null;
 }
 
@@ -278,9 +282,7 @@ export default function SupplierDetailPage() {
                       </span>
                     </td>
                     <td className="td text-right tabular-nums">
-                      {p.quoted_total != null
-                        ? `${p.currency === "IDR" ? "" : p.currency + " "}${idr(p.quoted_total)}`
-                        : <span className="muted">—</span>}
+                      <QuotedMoney amount={p.quoted_total} currency={p.currency} rate={p.fx_rate} />
                     </td>
                   </tr>
                 ))}
@@ -335,7 +337,9 @@ export default function SupplierDetailPage() {
                       {T(p.status.replace(/_/g, " "))}
                     </span>
                   </td>
-                  <td className="td text-right tabular-nums">{idr(p.total)}</td>
+                  <td className="td text-right tabular-nums">
+                    <QuotedMoney amount={p.total} currency={p.currency} rate={p.fx_rate} />
+                  </td>
                 </tr>
               ))}
             </tbody>

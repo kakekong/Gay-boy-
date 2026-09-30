@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { QuotedMoney } from "@/components/QuotedMoney";
 import { useAuthStore } from "@/store/auth";
 import { T, t } from "@/store/lang";
 import { CURRENCIES } from "@/lib/currency";
@@ -61,6 +62,7 @@ interface SPR {
   quoted_at: string | null;
   applied_at: string | null;
   quoted_total: number | null;
+  fx_rate?: number | null;
   lines_quoted: number;
   lines_total: number;
 }
@@ -410,7 +412,9 @@ export default function PurchasingPage() {
                     {r.lines_quoted}/{r.lines_total}
                   </td>
                   <td className="td text-right tabular-nums">
-                    {r.quoted_total == null ? "—" : idr(r.quoted_total)}
+                    {/* In the currency the supplier quoted, with rupiah under
+                        it — this printed every total as rupiah. */}
+                    <QuotedMoney amount={r.quoted_total} currency={r.currency} rate={r.fx_rate} />
                   </td>
                 </tr>
               ))}
@@ -468,7 +472,9 @@ export default function PurchasingPage() {
                     <td className="td">
                       <span className="chip bg-ink-100 text-ink-700 uppercase">{p.status}</span>
                     </td>
-                    <td className="td text-right tabular-nums">{idr(p.total ?? 0)}</td>
+                    <td className="td text-right tabular-nums">
+                      <QuotedMoney amount={p.total ?? 0} currency={p.currency} rate={p.fx_rate} />
+                    </td>
                   </tr>
                 );
               })}

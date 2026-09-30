@@ -130,6 +130,8 @@ async def main():
           a.get("currency") == "CNY"
           and abs(float(a.get("quoted_total") or 0) - (100 * 10 + 250 * 4)) < 0.01,
           f"{a.get('currency')} {a.get('quoted_total')}")
+    check("...with its rate, so the page can show it in rupiah too",
+          a.get("fx_rate") == 2200.0, str(a.get("fx_rate")))
     check("...and their lead time", a.get("quoted_lead_days") == 45,
           str(a.get("quoted_lead_days")))
 

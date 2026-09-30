@@ -225,6 +225,8 @@ async def get_supplier(
             "quoted_at": x.quoted_at,
             "valid_until": x.valid_until,
             "currency": x.currency,
+            # With the currency, so a yuan quote can be shown in rupiah too.
+            "fx_rate": float(x.fx_rate) if x.fx_rate is not None else None,
             "line_count": len(lines),
             "quoted_lines": len(quoted),
             # A one-line reminder of what the ask was about, so the row can be
@@ -269,7 +271,10 @@ async def get_supplier(
         "price_requests": price_requests,
         "price_request_count": len(price_requests),
         "awaiting_quote_count": len(awaiting),
-        "lifetime_value": float(sum(float(p.total or 0) for p in po_rows)),
+        # In rupiah: a yuan order counts at its own rate. Adding its yuan
+        # figure as though it were rupiah understated every foreign supplier.
+        # An order with no rate yet cannot be counted and is left out.
+        "lifetime_value": float(sum(_fx(p)["total_idr"] or 0 for p in po_rows)),
         "purchase_orders": [
             {
                 "id": str(p.id),
@@ -277,6 +282,8 @@ async def get_supplier(
                 "status": p.status,
                 "po_date": p.po_date,
                 "total": float(p.total or 0),
+                "currency": (p.currency or "IDR").upper(),
+                **_fx(p),
                 "project_id": str(p.project_id) if p.project_id else None,
             }
             for p in po_rows
