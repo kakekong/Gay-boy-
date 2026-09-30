@@ -296,7 +296,10 @@ async def create_supplier(
 ):
     if not payload.name.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name required")
-    existing = await db.scalar(select(Supplier).where(Supplier.name == payload.name.strip()))
+    # Names are stored in capitals, so "pt abc" is the existing "PT ABC".
+    from app.core.names import company_name
+    existing = await db.scalar(select(Supplier).where(
+        Supplier.name == company_name(payload.name)))
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "Supplier with this name already exists")
     from app.models.purchasing import SupplierContact
@@ -353,7 +356,8 @@ async def update_supplier(
     data = payload.model_dump(exclude_unset=True)
 
     if "name" in data:
-        new_name = (data.pop("name") or "").strip()
+        from app.core.names import company_name
+        new_name = company_name(data.pop("name") or "") or ""
         if not new_name:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Name required")
         if new_name != s.name:

@@ -168,7 +168,7 @@ export function NewCustomerForm({ onClose, customer }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Field label={t("Company name *", "Nama perusahaan *")}>
             <input className="input" required value={basic.company_name}
-              onChange={(e) => setBasic({ ...basic, company_name: e.target.value })} />
+              onChange={(e) => setBasic({ ...basic, company_name: e.target.value.toUpperCase() })} />
           </Field>
           <Field label={t("Industry", "Industri")}>
             <select className="input" value={basic.industry}

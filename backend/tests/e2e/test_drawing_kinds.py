@@ -378,7 +378,7 @@ async def main():
 
     pship = J(await c.get(f"/purchasing/po/for-project/{proj}", headers=pur))
     check("purchasing still see the vendor on theirs",
-          pship["shipments"][0]["supplier_name"] == f"PT Rahasia {tag}",
+          pship["shipments"][0]["supplier_name"] == f"PT Rahasia {tag}".upper(),
           str(pship["shipments"][0]["supplier_name"]))
 
     # ══ the neighbours that could undo all of it ═════════════════════════════

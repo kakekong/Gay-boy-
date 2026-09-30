@@ -292,7 +292,7 @@ async def main():
     check("...headed by its number and kind", v["number"] == inv_no
           and v["type"] == "final", str(v)[:200])
     check("...naming the customer and the project",
-          v["customer_name"] == f"PT Faktur {tag}" and v["project_code"],
+          v["customer_name"] == f"PT Faktur {tag}".upper() and v["project_code"],
           f"{v.get('customer_name')} / {v.get('project_code')}")
     check("...and the customer's PO it bills against", v["po_number"] == po_no,
           str(v.get("po_number")))

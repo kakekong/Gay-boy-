@@ -633,6 +633,22 @@ COLUMN_MIGRATIONS: list[str] = [
           AND target_type IN ('quotation_won', 'delivery_order')
           AND required_role <> 'finance'""",
 
+    # ── Company names in capitals ──────────────────────────────────────
+    # New and edited names are capitalised by the models; these bring the
+    # ones written before into line. Idempotent — runs each boot. A supplier
+    # whose capitalised name would clash with another's (supplier names are
+    # unique) is left as it is rather than failing the boot: that pair is the
+    # same company twice and wants merging by a person.
+    """UPDATE customers SET company_name = upper(regexp_replace(btrim(company_name), '\\s+', ' ', 'g'))
+        WHERE company_name <> upper(regexp_replace(btrim(company_name), '\\s+', ' ', 'g'))""",
+    """UPDATE suppliers s SET name = upper(regexp_replace(btrim(s.name), '\\s+', ' ', 'g'))
+        WHERE s.name <> upper(regexp_replace(btrim(s.name), '\\s+', ' ', 'g'))
+          AND NOT EXISTS (
+            SELECT 1 FROM suppliers o
+             WHERE o.id <> s.id
+               AND upper(regexp_replace(btrim(o.name), '\\s+', ' ', 'g'))
+                 = upper(regexp_replace(btrim(s.name), '\\s+', ' ', 'g')))""",
+
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
 

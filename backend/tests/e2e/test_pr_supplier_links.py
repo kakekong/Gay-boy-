@@ -120,7 +120,7 @@ async def main():
           joint.get("id") in ids, str(ids))
 
     a = next((x for x in links if x["id"] == spr_a["id"]), {})
-    check("each row names the supplier", a.get("supplier_name") == f"PT Cepat {TAG}",
+    check("each row names the supplier", a.get("supplier_name") == f"PT Cepat {TAG}".upper(),
           str(a.get("supplier_name")))
     check("...and its number, to link by", a.get("number") == spr_a.get("number"),
           str(a.get("number")))

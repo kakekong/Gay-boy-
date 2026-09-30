@@ -129,6 +129,7 @@ Nine base roles. Internal roles are capped by a sidebar/route allowlist enforced
 Each customer carries a **stage**:
 `lead → presentation → engineering → quotation → negotiation → po → drawing → purchasing → delivery → invoicing → payment → closed_won / closed_lost`
 
+- **Company names are always in capitals** — customers and suppliers alike ("PT JAKARTA PRIMA CRANE"), however they are typed, imported or edited, with spacing tidied; the forms show capitals as you type. Names from before were capitalised on deploy. A supplier whose capitalised name would clash with another supplier's is left as it was — that pair is one company twice and wants merging. New files for a customer go to a capitalised storage folder; older files stay where they are and still open.
 - **Forward moves are one stage at a time** (no skipping); backward moves are always allowed; `closed_lost` can be reached from anywhere.
 - **Manual stage moves need approval.** Sales files a request (mandatory written reason + optional evidence files); a **manager or director** approves. Managers'/directors' own moves apply instantly.
 - **Stage notes are permanent.** Clicking a *passed* stage on the pipeline stepper opens that stage's paper trail: every move into/out of it, the reason written at the time, who requested, who decided, and the decision note.

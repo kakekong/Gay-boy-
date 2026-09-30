@@ -140,7 +140,7 @@ async def main():
           by_key["delivery"]["label_id"] == "Alamat Pengiriman",
           str(by_key["delivery"]))
     check("the customer is named, so you know what you are printing",
-          opts["customer_name"] == f"PT Tiga Alamat {tag}", str(opts.get("customer_name")))
+          opts["customer_name"] == f"PT Tiga Alamat {tag}".upper(), str(opts.get("customer_name")))
     names = [p["name"] for p in opts["pics"]]
     check("the contacts are offered too", "Pak Budi" in names
           and f"Ibu Sari {tag}" in names, str(names))

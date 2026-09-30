@@ -105,7 +105,7 @@ async def main():
           f"{r.status_code} {r.content[:8]}")
     x = xlsx_text(r.content)
     check("...carrying the number and supplier",
-          po_no in x and f"PT Cetak PO {tag}" in x, x[:300])
+          po_no in x and f"PT Cetak PO {tag}".upper() in x, x[:300])
     check("...every line", f"CHAIN C-2122 {tag}" in x and f"SPROCKET 24T {tag}" in x,
           x[:400])
     check("...the lead time", "30" in x, x[:400])

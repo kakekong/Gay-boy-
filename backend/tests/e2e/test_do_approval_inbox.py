@@ -160,7 +160,7 @@ async def main():
     pv = J(await c.get(f"/approvals/{req['id']}/preview", headers=fin))
     check("the preview is the document, not the request",
           pv.get("title") == do_no, str(pv.get("title")))
-    check("...naming the customer", f"PT Kirim {tag}" == (pv.get("subtitle") or ""),
+    check("...naming the customer", f"PT Kirim {tag}".upper() == (pv.get("subtitle") or ""),
           str(pv.get("subtitle")))
     check("...with the goods on it",
           len(pv.get("items") or []) == 1
@@ -308,7 +308,7 @@ async def main():
     check("...headed by its number and shipment", v.get("number") == do_no
           and v.get("split_index") == 1, str(v)[:200])
     check("...naming the customer and the project",
-          v.get("customer_name") == f"PT Kirim {tag}" and v.get("project_code"),
+          v.get("customer_name") == f"PT Kirim {tag}".upper() and v.get("project_code"),
           f"{v.get('customer_name')} / {v.get('project_code')}")
     check("...the customer's PO, which prints as the reference",
           v.get("po_number") == po_no, str(v.get("po_number")))

@@ -637,8 +637,8 @@ function NewSupplierModal({ onClose, onCreated, onError }: {
           <Field label={T("Name *")}>
             <input
               className="input" required
-              value={name} onChange={(e) => setName(e.target.value)}
-              placeholder={T("PT Sumber Logam Indonesia")}
+              value={name} onChange={(e) => setName(e.target.value.toUpperCase())}
+              placeholder="PT SUMBER LOGAM INDONESIA"
             />
           </Field>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

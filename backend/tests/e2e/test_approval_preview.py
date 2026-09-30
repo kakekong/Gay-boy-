@@ -97,7 +97,7 @@ async def main():
     # ── 1. the customer PO preview ───────────────────────────────────────────
     p = J(await c.get(f"/approvals/{req_id}/preview", headers=d))
     check("the preview names the document", p.get("title") == f"PO-PREV-{tag}", str(p)[:200])
-    check("...and the customer", p.get("subtitle") == f"PT Pratinjau {tag}", str(p.get("subtitle")))
+    check("...and the customer", p.get("subtitle") == f"PT Pratinjau {tag}".upper(), str(p.get("subtitle")))
     check("...and links through to it", (p.get("link") or "").endswith(str(po_id)), str(p.get("link")))
     items = p.get("items") or []
     check("both lines are there", len(items) == 2, str(len(items)))

@@ -302,7 +302,7 @@ async def main():
     check("a quotation whose customer isn't in the CRM is skipped, not guessed",
           byq[q4]["action"] == "no_customer", byq[q4]["action"])
     check("...with the likely customer named",
-          any("did you mean" in w and "Nusantara" in w for w in byq[q4]["warnings"]),
+          any("did you mean" in w and "NUSANTARA" in w for w in byq[q4]["warnings"]),
           str(byq[q4]["warnings"]))
     check("...and the offer is counted so it can be made with a number",
           p["near_name_matches"] == 1, str(p.get("near_name_matches")))
@@ -313,7 +313,7 @@ async def main():
                             data={"accept_near_names": "true"}))
     near = {r["number"]: r for r in p_near["rows"]}
     check("turning the offer on files it against that customer",
-          near[q4]["action"] == "create" and "Nusantara" in (near[q4]["matched_customer"] or ""),
+          near[q4]["action"] == "create" and "NUSANTARA" in (near[q4]["matched_customer"] or ""),
           str(near[q4]["action"]) + " " + str(near[q4]["matched_customer"]))
 
     # ── committing ──

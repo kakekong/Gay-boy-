@@ -219,7 +219,7 @@ async def main():
     mine = [i for i in bell2["items"] if i["kind"] == "handover"]
     check("the new rep is told in the bell", len(mine) >= 1, str(len(mine)))
     check("...by name, with a link to the customer",
-          any("PT Pindah" in i["title"] and cust in i["link"] for i in mine),
+          any("PT PINDAH" in i["title"] and cust in i["link"] for i in mine),
           str(mine[:1])[:180])
     check("...and told what came with it",
           any("quotation" in i["body"] for i in mine), str(mine[:1])[:180])
@@ -350,7 +350,7 @@ async def main():
     dh = await login(f"diani-{tag}@demo.local")
     theirs = [x["company_name"] for x in J(await c.get("/customers", headers=dh))["data"]]
     check("...and Diani can now see them",
-          sum(1 for n in theirs if f"PT Diani Punya {tag}" in n) == 3, str(theirs)[:160])
+          sum(1 for n in theirs if f"PT Diani Punya {tag}".upper() in n) == 3, str(theirs)[:160])
 
     reps = J(await c.get("/customers/assignable-reps", headers=d))
     group = next((g for g in reps.get("from_import", [])

@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.db import Base
 from app.models.base import AuthorshipMixin, SoftDeleteMixin, TimestampMixin, UUIDPK
@@ -14,6 +14,13 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     __tablename__ = "customers"
 
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+    @validates("company_name")
+    def _caps(self, _key, value):
+        # Always in capitals — see app/core/names.py.
+        from app.core.names import company_name
+        return company_name(value)
+
     industry: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     pic_name: Mapped[str | None] = mapped_column(String(255))
     pic_position: Mapped[str | None] = mapped_column(String(120))

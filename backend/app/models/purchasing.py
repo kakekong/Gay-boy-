@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.db import Base
 from app.models.base import TimestampMixin, UUIDPK
@@ -14,6 +14,12 @@ class Supplier(Base, UUIDPK, TimestampMixin):
     __tablename__ = "suppliers"
 
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+
+    @validates("name")
+    def _caps(self, _key, value):
+        # Always in capitals — see app/core/names.py.
+        from app.core.names import company_name
+        return company_name(value)
     category: Mapped[str | None] = mapped_column(String(120))
     rating: Mapped[float] = mapped_column(Numeric(4, 2), default=0, nullable=False)
     lead_time_days_avg: Mapped[float] = mapped_column(Numeric(6, 2), default=0, nullable=False)

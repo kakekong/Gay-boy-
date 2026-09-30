@@ -118,7 +118,7 @@ async def main():
     got=storage._client().get_object(Bucket=BUCKET,Key=key)["Body"].read()
     check("the bucket holds the exact bytes", got==s3_body, f"{got[:40]!r}")
     check("the key files it under the customer's name, not the month",
-          key.startswith(f"attachments/customer/PT-Storage-{tag}/"), key)
+          key.startswith(f"attachments/customer/PT-STORAGE-{tag.upper()}/"), key)
 
     # ---------- 3. THE POINT: the pre-switch file still downloads ----------
     r=await c.get(f"/attachments/{local_id}/download",headers=H["d"])
@@ -203,7 +203,7 @@ async def main():
         row=await db.get(Attachment, uuid.UUID(stale_id))
         new_key=row.storage_path.split("/",3)[3]
     check("relayout moved the object under the customer's name",
-          new_key.startswith(f"attachments/customer/PT-Storage-{tag}/"), new_key)
+          new_key.startswith(f"attachments/customer/PT-STORAGE-{tag.upper()}/"), new_key)
     r=await c.get(f"/attachments/{stale_id}/download",headers=H["d"])
     check("...and it still downloads, byte for byte",
           r.status_code==200 and r.content==stale_body, f"{r.status_code} {r.content[:40]!r}")

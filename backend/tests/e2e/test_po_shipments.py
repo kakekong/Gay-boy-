@@ -115,7 +115,7 @@ async def main():
           str([s["eta"] for s in ship["shipments"]]))
     check("...each naming the vendor bringing it",
           {s["supplier_name"] for s in ship["shipments"]}
-          == {f"PT Rantai {tag}", f"PT Sproket {tag}"},
+          == {f"PT Rantai {tag}".upper(), f"PT Sproket {tag}".upper()},
           str([s["supplier_name"] for s in ship["shipments"]]))
     check("...and which items are on which truck",
           f"SPROCKET {tag}" in str(ship["shipments"][0]["items"])

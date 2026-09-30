@@ -123,14 +123,14 @@ async def main():
 
     path, err = await upload("customer", cust, "npwp.pdf", s1)
     check("a customer's files sit under the company name",
-          folder(path) == f"attachments/customer/PT-Berkas-{TAG}",
+          folder(path) == f"attachments/customer/PT-BERKAS-{TAG.upper()}",
           err or folder(path))
 
     contact = J(await c.post(f"/customers/{cust}/contacts", headers=s1, json={
         "name": f"Budi {TAG}", "position": "Purchasing"}))
     path, err = await upload("customer_contact", contact["id"], "ktp.jpg", s1)
     check("a contact's ID card nests under their company, then their name",
-          folder(path) == f"attachments/customer_contact/PT-Berkas-{TAG}/Budi-{TAG}",
+          folder(path) == f"attachments/customer_contact/PT-BERKAS-{TAG.upper()}/Budi-{TAG}",
           err or folder(path))
 
     emp = J(await c.post("/employees", headers=hr, json={

@@ -118,7 +118,7 @@ async def main():
     check("...so it is not ready for the director", cov["fully_costed"] is False)
     line1 = cov["lines"][0]
     check("...line 1 names the vendor holding it",
-          line1["asked"] and f"PT Rantai {tag}" == line1["asked"][0]["supplier_name"],
+          line1["asked"] and f"PT Rantai {tag}".upper() == line1["asked"][0]["supplier_name"],
           str(line1["asked"])[:200])
 
     # the chain vendor answers first
@@ -136,7 +136,7 @@ async def main():
 
     priced = J(await c.get(f"/price-requests/{job['id']}", headers=pur))
     check("the costed line carries its supplier's name",
-          priced["items"][0].get("cost_supplier") == f"PT Rantai {tag}",
+          priced["items"][0].get("cost_supplier") == f"PT Rantai {tag}".upper(),
           str(priced["items"][0].get("cost_supplier")))
     check("...and the other two are still empty",
           priced["items"][1].get("cost_price") in (None, ""),
@@ -161,7 +161,7 @@ async def main():
           str([i.get("cost_price") for i in done["items"]]))
     check("...and the lines name different suppliers, which is the point",
           {i.get("cost_supplier") for i in done["items"]}
-          == {f"PT Rantai {tag}", f"PT Sproket {tag}"},
+          == {f"PT Rantai {tag}".upper(), f"PT Sproket {tag}".upper()},
           str({i.get("cost_supplier") for i in done["items"]}))
 
     check("both quotes stay marked as live — neither superseded the other",

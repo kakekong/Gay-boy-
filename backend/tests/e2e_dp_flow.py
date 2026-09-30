@@ -80,8 +80,8 @@ async def main():
                 await db.flush()
             users[role] = u
         if not await db.scalar(select(Customer).where(
-                Customer.company_name == "PT Bara Kalsel")):
-            db.add(Customer(company_name="PT Bara Kalsel", industry="mining",
+                Customer.company_name == "PT BARA KALSEL")):
+            db.add(Customer(company_name="PT BARA KALSEL", industry="mining",
                             pic_name="Andi", whatsapp="+628123456789",
                             sales_pic_id=users["sales"].id,
                             stage="negotiation",
@@ -108,11 +108,11 @@ async def main():
     # Search rather than page. The other drivers each leave a handful of
     # customers behind, so the seeded one drops off any fixed-size first page
     # once the suite has grown — and this driver runs last.
-    r = await director.get("/customers", params={"q": "PT Bara Kalsel", "page_size": 50})
+    r = await director.get("/customers", params={"q": "PT BARA KALSEL", "page_size": 50})
     body = r.json()
     customers = body["data"] if isinstance(body, dict) and "data" in body else body
-    cust = next((c for c in customers if c["company_name"] == "PT Bara Kalsel"), None)
-    assert cust, f"seeded customer 'PT Bara Kalsel' not found in {len(customers)} result(s)"
+    cust = next((c for c in customers if c["company_name"] == "PT BARA KALSEL"), None)
+    assert cust, f"seeded customer 'PT BARA KALSEL' not found in {len(customers)} result(s)"
     cust_id = cust["id"]
 
     r = await director.post("/quotations", json={

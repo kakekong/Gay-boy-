@@ -132,7 +132,7 @@ async def main():
                         params={"type": "customer_po", "q": f"PO-DEL-A-{tag}"}))
     check("records can be found by number", len(lst) == 1, str(lst)[:160])
     check("...and come back named by customer, not just by id",
-          lst and lst[0]["customer"] == f"PT Hapus Ini {tag}", str(lst)[:160])
+          lst and lst[0]["customer"] == f"PT Hapus Ini {tag}".upper(), str(lst)[:160])
     r = await c.get("/maintenance/records", headers=d, params={"type": "nonsense"})
     check("an unknown record type is refused", r.status_code == 400, str(r.status_code))
 

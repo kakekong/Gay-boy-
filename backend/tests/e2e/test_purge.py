@@ -118,8 +118,8 @@ async def main():
 
     # Sales One's deal is real; the victim's is the throwaway. Both are built by
     # the same function, so the ONLY difference is who originated them.
-    real = await full_deal(c, s1, d, pu, f"PT Nyata {tag}", f"REAL{tag}")
-    junk = await full_deal(c, vs, d, pu, f"PT Coba {tag}", f"JUNK{tag}")
+    real = await full_deal(c, s1, d, pu, f"PT Nyata {tag}".upper(), f"REAL{tag}")
+    junk = await full_deal(c, vs, d, pu, f"PT Coba {tag}".upper(), f"JUNK{tag}")
     check("both deals reached a project",
           bool(real["project"]) and bool(junk["project"]),
           f"real={real['project']} junk={junk['project']}")
@@ -153,16 +153,16 @@ async def main():
     prev = J(await c.post("/maintenance/purge/preview", headers=d, json=keep))
     doomed_names = {x["name"] for x in prev["customers_to_delete"]}
     kept_names = {x["name"] for x in prev["customers_to_keep"]}
-    check("the preview keeps the real customer", f"PT Nyata {tag}" in kept_names,
+    check("the preview keeps the real customer", f"PT Nyata {tag}".upper() in kept_names,
           str(sorted(kept_names))[:120])
     check("the preview marks the test customer for deletion",
-          f"PT Coba {tag}" in doomed_names, str(sorted(doomed_names))[:120])
+          f"PT Coba {tag}".upper() in doomed_names, str(sorted(doomed_names))[:120])
     check("it says why a customer is being kept",
-          any(x["why"] for x in prev["customers_to_keep"] if x["name"] == f"PT Nyata {tag}"),
-          str([x for x in prev["customers_to_keep"] if x["name"] == f"PT Nyata {tag}"])[:160])
+          any(x["why"] for x in prev["customers_to_keep"] if x["name"] == f"PT Nyata {tag}".upper()),
+          str([x for x in prev["customers_to_keep"] if x["name"] == f"PT Nyata {tag}".upper()])[:160])
     check("the director approving the test PO does not rescue it "
           "(project.created_by is not a keep rule)",
-          f"PT Coba {tag}" in doomed_names, str(sorted(doomed_names))[:140])
+          f"PT Coba {tag}".upper() in doomed_names, str(sorted(doomed_names))[:140])
     check("it counts the whole lineage, not just customers",
           prev["counts"]["projects"] >= 1 and prev["counts"]["quotations"] >= 1
           and prev["counts"]["invoices"] >= 0, str(prev["counts"]))
@@ -199,7 +199,7 @@ async def main():
     others = body.get("data") if isinstance(body, dict) else body
     names = {x.get("company_name") for x in (others or [])}
     check("customers belonging to everyone else are untouched",
-          f"PT Coba {tag}" not in names and f"PT Nyata {tag}" in names,
+          f"PT Coba {tag}".upper() not in names and f"PT Nyata {tag}".upper() in names,
           str(sorted(n for n in names if tag in (n or "")))[:140])
     check("the real customer survives",
           (await c.get(f"/customers/{real['customer']}", headers=d)).status_code == 200)
