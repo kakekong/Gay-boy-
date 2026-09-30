@@ -156,6 +156,118 @@ def _status(item: InventoryItem) -> str:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
+@router.get("/suggest")
+async def suggest(q: str = "", limit: int = Query(8, ge=1, le=25),
+                  db: AsyncSession = Depends(get_db)):
+    """Catalogue parts matching what is being typed, best first.
+
+    For the price request line: a customer ordering the same part again
+    should land on the same catalogue row (and its SKU) rather than a new
+    one spelled slightly differently. Every word typed has to appear in the
+    name or SKU, in any order, so the list narrows with each word — "6205
+    bearing" finds "BEARING 6205 ZZ". A SKU typed exactly, then names that
+    start with what was typed, come first.
+    """
+    words = [w for w in (q or "").strip().split() if w]
+    if not words or len("".join(words)) < 2:
+        return []
+    hay = func.concat(InventoryItem.name, " ", InventoryItem.sku)
+    stmt = select(InventoryItem).where(InventoryItem.is_active.is_(True))
+    for w in words[:8]:
+        stmt = stmt.where(hay.ilike(f"%{w}%"))
+    whole = " ".join(words)
+    from sqlalchemy import case
+    rank = case(
+        (func.lower(InventoryItem.sku) == whole.lower(), 0),
+        (InventoryItem.name.ilike(f"{whole}%"), 1),
+        (InventoryItem.name.ilike(f"%{whole}%"), 2),
+        else_=3,
+    )
+    rows = (await db.scalars(
+        stmt.order_by(rank, func.length(InventoryItem.name), InventoryItem.name)
+        .limit(limit)
+    )).all()
+    return [{
+        "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
+        "uom": r.uom, "link": r.link, "current_stock": float(r.current_stock or 0),
+    } for r in rows]
+
+
+# ─── Merging duplicates ──────────────────────────────────────────────────────
+# Director only, like deleting records: a merge deletes catalogue rows and
+# rewrites documents, and it is previewed in full before it runs.
+_merger = require(Role.DIRECTOR)
+
+
+class MergeGroup(BaseModel):
+    keep_id: UUID
+    merge_ids: list[UUID]
+
+
+class MergeIn(BaseModel):
+    groups: list[MergeGroup]
+
+
+def _check_groups(groups: list[MergeGroup]) -> None:
+    if not groups:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing chosen to merge.")
+    seen: set = set()
+    for g in groups:
+        for i in [g.keep_id, *g.merge_ids]:
+            if i in seen:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "An item appears in more than one merge — "
+                                    "each item can only be merged once.")
+            seen.add(i)
+
+
+@router.get("/duplicates", dependencies=[Depends(_merger)])
+async def duplicates(db: AsyncSession = Depends(get_db)):
+    """Items that look like the same part typed differently."""
+    from app.services.inventory_merge import find_duplicates
+    return {"groups": await find_duplicates(db)}
+
+
+@router.post("/merge/preview", dependencies=[Depends(_merger)])
+async def merge_preview(payload: MergeIn, db: AsyncSession = Depends(get_db)):
+    """Exactly what the merge would change — nothing is written."""
+    from app.services.inventory_merge import MergeError, plan
+    _check_groups(payload.groups)
+    try:
+        plans = [await plan(db, g.keep_id, g.merge_ids) for g in payload.groups]
+    except MergeError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    return {"plans": plans,
+            "totals": {"items_removed": sum(len(p["merge"]) for p in plans),
+                       "movements_moved": sum(m["movements"] for p in plans for m in p["merge"]),
+                       "documents": sum(len(p["documents"]) for p in plans)}}
+
+
+@router.post("/merge", dependencies=[Depends(_merger)])
+async def merge(payload: MergeIn, db: AsyncSession = Depends(get_db),
+                user: User = Depends(get_current_user)):
+    from app.core.audit import record as audit_record
+    from app.services.inventory_merge import MergeError, plan
+    _check_groups(payload.groups)
+    done = []
+    try:
+        for g in payload.groups:
+            res = await plan(db, g.keep_id, g.merge_ids, write=True, user=user)
+            done.append(res)
+            await audit_record(db, actor=user, action="inventory.merge",
+                               entity="inventory_item", entity_id=g.keep_id,
+                               before={"merged": res["merge"]},
+                               after={"stock": res["after"]["current_stock"],
+                                      "documents": res["documents"]})
+    except MergeError as e:
+        await db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    await db.commit()
+    return {"merged": len(done),
+            "items_removed": sum(len(p["merge"]) for p in done),
+            "documents": sum(len(p["documents"]) for p in done)}
+
+
 # Declared above `/{item_id}` — "reconcile" is a valid-looking UUID path
 # segment as far as the router is concerned, and the first match wins.
 
@@ -417,6 +529,9 @@ async def item_history(item_id: UUID,
             "reorder_point": float(r.reorder_point or 0),
             "location": r.location, "supplier_hint": r.supplier_hint,
             "link": r.link, "notes": r.notes, "stock_status": _status(r),
+            # Duplicates merged into this item, so an old SKU on a shelf label
+            # can be recognised here.
+            "aliases": r.aliases or [],
         },
         "movements": out,
         # The movements are the record; say so when the total disagrees.

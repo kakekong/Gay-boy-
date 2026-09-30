@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -146,6 +146,11 @@ class InventoryItem(Base, UUIDPK, TimestampMixin):
     supplier_hint: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # The SKUs and names of duplicates merged into this item, as
+    # [{"sku": …, "name": …}]. Documents were rewritten at the merge, but a
+    # line typed later from an old label or an old spelling still has to land
+    # here rather than bring the duplicate back (see stock_sync.item_index).
+    aliases: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
 
 
 class InventoryMovement(Base, UUIDPK, TimestampMixin):

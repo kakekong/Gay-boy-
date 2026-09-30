@@ -26,6 +26,7 @@ interface History {
     cost_fx_rate: number | null; unit_cost_idr: number | null;
     current_stock: number; reorder_point: number; location: string | null;
     supplier_hint: string | null; notes: string | null; stock_status: string;
+    aliases?: { sku?: string; name?: string }[];
   };
   movements: Movement[];
   ledger_total: number;
@@ -40,6 +41,7 @@ const REASON: Record<string, [string, string]> = {
   do_out_reversed: ["Delivery withdrawn", "Pengiriman ditarik"],
   adjust: ["Adjustment", "Penyesuaian"],
   opening: ["Opening balance", "Saldo awal"],
+  merge: ["Duplicate merged in", "Duplikat digabung"],
 };
 
 export default function InventoryItemPage() {
@@ -82,6 +84,13 @@ export default function InventoryItemPage() {
             <div className="text-xs muted mt-0.5">
               {[item.category, item.location, item.supplier_hint].filter(Boolean).join(" · ") || "—"}
             </div>
+            {(item.aliases ?? []).length > 0 && (
+              <div className="text-xs muted mt-1">
+                {t("Also known as (merged in):", "Juga dikenal sebagai (digabung):")}{" "}
+                {(item.aliases ?? []).map((a) =>
+                  [a.sku, a.name].filter(Boolean).join(" ")).join(" · ")}
+              </div>
+            )}
           </div>
           <div className="flex gap-6 text-right">
             <div>

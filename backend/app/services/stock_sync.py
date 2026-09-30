@@ -88,6 +88,52 @@ def _key(name: str | None) -> str:
     return re.sub(r"\s+", " ", (name or "").strip()).lower()
 
 
+def loose_key(name: str | None) -> str:
+    """A part's name with only its letters and digits — "Bearing-6205 ZZ" and
+    "BEARING 6205ZZ" are one part typed two ways. What the duplicate finder
+    groups on, and the last fallback when matching a line to the catalogue."""
+    return re.sub(r"[^0-9a-z]+", "", (name or "").lower())
+
+
+class ItemIndex:
+    """Where a document line's SKU or name finds its catalogue row.
+
+    In order: the SKU, then an old SKU merged into the item (its `aliases`),
+    then the name, then a merged name, then the name with punctuation and
+    spacing ignored. The aliases are what keep a merge merged: a line typed
+    later from an old shelf label or the old spelling lands on the item that
+    absorbed it, instead of quietly re-creating the duplicate.
+    """
+
+    def __init__(self, items):
+        self.by_sku: dict[str, InventoryItem] = {}
+        self.by_name: dict[str, InventoryItem] = {}
+        self.by_loose: dict[str, InventoryItem] = {}
+        for i in items:
+            if (i.sku or "").strip():
+                self.by_sku[(i.sku or "").strip()] = i
+            self.by_name.setdefault(_key(i.name), i)
+            self.by_loose.setdefault(loose_key(i.name), i)
+        for i in items:                   # an item's own values beat an alias
+            for a in (getattr(i, "aliases", None) or []):
+                if (a.get("sku") or "").strip():
+                    self.by_sku.setdefault(a["sku"].strip(), i)
+                if a.get("name"):
+                    self.by_name.setdefault(_key(a["name"]), i)
+                    self.by_loose.setdefault(loose_key(a["name"]), i)
+
+    def find(self, sku: str | None = None, name: str | None = None):
+        wanted = (sku or "").strip()
+        if wanted and wanted in self.by_sku:
+            return self.by_sku[wanted]
+        if name:
+            hit = self.by_name.get(_key(name))
+            if hit is None and loose_key(name):
+                hit = self.by_loose.get(loose_key(name))
+            return hit
+        return None
+
+
 async def _next_sku(db: AsyncSession) -> str:
     """One past the highest numeric SKU in use.
 
@@ -127,12 +173,7 @@ async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
     """
     wanted = (sku or "").strip()
     items = (await db.scalars(select(InventoryItem))).all()
-    found = None
-    if wanted:
-        found = next((i for i in items if (i.sku or "").strip() == wanted), None)
-    if found is None:
-        key = _key(name)
-        found = next((i for i in items if _key(i.name) == key), None)
+    found = ItemIndex(items).find(wanted, name)
     if found is not None:
         # A later order at a different price is the current price. Zero
         # means "not stated on this line", which must not wipe a price
@@ -481,16 +522,13 @@ async def issue_delivery_order(db: AsyncSession, do, user: User | None = None) -
     if await _already_moved(db, ref, "do_out"):
         return []
     touched: list[str] = []
-    items = (await db.scalars(select(InventoryItem))).all()
-    by_key = {_key(i.name): i for i in items}
-    by_sku = {(i.sku or "").strip(): i for i in items if (i.sku or "").strip()}
+    idx = ItemIndex((await db.scalars(select(InventoryItem))).all())
     for line in (do.items or []):
         qty = float(line.get("qty") or 0)
         # By SKU where the line carries one — it came from the price request
         # that created the catalogue row, so it is the exact answer. The name
         # match stays for lines that predate a SKU or were typed by hand.
-        item = by_sku.get((line.get("sku") or "").strip()) \
-            or by_key.get(_key(line.get("description")))
+        item = idx.find(line.get("sku"), line.get("description"))
         if qty <= 0 or item is None:
             continue
         await _move(db, item, delta=-qty, reason="do_out", reference=ref,

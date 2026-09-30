@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
+import { ProductSuggestInput, type CatalogueHit } from "@/components/ProductSuggestInput";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
 import { useAuthStore } from "@/store/auth";
@@ -388,7 +389,10 @@ function CreateForm({
     mutationFn: async () => {
       const d = await api.post("/price-requests", {
         customer_id: customerId, notes,
-        items: items.filter((it) => it.description.trim()),
+        // `_picked` is this form's own note of which catalogue part a line
+        // was taken from; the server has no use for it.
+        items: items.filter((it) => it.description.trim())
+          .map(({ _picked, ...line }) => line),
       }).then((r) => r.data);
       // The PR exists — now attach the chosen files to it. A failed upload
       // shouldn't lose the PR: warn and continue (files can be re-added on
@@ -418,6 +422,35 @@ function CreateForm({
 
   const setItem = (i: number, k: string, v: any) =>
     setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, [k]: v } : it)));
+
+  // A part the customer has ordered before is already in the catalogue.
+  // Picking it from the suggestions puts its SKU on the line, so on submit
+  // the line lands on that same inventory row instead of a near-duplicate.
+  const categoryOptions = usePrCatalog();
+  const pickProduct = (i: number, h: CatalogueHit) =>
+    setItems((arr) => arr.map((it, idx) => idx !== i ? it : {
+      ...it,
+      description: h.name,
+      sku: h.sku,
+      // Only a category the form offers — an old free-text one would be
+      // refused on a new line.
+      category: categoryOptions.some((o) => o.value === h.category)
+        ? h.category : it.category,
+      uom: h.uom || it.uom,
+      link: it.link || h.link || "",
+      _picked: { sku: h.sku, name: h.name, stock: h.current_stock, uom: h.uom },
+    }));
+  // Typing over a picked name means it is no longer that part — drop the
+  // SKU that came with it, or a renamed line would still land on the old row.
+  const typeName = (i: number, v: string) =>
+    setItems((arr) => arr.map((it, idx) => {
+      if (idx !== i) return it;
+      if (it._picked && v !== it._picked.name) {
+        const { _picked, ...rest } = it;
+        return { ...rest, description: v, sku: it.sku === _picked.sku ? "" : it.sku };
+      }
+      return { ...it, description: v };
+    }));
 
   return (
     <div className="card p-5 space-y-4">
@@ -466,16 +499,36 @@ function CreateForm({
                 <input className="input w-32" placeholder={t("SKU no.", "No. SKU")}
                   aria-label={`SKU ${i + 1}`} value={it.sku}
                   onChange={(e) => setItem(i, "sku", e.target.value)} />
-                <input className="input flex-1"
-                  placeholder={t("Product name", "Nama produk")}
-                  aria-label={`Product name ${i + 1}`} value={it.description}
-                  onChange={(e) => setItem(i, "description", e.target.value)} />
+                <ProductSuggestInput className="flex-1"
+                  placeholder={t("Product name — start typing to find one already in the catalogue",
+                                 "Nama produk — ketik untuk mencari yang sudah ada di katalog")}
+                  ariaLabel={`Product name ${i + 1}`} value={it.description}
+                  onChange={(v) => typeName(i, v)}
+                  onPick={(h) => pickProduct(i, h)} />
                 <button className="btn-ghost text-red-600"
                   aria-label={`Remove line ${i + 1}`}
                   onClick={() => setItems((arr) => arr.filter((_, idx) => idx !== i))}>
                   <Trash2 size={14} />
                 </button>
               </div>
+              {it._picked && (
+                <div className="flex items-center gap-2 text-[11px] text-emerald-700">
+                  <Check size={12} />
+                  <span>
+                    {t("From the catalogue", "Dari katalog")} · SKU{" "}
+                    <span className="font-mono">{it._picked.sku}</span> ·{" "}
+                    {t("in stock", "stok")} {it._picked.stock} {it._picked.uom ?? ""}
+                  </span>
+                  <button type="button" className="text-ink-500 hover:underline"
+                    onClick={() => setItems((arr) => arr.map((x, idx) => {
+                      if (idx !== i) return x;
+                      const { _picked, ...rest } = x;
+                      return { ...rest, sku: "" };
+                    }))}>
+                    {t("not this one", "bukan ini")}
+                  </button>
+                </div>
+              )}
               <div className="flex gap-2 items-center flex-wrap">
                 <CategorySelect
                   label={`Category ${i + 1}`}
@@ -636,6 +689,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   // "edit" writes straight to the request (draft, or the director overriding).
   // "propose" files a revision for the director to decide — the negotiation path.
   const [editMode, setEditMode] = useState<"edit" | "propose">("edit");
+  const catalogOptions = usePrCatalog();
   const [reviseReason, setReviseReason] = useState("");
 
   const refresh = () => { qc.invalidateQueries({ queryKey: ["price-request", id] }); qc.invalidateQueries({ queryKey: ["price-requests"] }); };
@@ -1079,12 +1133,21 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                   value={row.sku}
                   onChange={(e) => set("sku", e.target.value)}
                 />
-                <input
-                  className="input col-span-6 sm:col-span-8"
+                <ProductSuggestInput
+                  className="col-span-6 sm:col-span-8"
                   placeholder={t("Product name", "Nama produk")}
-                  aria-label={`Edit product name ${i + 1}`}
+                  ariaLabel={`Edit product name ${i + 1}`}
                   value={row.description}
-                  onChange={(e) => set("description", e.target.value)}
+                  onChange={(v) => set("description", v)}
+                  onPick={(h) => setEditItems((rows) => rows!.map((x, j) => j !== i ? x : {
+                    ...x,
+                    description: h.name,
+                    sku: h.sku,
+                    category: catalogOptions.some((o) => o.value === h.category)
+                      ? (h.category ?? "") : x.category,
+                    uom: h.uom || x.uom,
+                    link: x.link || h.link || "",
+                  }))}
                 />
                 <button
                   className="col-span-1 grid place-items-center rounded-lg text-red-600

@@ -665,6 +665,19 @@ DataCleanup.tsx. `tests/e2e/test_data_sync.py` builds legacy-shaped rows
 directly in the DB and runs the syncs against them — add to it when adding a
 new sync.
 
+**Catalogue matching and merging.** `stock_sync.ItemIndex` is the one way a
+document line finds its inventory row: SKU → merged-in SKU (`InventoryItem.aliases`,
+JSONB `[{sku, name}]`) → exact name → merged-in name → `loose_key` (letters and
+digits only). `_item_for` and `issue_delivery_order` use it; use it for any new
+matcher rather than another `_key` dict. `services/inventory_merge.py`: `find_duplicates`
+groups by `loose_key`; `plan(keep, merge_ids, write=False)` is both the preview
+and (with `write=True`) the merge, so they cannot disagree. It rewrites SKUs on
+every JSONB `items` table in `_DOCS` plus `quotation_items.sku` — add a table
+there if a new document starts carrying SKUs. Endpoints `GET /inventory/duplicates`,
+`POST /inventory/merge/preview`, `POST /inventory/merge` are director-only;
+`GET /inventory/suggest?q=` (all internal roles) feeds `ProductSuggestInput`
+on price-request lines. Tests: `test_inventory_merge.py`.
+
 **Inventory cost has a currency.** `InventoryItem.cost_currency` /
 `cost_fx_rate`; `unit_cost` is in that currency and APIs also return
 `unit_cost_idr`. `stock_sync._item_for` takes `currency`/`fx_rate` from the PO

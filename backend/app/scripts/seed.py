@@ -619,6 +619,8 @@ COLUMN_MIGRATIONS: list[str] = [
     # ── Inventory cost keeps the currency it was bought in ──────────────
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_currency VARCHAR(8) NOT NULL DEFAULT 'IDR'",
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_fx_rate NUMERIC(18,6)",
+    # Old SKUs and names of duplicates merged into an item.
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]'::jsonb",
 
     # ── Pending approvals follow the desk that now decides them ────────
     # Mark-won moved from the director to finance, and so did releasing a
