@@ -157,7 +157,8 @@ def _status(item: InventoryItem) -> str:
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 @router.get("/suggest")
-async def suggest(q: str = "", limit: int = Query(8, ge=1, le=25),
+async def suggest(q: str = "", limit: int = Query(20, ge=1, le=200),
+                  offset: int = Query(0, ge=0),
                   db: AsyncSession = Depends(get_db)):
     """Catalogue parts matching what is being typed, best first.
 
@@ -167,10 +168,15 @@ async def suggest(q: str = "", limit: int = Query(8, ge=1, le=25),
     name or SKU, in any order, so the list narrows with each word — "6205
     bearing" finds "BEARING 6205 ZZ". A SKU typed exactly, then names that
     start with what was typed, come first.
+
+    A page at a time, with the total: a catalogue where hundreds of parts
+    start "SPROCKET" must say so rather than show the first few as though
+    they were all of them. The order is fixed (ties broken by id), so the
+    next page continues the last one.
     """
     words = [w for w in (q or "").strip().split() if w]
     if not words or len("".join(words)) < 2:
-        return []
+        return {"items": [], "total": 0}
     hay = func.concat(InventoryItem.name, " ", InventoryItem.sku)
     stmt = select(InventoryItem).where(InventoryItem.is_active.is_(True))
     for w in words[:8]:
@@ -183,14 +189,16 @@ async def suggest(q: str = "", limit: int = Query(8, ge=1, le=25),
         (InventoryItem.name.ilike(f"%{whole}%"), 2),
         else_=3,
     )
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = (await db.scalars(
-        stmt.order_by(rank, func.length(InventoryItem.name), InventoryItem.name)
-        .limit(limit)
+        stmt.order_by(rank, func.length(InventoryItem.name), InventoryItem.name,
+                      InventoryItem.id)
+        .limit(limit).offset(offset)
     )).all()
-    return [{
+    return {"total": total, "items": [{
         "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
         "uom": r.uom, "link": r.link, "current_stock": float(r.current_stock or 0),
-    } for r in rows]
+    } for r in rows]}
 
 
 # ─── Merging duplicates ──────────────────────────────────────────────────────

@@ -75,6 +75,10 @@
            placeholder:text-ink-400 transition-shadow
            focus:border-accent-500 focus:ring-2 focus:ring-accent-500/30 focus:outline-none;
   }
+  /* type="search" is used to keep browser AutoFill out of lookup boxes;
+     it should look like any other input, without the native styling. */
+  input[type="search"].input { -webkit-appearance: none; appearance: none; }
+  input[type="search"].input::-webkit-search-decoration { -webkit-appearance: none; }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
   }

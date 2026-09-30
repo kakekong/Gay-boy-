@@ -83,20 +83,43 @@ async def main():
         keep_id, dup_id = str(keep.id), str(dup.id)
 
     print("\n── product suggestions while typing ──")
-    r = J(await c.get("/inventory/suggest", headers=s1, params={"q": f"bearing {TAG}"}))
+    async def sug(**params):
+        return J(await c.get("/inventory/suggest", headers=s1, params=params))["items"]
+    r = await sug(q=f"bearing {TAG}")
     check("sales gets suggestions for what they type",
           {x["sku"] for x in r} >= {KEEP, DUP}, str(r)[:200])
-    r = J(await c.get("/inventory/suggest", headers=s1, params={"q": f"6205 {TAG} zz"}))
+    r = await sug(q=f"6205 {TAG} zz")
     check("words match in any order", KEEP in {x["sku"] for x in r}, str(r)[:200])
-    r = J(await c.get("/inventory/suggest", headers=s1,
-                      params={"q": f"bearing {TAG} nothing-like-this"}))
+    r = await sug(q=f"bearing {TAG} nothing-like-this")
     check("each extra word narrows the list — to nothing if nothing fits", r == [], str(r)[:200])
-    r = J(await c.get("/inventory/suggest", headers=s1, params={"q": KEEP}))
+    r = await sug(q=KEEP)
     check("a SKU typed exactly comes first", r and r[0]["sku"] == KEEP, str(r)[:200])
     check("...and the suggestion carries what fills the line",
           r and {"sku", "name", "category", "uom", "current_stock"} <= set(r[0]))
-    check("one letter suggests nothing yet",
-          J(await c.get("/inventory/suggest", headers=s1, params={"q": "b"})) == [])
+    check("one letter suggests nothing yet", await sug(q="b") == [])
+
+    print("\n── many parts sharing their first letters ──")
+    async with SessionLocal() as db:
+        for i in range(45):
+            db.add(InventoryItem(sku=f"MANY{TAG}{i:02d}", name=f"Sprocketx{TAG} 40B {i:02d}T",
+                                 uom="pcs", current_stock=0))
+        await db.commit()
+    first = J(await c.get("/inventory/suggest", headers=s1, params={"q": f"sprocketx{TAG}"}))
+    check("the list says how many match, not just the first few",
+          first["total"] == 45 and len(first["items"]) == 20, f'{first["total"]} {len(first["items"])}')
+    seen, off = [], 0
+    while True:
+        pg = J(await c.get("/inventory/suggest", headers=s1,
+                           params={"q": f"sprocketx{TAG}", "limit": 20, "offset": off}))["items"]
+        if not pg:
+            break
+        seen += [x["sku"] for x in pg]; off += len(pg)
+    check("loading more reaches every one of them, none twice",
+          len(seen) == 45 and len(set(seen)) == 45, f"{len(seen)} / {len(set(seen))}")
+    narrowed = J(await c.get("/inventory/suggest", headers=s1,
+                             params={"q": f"sprocketx{TAG} 40B 07T"}))
+    check("typing more narrows it to the one", narrowed["total"] == 1
+          and narrowed["items"][0]["sku"] == f"MANY{TAG}07", str(narrowed)[:200])
 
     print("\n── finding duplicates ──")
     g = J(await c.get("/inventory/duplicates", headers=d))
@@ -171,7 +194,7 @@ async def main():
         c3 = await _item_for(db, name=f"bearing 6205-zz {TAG}", uom="pcs", unit_cost=None)
         check("and a third spelling of the same letters and digits", c3.id == k.id, c3.sku)
         n = await db.scalar(select(func.count(InventoryItem.id))
-                            .where(InventoryItem.name.ilike(f"%{TAG}%")))
+                            .where(InventoryItem.name.ilike(f"%6205%{TAG}%")))
         check("no new item was created", n == 1, str(n))
         await db.rollback()
 

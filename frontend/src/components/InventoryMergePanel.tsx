@@ -228,13 +228,13 @@ export function InventoryMergePanel({ onClose }: { onClose: () => void }) {
           <div className="text-xs font-medium">{t("Add two items by hand", "Tambah dua barang secara manual")}</div>
           <div className="grid md:grid-cols-[1fr_auto_1fr_auto] gap-2 items-center">
             <ProductSuggestInput value={manKeepText}
-              placeholder={t("Keep this item — type its name or SKU", "Simpan barang ini — ketik nama atau SKU")}
+              placeholder={t("Keep this item — type the product or SKU", "Simpan barang ini — ketik produk atau SKU")}
               ariaLabel={t("Item to keep", "Barang yang disimpan")}
               onChange={(v) => { setManKeepText(v); setManKeep(null); }}
               onPick={(h) => { setManKeep(h); setManKeepText(`${h.sku} · ${h.name}`); }} />
             <span className="text-xs muted text-center">{t("absorbs", "menyerap")}</span>
             <ProductSuggestInput value={manDupText}
-              placeholder={t("…this duplicate — type its name or SKU", "…duplikat ini — ketik nama atau SKU")}
+              placeholder={t("…this duplicate — type the product or SKU", "…duplikat ini — ketik produk atau SKU")}
               ariaLabel={t("Duplicate to merge in", "Duplikat yang digabung")}
               onChange={(v) => { setManDupText(v); setManDup(null); }}
               onPick={(h) => { setManDup(h); setManDupText(`${h.sku} · ${h.name}`); }} />

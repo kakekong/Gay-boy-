@@ -500,9 +500,9 @@ function CreateForm({
                   aria-label={`SKU ${i + 1}`} value={it.sku}
                   onChange={(e) => setItem(i, "sku", e.target.value)} />
                 <ProductSuggestInput className="flex-1"
-                  placeholder={t("Product name — start typing to find one already in the catalogue",
-                                 "Nama produk — ketik untuk mencari yang sudah ada di katalog")}
-                  ariaLabel={`Product name ${i + 1}`} value={it.description}
+                  placeholder={t("Product — start typing to find one already in the catalogue",
+                                 "Produk — ketik untuk mencari yang sudah ada di katalog")}
+                  ariaLabel={`Product ${i + 1}`} value={it.description}
                   onChange={(v) => typeName(i, v)}
                   onPick={(h) => pickProduct(i, h)} />
                 <button className="btn-ghost text-red-600"
@@ -1135,8 +1135,8 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 />
                 <ProductSuggestInput
                   className="col-span-6 sm:col-span-8"
-                  placeholder={t("Product name", "Nama produk")}
-                  ariaLabel={`Edit product name ${i + 1}`}
+                  placeholder={t("Product", "Produk")}
+                  ariaLabel={`Edit product ${i + 1}`}
                   value={row.description}
                   onChange={(v) => set("description", v)}
                   onPick={(h) => setEditItems((rows) => rows!.map((x, j) => j !== i ? x : {
