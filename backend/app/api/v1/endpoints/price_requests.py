@@ -533,6 +533,8 @@ async def create_price_request(
     cust = await db.get(Customer, payload.customer_id)
     if not cust:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Customer not found")
+    from app.api.v1.endpoints.customers import assert_customer_active
+    await assert_customer_active(db, cust.id)
     if Role(user.role) == Role.SALES and cust.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your customer")
     # The request belongs to whoever runs the account, not to whoever typed

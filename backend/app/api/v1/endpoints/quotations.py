@@ -215,6 +215,8 @@ async def create_quotation(
     # that rep's behalf; leaving it in the director's name meant the rep could
     # not edit their own deal.
     _cust = await db.get(Customer, payload.customer_id)
+    from app.api.v1.endpoints.customers import assert_customer_active
+    await assert_customer_active(db, payload.customer_id)
     q = Quotation(
         number=number,
         customer_id=payload.customer_id,

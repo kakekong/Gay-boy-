@@ -53,8 +53,15 @@ async def list_customers(
     sales_pic_id: UUID | None = None,
     unassigned: bool = False,
     rep_hint: str | None = None,
+    # active (default) | inactive | all. Deactivated customers leave the
+    # list and every picker built on it, but are one filter away.
+    status_filter: str = Query("active", alias="status"),
 ):
     base = select(Customer).where(Customer.is_deleted.is_(False))
+    if status_filter == "active":
+        base = base.where(Customer.is_active.is_(True))
+    elif status_filter == "inactive":
+        base = base.where(Customer.is_active.is_(False))
     base = filter_to_role_scope(user, base, Customer.sales_pic_id)
     # Book-of-business filters, for the director deciding who covers what.
     # "Nobody is on this account" is the one that matters after an import.
@@ -426,6 +433,71 @@ async def get_customer(customer_id: UUID,
         rep = await db.get(User, obj.sales_pic_id)
         out.sales_pic_name = rep.full_name if rep else None
     return out
+
+
+class DeactivateIn(BaseModel):
+    reason: str | None = None
+
+
+_ACTIVATORS = (Role.DIRECTOR, Role.MANAGER)
+
+
+@router.post("/{customer_id}/deactivate", response_model=CustomerOut)
+async def deactivate_customer(customer_id: UUID, payload: DeactivateIn | None = None,
+                              db: AsyncSession = Depends(get_db),
+                              user: User = Depends(get_current_user)):
+    """Take a customer off the books without erasing them.
+
+    Like deactivating a user: everything they have — deals, quotations, POs,
+    projects, invoices, payments, files — stays exactly as it is and keeps
+    printing their name. They just drop out of the customer list and the
+    pickers, and can't start a new price request or quotation until they are
+    reactivated. Work already under way carries on.
+    """
+    if Role(user.role) not in _ACTIVATORS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director or a manager can deactivate a customer")
+    obj = await db.get(Customer, customer_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not obj.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This customer is already inactive")
+    obj.is_active = False
+    obj.deactivated_at = datetime.now(UTC)
+    obj.deactivated_reason = ((payload.reason or "").strip() or None) if payload else None
+    await audit_record(db, actor=user, action="deactivate", entity="customer",
+                       entity_id=obj.id, after={"reason": obj.deactivated_reason})
+    await db.flush()
+    return await get_customer(customer_id, db, user)
+
+
+@router.post("/{customer_id}/reactivate", response_model=CustomerOut)
+async def reactivate_customer(customer_id: UUID,
+                              db: AsyncSession = Depends(get_db),
+                              user: User = Depends(get_current_user)):
+    if Role(user.role) not in _ACTIVATORS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director or a manager can reactivate a customer")
+    obj = await db.get(Customer, customer_id)
+    if not obj or obj.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    obj.is_active = True
+    obj.deactivated_at = None
+    obj.deactivated_reason = None
+    await audit_record(db, actor=user, action="reactivate", entity="customer",
+                       entity_id=obj.id)
+    await db.flush()
+    return await get_customer(customer_id, db, user)
+
+
+async def assert_customer_active(db: AsyncSession, customer_id) -> None:
+    """Refuse new work for a deactivated customer, saying how to undo it."""
+    c = await db.get(Customer, customer_id) if customer_id else None
+    if c is not None and not c.is_active:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{c.company_name} is deactivated. A director or manager can "
+            "reactivate them from their customer page to start new work.")
 
 
 @router.patch("/{customer_id}", response_model=CustomerOut)

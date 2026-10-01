@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -75,5 +76,8 @@ class CustomerOut(CustomerBase):
     # matched a user account here, so an unassigned import can still be
     # sorted out afterwards by who used to own it.
     sales_rep_hint: str | None = None
+    is_active: bool = True
+    deactivated_at: datetime | None = None
+    deactivated_reason: str | None = None
 
     model_config = {"from_attributes": True}

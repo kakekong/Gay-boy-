@@ -7,6 +7,7 @@ import {
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
   Clock, ListChecks, CheckCircle2, Circle, RotateCcw, ChevronRight, Truck,
   ShoppingCart, Banknote, Building, CalendarDays, Tag, Pencil, UserCog,
+  UserX, UserCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -207,6 +208,21 @@ export default function CustomerDetailPage() {
     }),
   });
   const isDirector = me?.role === "director";
+  // Deactivate, like a user: kept on file with everything they have, out of
+  // the lists and pickers, no new price requests or quotations. Director
+  // and managers; the server holds the rule.
+  const canDeactivate = me?.role === "director" || me?.role === "manager";
+  const setActive = useMutation({
+    mutationFn: (v: { active: boolean; reason?: string }) => v.active
+      ? api.post(`/customers/${id}/reactivate`).then((r) => r.data)
+      : api.post(`/customers/${id}/deactivate`, { reason: v.reason || null }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer", id] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+    onError: (e: any) => alert(e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail ?? tt("Couldn't change the customer", "Gagal mengubah pelanggan")),
+  });
   // Managers and directors hold stage-approval authority, so their own
   // moves apply instantly. Everyone else opens the request modal.
   const canApproveStage = me?.role === "director" || me?.role === "manager";
@@ -267,6 +283,30 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="space-y-6">
+      {c.is_active === false && (
+        <div className="rounded-xl border border-ink-300 bg-ink-100 px-4 py-3 text-sm flex items-start gap-3 flex-wrap">
+          <UserX size={16} className="mt-0.5 shrink-0 text-ink-600" />
+          <div className="flex-1 min-w-[240px]">
+            <div className="font-semibold">
+              {t("Deactivated", "Dinonaktifkan")}
+              {c.deactivated_at && <span className="font-normal muted"> · {new Date(c.deactivated_at).toLocaleDateString(locale())}</span>}
+            </div>
+            <div className="text-ink-600">
+              {t("Kept on file with all its history. It is out of the customer list and the pickers, and can't start new price requests or quotations. Work already under way carries on.",
+                 "Tetap tersimpan beserta seluruh riwayatnya. Tidak muncul di daftar pelanggan dan pilihan, dan tidak bisa membuat permintaan harga atau penawaran baru. Pekerjaan yang sedang berjalan tetap lanjut.")}
+            </div>
+            {c.deactivated_reason && (
+              <div className="text-xs mt-1">{t("Reason:", "Alasan:")} {c.deactivated_reason}</div>
+            )}
+          </div>
+          {canDeactivate && (
+            <button className="btn-primary" disabled={setActive.isPending}
+              onClick={() => setActive.mutate({ active: true })}>
+              <UserCheck size={14} /> {t("Reactivate", "Aktifkan kembali")}
+            </button>
+          )}
+        </div>
+      )}
       {/* Header */}
       <div className="card p-5 lg:p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -325,6 +365,19 @@ export default function CustomerDetailPage() {
               <Download size={15} /> {T("CSV")}</button>
             <button className="btn-ghost" onClick={openWhatsApp}>
               <MessageCircle size={15} /> {T("WhatsApp")}</button>
+            {canDeactivate && c.is_active !== false && (
+              <button className="btn-ghost text-ink-600"
+                title={t("Deactivate (keeps history)", "Nonaktifkan (riwayat tetap ada)")}
+                disabled={setActive.isPending}
+                onClick={() => {
+                  const reason = window.prompt(tt(
+                    `Deactivate ${c.company_name}? Everything on file stays — they just leave the lists and pickers and can't start new price requests or quotations. Reason (optional):`,
+                    `Nonaktifkan ${c.company_name}? Semua data tetap tersimpan — hanya keluar dari daftar dan pilihan, dan tidak bisa membuat permintaan harga atau penawaran baru. Alasan (opsional):`));
+                  if (reason !== null) setActive.mutate({ active: false, reason });
+                }}>
+                <UserX size={15} /> {t("Deactivate", "Nonaktifkan")}
+              </button>
+            )}
             <button
               className="btn-primary"
               onClick={() => { setOpenAI(true); aiSuggest.mutate(); }}

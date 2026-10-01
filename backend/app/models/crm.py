@@ -22,6 +22,12 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
         return company_name(value)
 
     industry: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    # Deactivated, not deleted: an account the company no longer works with
+    # stays on file with its whole history — it just leaves the lists and
+    # pickers and can't start new price requests or quotations. Reversible.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deactivated_reason: Mapped[str | None] = mapped_column(Text)
     pic_name: Mapped[str | None] = mapped_column(String(255))
     pic_position: Mapped[str | None] = mapped_column(String(120))
     phone: Mapped[str | None] = mapped_column(String(40))

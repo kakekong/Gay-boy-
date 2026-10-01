@@ -633,6 +633,12 @@ COLUMN_MIGRATIONS: list[str] = [
           AND target_type IN ('quotation_won', 'delivery_order')
           AND required_role <> 'finance'""",
 
+    # ── Customers can be deactivated without being deleted ─────────────
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ",
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS deactivated_reason TEXT",
+    "CREATE INDEX IF NOT EXISTS ix_customers_is_active ON customers (is_active)",
+
     # ── Pay that follows attendance ────────────────────────────────────
     "ALTER TABLE attendances ADD COLUMN IF NOT EXISTS overtime_minutes INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE attendances ADD COLUMN IF NOT EXISTS overtime_status VARCHAR(20)",

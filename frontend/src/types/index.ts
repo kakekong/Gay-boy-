@@ -15,6 +15,10 @@ export interface Customer {
   /** The rep name the import file carried, if this customer came from one. */
   sales_rep_hint?: string | null;
   lifetime_value: number;
+  /** False once deactivated — kept on file, out of the lists and pickers. */
+  is_active?: boolean;
+  deactivated_at?: string | null;
+  deactivated_reason?: string | null;
 }
 
 export interface Quotation {

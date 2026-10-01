@@ -48,6 +48,8 @@ export default function CustomersPage() {
 
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
+  // Deactivated customers are kept, not erased — one filter away.
+  const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
   const [openNew, setOpenNew] = useState(false);
   // Who covers what is the director's call, so the filter and the bulk
   // hand-over only exist for them. "" = everyone, "none" = nobody is on it —
@@ -68,7 +70,7 @@ export default function CustomersPage() {
   }, [pageSize]);
   // Any change to what is being looked at invalidates the page number.
   useEffect(() => { setPage(1); setPicked(new Set()); },
-            [search, stage, rep, pageSize, view]);
+            [search, stage, rep, pageSize, view, activeFilter]);
 
   const reps = useQuery({
     queryKey: ["assignable-reps"],
@@ -81,7 +83,7 @@ export default function CustomersPage() {
   const hint = rep.startsWith("hint:") ? rep.slice(5) : "";
   const q = useQuery({
     queryKey: ["customers", view === "pipeline" ? "" : search,
-               view === "pipeline" ? "" : stage, rep, page, pageSize, view],
+               view === "pipeline" ? "" : stage, rep, page, pageSize, view, activeFilter],
     queryFn: () => {
       const params = {
         q: search || undefined,
@@ -89,6 +91,7 @@ export default function CustomersPage() {
         sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
         unassigned: rep === "none" ? true : undefined,
         rep_hint: hint || undefined,
+        status: activeFilter,
       };
       // The board shows every stage at once and doesn't page, so it takes
       // every customer — it used to take one page of 500 and drop the rest.
@@ -132,6 +135,7 @@ export default function CustomersPage() {
             sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
             unassigned: rep === "none" ? true : undefined,
             rep_hint: hint || undefined,
+            status: activeFilter,
             page: p, page_size: size,
           },
         });
@@ -233,6 +237,13 @@ export default function CustomersPage() {
             ))}
           </select>
         )}
+        <select value={activeFilter} aria-label={t("Active or inactive", "Aktif atau nonaktif")}
+          onChange={(e) => setActiveFilter(e.target.value as typeof activeFilter)}
+          className="input max-w-[170px]">
+          <option value="active">{t("Active customers", "Pelanggan aktif")}</option>
+          <option value="inactive">{t("Deactivated", "Dinonaktifkan")}</option>
+          <option value="all">{t("Active and deactivated", "Aktif dan nonaktif")}</option>
+        </select>
         {isDirector && (
           <select value={rep} onChange={(e) => { setRep(e.target.value); setPicked(new Set()); }}
                   className="input max-w-[240px]"
@@ -340,7 +351,8 @@ export default function CustomersPage() {
               </thead>
               <tbody>
                 {rows.map((c, i) => (
-                  <tr key={c.id} className="tr-hover border-t border-ink-100">
+                  <tr key={c.id} className={clsx("tr-hover border-t border-ink-100",
+                    c.is_active === false && "opacity-60")}>
                     {isDirector && (
                       <td className="td">
                         <input
@@ -361,6 +373,10 @@ export default function CustomersPage() {
                       >
                         {c.company_name}
                       </Link>
+                      {c.is_active === false && (
+                        <span className="ml-2 chip bg-ink-100 text-ink-600 text-[10px]">
+                          {t("Deactivated", "Nonaktif")}</span>
+                      )}
                     </td>
                     <td className="td capitalize muted">{c.industry}</td>
                     <td className="td">{c.pic_name ?? "—"}</td>
