@@ -82,6 +82,21 @@ class Settings(BaseSettings):
     DEFAULT_CURRENCY: str = "IDR"
     TIMEZONE: str = "Asia/Jakarta"
 
+    # ── Working day, for attendance and the pay that follows from it ──
+    # Times are local (TIMEZONE). Days are Python weekdays: 0 = Monday.
+    WORK_START: str = "08:30"
+    WORK_END: str = "17:00"
+    WORK_DAYS: str = "0,1,2,3,4"
+    # Clocking in up to this many minutes late costs nothing; past it, every
+    # minute late is deducted at the per-minute wage.
+    LATE_GRACE_MINUTES: int = 15
+    # Staying at least this long past WORK_END files overtime for a manager
+    # or the director to approve; only approved overtime is paid.
+    OVERTIME_MIN_MINUTES: int = 30
+    # Monthly hours an hourly wage is worked out from (Indonesian practice:
+    # hourly = monthly wage / 173).
+    PAY_MONTHLY_HOURS: int = 173
+
     # Discount thresholds (override per tenant if needed)
     DISCOUNT_AUTO_MAX: float = 5.0
     DISCOUNT_MANAGER_MAX: float = 15.0

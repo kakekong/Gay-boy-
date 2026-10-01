@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,3 +27,9 @@ class Attendance(Base, UUIDPK, TimestampMixin):
     # present | absent | half_day | leave | wfh | sick | holiday
     status: Mapped[str] = mapped_column(String(20), default="present", nullable=False, index=True)
     notes:  Mapped[str | None] = mapped_column(Text)
+    # Time past the end of the working day at clock-out, and whether it is
+    # paid: none | pending | approved | rejected. Only approved overtime pays
+    # (`overtime_approved_minutes`, which the approver may trim).
+    overtime_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    overtime_status: Mapped[str | None] = mapped_column(String(20))
+    overtime_approved_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

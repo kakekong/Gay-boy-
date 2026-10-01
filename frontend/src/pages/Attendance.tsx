@@ -22,6 +22,9 @@ interface AttendanceRow {
   hours: number;
   status: string;
   notes: string | null;
+  late_minutes?: number;
+  overtime_minutes?: number;
+  overtime_status?: string | null;
 }
 
 const STATUS_CHIP: Record<string, string> = {
@@ -38,6 +41,31 @@ const STATUS_CHIP: Record<string, string> = {
 function fmtTime(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+const OT_LABEL: Record<string, [string, string]> = {
+  pending: ["waiting for approval", "menunggu persetujuan"],
+  approved: ["approved — paid", "disetujui — dibayar"],
+  rejected: ["not approved", "tidak disetujui"],
+};
+
+/** Under a clock-in: how late, past the grace (it comes off pay). Under a
+ *  clock-out: time past the end of the day and where its approval stands —
+ *  only approved overtime is paid. */
+function LateFlag({ r }: { r: AttendanceRow }) {
+  if (!r.late_minutes) return null;
+  return <span className="block text-[11px] text-red-700">{tt(`late ${r.late_minutes} min`, `terlambat ${r.late_minutes} mnt`)}</span>;
+}
+function OvertimeFlag({ r }: { r: AttendanceRow }) {
+  if (!r.overtime_minutes || !r.overtime_status) return null;
+  const [en, id] = OT_LABEL[r.overtime_status] ?? [r.overtime_status, r.overtime_status];
+  return (
+    <span className={clsx("block text-[11px]",
+      r.overtime_status === "approved" ? "text-emerald-700"
+      : r.overtime_status === "rejected" ? "text-ink-500" : "text-amber-700")}>
+      {tt(`overtime ${r.overtime_minutes} min · ${en}`, `lembur ${r.overtime_minutes} mnt · ${id}`)}
+    </span>
+  );
 }
 
 export default function AttendancePage() {
@@ -267,8 +295,8 @@ export default function AttendancePage() {
                       {T(r.status.replace(/_/g, " "))}
                     </span>
                   </td>
-                  <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}</td>
-                  <td className="td muted whitespace-nowrap">{fmtTime(r.clock_out)}</td>
+                  <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}<LateFlag r={r} /></td>
+                  <td className="td muted whitespace-nowrap">{fmtTime(r.clock_out)}<OvertimeFlag r={r} /></td>
                   <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
                   <td className="td"><AttendanceNote text={r.notes} /></td>
                 </tr>
@@ -376,8 +404,8 @@ export default function AttendancePage() {
                         {T(r.status.replace(/_/g, " "))}
                       </span>
                     </td>
-                    <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}</td>
-                    <td className="td muted whitespace-nowrap">{fmtTime(r.clock_out)}</td>
+                    <td className="td muted whitespace-nowrap">{fmtTime(r.clock_in)}<LateFlag r={r} /></td>
+                    <td className="td muted whitespace-nowrap">{fmtTime(r.clock_out)}<OvertimeFlag r={r} /></td>
                     <td className="td text-right tabular-nums">{Number(r.hours).toFixed(2)}</td>
                     <td className="td"><AttendanceNote text={r.notes} /></td>
                   </tr>

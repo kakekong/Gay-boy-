@@ -10,7 +10,7 @@ Pulls live signals from across the system:
 Computed at request time — no separate notifications table.
 """
 
-from datetime import UTC, date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -29,14 +29,13 @@ from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.operation import Drawing, Project
 from app.models.quotation import Quotation
 from app.models.user import User
+from app.core.config import settings
 
 # Office timezone for "late" attendance — the business runs on WIB (UTC+7).
 _WIB = timezone(timedelta(hours=7))
-_LATE_CUTOFF = time(9, 15)
-# Before this, "nobody has clocked in" is just a description of the morning.
-# Raising it at 06:00 trains people to ignore the badge, so the attendance
-# alerts stay silent until the office is actually expected to be working.
-_ATTENDANCE_ALERT_FROM = time(8, 30)
+# Attendance alerts stay silent until the working day starts (WORK_START in
+# settings) — raising "nobody has clocked in" at 06:00 trains people to
+# ignore the badge — and "late" is payroll's rule, grace period included.
 
 # Where an approval's *subject* lives. An alert about a quotation belongs in
 # Quotations, not on the dashboard — the sidebar badges are derived from these
@@ -56,6 +55,7 @@ _TARGET_LINK = {
     "followup":               "/customers/{id}",
     "inventory_item":         "/inventory",
     "cross_dept_chat":        "/chat",
+    "overtime":               "/approvals",
 }
 
 
@@ -645,7 +645,14 @@ async def list_notifications(
         # The clock is read in WIB, not server time: the box runs on UTC, so
         # `now.time()` there is 08:30 WIB minus seven hours and the gate would
         # open mid-afternoon.
-        if today.weekday() < 5 and now.astimezone(_WIB).time() >= _ATTENDANCE_ALERT_FROM:
+        # Late and the working day are the same rules payroll uses
+        # (services/attendance_pay.py): the schedule in settings, the grace
+        # period, and the office's own date.
+        from app.services.attendance_pay import (
+            is_work_day, late_minutes, local_today, work_start,
+        )
+        office_today = local_today()
+        if is_work_day(office_today) and now.astimezone(_WIB).time() >= work_start():
             internal = (await db.scalars(
                 select(User).where(
                     User.is_active.is_(True),
@@ -654,7 +661,7 @@ async def list_notifications(
             )).all()
             today_att = {
                 a.user_id: a for a in (await db.scalars(
-                    select(Attendance).where(Attendance.date == today)
+                    select(Attendance).where(Attendance.date == office_today)
                 )).all()
             }
             missing = 0
@@ -666,7 +673,7 @@ async def list_notifications(
                     if a and a.status in ("leave", "sick", "holiday", "wfh"):
                         continue
                     missing += 1
-                elif a.clock_in.astimezone(_WIB).time() > _LATE_CUTOFF:
+                elif late_minutes(a):
                     late += 1
             if missing:
                 items.append({
@@ -675,7 +682,7 @@ async def list_notifications(
                     # one more person clocked in — so dismissing it in the
                     # morning was pointless, and the red badge sat there all
                     # day reappearing. One dismissal now covers today.
-                    "id": f"attendance-missing:{today.isoformat()}",
+                    "id": f"attendance-missing:{office_today.isoformat()}",
                     "kind": "attendance",
                     "severity": "medium",
                     "title": f"{missing} employee(s) not clocked in today",
@@ -685,11 +692,11 @@ async def list_notifications(
                 })
             if late:
                 items.append({
-                    "id": f"attendance-late:{today.isoformat()}",
+                    "id": f"attendance-late:{office_today.isoformat()}",
                     "kind": "attendance",
                     "severity": "low",
                     "title": f"{late} employee(s) clocked in late today",
-                    "body": f"After {_LATE_CUTOFF.strftime('%H:%M')} WIB",
+                    "body": f"More than {settings.LATE_GRACE_MINUTES} min after {settings.WORK_START} WIB",
                     "link": "/attendance",
                     "at": now,
                 })

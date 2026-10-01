@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, Wallet, BookOpen, Undo2, CheckCircle, Trash2, Loader2, AlertCircle,
+  Plus, Wallet, BookOpen, Undo2, CheckCircle, Trash2, Loader2, AlertCircle, RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { NewSalaryForm } from "@/components/forms/NewSalaryForm";
-import { T } from "@/store/lang";
+import { T, useT } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -19,6 +19,7 @@ const STATUS_CHIP: Record<string, string> = {
 
 export default function SalaryPage() {
   const qc = useQueryClient();
+  const t = useT();
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [openNew, setOpenNew] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
@@ -59,6 +60,16 @@ export default function SalaryPage() {
     onSuccess: () => {
       refresh(); qc.invalidateQueries({ queryKey: ["accounts"] });
       setFlash({ kind: "ok", text: "Marked paid." });
+    },
+    onError: (e: any) => setFlash({ kind: "err", text: errMsg(e) }),
+  });
+  // Re-read the month's attendance into a draft — after HR marks a leave
+  // day, or overtime is approved after the record was made.
+  const refreshAtt = useMutation({
+    mutationFn: (id: string) => api.post(`/salaries/${id}/refresh-attendance`),
+    onSuccess: () => {
+      refresh();
+      setFlash({ kind: "ok", text: t("Attendance re-read.", "Absensi dibaca ulang.") });
     },
     onError: (e: any) => setFlash({ kind: "err", text: errMsg(e) }),
   });
@@ -130,6 +141,7 @@ export default function SalaryPage() {
               <th className="th">{T("Employee")}</th>
               <th className="th">{T("Period")}</th>
               <th className="th">{T("Status")}</th>
+              <th className="th">{t("Attendance", "Absensi")}</th>
               <th className="th text-right">{T("Gross")}</th>
               <th className="th text-right">{T("PPh 21")}</th>
               <th className="th text-right">{T("Net")}</th>
@@ -149,9 +161,39 @@ export default function SalaryPage() {
                     <span className="ml-2 chip bg-brand-50 text-brand-700">{T("posted")}</span>
                   )}
                 </td>
-                <td className="td text-right tabular-nums">{idr(s.gross_salary)}</td>
+                <td className="td text-xs">
+                  {/* What attendance did to this month's pay. */}
+                  <div className="flex flex-col gap-0.5 tabular-nums whitespace-nowrap">
+                    {Number(s.late_deduction) > 0 && (
+                      <span className="text-red-700">
+                        {t(`late ${s.late_minutes} min −${idr(s.late_deduction)}`,
+                           `terlambat ${s.late_minutes} mnt −${idr(s.late_deduction)}`)}</span>
+                    )}
+                    {Number(s.absent_deduction) > 0 && (
+                      <span className="text-red-700">
+                        {t(`absent ${s.absent_days} d −${idr(s.absent_deduction)}`,
+                           `absen ${s.absent_days} hr −${idr(s.absent_deduction)}`)}</span>
+                    )}
+                    {Number(s.overtime_pay) > 0 && (
+                      <span className="text-emerald-700">
+                        {t(`overtime ${s.overtime_hours} h +${idr(s.overtime_pay)}`,
+                           `lembur ${s.overtime_hours} jam +${idr(s.overtime_pay)}`)}</span>
+                    )}
+                    {Number(s.attendance_breakdown?.overtime_pending) > 0 && (
+                      <span className="text-amber-700">
+                        {t(`${s.attendance_breakdown.overtime_pending} overtime waiting`,
+                           `${s.attendance_breakdown.overtime_pending} lembur menunggu`)}</span>
+                    )}
+                    {!Number(s.late_deduction) && !Number(s.absent_deduction)
+                      && !Number(s.overtime_pay) && (
+                      <span className="muted">{s.attendance_breakdown?.working_days
+                        ? t("on time, no absences", "tepat waktu, tanpa absen") : "—"}</span>
+                    )}
+                  </div>
+                </td>
+                <td className="td text-right tabular-nums whitespace-nowrap">{idr(s.gross_salary)}</td>
                 <td className="td text-right tabular-nums">{idr(s.pph21)}</td>
-                <td className="td text-right tabular-nums font-semibold">{idr(s.net_pay)}</td>
+                <td className="td text-right tabular-nums font-semibold whitespace-nowrap">{idr(s.net_pay)}</td>
                 <td className="td text-right">
                   <div className="inline-flex gap-1">
                     {s.status === "draft" && (
@@ -159,6 +201,12 @@ export default function SalaryPage() {
                         <button className="btn-ghost text-brand-700"
                           onClick={() => { setEditing(s); setOpenNew(true); }}>
                           {T("Edit")}</button>
+                        <button className="btn-ghost"
+                          title={t("Re-read this month's attendance", "Baca ulang absensi bulan ini")}
+                          aria-label={t("Refresh from attendance", "Perbarui dari absensi")}
+                          disabled={refreshAtt.isPending}
+                          onClick={() => refreshAtt.mutate(s.id)}>
+                          <RefreshCw size={13} /></button>
                         <button className="btn-success"
                           disabled={post.isPending}
                           onClick={() => post.mutate(s.id)}>
@@ -192,7 +240,7 @@ export default function SalaryPage() {
             ))}
             {!salaries.data?.length && (
               <tr>
-                <td colSpan={7} className="td text-center muted py-12">
+                <td colSpan={8} className="td text-center muted py-12">
                   {T("No salary records for")}{" "}{period}{T(". Click \"+ New salary\" to create one.")}</td>
               </tr>
             )}

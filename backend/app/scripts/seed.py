@@ -633,6 +633,18 @@ COLUMN_MIGRATIONS: list[str] = [
           AND target_type IN ('quotation_won', 'delivery_order')
           AND required_role <> 'finance'""",
 
+    # ── Pay that follows attendance ────────────────────────────────────
+    "ALTER TABLE attendances ADD COLUMN IF NOT EXISTS overtime_minutes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE attendances ADD COLUMN IF NOT EXISTS overtime_status VARCHAR(20)",
+    "ALTER TABLE attendances ADD COLUMN IF NOT EXISTS overtime_approved_minutes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS late_minutes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS late_deduction NUMERIC(18,2) NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS absent_days NUMERIC(6,2) NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS absent_deduction NUMERIC(18,2) NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS overtime_hours NUMERIC(6,2) NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS overtime_pay NUMERIC(18,2) NOT NULL DEFAULT 0",
+    "ALTER TABLE salaries ADD COLUMN IF NOT EXISTS attendance_breakdown JSONB NOT NULL DEFAULT '{}'::jsonb",
+
     # ── Company names in capitals ──────────────────────────────────────
     # New and edited names are capitalised by the models; these bring the
     # ones written before into line. Idempotent — runs each boot. A supplier

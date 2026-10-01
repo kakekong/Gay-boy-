@@ -5,6 +5,11 @@ Each salary record is auto-postable to the Chart of Accounts:
   CR Hutang Pph 21         (account_tax_no,     default 2102-04)  = pph21
   CR Hutang Gaji Karyawan  (account_liability_no, default 2102-02) = net_pay
 
+Attendance feeds it (services/attendance_pay.py): minutes late and days
+absent are deducted, approved overtime is paid. They are worked out when the
+record is created, again whenever the base salary changes, and on demand
+("Refresh from attendance") while it is still a draft.
+
 Marking 'paid' moves the cash out of the bank into the liability:
   DR Hutang Gaji Karyawan  = net_pay
   CR Bank                  (account_bank_no, default 1101-01) = net_pay
@@ -61,6 +66,8 @@ class SalaryIn(BaseModel):
     account_tax_no:       str | None = None
     account_bank_no:      str | None = None
     notes: str | None = None
+    # Work the month's attendance into the record (late, absent, overtime).
+    from_attendance: bool = True
 
 
 class SalaryPatch(BaseModel):
@@ -106,17 +113,48 @@ class SalaryOut(BaseModel):
     account_bank_no:      str | None
     notes: str | None
     posted_snapshot: dict
+    late_minutes: int = 0
+    late_deduction: float = 0
+    absent_days: float = 0
+    absent_deduction: float = 0
+    overtime_hours: float = 0
+    overtime_pay: float = 0
+    attendance_breakdown: dict = {}
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _recalc(s: Salary) -> None:
-    s.gross_salary = float(
-        (s.base_salary or 0) + (s.transport or 0) + (s.meal or 0)
-        + (s.bonus or 0) + (s.thr or 0) + (s.other_allowance or 0)
-    )
-    deductions = float((s.pph21 or 0) + (s.bpjs or 0) + (s.other_deduction or 0))
-    s.net_pay = float(s.gross_salary - deductions)
+    # float() each: a record read back from the database holds Decimals, and
+    # the attendance figures arrive as floats.
+    f = lambda v: float(v or 0)  # noqa: E731
+    s.gross_salary = round(
+        f(s.base_salary) + f(s.transport) + f(s.meal) + f(s.bonus) + f(s.thr)
+        + f(s.other_allowance) + f(s.overtime_pay), 2)
+    deductions = (f(s.pph21) + f(s.bpjs) + f(s.other_deduction)
+                  + f(s.late_deduction) + f(s.absent_deduction))
+    s.net_pay = round(f(s.gross_salary) - deductions, 2)
+
+
+async def _join_date(db: AsyncSession, user_id: UUID):
+    """When the person started — days before it are not absences."""
+    from app.models.employee import Employee
+    u = await db.get(User, user_id)
+    emp = await db.get(Employee, u.employee_id) if u and u.employee_id else None
+    return emp.join_date if emp else None
+
+
+async def _apply_attendance(db: AsyncSession, s: Salary) -> None:
+    from app.services.attendance_pay import month_for
+    m = await month_for(db, s.user_id, s.period, float(s.base_salary or 0),
+                        join_date=await _join_date(db, s.user_id))
+    s.late_minutes = m["late_minutes"]
+    s.late_deduction = m["late_deduction"]
+    s.absent_days = m["absent_days"]
+    s.absent_deduction = m["absent_deduction"]
+    s.overtime_hours = m["overtime_hours"]
+    s.overtime_pay = m["overtime_pay"]
+    s.attendance_breakdown = m
 
 
 async def _bump(db: AsyncSession, account_no: str | None, delta: float) -> dict | None:
@@ -174,6 +212,13 @@ async def _serialize(db: AsyncSession, s: Salary) -> dict:
         account_tax_no=s.account_tax_no,
         account_bank_no=s.account_bank_no,
         notes=s.notes, posted_snapshot=s.posted_snapshot or {},
+        late_minutes=int(s.late_minutes or 0),
+        late_deduction=float(s.late_deduction or 0),
+        absent_days=float(s.absent_days or 0),
+        absent_deduction=float(s.absent_deduction or 0),
+        overtime_hours=float(s.overtime_hours or 0),
+        overtime_pay=float(s.overtime_pay or 0),
+        attendance_breakdown=s.attendance_breakdown or {},
     ).model_dump(mode="json")
 
 
@@ -191,6 +236,19 @@ async def list_salaries(
     if user_id: stmt = stmt.where(Salary.user_id == user_id)
     rows = (await db.scalars(stmt)).all()
     return [await _serialize(db, s) for s in rows]
+
+
+@router.get("/attendance-preview")
+async def attendance_preview(user_id: UUID, period: str, base_salary: float = 0,
+                             db: AsyncSession = Depends(get_db),
+                             _: User = Depends(_director)):
+    """What this month's attendance does to pay, before a record exists."""
+    from app.services.attendance_pay import month_for
+    try:
+        return await month_for(db, user_id, period, base_salary,
+                               join_date=await _join_date(db, user_id))
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "period must be YYYY-MM")
 
 
 @router.get("/{salary_id}")
@@ -219,7 +277,11 @@ async def create_salary(payload: SalaryIn,
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "A salary record already exists for this employee + period.")
 
-    s = Salary(**payload.model_dump(), status="draft")
+    data = payload.model_dump()
+    from_attendance = data.pop("from_attendance", True)
+    s = Salary(**data, status="draft")
+    if from_attendance:
+        await _apply_attendance(db, s)
     _recalc(s)
     db.add(s)
     await db.flush()
@@ -237,9 +299,32 @@ async def update_salary(salary_id: UUID,
     if s.is_posted:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Reverse the posting before editing this salary.")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    for k, v in changes.items():
         setattr(s, k, v)
+    # Late and absent are worked from the base salary, so a new base moves
+    # them — unless this record was made without attendance.
+    if "base_salary" in changes and s.attendance_breakdown:
+        await _apply_attendance(db, s)
     _recalc(s)
+    return await _serialize(db, s)
+
+
+@router.post("/{salary_id}/refresh-attendance")
+async def refresh_attendance(salary_id: UUID,
+                             db: AsyncSession = Depends(get_db),
+                             _: User = Depends(_director)):
+    """Re-read the month's attendance — after HR marks a leave day, or a
+    manager approves overtime filed since the record was made."""
+    s = await db.get(Salary, salary_id)
+    if not s:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if s.is_posted:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Reverse the posting before refreshing this salary.")
+    await _apply_attendance(db, s)
+    _recalc(s)
+    await db.flush()
     return await _serialize(db, s)
 
 

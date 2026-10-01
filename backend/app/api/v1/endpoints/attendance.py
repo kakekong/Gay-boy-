@@ -60,8 +60,14 @@ class StatusPatch(BaseModel):
 
 
 async def _serialize(db: AsyncSession, a: Attendance) -> dict:
+    from app.services.attendance_pay import late_minutes
     u = await db.get(User, a.user_id)
     return {
+        # Against the working day in settings — what payroll reads too.
+        "late_minutes": late_minutes(a),
+        "overtime_minutes": int(a.overtime_minutes or 0),
+        "overtime_status": a.overtime_status,
+        "overtime_approved_minutes": int(a.overtime_approved_minutes or 0),
         "id": str(a.id),
         "user_id": str(a.user_id),
         "user_name": u.full_name if u else None,
@@ -92,7 +98,10 @@ async def clock_in(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    today = date_t.today()
+    # The office's date, not the server's: on a UTC server a 06:45 clock-in
+    # in Jakarta landed on the day before.
+    from app.services.attendance_pay import local_today
+    today = local_today()
     existing = await db.scalar(
         select(Attendance).where(Attendance.user_id == me.id, Attendance.date == today)
     )
@@ -120,7 +129,8 @@ async def clock_out(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    today = date_t.today()
+    from app.services.attendance_pay import local_today
+    today = local_today()
     a = await db.scalar(
         select(Attendance).where(Attendance.user_id == me.id, Attendance.date == today)
     )
@@ -134,8 +144,35 @@ async def clock_out(
     delta = (a.clock_out - a.clock_in).total_seconds() / 3600
     a.hours = round(max(0, delta), 2)
     a.notes = _append_note(a.notes, "Out", payload.note if payload else None)
+    await _file_overtime(db, a, me)
     await db.flush()
     return await _serialize(db, a)
+
+
+async def _file_overtime(db: AsyncSession, a: Attendance, me: User) -> None:
+    """Staying past the end of the day files overtime for approval.
+
+    Only approved overtime is paid, so it goes where approvals go: the inbox
+    of a manager or the director, who can approve or turn it down. Shorter
+    than OVERTIME_MIN_MINUTES is recorded but not filed.
+    """
+    from app.core.approval import request_approval
+    from app.core.config import settings
+    from app.services.attendance_pay import overtime_minutes_at
+    mins = overtime_minutes_at(a)
+    a.overtime_minutes = mins
+    if mins < int(settings.OVERTIME_MIN_MINUTES) or a.overtime_status in ("pending", "approved"):
+        return
+    a.overtime_status = "pending"
+    await request_approval(
+        db, target_type="overtime", target_id=a.id, requested_by=me.id,
+        required_role=Role.MANAGER,
+        reason=(f"Overtime {a.date.isoformat()}: {mins} min after "
+                f"{settings.WORK_END} — paid only if approved"),
+        payload={"date": a.date.isoformat(), "minutes": mins,
+                 "employee": me.full_name,
+                 "clock_out": a.clock_out.isoformat() if a.clock_out else None},
+    )
 
 
 @router.get("/me")
@@ -158,7 +195,8 @@ async def my_today(
     db: AsyncSession = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    today = date_t.today()
+    from app.services.attendance_pay import local_today
+    today = local_today()
     a = await db.scalar(
         select(Attendance).where(Attendance.user_id == me.id, Attendance.date == today)
     )
@@ -206,12 +244,8 @@ async def summary_all(
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "period must be YYYY-MM")
 
-    workdays = 0
-    d = start
-    while d < end:
-        if d.weekday() < 5:
-            workdays += 1
-        d += timedelta(days=1)
+    from app.services.attendance_pay import working_days_in
+    workdays = working_days_in(period)
 
     users = (await db.scalars(
         select(User).where(
@@ -320,13 +354,9 @@ async def summary(
     for a in rows:
         counts[a.status] = counts.get(a.status, 0) + 1
         total_hours += float(a.hours or 0)
-    # Working days in the month, Mon-Fri
-    workdays = 0
-    d = start
-    while d < end:
-        if d.weekday() < 5:
-            workdays += 1
-        d += timedelta(days=1)
+    # Working days in the month, on the schedule in settings.
+    from app.services.attendance_pay import working_days_in
+    workdays = working_days_in(period)
     present_like = counts.get("present", 0) + counts.get("wfh", 0)
     half = counts.get("half_day", 0)
     absent_like = counts.get("absent", 0)

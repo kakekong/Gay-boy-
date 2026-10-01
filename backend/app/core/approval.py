@@ -311,6 +311,15 @@ async def apply_to_target(
                 if parent and parent.status not in ("won", "cancelled", "superseded"):
                     parent.status = "superseded"
                     applied["superseded"] = str(parent.id)
+    elif req.target_type == "overtime":
+        # Time past the end of the working day, filed at clock-out. Only
+        # approved overtime is paid (services/attendance_pay.py).
+        from app.models.attendance import Attendance
+        a = await db.get(Attendance, req.target_id)
+        if a:
+            a.overtime_status = "approved" if approve else "rejected"
+            a.overtime_approved_minutes = int(a.overtime_minutes or 0) if approve else 0
+            applied["overtime_status"] = a.overtime_status
     elif req.target_type == "quotation_edit":
         # Pricing edit to an already-approved quotation: the stashed
         # changes apply only when the director approves. Rejection leaves

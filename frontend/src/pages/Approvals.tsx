@@ -4,13 +4,13 @@ import { Link } from "react-router-dom";
 import {
   Check, X, ShieldCheck, AlertCircle, Loader2, CheckCircle2,
   Download, ChevronRight, FileText, Building2, Eye, History,
-  MessageSquare, Trophy, Truck,
+  MessageSquare, Trophy, Truck, Clock,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { GeneratedSheetModal } from "@/components/GeneratedSheetModal";
-import { T, locale } from "@/store/lang";
+import { T, locale, t as tt } from "@/store/lang";
 
 interface ApprovalAttachment {
   id: string;
@@ -227,6 +227,7 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
   // Releasing a delivery order: the goods leave under it, and the sheet the
   // driver carries is generated the moment this is approved.
   const isDeliveryOrder = r.target_type === "delivery_order";
+  const isOvertime = r.target_type === "overtime";
   // Friendly labels for project-shipping fields so the director sees
   // "Estimated ship from origin", not "est_ship_from_origin".
   const PROJECT_FIELD_LABELS: Record<string, string> = {
@@ -292,6 +293,9 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
             ) : isProjectUpdate ? (
               <span className="chip bg-indigo-50 text-indigo-700 inline-flex items-center gap-1">
                 <FileText size={11} /> {T("Shipping update")}</span>
+            ) : isOvertime ? (
+              <span className="chip bg-orange-50 text-orange-700 inline-flex items-center gap-1">
+                <Clock size={11} /> {tt("Overtime", "Lembur")}</span>
             ) : isDeliveryOrder ? (
               <span className="chip bg-lime-50 text-lime-700 inline-flex items-center gap-1">
                 <Truck size={11} /> {T("Delivery order")}</span>
@@ -433,6 +437,24 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          ) : isOvertime ? (
+            // Staying past the end of the day, filed at clock-out. Approving
+            // is what makes it paid on the month's salary.
+            <div className="mt-3 space-y-1 text-sm">
+              <div className="font-semibold text-ink-900">{r.payload?.employee ?? "—"}</div>
+              <div className="tabular-nums">
+                {r.payload?.date}
+                {r.payload?.clock_out && <> · {tt("out", "pulang")}{" "}
+                  {new Date(r.payload.clock_out).toLocaleTimeString(locale(), {
+                    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}</>}
+                {" · "}{tt(`${r.payload?.minutes} min past the end of the day`,
+                           `${r.payload?.minutes} mnt setelah jam pulang`)}
+              </div>
+              <div className="text-xs muted">
+                {tt("Paid on this month's salary only if approved — first hour at 1.5×, each further hour at 2× the hourly wage.",
+                    "Dibayar di gaji bulan ini hanya jika disetujui — jam pertama 1,5×, jam berikutnya 2× upah per jam.")}
+              </div>
             </div>
           ) : isDeliveryOrder ? (
             <div className="mt-3 space-y-2">

@@ -439,6 +439,12 @@ Every report exports to **PDF and Excel**. A separate **Estimated finance** page
 
 Director-only: generate the monthly run → post to ledger → mark paid.
 
+**Pay follows attendance.** The working day is **08:30–17:00, Monday–Friday** (Jakarta time; settings `WORK_START`, `WORK_END`, `WORK_DAYS`). A salary record is worked from the month's attendance when it is created, again when its base salary changes, and on **Refresh from attendance** (the ↻ on a draft):
+- **Late** — clocking in up to **15 minutes** late is free (`LATE_GRACE_MINUTES`); past that, *every* minute late is deducted at the per-minute wage (base ÷ 173 ÷ 60).
+- **Absent** — a working day with no clock-in costs **one day's wage** (base ÷ working days that month); a half day costs half. Days HR marks leave, sick, holiday or WFH are excused, as are days before the employee's join date and days not yet over.
+- **Late clock-out (overtime)** — clocking out 30+ minutes after 17:00 (`OVERTIME_MIN_MINUTES`) files an **Overtime** request in the approvals inbox for a **manager or the director**. Only approved overtime is paid: rounded to the nearest hour, the first hour at **1.5×** and each further hour at **2×** the hourly wage (base ÷ 173), per day. Waiting overtime is shown on the payslip but not paid until approved — refresh the draft after approving.
+Only the base salary is used for these rates, not allowances. The salary form shows the month's late minutes, absent days and approved overtime (with a day-by-day list) as it is filled in, and the list shows them per person. The attendance page marks each late clock-in and each overtime clock-out with its approval status. Clock-in now uses the office date, not the server's (a 06:45 clock-in used to land on the day before).
+
 ---
 
 ## 10. Approvals & notifications

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -50,3 +50,13 @@ class Salary(Base, UUIDPK, TimestampMixin):
 
     paid_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes:     Mapped[str | None] = mapped_column(Text)
+    # From the month's attendance (services/attendance_pay.py): deductions
+    # for minutes late and days absent, pay for approved overtime, and the
+    # day-by-day working behind them.
+    late_minutes:     Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    late_deduction:   Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    absent_days:      Mapped[float] = mapped_column(Numeric(6, 2), default=0, nullable=False)
+    absent_deduction: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    overtime_hours:   Mapped[float] = mapped_column(Numeric(6, 2), default=0, nullable=False)
+    overtime_pay:     Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    attendance_breakdown: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

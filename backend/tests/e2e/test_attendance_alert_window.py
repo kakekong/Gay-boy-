@@ -50,8 +50,13 @@ async def main():
         items = J(await c.get("/notifications", headers=d)).get("items", [])
         return [i for i in items if i.get("kind") == "attendance"]
 
-    original = N._ATTENDANCE_ALERT_FROM
-    check("the shipped window opens at 08:30", original == time(8, 30), str(original))
+    # The window opens when the working day starts — WORK_START, the same
+    # setting payroll's "late" is measured from.
+    from app.core.config import settings
+    def set_start(t):
+        settings.WORK_START = t.strftime("%H:%M")
+    original = settings.WORK_START
+    check("the shipped window opens at 08:30", original == "08:30", str(original))
 
     now_utc = datetime.now(UTC)
     now_wib = now_utc.astimezone(WIB)
@@ -61,13 +66,13 @@ async def main():
         # ── the gate closed ──────────────────────────────────────────────────
         # An hour from now in WIB: the office day is under way, but the window
         # has not opened, so nothing should be said.
-        N._ATTENDANCE_ALERT_FROM = (now_wib + timedelta(hours=1)).time()
+        set_start((now_wib + timedelta(hours=1)).time())
         check("before the window opens there is no attendance alert",
               await attendance_alerts() == [],
               str([i["id"] for i in await attendance_alerts()]))
 
         # ── the gate open ────────────────────────────────────────────────────
-        N._ATTENDANCE_ALERT_FROM = time(0, 0)
+        set_start(time(0, 0))
         alerts = await attendance_alerts()
         if weekend:
             # The weekday rule is separate and older than this change; on a
@@ -82,11 +87,11 @@ async def main():
                   str([a["id"] for a in alerts]))
 
         # ── the boundary is inclusive ────────────────────────────────────────
-        N._ATTENDANCE_ALERT_FROM = now_wib.time().replace(microsecond=0)
+        set_start(now_wib.time().replace(microsecond=0))
         alerts = await attendance_alerts()
         check("the alert fires at the boundary minute, not one after it",
               (alerts == []) if weekend else (len(alerts) >= 1),
-              f"threshold={N._ATTENDANCE_ALERT_FROM} wib_now={now_wib.time()}")
+              f"threshold={settings.WORK_START} wib_now={now_wib.time()}")
 
         # ── the clock is WIB, not the server's ───────────────────────────────
         # Pick a threshold later than the server's own wall clock but earlier
@@ -95,7 +100,7 @@ async def main():
         if now_utc.date() == now_wib.date() and not weekend:
             between = (now_utc + timedelta(minutes=30))
             if between.time() < now_wib.time():
-                N._ATTENDANCE_ALERT_FROM = between.time()
+                set_start(between.time())
                 check("the window is measured in WIB, not server time",
                       len(await attendance_alerts()) >= 1,
                       f"threshold={between.time()} utc_now={now_utc.time()} "
@@ -108,10 +113,10 @@ async def main():
             check("skipped the WIB-vs-server probe (dates straddle midnight, "
                   "or it is the weekend)", True)
     finally:
-        N._ATTENDANCE_ALERT_FROM = original
+        settings.WORK_START = original
 
     check("the window was put back for the rest of the suite",
-          N._ATTENDANCE_ALERT_FROM == time(8, 30), str(N._ATTENDANCE_ALERT_FROM))
+          settings.WORK_START == "08:30", str(settings.WORK_START))
 
     # ── everything else is unaffected ────────────────────────────────────────
     items = J(await c.get("/notifications", headers=d)).get("items", [])

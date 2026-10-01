@@ -665,6 +665,21 @@ DataCleanup.tsx. `tests/e2e/test_data_sync.py` builds legacy-shaped rows
 directly in the DB and runs the syncs against them — add to it when adding a
 new sync.
 
+**Payroll from attendance.** `services/attendance_pay.py` is the one place the
+rules live (`late_minutes`, `overtime_minutes_at`, `month_for`), driven by
+settings `WORK_START/WORK_END/WORK_DAYS/LATE_GRACE_MINUTES/OVERTIME_MIN_MINUTES/
+PAY_MONTHLY_HOURS`; dates are office-local (`local_today()`), never
+`date.today()`. Clock-out stores `Attendance.overtime_minutes` and files an
+`overtime` ApprovalRequest (required_role manager) via `_file_overtime`; the
+applier in `core/approval.py` sets `overtime_status`/`overtime_approved_minutes`.
+`salaries._apply_attendance` writes `late_*`, `absent_*`, `overtime_*` and
+`attendance_breakdown` onto the Salary; `_recalc` adds overtime to gross and
+late/absent to deductions. `tests/e2e/test_attendance_payroll.py` is the
+three-scenario simulation (late / absent / late clock-out) and prints payslips.
+The bell's attendance alerts (`notifications.py` §6a) use the same helpers —
+office date, `is_work_day`, `late_minutes`, gate at `work_start()` — so "late"
+on the bell and on the payslip cannot disagree.
+
 **Catalogue matching and merging.** `stock_sync.ItemIndex` is the one way a
 document line finds its inventory row: SKU → merged-in SKU (`InventoryItem.aliases`,
 JSONB `[{sku, name}]`) → exact name → merged-in name → `loose_key` (letters and

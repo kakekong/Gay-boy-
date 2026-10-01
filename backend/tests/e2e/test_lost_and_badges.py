@@ -131,11 +131,15 @@ async def main():
               str([i["id"] for i in after.get("items", []) if i.get("kind") == "attendance"]))
 
     # The sidebar badge is a count of notification items per link, so an alert
-    # that won't stay dismissed is exactly a badge that won't clear.
+    # that won't stay dismissed is exactly a badge that won't clear. What was
+    # dismissed must stay dismissed. A *new* alert is allowed: the probe
+    # clock-in above is genuinely late once the morning is past the grace
+    # period, and "someone clocked in late" is then news, not a resurfacing.
     final = J(await c.get("/notifications", headers=d))
-    links = [i.get("link") for i in final.get("items", [])]
-    check("the attendance badge is clear", "/attendance" not in links,
-          str(links)[:200])
+    dismissed = {i["id"] for i in att}
+    back = [i["id"] for i in final.get("items", [])
+            if i.get("link") == "/attendance" and i["id"] in dismissed]
+    check("the attendance badge is clear of everything dismissed", not back, str(back))
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
