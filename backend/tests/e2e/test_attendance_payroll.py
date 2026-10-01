@@ -188,6 +188,28 @@ async def main():
           abs(r["overtime_pay"] - 250_000) < 0.01 and r["overtime_hours"] == 3, str(r.get("overtime_pay")))
     slips["overtime"] = r
 
+    print("\n── the worked examples on the payroll page ──")
+    s1 = await login("sales1@demo.local")
+    r = await c.get("/salaries/examples", headers=s1)
+    check("only the director sees them", r.status_code == 403, str(r.status_code))
+    ex = J(await c.get("/salaries/examples", headers=d))
+    byk = {e["key"]: e for e in ex.get("examples", [])}
+    check("three examples: late, absent, late clock-out", set(byk) == {"late", "absent", "overtime"})
+    b = byk["late"]["breakdown"]
+    check("the late example counts 65 minutes at the per-minute wage",
+          b["late_minutes"] == 65 and abs(byk["late"]["late_deduction"] - round(65 * per_min, 2)) < 0.01,
+          str(b["late_minutes"]))
+    b = byk["absent"]["breakdown"]
+    check("the absent example is 2.5 days at that month's day wage",
+          b["absent_days"] == 2.5 and abs(byk["absent"]["absent_deduction"]
+                                          - round(2.5 * BASE / b["working_days"], 2)) < 0.01,
+          str(b["absent_days"]))
+    b = byk["overtime"]["breakdown"]
+    check("the overtime example pays only the approved evening, Rp 175.000",
+          byk["overtime"]["overtime_pay"] == 175_000 and b["overtime_pending"] == 1)
+    check("each example carries the rates it was worked at",
+          all({"day_wage", "hourly_wage", "minute_wage"} <= set(e["breakdown"]) for e in byk.values()))
+
     print("\n" + "═" * 64)
     for k, title in (("late", "LATE"), ("absent", "ABSENT"), ("overtime", "LATE CLOCK-OUT")):
         sl = slips[k]
@@ -203,9 +225,10 @@ async def main():
             print(f"  Absent ({sl['absent_days']:g} days)       -{rp(sl['absent_deduction']):>19}")
         print(f"  Net pay                {rp(sl['net_pay']):>20}")
         for ln in sl["attendance_breakdown"]["days"]:
-            extra = (f"in {ln['clock_in']}, {ln['minutes']} min" if ln["kind"] == "late"
+            extra = (f"in {ln['clock_in']}, {ln['minutes']} min" if ln["kind"] in ("late", "grace")
                      else f"out {ln.get('clock_out')}, {ln['minutes']} min, {ln['status']}"
-                     if ln["kind"] == "overtime" else f"{ln['days']} day")
+                     if ln["kind"] == "overtime" else f"{ln['status']} (excused)"
+                     if ln["kind"] == "excused" else f"{ln['days']} day")
             amt = ln.get("amount")
             print(f"     {ln['date']}  {ln['kind']:<9} {extra:<34} {rp(amt) if amt is not None else ''}")
 

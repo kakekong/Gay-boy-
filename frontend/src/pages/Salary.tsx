@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus, Wallet, BookOpen, Undo2, CheckCircle, Trash2, Loader2, AlertCircle, RefreshCw,
+  ChevronDown, ChevronRight, Calculator,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
 import { NewSalaryForm } from "@/components/forms/NewSalaryForm";
+import { PayslipBreakdown } from "@/components/PayslipBreakdown";
 import { T, useT } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -23,6 +25,13 @@ export default function SalaryPage() {
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [openNew, setOpenNew] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
+  // Rows opened to their full payslip breakdown.
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+  const toggleRow = (id: string) => setOpenRows((cur) => {
+    const next = new Set(cur);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const salaries = useQuery({
     queryKey: ["salaries", period],
@@ -134,7 +143,7 @@ export default function SalaryPage() {
       </div>
 
       {/* Table */}
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60">
             <tr>
@@ -150,8 +159,17 @@ export default function SalaryPage() {
           </thead>
           <tbody>
             {(salaries.data ?? []).map((s) => (
-              <tr key={s.id} className="tr-hover border-t border-ink-100">
-                <td className="td font-medium">{s.user_name ?? "—"}</td>
+              <Fragment key={s.id}>
+              <tr className="tr-hover border-t border-ink-100">
+                <td className="td font-medium">
+                  <button type="button" className="inline-flex items-center gap-1 hover:text-brand-700 whitespace-nowrap"
+                    aria-expanded={openRows.has(s.id)}
+                    onClick={() => toggleRow(s.id)}>
+                    {openRows.has(s.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {s.user_name ?? "—"}
+                  </button>
+                  <div className="text-[11px] muted pl-5">{t("Breakdown", "Rincian")}</div>
+                </td>
                 <td className="td muted">{s.period}</td>
                 <td className="td">
                   <span className={clsx("chip uppercase", STATUS_CHIP[s.status] ?? "bg-ink-100")}>
@@ -237,6 +255,14 @@ export default function SalaryPage() {
                   </div>
                 </td>
               </tr>
+              {openRows.has(s.id) && (
+                <tr className="bg-ink-50/40">
+                  <td colSpan={8} className="px-5 py-4 overflow-x-auto">
+                    <PayslipBreakdown slip={s} b={s.attendance_breakdown} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
             {!salaries.data?.length && (
               <tr>
@@ -247,6 +273,8 @@ export default function SalaryPage() {
           </tbody>
         </table>
       </div>
+
+      <WorkedExamples />
 
       <div className="card p-4 flex items-start gap-3 text-sm">
         <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
@@ -267,6 +295,64 @@ export default function SalaryPage() {
       >
         <NewSalaryForm initial={editing} onClose={() => setOpenNew(false)} />
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * The three ways attendance moves pay — late, absent, a late clock-out —
+ * each as a full month worked through on the payroll rules in force. The
+ * server builds them on last month's calendar with the same calculation real
+ * salaries use, so they read true whenever the schedule or grace changes.
+ */
+function WorkedExamples() {
+  const t = useT();
+  const [tab, setTab] = useState<"late" | "absent" | "overtime">("late");
+  const ex = useQuery({
+    queryKey: ["salary-examples"],
+    queryFn: () => api.get("/salaries/examples").then((r) => r.data as {
+      period: string; examples: any[];
+    }),
+    staleTime: 5 * 60_000,
+  });
+  const cur = ex.data?.examples.find((e) => e.key === tab);
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-ink-100 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <Calculator size={15} className="text-brand-600" />
+            {t("How attendance changes pay — three worked examples",
+               "Bagaimana absensi mengubah gaji — tiga contoh perhitungan")}
+          </div>
+          <div className="text-xs muted mt-0.5 max-w-3xl">
+            {t(`One employee on a base salary of Rp 8.650.000 (Rp 50.000 an hour) plus Rp 900.000 transport and meal, through ${ex.data?.period ?? "last month"}. Worked out by the same rules as every real payslip — nothing here is saved.`,
+               `Satu karyawan dengan gaji pokok Rp 8.650.000 (Rp 50.000 per jam) ditambah Rp 900.000 transport dan makan, selama ${ex.data?.period ?? "bulan lalu"}. Dihitung dengan aturan yang sama seperti slip gaji sebenarnya — tidak ada yang disimpan.`)}
+          </div>
+        </div>
+        <div className="inline-flex rounded-lg border border-ink-200 overflow-hidden text-sm" role="tablist">
+          {(["late", "absent", "overtime"] as const).map((k) => (
+            <button key={k} role="tab" aria-selected={tab === k}
+              className={clsx("px-3 py-1.5", tab === k ? "bg-brand-600 text-white" : "hover:bg-ink-50")}
+              onClick={() => setTab(k)}>
+              {k === "late" ? t("Late", "Terlambat") : k === "absent" ? t("Absent", "Absen")
+                : t("Late clock-out", "Pulang lewat jam")}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="p-5 space-y-3">
+        {ex.isLoading ? (
+          <div className="text-sm muted flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t("Working it out…", "Menghitung…")}</div>
+        ) : !cur ? (
+          <div className="text-sm muted">{t("Couldn't load the examples.", "Contoh tidak dapat dimuat.")}</div>
+        ) : (
+          <>
+            <div className="text-sm"><b>{t(cur.title, cur.key === "late" ? "Terlambat" : cur.key === "absent" ? "Absen" : "Pulang lewat jam")}</b> — {t(cur.story, cur.story_id ?? cur.story)}</div>
+            <PayslipBreakdown slip={cur} b={cur.breakdown} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -197,6 +197,8 @@ export function NewSalaryForm({ initial, onClose }: Props) {
                         {d.kind === "late" ? t(`late — in ${d.clock_in}, ${d.minutes} min`, `terlambat — masuk ${d.clock_in}, ${d.minutes} mnt`)
                           : d.kind === "absent" ? t("absent", "absen")
                           : d.kind === "half_day" ? t("half day", "setengah hari")
+                          : d.kind === "grace" ? t(`in ${d.clock_in}, ${d.minutes} min — within grace`, `masuk ${d.clock_in}, ${d.minutes} mnt — dalam toleransi`)
+                          : d.kind === "excused" ? t(`${d.status} — excused`, `${d.status} — dimaafkan`)
                           : t(`overtime — out ${d.clock_out}, ${d.minutes} min, ${d.status}`,
                               `lembur — pulang ${d.clock_out}, ${d.minutes} mnt, ${d.status}`)}
                       </span>

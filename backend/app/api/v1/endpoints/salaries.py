@@ -251,6 +251,107 @@ async def attendance_preview(user_id: UUID, period: str, base_salary: float = 0,
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "period must be YYYY-MM")
 
 
+EXAMPLE_BASE = 8_650_000       # → Rp 50.000 an hour at 173 hours
+EXAMPLE_ALLOWANCES = {"transport": 500_000, "meal": 400_000}
+
+
+@router.get("/examples")
+async def worked_examples(_: User = Depends(_director)):
+    """Three worked months — late, absent, late clock-out — for the payroll page.
+
+    Built in memory on last month's calendar and run through the same code
+    that works out real salaries (`attendance_pay.compute_month`), so the
+    examples change when the settings do and never disagree with a payslip.
+    Nothing is written.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    from app.models.attendance import Attendance
+    from app.core.config import settings
+    from app.services import attendance_pay as ap
+
+    today = ap.local_today()
+    first_this = today.replace(day=1)
+    last_prev = first_this - _td(days=1)
+    period = last_prev.strftime("%Y-%m")
+    start, end = ap.month_bounds(period)
+    wdays = [start + _td(days=i) for i in range((end - start).days + 1)
+             if ap.is_work_day(start + _td(days=i))]
+    tz = ap.tz()
+    ws, we = ap.work_start(), ap.work_end()
+
+    def at(d, hh, mm):
+        return _dt(d.year, d.month, d.day, hh, mm, tzinfo=tz)
+
+    def shift(t, minutes):
+        base = _dt(2000, 1, 1, t.hour, t.minute) + _td(minutes=minutes)
+        return base.hour, base.minute
+
+    def day(d, *, in_late=0, out_over=0, status="present", ot_status=None, clocked=True):
+        a = Attendance(date=d, status=status)
+        if clocked:
+            a.clock_in = at(d, *shift(ws, in_late))
+            a.clock_out = at(d, *shift(we, out_over))
+        a.overtime_minutes = ap.overtime_minutes_at(a) if clocked else 0
+        a.overtime_status = ot_status
+        a.overtime_approved_minutes = a.overtime_minutes if ot_status == "approved" else 0
+        return a
+
+    grace = int(settings.LATE_GRACE_MINUTES)
+    ot_min = int(settings.OVERTIME_MIN_MINUTES)
+    pick = lambda i: wdays[min(i, len(wdays) - 1)]  # noqa: E731
+
+    late_in = {pick(2): grace - 5, pick(5): grace + 5, pick(9): 45}
+    late_rows = [day(d, in_late=late_in.get(d, 0)) for d in wdays]
+
+    absent_rows = []
+    for d in wdays:
+        if d in (pick(3), pick(11)):
+            continue                                   # no clock-in at all
+        if d == pick(6):
+            absent_rows.append(day(d, status="half_day"))
+        elif d == pick(15):
+            absent_rows.append(day(d, status="sick", clocked=False))
+        else:
+            absent_rows.append(day(d))
+
+    ot_plan = {pick(1): (105, "approved"), pick(4): (120, "rejected"),
+               pick(8): (70, "pending"), pick(12): (max(ot_min - 10, 5), None)}
+    ot_rows = [day(d, out_over=ot_plan[d][0], ot_status=ot_plan[d][1])
+               if d in ot_plan else day(d) for d in wdays]
+
+    def slip(key, title, story, story_id, rows):
+        m = ap.compute_month(rows, period, EXAMPLE_BASE, today=first_this)
+        allow = sum(EXAMPLE_ALLOWANCES.values())
+        gross = EXAMPLE_BASE + allow + m["overtime_pay"]
+        net = gross - m["late_deduction"] - m["absent_deduction"]
+        return {"key": key, "title": title, "story": story, "story_id": story_id,
+                "base_salary": EXAMPLE_BASE, **EXAMPLE_ALLOWANCES,
+                "overtime_pay": m["overtime_pay"], "late_deduction": m["late_deduction"],
+                "absent_deduction": m["absent_deduction"],
+                "gross_salary": round(gross, 2), "net_pay": round(net, 2),
+                "breakdown": m}
+
+    return {"period": period, "examples": [
+        slip("late", "Late",
+             f"On time every day but three: {grace - 5} min late (inside the "
+             f"{grace}-minute grace), {grace + 5} min and 45 min late.",
+             f"Tepat waktu setiap hari kecuali tiga: terlambat {grace - 5} mnt "
+             f"(masih dalam toleransi {grace} mnt), {grace + 5} mnt, dan 45 mnt.", late_rows),
+        slip("absent", "Absent",
+             "On time every day but four: two days with no clock-in, one half "
+             "day, and one sick day HR marked (excused).",
+             "Tepat waktu setiap hari kecuali empat: dua hari tanpa absen masuk, "
+             "satu setengah hari, dan satu hari sakit yang dicatat HR (dimaafkan).", absent_rows),
+        slip("overtime", "Late clock-out",
+             f"In on time, out late four times: 105 min (approved), 120 min "
+             f"(turned down), 70 min (still waiting) and {ot_plan[pick(12)][0]} "
+             f"min (under {ot_min} min, not filed).",
+             f"Masuk tepat waktu, pulang lewat jam empat kali: 105 mnt (disetujui), "
+             f"120 mnt (ditolak), 70 mnt (masih menunggu), dan {ot_plan[pick(12)][0]} "
+             f"mnt (kurang dari {ot_min} mnt, tidak diajukan).", ot_rows),
+    ]}
+
+
 @router.get("/{salary_id}")
 async def get_salary(salary_id: UUID,
                      db: AsyncSession = Depends(get_db),

@@ -79,13 +79,18 @@ def working_days_in(period: str) -> int:
                if is_work_day(first + timedelta(days=i)))
 
 
-def late_minutes(a: Attendance) -> int:
-    """Minutes late at clock-in, or 0 inside the grace period."""
+def raw_late_minutes(a: Attendance) -> int:
+    """Minutes after the start of the day at clock-in, grace or not."""
     if not a.clock_in or not is_work_day(a.date):
         return 0
     local_in = a.clock_in.astimezone(tz())
     start = datetime.combine(a.date, work_start(), tzinfo=tz())
-    mins = int((local_in - start).total_seconds() // 60)
+    return max(0, int((local_in - start).total_seconds() // 60))
+
+
+def late_minutes(a: Attendance) -> int:
+    """Minutes late at clock-in, or 0 inside the grace period."""
+    mins = raw_late_minutes(a)
     return mins if mins > int(settings.LATE_GRACE_MINUTES) else 0
 
 
@@ -114,10 +119,18 @@ async def month_for(db: AsyncSession, user_id, period: str, base_salary: float,
                     today: date | None = None) -> dict:
     """The month's attendance worked into pay: totals and the days behind them."""
     first, last = month_bounds(period)
-    today = today or local_today()
     rows = (await db.scalars(select(Attendance).where(
         Attendance.user_id == user_id,
         Attendance.date >= first, Attendance.date <= last))).all()
+    return compute_month(rows, period, base_salary, join_date=join_date, today=today)
+
+
+def compute_month(rows, period: str, base_salary: float, *,
+                  join_date: date | None = None, today: date | None = None) -> dict:
+    """`month_for` without the database — given the month's attendance rows.
+    The worked examples on the payroll page run through this same code."""
+    first, last = month_bounds(period)
+    today = today or local_today()
     by_day = {a.date: a for a in rows}
 
     wdays = working_days_in(period)
@@ -146,8 +159,16 @@ async def month_for(db: AsyncSession, user_id, period: str, base_salary: float,
             elif status == "half_day":
                 absent_days += 0.5
                 line = {"kind": "half_day", "days": 0.5, "amount": round(day_wage / 2, 2)}
-            elif status not in EXCUSED:
+            elif status in EXCUSED:
+                # Shown so the payslip says why the day cost nothing.
+                line = {"kind": "excused", "status": status, "amount": None}
+            else:
                 mins = late_minutes(a)
+                raw = raw_late_minutes(a)
+                if not mins and raw > 0:
+                    line = {"kind": "grace", "minutes": raw,
+                            "clock_in": a.clock_in.astimezone(tz()).strftime("%H:%M"),
+                            "amount": None}
                 if mins:
                     late_total += mins
                     line = {"kind": "late", "minutes": mins,
@@ -180,6 +201,8 @@ async def month_for(db: AsyncSession, user_id, period: str, base_salary: float,
         "working_days": wdays,
         "day_wage": round(day_wage, 2),
         "hourly_wage": round(hourly, 2),
+        "minute_wage": round(per_minute, 4),
+        "monthly_hours": int(settings.PAY_MONTHLY_HOURS or 173),
         "late_minutes": late_total,
         "late_deduction": late_deduction,
         "absent_days": absent_days,
