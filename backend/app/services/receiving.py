@@ -79,8 +79,12 @@ async def receive_goods(db: AsyncSession, po, received: dict[int, float],
     )
     db.add(gr)
     # The board should show the order has started arriving. A partial delivery
-    # is still an arrival — what is outstanding is visible on the lines.
-    if po.status in ("open", "pending_approval"):
+    # is still an arrival — what is outstanding is visible on the lines. An
+    # order still waiting for the director keeps waiting: receiving it used
+    # to flip it to 'received', which settled its approval request without
+    # anyone deciding it and dropped it out of the director's inbox. The
+    # approval moves it to 'received' instead (core/approval.py).
+    if po.status == "open":
         po.status = "received"
     await db.flush()
 

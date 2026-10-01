@@ -43,6 +43,90 @@ FINANCE_ONLY_TARGETS = ("quotation_won", "delivery_order")
 FINANCE_EXCLUSIVE_TARGETS = ("delivery_order",)
 
 
+async def drop_settled(db: AsyncSession, rows: list) -> list:
+    """Pending requests minus the ones whose document no longer needs them.
+
+    A request can be left pending when the same step happens off the
+    approvals page (a PO approved on its own page, a quote marked Won from the
+    quotation). Nothing is left to decide, so the inbox does not show them —
+    and the bell and the sidebar must not count them either, or the director
+    is told "approval needed" and finds an empty inbox. One rule, used by all
+    of them.
+
+    "Settled" is read narrowly: only when the document has moved somewhere a
+    decision cannot reach. A supplier order received before the director
+    signed it is NOT settled — the decision is still theirs to make.
+    """
+    from sqlalchemy import select as _sel
+    from app.models.customer_po import CustomerPO
+    from app.models.operation import DeliveryOrder, Project
+    from app.models.purchasing import PurchaseRequest, SupplierPO
+    from app.models.quotation import Quotation
+    from app.models.crm import Customer
+
+    def ids(*types):
+        return {r.target_id for r in rows if r.target_type in types}
+
+    async def load(model, keys):
+        if not keys:
+            return {}
+        return {x.id: x for x in (await db.scalars(_sel(model).where(model.id.in_(keys)))).all()}
+
+    quotes = await load(Quotation, ids("quotation", "discount", "quotation_edit", "quotation_won"))
+    cpos = await load(CustomerPO, ids("customer_po"))
+    spos = await load(SupplierPO, ids("supplier_po"))
+    prs = await load(PurchaseRequest, ids("purchase_request"))
+    dos = await load(DeliveryOrder, ids("delivery_order"))
+    projects = await load(Project, ids("project"))
+    customers = await load(Customer, ids("customer", "followup"))
+
+    quote_closed = ("won", "lost", "cancelled", "superseded")
+    cpo_open = ("pending_approval", "pending_finance", "pending_payment_confirm")
+
+    def settled(r) -> bool:
+        t = r.target_type
+        if t == "quotation_won":
+            q = quotes.get(r.target_id)
+            return bool(q and q.status in quote_closed)
+        if t in ("quotation", "discount"):
+            q = quotes.get(r.target_id)
+            return bool(q and q.status not in ("draft", "pending_approval"))
+        if t == "quotation_edit":
+            q = quotes.get(r.target_id)
+            return bool(q and q.status in ("cancelled", "superseded"))
+        if t == "customer_po":
+            po = cpos.get(r.target_id)
+            return bool(po and po.status not in cpo_open)
+        if t == "supplier_po":
+            spo = spos.get(r.target_id)
+            if not spo:
+                return False
+            # An edit is filed against an order that is already open, so only
+            # a finished order settles it.
+            if (r.payload or {}).get("action") == "update":
+                return spo.status in ("cancelled", "closed")
+            # A new order is settled once it was released (open), finished or
+            # cancelled. Received-before-approval stays in the inbox.
+            return spo.status in ("open", "closed", "cancelled")
+        if t == "purchase_request":
+            pr = prs.get(r.target_id)
+            return bool(pr and pr.status != "pending_approval")
+        if t == "delivery_order":
+            d = dos.get(r.target_id)
+            if d is None:
+                return True                     # withdrawn while it waited
+            return bool(d.approved_at) or d.status == "delivered"
+        if t == "project":
+            p = projects.get(r.target_id)
+            return bool(p and p.is_deleted)
+        if t in ("customer", "followup"):
+            c = customers.get(r.target_id)
+            return bool(c and c.is_deleted)
+        return False
+
+    return [r for r in rows if not settled(r)]
+
+
 def scope_to_inbox(stmt, role: Role):
     """Narrow a pending-ApprovalRequest query to what `role` should be shown.
 
@@ -429,9 +513,27 @@ async def apply_to_target(
         po = await db.get(SupplierPO, req.target_id)
         if po:
             action = (req.payload or {}).get("action")
+            # Goods can arrive before the director has signed the order —
+            # receiving no longer moves it off pending_approval, and orders
+            # received that way before are 'received' with this request still
+            # open. Either way the decision is still the director's to make;
+            # approving keeps it at 'received' rather than winding it back.
+            received_early = (action == "create" and approve
+                              and (po.status in ("received", "partial")
+                                   or float(po.payable_amount or 0) > 0))
+            if received_early:
+                po.status = "received"
+                applied["new_status"] = po.status
+                applied["note"] = "goods were already received against this order"
+                if po.project_id:
+                    from app.models.operation import Project, advance_project_status
+                    project = await db.get(Project, po.project_id)
+                    if project:
+                        advance_project_status(project, "purchasing")
+                return applied
             if action == "create" and po.status != "pending_approval":
-                # Already decided elsewhere (or goods received against it) —
-                # don't overwrite the live status with open/cancelled.
+                # Already decided elsewhere — don't overwrite the live status
+                # with open/cancelled.
                 applied["skipped"] = (
                     f"supplier PO already '{po.status}' — decision recorded "
                     "but not re-applied"

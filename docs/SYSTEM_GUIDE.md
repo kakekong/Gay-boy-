@@ -453,6 +453,8 @@ Only the base salary is used for these rates, not allowances. **Breakdown** unde
 
 A single `ApprovalRequest` table (target type + id, requester, required role, reason, JSON payload, decision fields) drives every gate. Decisions enforce who may decide (director-required → director only; manager → manager or director; finance → finance or director) and apply the effect atomically: quotation status + stage bump, queued quotation edits, customer stage changes + checklist spawn, customer-PO project spawn (DP-aware), supplier-PO effects, revision superseding.
 
+**The bell and the inbox count the same things.** A pending request whose document has moved on (a quote marked Won from its page, a customer PO approved on its page, a cancelled supplier order) is dropped from the approvals inbox — and from the bell and the sidebar badge by the same rule (`approval.drop_settled`), so "Approval needed" always has a row behind it. A new supplier PO counts as decided only once it is open, closed or cancelled: **receiving goods on an order the director hasn't signed leaves it waiting** (it used to flip to "received", which hid the request), and approving such an order marks it received rather than winding it back to open. Orders already stuck at "received" with an undecided request are back in the inbox.
+
 **Who approves what**
 
 | Decision | Approver |

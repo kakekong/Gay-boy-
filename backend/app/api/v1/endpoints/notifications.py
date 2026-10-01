@@ -120,9 +120,11 @@ async def list_notifications(
         )
         # Same filter the inbox applies, so the bell and the page agree about
         # what is waiting on you.
-        from app.core.approval import scope_to_inbox
+        from app.core.approval import drop_settled, scope_to_inbox
         appr_stmt = scope_to_inbox(appr_stmt, role)
-        for a in (await db.scalars(appr_stmt)).all():
+        # And the same "already settled" rule the inbox drops by — the bell
+        # said "approval needed" for requests the inbox no longer showed.
+        for a in await drop_settled(db, list((await db.scalars(appr_stmt)).all())):
             items.append({
                 "id": f"approval:{a.id}",
                 "kind": "approval",

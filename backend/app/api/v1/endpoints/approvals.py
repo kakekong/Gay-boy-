@@ -279,57 +279,9 @@ async def inbox(
         cpos = {p.id: p for p in (await db.scalars(
             select(CustomerPO).where(CustomerPO.id.in_(cpo_ids)))).all()}
 
-    _QUOTE_CLOSED = ("won", "lost", "cancelled", "superseded")
-    _CPO_OPEN = ("pending_approval", "pending_finance", "pending_payment_confirm")
-
-    def _stale(r) -> bool:
-        t = r.target_type
-        if t == "quotation_won":
-            q = all_quotes.get(r.target_id)
-            return bool(q and q.status in _QUOTE_CLOSED)
-        if t in ("quotation", "discount"):
-            # Only a draft/pending quote still needs an approve/reject.
-            q = all_quotes.get(r.target_id)
-            return bool(q and q.status not in ("draft", "pending_approval"))
-        if t == "quotation_edit":
-            q = all_quotes.get(r.target_id)
-            return bool(q and q.status in ("cancelled", "superseded"))
-        if t == "customer_po":
-            po = cpos.get(r.target_id)
-            return bool(po and po.status not in _CPO_OPEN)
-        if t == "supplier_po":
-            spo = supplier_pos.get(r.target_id)
-            if not spo:
-                return False
-            # Two different requests share this target type and only one of
-            # them is answered by the PO's status. A *create* is settled the
-            # moment the order leaves pending_approval — that was the director
-            # deciding it. An *edit* is filed against an order that is already
-            # open, so the same test marked every edit stale the instant it was
-            # filed and the director never saw one: purchasing was told
-            # "submitted for approval" and nothing arrived. An edit only goes
-            # stale when the order it edits is finished with.
-            if (r.payload or {}).get("action") == "update":
-                return spo.status in ("cancelled", "closed")
-            return spo.status != "pending_approval"
-        if t == "purchase_request":
-            pr = prs.get(r.target_id)
-            return bool(pr and pr.status != "pending_approval")
-        if t == "delivery_order":
-            d = dos.get(r.target_id)
-            if d is None:
-                # Deleted while it sat here — the desk withdrew the sheet.
-                return True
-            return bool(d.approved_at) or d.status == "delivered"
-        if t == "project":
-            p = projects.get(r.target_id)
-            return bool(p and p.is_deleted)
-        if t in ("customer", "followup"):
-            cst = customers.get(r.target_id)
-            return bool(cst and cst.is_deleted)
-        return False
-
-    rows = [r for r in rows if not _stale(r)]
+    # The same rule the bell and the sidebar count with (core.approval).
+    from app.core.approval import drop_settled
+    rows = await drop_settled(db, rows)
     if not rows:
         return []
 

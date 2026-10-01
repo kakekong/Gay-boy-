@@ -665,6 +665,15 @@ DataCleanup.tsx. `tests/e2e/test_data_sync.py` builds legacy-shaped rows
 directly in the DB and runs the syncs against them — add to it when adding a
 new sync.
 
+**What counts as "waiting" is one function.** `core.approval.drop_settled`
+drops pending requests whose document no longer needs them; the inbox
+(`approvals.py`) and the bell (`notifications.py` §1) both call it — they had
+separate rules, so the bell announced requests the inbox hid. Read "settled"
+narrowly (a supplier PO create only when open/closed/cancelled). Receiving
+(`services/receiving.receive_goods`) no longer moves a `pending_approval` PO;
+the supplier_po applier marks an early-received order `received` on approval.
+`tests/e2e/test_inbox_matches_bell.py`.
+
 **Payroll from attendance.** `services/attendance_pay.py` is the one place the
 rules live (`late_minutes`, `overtime_minutes_at`, `month_for`), driven by
 settings `WORK_START/WORK_END/WORK_DAYS/LATE_GRACE_MINUTES/OVERTIME_MIN_MINUTES/
