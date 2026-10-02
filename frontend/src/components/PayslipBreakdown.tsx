@@ -167,22 +167,20 @@ function describe(d: any, b: any, t: (en: string, id: string) => string) {
     return { what: t("Half day", "Setengah hari"), how: `0.5 × ${rp(b.day_wage)}`,
              amount: d.amount, sign: "-" };
   }
-  // overtime
-  const out = t(`Out at ${d.clock_out}, ${d.minutes} min over`, `Pulang ${d.clock_out}, lebih ${d.minutes} mnt`);
+  // overtime — recorded by the director
+  const what = t(`Overtime ${d.minutes} min recorded by the director`, `Lembur ${d.minutes} mnt dicatat direktur`)
+    + (d.reason ? ` · ${d.reason}` : "");
   if (d.status === "approved") {
     const h = Number(d.hours || 0);
     const how = h <= 1
       ? `${h} h → 1.5 × ${rp(b.hourly_wage)}`
       : `${h} h → 1.5 × ${rp(b.hourly_wage)} + ${h - 1} × 2 × ${rp(b.hourly_wage)}`;
-    return { what: `${out} · ${t("approved", "disetujui")}`, how, amount: d.amount, sign: "+" };
+    return { what, how, amount: d.amount, sign: "+" };
   }
-  if (d.status === "rejected") {
-    return { what: `${out} · ${t("not approved", "tidak disetujui")}`, how: t("not paid", "tidak dibayar"),
-             amount: null, sign: "" };
+  if (d.status === "revoked") {
+    return { what: t(`Overtime ${d.minutes} min — revoked`, `Lembur ${d.minutes} mnt — dibatalkan`)
+               + (d.reason ? ` · ${d.reason}` : ""),
+             how: t("not paid", "tidak dibayar"), amount: null, sign: "" };
   }
-  if (d.status === "pending") {
-    return { what: `${out} · ${t("waiting for approval", "menunggu persetujuan")}`,
-             how: t("paid once approved", "dibayar setelah disetujui"), amount: null, sign: "" };
-  }
-  return { what: out, how: t("too short to file", "terlalu singkat untuk diajukan"), amount: null, sign: "" };
+  return { what, how: t("not paid", "tidak dibayar"), amount: null, sign: "" };
 }

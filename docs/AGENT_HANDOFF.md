@@ -678,13 +678,18 @@ the supplier_po applier marks an early-received order `received` on approval.
 rules live (`late_minutes`, `overtime_minutes_at`, `month_for`), driven by
 settings `WORK_START/WORK_END/WORK_DAYS/LATE_GRACE_MINUTES/OVERTIME_MIN_MINUTES/
 PAY_MONTHLY_HOURS`; dates are office-local (`local_today()`), never
-`date.today()`. Clock-out stores `Attendance.overtime_minutes` and files an
-`overtime` ApprovalRequest (required_role manager) via `_file_overtime`; the
-applier in `core/approval.py` sets `overtime_status`/`overtime_approved_minutes`.
+`date.today()`. Overtime is `OvertimeEntry` (`overtime_entries`), recorded,
+revoked and deleted by the director only (`/attendance/overtime…`); payroll
+pays `status == "approved"` entries (`compute_month(..., overtime=)`). Clock-out
+only stores `Attendance.overtime_minutes` as a hint — nothing is filed from it.
+`overtime_status`/`overtime_approved_minutes` and the `overtime` approval
+applier are legacy; `attendance_pay.migrate_clockout_overtime` (boot data fix
+`overtime_director_entered`) moved the old filings over.
 `salaries._apply_attendance` writes `late_*`, `absent_*`, `overtime_*` and
 `attendance_breakdown` onto the Salary; `_recalc` adds overtime to gross and
 late/absent to deductions. `tests/e2e/test_attendance_payroll.py` is the
-three-scenario simulation (late / absent / late clock-out) and prints payslips.
+three-scenario simulation (late / absent / director-recorded overtime incl.
+revoke and delete) and prints payslips.
 The bell's attendance alerts (`notifications.py` §6a) use the same helpers —
 office date, `is_work_day`, `late_minutes`, gate at `work_start()` — so "late"
 on the bell and on the payslip cannot disagree.

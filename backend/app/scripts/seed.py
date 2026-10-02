@@ -635,6 +635,9 @@ COLUMN_MIGRATIONS: list[str] = [
 
     # ── Customers can be deactivated without being deleted ─────────────
     "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
+    # A fresh install creates the column from the model; make sure the
+    # database itself defaults it too, so a plain INSERT still works.
+    "ALTER TABLE customers ALTER COLUMN is_active SET DEFAULT true",
     "ALTER TABLE customers ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ",
     "ALTER TABLE customers ADD COLUMN IF NOT EXISTS deactivated_reason TEXT",
     "CREATE INDEX IF NOT EXISTS ix_customers_is_active ON customers (is_active)",
@@ -823,6 +826,15 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('delivery_orders_stock_out')"))
             await db.commit()
             print(f"Delivery orders taken out of stock: {res}")
+        # Overtime filed from clock-outs → the director's own entries.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'overtime_director_entered'")):
+            from app.services.attendance_pay import migrate_clockout_overtime
+            res = await migrate_clockout_overtime(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('overtime_director_entered')"))
+            await db.commit()
+            print(f"Clock-out overtime moved to director entries: {res}")
 
 
 async def main() -> None:

@@ -65,9 +65,8 @@ async def _serialize(db: AsyncSession, a: Attendance) -> dict:
     return {
         # Against the working day in settings — what payroll reads too.
         "late_minutes": late_minutes(a),
+        # Past the end of the day at clock-out — a hint, not paid overtime.
         "overtime_minutes": int(a.overtime_minutes or 0),
-        "overtime_status": a.overtime_status,
-        "overtime_approved_minutes": int(a.overtime_approved_minutes or 0),
         "id": str(a.id),
         "user_id": str(a.user_id),
         "user_name": u.full_name if u else None,
@@ -144,35 +143,155 @@ async def clock_out(
     delta = (a.clock_out - a.clock_in).total_seconds() / 3600
     a.hours = round(max(0, delta), 2)
     a.notes = _append_note(a.notes, "Out", payload.note if payload else None)
-    await _file_overtime(db, a, me)
+    # How long past the end of the day — a hint the director sees when
+    # recording overtime. Nothing is filed or paid from it: clock times carry
+    # too many human errors (see OvertimeEntry).
+    from app.services.attendance_pay import overtime_minutes_at
+    a.overtime_minutes = overtime_minutes_at(a)
     await db.flush()
     return await _serialize(db, a)
 
 
-async def _file_overtime(db: AsyncSession, a: Attendance, me: User) -> None:
-    """Staying past the end of the day files overtime for approval.
+# ─── Overtime: recorded by the director ───────────────────────────────────────
+# Overtime used to be filed from clock-out times, and clock times carry too
+# many human errors — a forgotten clock-out is hours of "overtime". The
+# director records it by hand instead, and that entry is the approval. A
+# mistaken or test entry is revoked (kept, with the reason, no longer paid)
+# or deleted outright. Payroll pays approved entries
+# (services/attendance_pay.py); a draft salary picks changes up on refresh.
 
-    Only approved overtime is paid, so it goes where approvals go: the inbox
-    of a manager or the director, who can approve or turn it down. Shorter
-    than OVERTIME_MIN_MINUTES is recorded but not filed.
-    """
-    from app.core.approval import request_approval
-    from app.core.config import settings
-    from app.services.attendance_pay import overtime_minutes_at
-    mins = overtime_minutes_at(a)
-    a.overtime_minutes = mins
-    if mins < int(settings.OVERTIME_MIN_MINUTES) or a.overtime_status in ("pending", "approved"):
-        return
-    a.overtime_status = "pending"
-    await request_approval(
-        db, target_type="overtime", target_id=a.id, requested_by=me.id,
-        required_role=Role.MANAGER,
-        reason=(f"Overtime {a.date.isoformat()}: {mins} min after "
-                f"{settings.WORK_END} — paid only if approved"),
-        payload={"date": a.date.isoformat(), "minutes": mins,
-                 "employee": me.full_name,
-                 "clock_out": a.clock_out.isoformat() if a.clock_out else None},
-    )
+_director = require(Role.DIRECTOR)
+_overtime_viewers = (Role.DIRECTOR, Role.HR, Role.MANAGER)
+
+
+class OvertimeIn(BaseModel):
+    user_id: UUID
+    date: date_t
+    minutes: int
+    reason: str | None = None
+
+
+class OvertimeRevokeIn(BaseModel):
+    reason: str
+
+
+async def _ot_out(db: AsyncSession, e) -> dict:
+    u = await db.get(User, e.user_id)
+    by = await db.get(User, e.entered_by) if e.entered_by else None
+    rv = await db.get(User, e.revoked_by) if e.revoked_by else None
+    # What the clock said that day, for comparison — never what is paid.
+    att = await db.scalar(select(Attendance).where(
+        Attendance.user_id == e.user_id, Attendance.date == e.date))
+    return {
+        "id": str(e.id), "user_id": str(e.user_id),
+        "user_name": u.full_name if u else None,
+        "date": e.date, "minutes": int(e.minutes), "reason": e.reason,
+        "status": e.status,
+        "entered_by_name": by.full_name if by else None, "entered_at": e.created_at,
+        "revoked_by_name": rv.full_name if rv else None, "revoked_at": e.revoked_at,
+        "revoke_reason": e.revoke_reason,
+        "clock_out": att.clock_out if att else None,
+        "clock_out_over_minutes": int(att.overtime_minutes or 0) if att else None,
+    }
+
+
+@router.get("/overtime")
+async def list_overtime(
+    period: str | None = Query(None, description="YYYY-MM"),
+    user_id: UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    """Recorded overtime. Director, HR and managers see everyone's; anybody
+    else sees their own."""
+    from app.models.attendance import OvertimeEntry
+    stmt = select(OvertimeEntry).order_by(OvertimeEntry.date.desc(),
+                                          OvertimeEntry.created_at.desc())
+    if Role(me.role) not in _overtime_viewers:
+        stmt = stmt.where(OvertimeEntry.user_id == me.id)
+    elif user_id:
+        stmt = stmt.where(OvertimeEntry.user_id == user_id)
+    if period:
+        from app.services.attendance_pay import month_bounds
+        try:
+            first, last = month_bounds(period)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "period must be YYYY-MM")
+        stmt = stmt.where(OvertimeEntry.date >= first, OvertimeEntry.date <= last)
+    return [await _ot_out(db, e) for e in (await db.scalars(stmt)).all()]
+
+
+@router.post("/overtime", status_code=201)
+async def record_overtime(payload: OvertimeIn,
+                          db: AsyncSession = Depends(get_db),
+                          me: User = Depends(_director)):
+    from app.core.audit import record as audit_record
+    from app.models.attendance import OvertimeEntry
+    from app.services.attendance_pay import local_today
+    if not 1 <= int(payload.minutes) <= 24 * 60:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Overtime is between 1 minute and 24 hours for a day.")
+    if payload.date > local_today():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Overtime is recorded for a day that has happened.")
+    u = await db.get(User, payload.user_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+    e = OvertimeEntry(user_id=u.id, date=payload.date, minutes=int(payload.minutes),
+                      reason=(payload.reason or "").strip() or None,
+                      status="approved", entered_by=me.id)
+    db.add(e)
+    await db.flush()
+    await audit_record(db, actor=me, action="record_overtime", entity="overtime_entry",
+                       entity_id=e.id, after={"user": u.full_name, "date": e.date.isoformat(),
+                                              "minutes": e.minutes})
+    return await _ot_out(db, e)
+
+
+@router.post("/overtime/{entry_id}/revoke")
+async def revoke_overtime(entry_id: UUID, payload: OvertimeRevokeIn,
+                          db: AsyncSession = Depends(get_db),
+                          me: User = Depends(_director)):
+    """Undo an approval given by mistake. The entry stays on record with the
+    reason, and is no longer paid."""
+    from datetime import UTC as _UTC, datetime as _dt
+    from app.core.audit import record as audit_record
+    from app.models.attendance import OvertimeEntry
+    e = await db.get(OvertimeEntry, entry_id)
+    if not e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if e.status == "revoked":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Already revoked.")
+    if not (payload.reason or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Say why it is being revoked — it stays on the record.")
+    e.status = "revoked"
+    e.revoked_by = me.id
+    e.revoked_at = _dt.now(_UTC)
+    e.revoke_reason = payload.reason.strip()
+    await audit_record(db, actor=me, action="revoke_overtime", entity="overtime_entry",
+                       entity_id=e.id, after={"reason": e.revoke_reason})
+    await db.flush()
+    return await _ot_out(db, e)
+
+
+@router.delete("/overtime/{entry_id}", status_code=204)
+async def delete_overtime(entry_id: UUID,
+                          db: AsyncSession = Depends(get_db),
+                          me: User = Depends(_director)):
+    """Remove an entry outright — for test entries. A real mistake is better
+    revoked, which keeps the trail."""
+    from app.core.audit import record as audit_record
+    from app.models.attendance import OvertimeEntry
+    e = await db.get(OvertimeEntry, entry_id)
+    if not e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    await audit_record(db, actor=me, action="delete_overtime", entity="overtime_entry",
+                       entity_id=e.id, before={"user_id": str(e.user_id),
+                                               "date": e.date.isoformat(),
+                                               "minutes": e.minutes, "status": e.status})
+    await db.delete(e)
+    return None
 
 
 @router.get("/me")

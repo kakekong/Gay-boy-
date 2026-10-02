@@ -12,7 +12,7 @@ from app.models.asset import (  # noqa: F401
     FixedAsset,
 )
 from app.models.attachment import Attachment  # noqa: F401
-from app.models.attendance import Attendance  # noqa: F401
+from app.models.attendance import Attendance, OvertimeEntry  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.budget import Budget, BudgetTransfer  # noqa: F401
 from app.models.chat import ChatChannel, ChatChannelMember, ChatMessage  # noqa: F401

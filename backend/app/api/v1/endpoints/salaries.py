@@ -286,18 +286,15 @@ async def worked_examples(_: User = Depends(_director)):
         base = _dt(2000, 1, 1, t.hour, t.minute) + _td(minutes=minutes)
         return base.hour, base.minute
 
-    def day(d, *, in_late=0, out_over=0, status="present", ot_status=None, clocked=True):
+    def day(d, *, in_late=0, out_over=0, status="present", clocked=True):
         a = Attendance(date=d, status=status)
         if clocked:
             a.clock_in = at(d, *shift(ws, in_late))
             a.clock_out = at(d, *shift(we, out_over))
         a.overtime_minutes = ap.overtime_minutes_at(a) if clocked else 0
-        a.overtime_status = ot_status
-        a.overtime_approved_minutes = a.overtime_minutes if ot_status == "approved" else 0
         return a
 
     grace = int(settings.LATE_GRACE_MINUTES)
-    ot_min = int(settings.OVERTIME_MIN_MINUTES)
     pick = lambda i: wdays[min(i, len(wdays) - 1)]  # noqa: E731
 
     late_in = {pick(2): grace - 5, pick(5): grace + 5, pick(9): 45}
@@ -314,13 +311,24 @@ async def worked_examples(_: User = Depends(_director)):
         else:
             absent_rows.append(day(d))
 
-    ot_plan = {pick(1): (105, "approved"), pick(4): (120, "rejected"),
-               pick(8): (70, "pending"), pick(12): (max(ot_min - 10, 5), None)}
-    ot_rows = [day(d, out_over=ot_plan[d][0], ot_status=ot_plan[d][1])
-               if d in ot_plan else day(d) for d in wdays]
+    # Overtime is what the director recorded, not what the clock says: the
+    # 19:30 clock-out with no entry (a forgotten clock-out) pays nothing.
+    from app.models.attendance import OvertimeEntry
+    outs = {pick(1): 105, pick(4): 120, pick(8): 70, pick(12): 150}
+    ot_rows = [day(d, out_over=outs.get(d, 0)) for d in wdays]
+    ot_entries = [
+        OvertimeEntry(date=pick(1), minutes=105, status="approved",
+                      reason="Stock-take after hours"),
+        OvertimeEntry(date=pick(4), minutes=120, status="revoked",
+                      reason="Entered for the wrong person",
+                      revoke_reason="Entered for the wrong person — revoked"),
+        OvertimeEntry(date=pick(8), minutes=70, status="approved",
+                      reason="Packing a rush order"),
+    ]
 
-    def slip(key, title, story, story_id, rows):
-        m = ap.compute_month(rows, period, EXAMPLE_BASE, today=first_this)
+    def slip(key, title, story, story_id, rows, entries=()):
+        m = ap.compute_month(rows, period, EXAMPLE_BASE, today=first_this,
+                             overtime=entries)
         allow = sum(EXAMPLE_ALLOWANCES.values())
         gross = EXAMPLE_BASE + allow + m["overtime_pay"]
         net = gross - m["late_deduction"] - m["absent_deduction"]
@@ -342,13 +350,15 @@ async def worked_examples(_: User = Depends(_director)):
              "day, and one sick day HR marked (excused).",
              "Tepat waktu setiap hari kecuali empat: dua hari tanpa absen masuk, "
              "satu setengah hari, dan satu hari sakit yang dicatat HR (dimaafkan).", absent_rows),
-        slip("overtime", "Late clock-out",
-             f"In on time, out late four times: 105 min (approved), 120 min "
-             f"(turned down), 70 min (still waiting) and {ot_plan[pick(12)][0]} "
-             f"min (under {ot_min} min, not filed).",
-             f"Masuk tepat waktu, pulang lewat jam empat kali: 105 mnt (disetujui), "
-             f"120 mnt (ditolak), 70 mnt (masih menunggu), dan {ot_plan[pick(12)][0]} "
-             f"mnt (kurang dari {ot_min} mnt, tidak diajukan).", ot_rows),
+        slip("overtime", "Overtime",
+             "The director recorded three overtime entries: 105 min and 70 min "
+             "(paid), and 120 min entered for the wrong person (revoked — not "
+             "paid). A day with a 19:30 clock-out but no entry pays nothing: "
+             "overtime is what the director records, not what the clock says.",
+             "Direktur mencatat tiga lembur: 105 mnt dan 70 mnt (dibayar), dan "
+             "120 mnt yang salah orang (dibatalkan — tidak dibayar). Hari dengan "
+             "absen pulang 19:30 tanpa catatan tidak dibayar: lembur adalah yang "
+             "dicatat direktur, bukan jam absen.", ot_rows, ot_entries),
     ]}
 
 

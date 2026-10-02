@@ -13,11 +13,12 @@ and then added up for the month:
   work-from-home and holiday days marked by HR are not absences; a half day
   counts as half. Days before the employee joined, and days not yet over,
   are not counted.
-* **Overtime** — time past the end of the day at clock-out. At least
-  `OVERTIME_MIN_MINUTES` of it files a request for a manager or the director;
-  only approved overtime is paid, at the legal rate: the first hour at 1.5×
-  the hourly wage and each hour after at 2×, per day. Approved minutes are
-  rounded to the nearest hour (half an hour rounds up).
+* **Overtime** — recorded by the director, by hand (`OvertimeEntry`), not
+  read off clock-outs: clock times carry too many human errors, and a
+  forgotten clock-out is hours of "overtime". Paid at the legal rate: the
+  first hour at 1.5× the hourly wage and each hour after at 2×, per day, the
+  day's recorded minutes rounded to the nearest hour (half an hour rounds
+  up). A revoked entry is listed but not paid.
 
 Only the base salary is the wage these are worked from — allowances are not.
 """
@@ -118,20 +119,30 @@ async def month_for(db: AsyncSession, user_id, period: str, base_salary: float,
                     *, join_date: date | None = None,
                     today: date | None = None) -> dict:
     """The month's attendance worked into pay: totals and the days behind them."""
+    from app.models.attendance import OvertimeEntry
     first, last = month_bounds(period)
     rows = (await db.scalars(select(Attendance).where(
         Attendance.user_id == user_id,
         Attendance.date >= first, Attendance.date <= last))).all()
-    return compute_month(rows, period, base_salary, join_date=join_date, today=today)
+    entries = (await db.scalars(select(OvertimeEntry).where(
+        OvertimeEntry.user_id == user_id,
+        OvertimeEntry.date >= first, OvertimeEntry.date <= last))).all()
+    return compute_month(rows, period, base_salary, join_date=join_date, today=today,
+                         overtime=entries)
 
 
 def compute_month(rows, period: str, base_salary: float, *,
-                  join_date: date | None = None, today: date | None = None) -> dict:
-    """`month_for` without the database — given the month's attendance rows.
-    The worked examples on the payroll page run through this same code."""
+                  join_date: date | None = None, today: date | None = None,
+                  overtime=()) -> dict:
+    """`month_for` without the database — given the month's attendance rows
+    and the director's overtime entries. The worked examples on the payroll
+    page run through this same code."""
     first, last = month_bounds(period)
     today = today or local_today()
     by_day = {a.date: a for a in rows}
+    ot_by_day: dict[date, list] = {}
+    for e in overtime:
+        ot_by_day.setdefault(e.date, []).append(e)
 
     wdays = working_days_in(period)
     base = float(base_salary or 0)
@@ -174,19 +185,26 @@ def compute_month(rows, period: str, base_salary: float, *,
                     line = {"kind": "late", "minutes": mins,
                             "clock_in": a.clock_in.astimezone(tz()).strftime("%H:%M"),
                             "amount": round(mins * per_minute, 2)}
-        if a is not None and (a.overtime_minutes or 0) > 0:
-            ot = {"kind": "overtime", "minutes": int(a.overtime_minutes or 0),
-                  "status": a.overtime_status or "none",
-                  "clock_out": a.clock_out.astimezone(tz()).strftime("%H:%M") if a.clock_out else None}
-            if a.overtime_status == "approved":
-                h = overtime_hours(int(a.overtime_approved_minutes or a.overtime_minutes or 0))
-                pay = overtime_pay_for(h, hourly)
-                ot_hours_total += h
-                ot_pay_total += pay
-                ot.update(hours=h, amount=pay)
-            elif a.overtime_status == "pending":
-                ot_pending += 1
-            days.append({"date": d.isoformat(), **ot})
+        # Overtime the director recorded for this day. The legal rate runs
+        # per day (first hour 1.5×, then 2×), so a day's live entries are
+        # added together before rounding; a revoked one is listed, unpaid.
+        day_entries = ot_by_day.get(d, [])
+        live = [e for e in day_entries if e.status == "approved"]
+        if live:
+            mins = sum(int(e.minutes or 0) for e in live)
+            h = overtime_hours(mins)
+            pay = overtime_pay_for(h, hourly)
+            ot_hours_total += h
+            ot_pay_total += pay
+            days.append({"date": d.isoformat(), "kind": "overtime", "status": "approved",
+                         "minutes": mins, "hours": h, "amount": pay,
+                         "reason": "; ".join(e.reason for e in live if e.reason) or None,
+                         "entry_ids": [str(e.id) for e in live if getattr(e, "id", None)]})
+        for e in day_entries:
+            if e.status == "revoked":
+                days.append({"date": d.isoformat(), "kind": "overtime", "status": "revoked",
+                             "minutes": int(e.minutes or 0), "amount": None,
+                             "reason": e.revoke_reason or e.reason})
         if line:
             days.append({"date": d.isoformat(), **line})
         d += timedelta(days=1)
@@ -212,3 +230,50 @@ def compute_month(rows, period: str, base_salary: float, *,
         "overtime_pending": ot_pending,
         "days": days,
     }
+
+
+async def migrate_clockout_overtime(db: AsyncSession) -> dict:
+    """Once: overtime filed from clock-outs becomes the director's entries.
+
+    Overtime used to be filed automatically when someone clocked out late and
+    approved in the inbox. It is now recorded by the director by hand. An
+    approval already given is kept — it becomes an entry, so it is still paid;
+    a request still waiting is closed with a note saying why, because it was
+    raised from a clock time and the director now enters overtime directly.
+    """
+    from datetime import UTC as _UTC
+    from app.models.approval import ApprovalRequest
+    from app.models.attendance import OvertimeEntry
+
+    approved = (await db.scalars(select(Attendance).where(
+        Attendance.overtime_status == "approved"))).all()
+    made = 0
+    for a in approved:
+        exists = await db.scalar(select(OvertimeEntry.id).where(
+            OvertimeEntry.user_id == a.user_id, OvertimeEntry.date == a.date))
+        if exists:
+            continue
+        req = await db.scalar(select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "overtime", ApprovalRequest.target_id == a.id,
+            ApprovalRequest.status == "approved"))
+        db.add(OvertimeEntry(
+            user_id=a.user_id, date=a.date,
+            minutes=int(a.overtime_approved_minutes or a.overtime_minutes or 0) or 1,
+            reason="Approved from a clock-out before overtime was entered by the director",
+            status="approved", entered_by=req.decided_by if req else None))
+        made += 1
+    closed = 0
+    for req in (await db.scalars(select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "overtime",
+            ApprovalRequest.status == "pending"))).all():
+        req.status = "rejected"
+        req.decided_at = datetime.now(_UTC)
+        req.decision_notes = ("Closed: overtime is now recorded by the director, not "
+                              "filed from clock-out times. Ask the director to enter it "
+                              "if it was worked.")
+        a = await db.get(Attendance, req.target_id)
+        if a is not None and a.overtime_status == "pending":
+            a.overtime_status = None
+        closed += 1
+    await db.flush()
+    return {"entries_from_approved": made, "requests_closed": closed}

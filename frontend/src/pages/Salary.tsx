@@ -300,7 +300,7 @@ export default function SalaryPage() {
 }
 
 /**
- * The three ways attendance moves pay — late, absent, a late clock-out —
+ * The three ways attendance moves pay — late, absent, and overtime —
  * each as a full month worked through on the payroll rules in force. The
  * server builds them on last month's calendar with the same calculation real
  * salaries use, so they read true whenever the schedule or grace changes.
@@ -336,7 +336,7 @@ function WorkedExamples() {
               className={clsx("px-3 py-1.5", tab === k ? "bg-brand-600 text-white" : "hover:bg-ink-50")}
               onClick={() => setTab(k)}>
               {k === "late" ? t("Late", "Terlambat") : k === "absent" ? t("Absent", "Absen")
-                : t("Late clock-out", "Pulang lewat jam")}
+                : t("Overtime", "Lembur")}
             </button>
           ))}
         </div>
@@ -348,7 +348,7 @@ function WorkedExamples() {
           <div className="text-sm muted">{t("Couldn't load the examples.", "Contoh tidak dapat dimuat.")}</div>
         ) : (
           <>
-            <div className="text-sm"><b>{t(cur.title, cur.key === "late" ? "Terlambat" : cur.key === "absent" ? "Absen" : "Pulang lewat jam")}</b> — {t(cur.story, cur.story_id ?? cur.story)}</div>
+            <div className="text-sm"><b>{t(cur.title, cur.key === "late" ? "Terlambat" : cur.key === "absent" ? "Absen" : "Lembur")}</b> — {t(cur.story, cur.story_id ?? cur.story)}</div>
             <PayslipBreakdown slip={cur} b={cur.breakdown} />
           </>
         )}

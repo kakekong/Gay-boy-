@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, validates
@@ -25,7 +25,8 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     # Deactivated, not deleted: an account the company no longer works with
     # stays on file with its whole history — it just leaves the lists and
     # pickers and can't start new price requests or quotations. Reversible.
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"),
+                                            nullable=False, index=True)
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deactivated_reason: Mapped[str | None] = mapped_column(Text)
     pic_name: Mapped[str | None] = mapped_column(String(255))

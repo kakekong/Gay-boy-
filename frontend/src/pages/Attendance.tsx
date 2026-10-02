@@ -6,6 +6,7 @@ import {
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { EmployeeAttendanceModal } from "@/components/EmployeeAttendanceModal";
+import { OvertimePanel } from "@/components/OvertimePanel";
 import { useAuthStore } from "@/store/auth";
 import {
   DailyLogSection, DailyLogHistory, TeamDailyLogs,
@@ -24,7 +25,6 @@ interface AttendanceRow {
   notes: string | null;
   late_minutes?: number;
   overtime_minutes?: number;
-  overtime_status?: string | null;
 }
 
 const STATUS_CHIP: Record<string, string> = {
@@ -43,27 +43,19 @@ function fmtTime(iso: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-const OT_LABEL: Record<string, [string, string]> = {
-  pending: ["waiting for approval", "menunggu persetujuan"],
-  approved: ["approved — paid", "disetujui — dibayar"],
-  rejected: ["not approved", "tidak disetujui"],
-};
-
 /** Under a clock-in: how late, past the grace (it comes off pay). Under a
- *  clock-out: time past the end of the day and where its approval stands —
- *  only approved overtime is paid. */
+ *  clock-out: how long past the end of the day — a hint only. Overtime is
+ *  paid from what the director records (see OvertimePanel), not from this. */
 function LateFlag({ r }: { r: AttendanceRow }) {
   if (!r.late_minutes) return null;
   return <span className="block text-[11px] text-red-700">{tt(`late ${r.late_minutes} min`, `terlambat ${r.late_minutes} mnt`)}</span>;
 }
 function OvertimeFlag({ r }: { r: AttendanceRow }) {
-  if (!r.overtime_minutes || !r.overtime_status) return null;
-  const [en, id] = OT_LABEL[r.overtime_status] ?? [r.overtime_status, r.overtime_status];
+  if (!r.overtime_minutes) return null;
   return (
-    <span className={clsx("block text-[11px]",
-      r.overtime_status === "approved" ? "text-emerald-700"
-      : r.overtime_status === "rejected" ? "text-ink-500" : "text-amber-700")}>
-      {tt(`overtime ${r.overtime_minutes} min · ${en}`, `lembur ${r.overtime_minutes} mnt · ${id}`)}
+    <span className="block text-[11px] muted" title={tt("Not overtime until the director records it",
+      "Bukan lembur sampai direktur mencatatnya")}>
+      {tt(`${r.overtime_minutes} min past the end`, `lewat ${r.overtime_minutes} mnt`)}
     </span>
   );
 }
@@ -258,6 +250,9 @@ export default function AttendancePage() {
           </button>
         </div>
       </div>
+
+      {/* Overtime — recorded by the director, paid from that record */}
+      <OvertimePanel />
 
       {/* Daily log */}
       <DailyLogSection />

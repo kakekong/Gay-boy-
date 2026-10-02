@@ -199,8 +199,10 @@ export function NewSalaryForm({ initial, onClose }: Props) {
                           : d.kind === "half_day" ? t("half day", "setengah hari")
                           : d.kind === "grace" ? t(`in ${d.clock_in}, ${d.minutes} min — within grace`, `masuk ${d.clock_in}, ${d.minutes} mnt — dalam toleransi`)
                           : d.kind === "excused" ? t(`${d.status} — excused`, `${d.status} — dimaafkan`)
-                          : t(`overtime — out ${d.clock_out}, ${d.minutes} min, ${d.status}`,
-                              `lembur — pulang ${d.clock_out}, ${d.minutes} mnt, ${d.status}`)}
+                          : d.status === "revoked"
+                            ? t(`overtime ${d.minutes} min — revoked`, `lembur ${d.minutes} mnt — dibatalkan`)
+                            : t(`overtime ${d.minutes} min — recorded by the director`,
+                                `lembur ${d.minutes} mnt — dicatat direktur`)}
                       </span>
                       <span className="ml-auto">{d.amount != null ? idr(d.amount) : ""}</span>
                     </li>
