@@ -439,7 +439,8 @@ class DeactivateIn(BaseModel):
     reason: str | None = None
 
 
-_ACTIVATORS = (Role.DIRECTOR, Role.MANAGER)
+# The director only — taking a customer off the books is their call.
+_ACTIVATORS = (Role.DIRECTOR,)
 
 
 @router.post("/{customer_id}/deactivate", response_model=CustomerOut)
@@ -456,7 +457,7 @@ async def deactivate_customer(customer_id: UUID, payload: DeactivateIn | None = 
     """
     if Role(user.role) not in _ACTIVATORS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the director or a manager can deactivate a customer")
+                            "Only the director can deactivate a customer")
     obj = await db.get(Customer, customer_id)
     if not obj or obj.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -477,7 +478,7 @@ async def reactivate_customer(customer_id: UUID,
                               user: User = Depends(get_current_user)):
     if Role(user.role) not in _ACTIVATORS:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Only the director or a manager can reactivate a customer")
+                            "Only the director can reactivate a customer")
     obj = await db.get(Customer, customer_id)
     if not obj or obj.is_deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -496,8 +497,8 @@ async def assert_customer_active(db: AsyncSession, customer_id) -> None:
     if c is not None and not c.is_active:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"{c.company_name} is deactivated. A director or manager can "
-            "reactivate them from their customer page to start new work.")
+            f"{c.company_name} is deactivated. The director can reactivate "
+            "them from their customer page to start new work.")
 
 
 @router.patch("/{customer_id}", response_model=CustomerOut)

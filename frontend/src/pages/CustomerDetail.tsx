@@ -209,9 +209,9 @@ export default function CustomerDetailPage() {
   });
   const isDirector = me?.role === "director";
   // Deactivate, like a user: kept on file with everything they have, out of
-  // the lists and pickers, no new price requests or quotations. Director
-  // and managers; the server holds the rule.
-  const canDeactivate = me?.role === "director" || me?.role === "manager";
+  // the lists and pickers, no new price requests or quotations. The
+  // director only; the server holds the rule.
+  const canDeactivate = me?.role === "director";
   const setActive = useMutation({
     mutationFn: (v: { active: boolean; reason?: string }) => v.active
       ? api.post(`/customers/${id}/reactivate`).then((r) => r.data)

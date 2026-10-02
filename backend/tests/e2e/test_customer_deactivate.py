@@ -2,7 +2,7 @@
 
 Deactivated: out of the customer list and every picker built on it, no new
 price requests or quotations, everything already on file intact and still
-openable, and one click (director or manager) to bring them back.
+openable, and one click (the director's) to bring them back.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -51,6 +51,8 @@ async def main():
     print("\n── deactivating ──")
     r = await c.post(f"/customers/{cid}/deactivate", headers=s1, json={})
     check("sales cannot deactivate", r.status_code == 403, str(r.status_code))
+    r = await c.post(f"/customers/{cid}/deactivate", headers=mgr, json={})
+    check("nor can a manager — the director only", r.status_code == 403, str(r.status_code))
     r = await c.post(f"/customers/{cid}/deactivate", headers=d, json={"reason": "stopped ordering"})
     body = J(r)
     check("the director deactivates, with a reason", r.status_code == 200
@@ -80,7 +82,9 @@ async def main():
 
     print("\n── reactivating ──")
     r = await c.post(f"/customers/{cid}/reactivate", headers=mgr)
-    check("a manager reactivates", r.status_code == 200 and J(r).get("is_active") is True,
+    check("a manager cannot reactivate", r.status_code == 403, str(r.status_code))
+    r = await c.post(f"/customers/{cid}/reactivate", headers=d)
+    check("the director reactivates", r.status_code == 200 and J(r).get("is_active") is True,
           f"{r.status_code} {str(J(r))[:160]}")
     check("it is back in the list", cid in await listed())
     r = await c.post("/price-requests", headers=s1, json={
