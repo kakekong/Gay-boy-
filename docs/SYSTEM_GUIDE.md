@@ -330,6 +330,17 @@ Who: which vendor serves which job is the **director's** call, so purchasing's a
 
 For import orders, purchasing maintains the required import documents (invoice, packing list, B/L, PIB, …) per delivery mode on the project's logistics card — expected complete before goods land. Document scans go through a director check.
 
+**One document set per supplier.** A job bought from two vendors ships twice, so every supplier with a live PO on the job (cancelled or rejected orders excluded) gets its own checklist on the logistics card, headed by the supplier's name and PO numbers:
+
+- **Its own delivery mode.** One vendor local and the other imported is an ordinary job. With several suppliers the mode is chosen on each supplier's set; with one, it is the single selector at the top as before.
+- **Its own documents.** A local or agent shipment needs an invoice and a packing list. A direct import also needs Form E and a bill of lading. Two suppliers therefore mean two invoices and two packing lists, and, when imported, two sets of customs papers. Filing one supplier's invoice never replaces the other's.
+- **Signed off one by one.** The director approves each document. Purchasing cannot replace an approved one; the director can. The approvals inbox names whose documents are waiting, e.g. "Invoice (GUI ZHOU …), Form E (GUI ZHOU …)".
+- **Delivery waits for all of them.** *Confirm delivery* stays blocked until every supplier's set is approved, and the refusal lists what is still open and for whom.
+
+Documents filed before a job had any supplier PO (or before this existed) belong to the **first** supplier ordered from.
+
+The project's **Supplier purchase orders** card shows each order in its own currency, with the rupiah conversion at the order's rate under a foreign one ("CNY 127,273.30 ≈ Rp 381.819.900"). The supplier portal shows the vendor its PO total in the order's currency.
+
 ### 8.5 Shipping timeline (three legs)
 
 Origin → our warehouse → customer's site; each leg has estimated + actual dates, shown identically on the customer portal.

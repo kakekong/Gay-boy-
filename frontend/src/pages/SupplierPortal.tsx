@@ -8,8 +8,8 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { T, locale } from "@/store/lang";
+import { money } from "@/lib/money";
 
-const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
 const UPLOAD_KINDS = [
   { value: "drawing",  label: "Drawing",          Icon: Hammer },
@@ -21,7 +21,7 @@ const UPLOAD_KINDS = [
 interface PO {
   id: string; number: string; status: string;
   po_date: string | null; quoted_lead_days: number | null;
-  total: number; items: any[];
+  total: number; currency?: string; items: any[];
   project_id: string | null;
   project_code: string | null;
   est_arrive_our_warehouse: string | null;
@@ -205,7 +205,7 @@ function POCard({ po }: { po: PO }) {
         <div className="flex items-center gap-3">
           <div className="text-right">
             <div className="text-[10px] uppercase muted">{T("Total")}</div>
-            <div className="font-semibold tabular-nums">{idr(po.total)}</div>
+            <div className="font-semibold tabular-nums">{money(po.total ?? 0, po.currency || "IDR")}</div>
           </div>
           <span className="chip bg-ink-100 text-ink-700 uppercase">{po.status}</span>
         </div>

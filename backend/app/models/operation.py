@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -52,6 +52,11 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     delivery_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Import-document checklist: {key: {collected: bool, attachment_id, note}}
     import_docs:          Mapped[dict]            = mapped_column(JSONB, default=dict, nullable=False)
+    # A supplier's own delivery mode when it differs from `delivery_mode`:
+    # {supplier_id: mode}. One vendor local and one imported is an ordinary
+    # job, and each needs its own document set.
+    supplier_delivery_modes: Mapped[dict] = mapped_column(
+        JSONB, default=dict, nullable=False, server_default=text("'{}'::jsonb"))
     # ── Drawing skipped ────────────────────────────────────────────────────
     # Not every job has a drawing. A catalogue part ordered off the shelf has
     # nothing to draw and nothing for the customer to approve, and the pipeline

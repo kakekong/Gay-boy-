@@ -78,20 +78,40 @@ async def pending_documents(
             Project.status.not_in(DONE_PROJECT),
         ).limit(500)
     )).all()
+    # A job bought from several vendors files one set per vendor, stored as
+    # "<doc>@<supplier_id>"; the row names the document and whose it is.
+    from app.api.v1.endpoints.operation import DOC_LABELS
+    from app.models.purchasing import Supplier
+    pending_by_project = []
+    sup_ids: set = set()
     for p in lrows:
-        pending_keys = [
-            k for k, v in (p.import_docs or {}).items()
-            if isinstance(v, dict) and v.get("status") == "pending"
-        ]
-        if pending_keys:
-            items.append({
-                "kind": "import_doc",
-                "title": f"{len(pending_keys)} shipping document(s) — {p.code}",
-                "body": "Uploaded by purchasing, waiting for approval "
-                        f"({', '.join(sorted(pending_keys))}).",
-                "link": f"/projects/{p.id}",
-                "at": p.updated_at or p.created_at,
-            })
+        keys = [k for k, v in (p.import_docs or {}).items()
+                if isinstance(v, dict) and v.get("status") == "pending"]
+        if keys:
+            pending_by_project.append((p, keys))
+            for k in keys:
+                if "@" in k:
+                    try:
+                        sup_ids.add(UUID(k.split("@", 1)[1]))
+                    except ValueError:
+                        pass
+    sup_names = {str(s.id): s.name for s in (await db.scalars(
+        select(Supplier).where(Supplier.id.in_(sup_ids))))} if sup_ids else {}
+
+    def _doc_name(k: str) -> str:
+        base, _, sid = k.partition("@")
+        label = DOC_LABELS.get(base, base)
+        return f"{label} ({sup_names[sid]})" if sid in sup_names else label
+
+    for p, pending_keys in pending_by_project:
+        items.append({
+            "kind": "import_doc",
+            "title": f"{len(pending_keys)} shipping document(s) — {p.code}",
+            "body": "Uploaded by purchasing, waiting for approval "
+                    f"({', '.join(sorted(_doc_name(k) for k in pending_keys))}).",
+            "link": f"/projects/{p.id}",
+            "at": p.updated_at or p.created_at,
+        })
 
     # 3. Delivery proofs uploaded but not yet verified — finance's to verify.
     dorows = [] if not is_finance else (await db.execute(

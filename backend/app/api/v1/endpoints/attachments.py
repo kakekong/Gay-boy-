@@ -673,7 +673,8 @@ async def _attachment_locked(db: AsyncSession, a: Attachment) -> str | None:
                 continue
             if (entry or {}).get("status") == "approved":
                 from app.api.v1.endpoints.operation import DOC_LABELS
-                label = DOC_LABELS.get(key, key)
+                base = key.split("@", 1)[0]   # "<doc>@<supplier>" per vendor
+                label = DOC_LABELS.get(base, base)
                 return (f"The {label} on this project is approved — the "
                         "delivery was confirmed against it. Ask the director "
                         "to remove it.")

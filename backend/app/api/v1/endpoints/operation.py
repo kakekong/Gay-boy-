@@ -462,7 +462,7 @@ async def project_full(project_id: UUID,
         # Null for anyone outside procurement, which is how the page knows to
         # drop the card rather than render a read-only customs pack at a role
         # that never chases one.
-        "logistics": _logistics_payload(p) if _role in _LOGISTICS_ROLES else None,
+        "logistics": (await _logistics(db, p)) if _role in _LOGISTICS_ROLES else None,
         "invoices": [] if not show_customer_docs else [
             {
                 "id": str(inv.id), "number": inv.number, "status": inv.status,
@@ -566,6 +566,12 @@ async def project_full(project_id: UUID,
                 "po_date": p.po_date,
                 "quoted_lead_days": p.quoted_lead_days,
                 "total": float(p.total or 0) if show_money else None,
+                # The total is in the vendor's currency — a yuan order printed
+                # as "Rp 127.273" understates it by the whole exchange rate.
+                # The rate travels with it so the page can show both.
+                "currency": (p.currency or "IDR").upper(),
+                "fx_rate": (float(p.fx_rate) if p.fx_rate is not None else None)
+                           if show_money else None,
                 "items": p.items,
                 "created_at": p.created_at,
             } for p in supplier_pos
@@ -860,32 +866,129 @@ def _may_see_drawing(role: Role, kind: str) -> bool:
     return role in _DRAWING_VIEW_ROLES.get(kind or "customer", set())
 
 
-def _logistics_payload(p: Project) -> dict:
-    mode = p.delivery_mode or "local"
-    required = REQUIRED_DOCS.get(mode, REQUIRED_DOCS["local"])
+# ── One document set per supplier ────────────────────────────────────────────
+#
+# A job bought from two vendors ships twice: each vendor sends its own
+# commercial invoice and packing list, and an imported shipment carries its own
+# Form E and bill of lading. One checklist per project held a single invoice
+# slot, so the second vendor's invoice could only be filed by replacing the
+# first one's.
+#
+# So the checklist is per supplier. The vendors are the ones with a live PO on
+# the job (single-job or shared; cancelled and rejected orders don't ship).
+# Each has its own delivery mode — one vendor local, the other imported, is an
+# ordinary job — and its own set of documents, stored in `Project.import_docs`
+# under `"<doc>@<supplier_id>"`.
+#
+# Documents filed before this existed sit under the bare `"<doc>"` key. They
+# belong to the *lead* supplier (the first one ordered from), which on every
+# job that had them was the only one; a job with no supplier PO yet keeps
+# filing under the bare key, and those carry over the same way.
+
+_DEAD_PO = ("cancelled", "rejected")
+
+
+def _doc_base(key: str) -> str:
+    """'invoice@<uuid>' → 'invoice'."""
+    return (key or "").split("@", 1)[0]
+
+
+def _doc_supplier(key: str) -> str | None:
+    """'invoice@<uuid>' → '<uuid>'; a bare key has none."""
+    return key.split("@", 1)[1] if "@" in (key or "") else None
+
+
+async def _logistics_groups(db: AsyncSession, p: Project) -> list[dict]:
+    """The vendors shipping into this job, first-ordered first."""
+    from app.models.purchasing import Supplier
+    from app.services.receiving import pos_for_project
+    pos = [x for x in await pos_for_project(db, p.id)
+           if x.supplier_id and (x.status or "") not in _DEAD_PO]
+    pos.sort(key=lambda x: x.created_at or datetime.min.replace(tzinfo=UTC))
+    order: list = []
+    numbers: dict = {}
+    for x in pos:
+        if x.supplier_id not in order:
+            order.append(x.supplier_id)
+        numbers.setdefault(x.supplier_id, []).append(x.number)
+    names = {s.id: s.name for s in (await db.scalars(
+        select(Supplier).where(Supplier.id.in_(order))))} if order else {}
+    return [{"supplier_id": str(sid), "supplier_name": names.get(sid),
+             "po_numbers": numbers.get(sid, [])} for sid in order]
+
+
+def _doc_slot(docs: dict, key: str, sid: str | None, lead: str | None) -> str:
+    """Where this supplier's copy of `key` is stored (see the note above)."""
+    if sid is None:
+        return key
+    composite = f"{key}@{sid}"
+    if composite in docs:
+        return composite
+    if sid == lead and key in docs:
+        return key
+    return composite
+
+
+def _resolve_supplier(groups: list[dict], supplier_id) -> str | None:
+    """The group a request names. None means the lead — what a caller that
+    predates per-supplier documents is talking about."""
+    lead = groups[0]["supplier_id"] if groups else None
+    if supplier_id in (None, ""):
+        return lead
+    sid = str(supplier_id)
+    if sid not in {g["supplier_id"] for g in groups}:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That supplier has no live purchase order on this project.")
+    return sid
+
+
+def _logistics_payload(p: Project, groups: list[dict] | None = None) -> dict:
     docs = p.import_docs or {}
-    rows = []
-    for key in required:
-        d = docs.get(key) or {}
-        rows.append({
-            "key": key,
-            "label": DOC_LABELS.get(key, key),
-            "collected": bool(d.get("collected")),
-            "attachment_id": d.get("attachment_id"),
-            "filename": d.get("filename"),
-            "external_url": d.get("external_url"),
-            "note": d.get("note"),
-            "status": d.get("status"),          # None | pending | approved | rejected
-            "decided_at": d.get("decided_at"),
+    overrides = p.supplier_delivery_modes or {}
+    lead = groups[0]["supplier_id"] if groups else None
+    sets = groups or [{"supplier_id": None, "supplier_name": None, "po_numbers": []}]
+    out_groups, rows = [], []
+    for g in sets:
+        sid = g["supplier_id"]
+        mode = (overrides.get(sid) if sid else None) or p.delivery_mode or "local"
+        required = REQUIRED_DOCS.get(mode, REQUIRED_DOCS["local"])
+        g_rows = []
+        for key in required:
+            d = docs.get(_doc_slot(docs, key, sid, lead)) or {}
+            g_rows.append({
+                "key": key,
+                "label": DOC_LABELS.get(key, key),
+                "supplier_id": sid,
+                "supplier_name": g["supplier_name"],
+                "collected": bool(d.get("collected")),
+                "attachment_id": d.get("attachment_id"),
+                "filename": d.get("filename"),
+                "external_url": d.get("external_url"),
+                "note": d.get("note"),
+                "status": d.get("status"),      # None | pending | approved | rejected
+                "decided_at": d.get("decided_at"),
+            })
+        out_groups.append({
+            **g, "delivery_mode": mode,
+            "mode_overridden": bool(sid and overrides.get(sid)),
+            "required_docs": g_rows,
+            "docs_complete": all(r["collected"] for r in g_rows) if g_rows else True,
+            "docs_approved": all(r["status"] == "approved" for r in g_rows) if g_rows else True,
         })
+        rows.extend(g_rows)
     all_collected = all(r["collected"] for r in rows) if rows else True
     all_approved = all(r["status"] == "approved" for r in rows) if rows else True
     days_to = (p.est_delivery_date - date.today()).days if p.est_delivery_date else None
     return {
-        "delivery_mode": mode,
+        "delivery_mode": p.delivery_mode or "local",
         "est_delivery_date": p.est_delivery_date,
         "delivery_confirmed_at": p.delivery_confirmed_at,
+        # Every supplier's documents, flat — what "all approved?" is asked of.
         "required_docs": rows,
+        # The same rows, one set per supplier, for the card to lay out.
+        "suppliers": out_groups,
+        "per_supplier": len(out_groups) > 1,
         "docs_complete": all_collected,
         "docs_approved": all_approved,
         "days_to_delivery": days_to,
@@ -894,6 +997,10 @@ def _logistics_payload(p: Project) -> dict:
             days_to is not None and days_to <= DOCS_DUE_WINDOW_DAYS and not all_collected
         ),
     }
+
+
+async def _logistics(db: AsyncSession, p: Project) -> dict:
+    return _logistics_payload(p, await _logistics_groups(db, p))
 
 
 async def _has_approved_drawing(db: AsyncSession, project_id: UUID) -> bool:
@@ -1403,6 +1510,9 @@ async def delete_drawing(
 class LogisticsPatch(BaseModel):
     delivery_mode: str | None = None
     est_delivery_date: date | None = None
+    # Set the mode for one supplier's shipment only. Without it the mode is
+    # the project's, which every supplier without its own follows.
+    supplier_id: UUID | None = None
 
 
 @router.patch("/projects/{project_id}/logistics")
@@ -1426,11 +1536,17 @@ async def update_logistics(project_id: UUID, payload: LogisticsPatch,
         if payload.delivery_mode not in REQUIRED_DOCS:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 f"delivery_mode must be one of {list(REQUIRED_DOCS)}")
-        p.delivery_mode = payload.delivery_mode
+        if payload.supplier_id is not None:
+            groups = await _logistics_groups(db, p)
+            sid = _resolve_supplier(groups, payload.supplier_id)
+            p.supplier_delivery_modes = {**(p.supplier_delivery_modes or {}),
+                                         sid: payload.delivery_mode}
+        else:
+            p.delivery_mode = payload.delivery_mode
     if payload.est_delivery_date is not None:
         p.est_delivery_date = payload.est_delivery_date
     await db.flush()
-    return _logistics_payload(p)
+    return await _logistics(db, p)
 
 
 class ImportDocPatch(BaseModel):
@@ -1438,6 +1554,8 @@ class ImportDocPatch(BaseModel):
     collected: bool = True
     attachment_id: str | None = None
     note: str | None = None
+    # Whose shipment the document is for; omitted means the lead supplier.
+    supplier_id: UUID | None = None
 
 
 @router.patch("/projects/{project_id}/import-docs")
@@ -1454,17 +1572,20 @@ async def update_import_doc(project_id: UUID, payload: ImportDocPatch,
     if payload.key not in DOC_LABELS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Unknown document '{payload.key}'")
+    groups = await _logistics_groups(db, p)
+    sid = _resolve_supplier(groups, payload.supplier_id)
     docs = dict(p.import_docs or {})
-    entry = dict(docs.get(payload.key) or {})
+    slot = _doc_slot(docs, payload.key, sid, groups[0]["supplier_id"] if groups else None)
+    entry = dict(docs.get(slot) or {})
     entry["collected"] = payload.collected
     if payload.attachment_id is not None:
         entry["attachment_id"] = payload.attachment_id
     if payload.note is not None:
         entry["note"] = payload.note
-    docs[payload.key] = entry
+    docs[slot] = entry
     p.import_docs = docs
     await db.flush()
-    return _logistics_payload(p)
+    return _logistics_payload(p, groups)
 
 
 @router.post("/projects/{project_id}/import-docs/{key}/upload")
@@ -1474,6 +1595,7 @@ async def upload_import_doc(
     note: str | None = Form(None),
     file: UploadFile | None = File(None),
     link_url: str | None = Form(None),
+    supplier_id: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1502,19 +1624,25 @@ async def upload_import_doc(
     # The director keeps the ability, because a document approved in error has
     # to be replaceable by somebody and it should be the account that approved
     # it.
-    existing = (p.import_docs or {}).get(key) or {}
+    groups = await _logistics_groups(db, p)
+    sid = _resolve_supplier(groups, supplier_id)
+    lead = groups[0]["supplier_id"] if groups else None
+    slot = _doc_slot(p.import_docs or {}, key, sid, lead)
+    who = next((g["supplier_name"] for g in groups if g["supplier_id"] == sid), None)
+    label = DOC_LABELS.get(key, key) + (f" — {who}" if who and len(groups) > 1 else "")
+    existing = (p.import_docs or {}).get(slot) or {}
     if existing.get("status") == "approved" and Role(user.role) != Role.DIRECTOR:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"The {DOC_LABELS.get(key, key)} is already approved — the "
+            f"The {label} is already approved — the "
             "delivery was confirmed against this file. Ask the director to "
             "replace it.")
 
-    stamp = f"[import-doc:{key}] {note or ''}".strip()
+    stamp = f"[import-doc:{slot}] {note or ''}".strip()
     if link_url and (link_url or "").strip():
         a = await _link_attachment(
             db, url=link_url, owner_type="project", owner_id=p.id, user=user,
-            description=stamp, label=DOC_LABELS.get(key, key),
+            description=stamp, label=label,
         )
         safe = a.filename
     elif file is not None:
@@ -1544,7 +1672,7 @@ async def upload_import_doc(
                             "Attach a file or paste a link")
 
     docs = dict(p.import_docs or {})
-    docs[key] = {
+    docs[slot] = {
         "collected": True,
         "attachment_id": str(a.id),
         "filename": safe,
@@ -1559,12 +1687,13 @@ async def upload_import_doc(
     }
     p.import_docs = docs
     await db.flush()
-    return _logistics_payload(p)
+    return _logistics_payload(p, groups)
 
 
 class ImportDocDecision(BaseModel):
     decision: str          # 'approve' | 'reject'
     note: str | None = None
+    supplier_id: UUID | None = None   # whose document; omitted = the lead's
 
 
 @router.post("/projects/{project_id}/import-docs/{key}/decide")
@@ -1586,8 +1715,11 @@ async def decide_import_doc(
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    groups = await _logistics_groups(db, p)
+    sid = _resolve_supplier(groups, payload.supplier_id)
     docs = dict(p.import_docs or {})
-    entry = dict(docs.get(key) or {})
+    slot = _doc_slot(docs, key, sid, groups[0]["supplier_id"] if groups else None)
+    entry = dict(docs.get(slot) or {})
     if not entry.get("attachment_id"):
         raise HTTPException(status.HTTP_409_CONFLICT, "No file uploaded for this document yet")
     if payload.decision == "approve":
@@ -1600,10 +1732,10 @@ async def decide_import_doc(
     entry["decided_at"] = datetime.now(UTC).isoformat()
     if payload.note:
         entry["note"] = ((entry.get("note") or "") + f"\n[{user.full_name}] {payload.note}").strip()
-    docs[key] = entry
+    docs[slot] = entry
     p.import_docs = docs
     await db.flush()
-    return _logistics_payload(p)
+    return _logistics_payload(p, groups)
 
 
 @router.post("/projects/{project_id}/confirm-delivery")
@@ -1621,10 +1753,14 @@ async def confirm_delivery(project_id: UUID,
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Set the estimated delivery date first.")
     # Every required import document must be director-approved first.
-    if not _logistics_payload(p)["docs_approved"]:
+    lg = await _logistics(db, p)
+    if not lg["docs_approved"]:
+        missing = [r["label"] + (f" ({r['supplier_name']})" if lg["per_supplier"] else "")
+                   for r in lg["required_docs"] if r["status"] != "approved"]
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "All required documents must be approved by the director first.",
+            "All required documents must be approved by the director first"
+            + (f" — still open: {', '.join(missing)}." if missing else "."),
         )
     p.delivery_confirmed_at = datetime.now(UTC)
     # Under the reordered pipeline, drawing_approved → production is a
@@ -1646,7 +1782,7 @@ async def confirm_delivery(project_id: UUID,
         created_wo = {"id": str(wo.id), "code": wo.code}
     return {"ok": True, "delivery_confirmed_at": p.delivery_confirmed_at,
             "receiving_work_order": created_wo,
-            "logistics": _logistics_payload(p)}
+            "logistics": await _logistics(db, p)}
 
 
 # Operations (the ops board) — manager/admin/director.

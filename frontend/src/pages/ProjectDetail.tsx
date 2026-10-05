@@ -20,6 +20,7 @@ import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { NewDeliveryOrderModal } from "@/components/NewDeliveryOrderModal";
+import { QuotedMoney } from "@/components/QuotedMoney";
 
 const STATUS_CHIP: Record<string, string> = {
   new:              "bg-ink-100 text-ink-700",
@@ -522,18 +523,21 @@ export default function ProjectDetailPage() {
     onSuccess: refresh, onError: onErr,
   });
   const uploadDoc = useMutation({
-    mutationFn: (body: { key: string; file?: File; linkUrl?: string }) => {
+    mutationFn: (body: { key: string; file?: File; linkUrl?: string; supplierId?: string | null }) => {
       const fd = new FormData();
       if (body.file) fd.append("file", body.file);
       if (body.linkUrl) fd.append("link_url", body.linkUrl);
+      // Whose shipment the document belongs to — each supplier files its own.
+      if (body.supplierId) fd.append("supplier_id", body.supplierId);
       return api.post(`/operation/projects/${id}/import-docs/${body.key}/upload`, fd);
     },
     onSuccess: refresh, onError: onErr,
   });
   const decideDoc = useMutation({
-    mutationFn: (body: { key: string; decision: string; note?: string }) =>
+    mutationFn: (body: { key: string; decision: string; note?: string; supplierId?: string | null }) =>
       api.post(`/operation/projects/${id}/import-docs/${body.key}/decide`, {
         decision: body.decision, note: body.note,
+        supplier_id: body.supplierId || undefined,
       }),
     onSuccess: refresh, onError: onErr,
   });
@@ -1601,7 +1605,11 @@ export default function ProjectDetailPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <div className="text-[11px] uppercase tracking-wider muted mb-1">{t("Delivery mode", "Mode pengiriman")}</div>
-                {canLogistics ? (
+                {logistics.per_supplier ? (
+                  <div className="text-sm">
+                    {t("Set per supplier, below", "Diatur per supplier, di bawah")}
+                  </div>
+                ) : canLogistics ? (
                   <select className="input" value={logistics.delivery_mode}
                     onChange={(e) => setLogistics.mutate({ delivery_mode: e.target.value })}>
                     <option value="local">{t("Local", "Lokal")}</option>
@@ -1644,12 +1652,51 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
-            <div>
-              <div className="text-[11px] uppercase tracking-wider muted mb-2">
-                {t("Required documents", "Dokumen wajib")} ({sl(logistics.delivery_mode, DELIVERY_MODE_LABEL_ID)})
+            {/* One document set per supplier: each vendor sends its own
+                invoice and packing list, and an imported shipment its own
+                customs papers. A single-vendor job shows one set, as before. */}
+            {((logistics.suppliers?.length ? logistics.suppliers : [{
+              supplier_id: null, supplier_name: null, po_numbers: [],
+              delivery_mode: logistics.delivery_mode,
+              required_docs: logistics.required_docs ?? [],
+              docs_approved: logistics.docs_approved,
+            }]) as any[]).map((g: any) => (
+            <div key={g.supplier_id ?? "project"}
+              className={clsx(logistics.per_supplier && "rounded-lg border border-ink-100 p-3")}>
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                <div className="text-[11px] uppercase tracking-wider muted">
+                  {t("Required documents", "Dokumen wajib")} ({sl(g.delivery_mode, DELIVERY_MODE_LABEL_ID)})
+                </div>
+                {g.supplier_name && (
+                  <div className="text-sm font-medium">
+                    {logistics.per_supplier ? "" : t("from ", "dari ")}{g.supplier_name}
+                    {g.po_numbers?.length > 0 && (
+                      <span className="ml-1.5 font-mono text-[11px] muted">{g.po_numbers.join(", ")}</span>
+                    )}
+                  </div>
+                )}
+                {logistics.per_supplier && (
+                  <span className={clsx("chip text-[11px]", g.docs_approved
+                    ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                    {g.docs_approved
+                      ? t("all approved", "semua disetujui")
+                      : `${g.required_docs.filter((d: any) => d.status !== "approved").length} ${t("open", "belum")}`}
+                  </span>
+                )}
+                {logistics.per_supplier && (canLogistics ? (
+                  <select className="input py-1 text-xs w-auto ml-auto"
+                    aria-label={tt("Delivery mode for this supplier", "Mode pengiriman supplier ini")}
+                    value={g.delivery_mode}
+                    onChange={(e) => setLogistics.mutate({
+                      delivery_mode: e.target.value, supplier_id: g.supplier_id })}>
+                    <option value="local">{t("Local", "Lokal")}</option>
+                    <option value="direct_import">{t("Direct import", "Impor langsung")}</option>
+                    <option value="agent">{t("Via agent", "Lewat agen")}</option>
+                  </select>
+                ) : null)}
               </div>
               <div className="space-y-2">
-                {(logistics.required_docs ?? []).map((d: any) => (
+                {(g.required_docs ?? []).map((d: any) => (
                   <div key={d.key} className="flex items-center gap-3 flex-wrap text-sm border-b border-ink-50 pb-2">
                     <span className="w-32 shrink-0 font-medium">{T(d.label)}</span>
 
@@ -1686,7 +1733,7 @@ export default function ProjectDetailPage() {
                           <input type="file" className="hidden"
                             onChange={(e) => {
                               const f = e.target.files?.[0];
-                              if (f) uploadDoc.mutate({ key: d.key, file: f });
+                              if (f) uploadDoc.mutate({ key: d.key, file: f, supplierId: g.supplier_id });
                               e.target.value = "";
                             }} />
                         </label>
@@ -1694,11 +1741,13 @@ export default function ProjectDetailPage() {
                           className="text-xs text-brand-700 hover:underline inline-flex items-center gap-1"
                           disabled={uploadDoc.isPending}
                           onClick={() => {
+                            const whose = g.supplier_name ? ` (${g.supplier_name})` : "";
                             const u = window.prompt(tt(
-                              `Paste the link for ${d.label}`,
-                              `Tempel tautan untuk ${d.label}`,
+                              `Paste the link for ${d.label}${whose}`,
+                              `Tempel tautan untuk ${d.label}${whose}`,
                             ));
-                            if (u && u.trim()) uploadDoc.mutate({ key: d.key, linkUrl: u.trim() });
+                            if (u && u.trim()) uploadDoc.mutate({
+                              key: d.key, linkUrl: u.trim(), supplierId: g.supplier_id });
                           }}>
                           <Link2 size={11} /> {t("Use a link", "Pakai tautan")}
                         </button>
@@ -1710,12 +1759,14 @@ export default function ProjectDetailPage() {
                       <span className="inline-flex gap-1.5 ml-auto">
                         <button className="btn-primary py-0.5 px-2 text-xs"
                           disabled={decideDoc.isPending}
-                          onClick={() => decideDoc.mutate({ key: d.key, decision: "approve" })}>
+                          onClick={() => decideDoc.mutate({
+                            key: d.key, decision: "approve", supplierId: g.supplier_id })}>
                           <CheckCircle size={12} /> {t("Approve", "Setujui")}
                         </button>
                         <button className="btn-ghost py-0.5 px-2 text-xs text-red-600"
                           disabled={decideDoc.isPending}
-                          onClick={() => decideDoc.mutate({ key: d.key, decision: "reject" })}>
+                          onClick={() => decideDoc.mutate({
+                            key: d.key, decision: "reject", supplierId: g.supplier_id })}>
                           <XCircle size={12} /> {t("Reject", "Tolak")}
                         </button>
                       </span>
@@ -1723,12 +1774,13 @@ export default function ProjectDetailPage() {
                   </div>
                 ))}
               </div>
-              {!logistics.docs_approved && (
-                <div className="text-[11px] text-amber-700 mt-2">
-                  {logistics.required_docs.filter((d: any) => d.status !== "approved").length} {t("document(s) not yet approved.", "dokumen belum disetujui.")}
-                </div>
-              )}
             </div>
+            ))}
+            {!logistics.docs_approved && (
+              <div className="text-[11px] text-amber-700">
+                {logistics.required_docs.filter((d: any) => d.status !== "approved").length} {t("document(s) not yet approved.", "dokumen belum disetujui.")}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2746,8 +2798,8 @@ export default function ProjectDetailPage() {
                     </span>
                   </td>
                   {showMoney && (
-                    <td className="td text-right tabular-nums">
-                      {po.total != null ? "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(po.total)) : "—"}
+                    <td className="td text-right">
+                      <QuotedMoney amount={po.total} currency={po.currency} rate={po.fx_rate} />
                     </td>
                   )}
                 </tr>

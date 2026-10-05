@@ -335,6 +335,7 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS est_delivery_date DATE',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS delivery_confirmed_at TIMESTAMPTZ',
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS import_docs JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS supplier_delivery_modes JSONB NOT NULL DEFAULT '{}'::jsonb",
 
     # The director's decision that a job has no drawing to wait for. Nullable
     # throughout: every project on file predates the decision and none of them

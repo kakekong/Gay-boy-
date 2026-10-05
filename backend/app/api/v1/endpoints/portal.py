@@ -262,7 +262,8 @@ async def supplier_orders(
         po_out.append({
             "id": str(p.id), "number": p.number, "status": p.status,
             "po_date": p.po_date, "quoted_lead_days": p.quoted_lead_days,
-            "total": float(p.total or 0), "items": p.items,
+            "total": float(p.total or 0), "currency": (p.currency or "IDR").upper(),
+            "items": p.items,
             "created_at": p.created_at,
             "project_id": str(p.project_id) if p.project_id else None,
             "project_code": proj.code if proj else None,

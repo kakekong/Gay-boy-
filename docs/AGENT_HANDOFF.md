@@ -1170,6 +1170,21 @@ above anything "Load more" will ask for (10 000). Dropdowns and the customer
 board load every customer through `lib/fetchAll.ts` (`/customers` pages at
 500 max). `tests/e2e/test_list_caps.py` builds past the old caps.
 
+**Import documents are per supplier.** `Project.import_docs` stores one entry
+per document *per supplier* under `"<doc>@<supplier_id>"`; a bare `"<doc>"`
+key is a legacy/no-PO entry and belongs to the **lead** supplier (first live
+PO by `created_at`). The suppliers are the ones with a live PO on the job via
+`receiving.pos_for_project` (single-job and shared; `cancelled`/`rejected`
+excluded). `Project.supplier_delivery_modes` holds per-supplier mode overrides;
+the project's `delivery_mode` is the default. In `operation.py`,
+`_logistics_groups` builds the groups, `_doc_slot` resolves the storage key,
+`_resolve_supplier` maps a request's `supplier_id` (omitted = the lead,
+unknown = 400), and `_logistics(db, p)` is the async payload, carrying
+`suppliers[]`, `per_supplier` and a flat `required_docs`. Anything that walks
+`import_docs` must split the key on `@` before looking up `DOC_LABELS`
+(approvals `pending-documents`, the attachment lock). The tests are in
+`tests/e2e/test_per_supplier_docs.py`.
+
 **Push notifications** — `app/services/webpush.py`. VAPID keys live in the DB,
 created under `pg_advisory_xact_lock(429173001)` with `ORDER BY created_at` so
 concurrent boots can't mint two keypairs. Background sends go through
@@ -1397,7 +1412,10 @@ signature sized and placed like the wet-signed original, and purchasing able to
 correct a cost on a submitted price request with the director signing off each
 one, a supplier purchase order written in English with its currency on every
 figure, and the drawings split into the customer's and the supplier's with
-admin moved to the customer side of that wall.
+admin moved to the customer side of that wall. Later: shipping and import
+documents per supplier on a multi-vendor job (each supplier its own delivery
+mode, invoice, packing list and customs papers), and the project page's
+supplier PO totals in the order's own currency.
 
 ## 10. Open items
 
