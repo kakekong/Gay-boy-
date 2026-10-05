@@ -108,7 +108,7 @@ Nine base roles. Internal roles are capped by a sidebar/route allowlist enforced
 | **Finance** | Finance, financial reports, estimated finance, payment verification, chart of accounts, recent ledgers, customer POs, projects, attendance, chat | Issues + approves invoices, gates DP POs, verifies/records payments |
 | **HR** | Employees, attendance, chat | Personnel documents and attendance |
 | **Manager** | Everything (oversight) | Clears manual stage moves + manager-tier changes; watches every queue |
-| **Director** | Everything + Salary, PO Recap, All files, Users, KPI, Audit log, Feedback inbox | The approval authority for every deal document |
+| **Director** | Everything + Salary, PO Recap, All files, Users, KPI, Audit log, System log, Feedback inbox | The approval authority for every deal document |
 | **Customer** (portal) | Own quotations, projects, invoices, drawings, payment claims | External |
 | **Supplier** (portal) | Own assigned POs, drawing upload, ETA entry | External |
 
@@ -603,6 +603,11 @@ A **supplier's page** answers the same question from the other side: alongside t
 - **Auth**: JWT (12 h access / 30-day refresh), argon2 password hashing, per-IP login rate limiting, "Keep me signed in" opt-in (session-only storage by default — safe on shared computers).
 - **Unsaved typing is kept on the device.** Long forms — a new price request, a supplier's quoted prices, a purchase order's lines, an unsent discussion message — mirror what is typed into `localStorage` as it is typed, under a per-user prefix that a sign-out deliberately does not clear. Reopen the form and the typing is put back, with an amber notice saying so, dated, and a **Discard it** that restores the record's own values. Drafts clear themselves the moment the form saves for real, and expire after a week. This is the second half of the answer to the app signing somebody out on its own (the first half being the refresh handling in `api/client.ts`): it does not stop it happening, it stops it costing the work. Files are the exception — a browser will not hand a `File` back across a reload, so attachments must be re-picked.
 - **Audit log** (admin/director): every consequential mutation writes actor / action / entity / before / after / IP — powering the audit page and the stage-history feature.
+- **System log** (director only, Insights → System log): who has been in the system and what each person did.
+  - **People**: every account with *last seen* (any use of the app, not only a sign-in, since a session lasts for days), last sign-in with device and IP, and 30-day counts of sign-ins, failed attempts (in red) and changes made. Click a person for their **history**: sign-ins, sign-outs, failed attempts and every change they made, newest first. Where the audit log has the before/after for a change, it opens under that change.
+  - **All sign-ins**: every attempt by everyone. Each one is *signed in*, *failed* (wrong password, no such account, or account deactivated), *blocked* (too many attempts in a minute), *signed out*, or *viewed as* (the director opened the account with "View as"). Filter by event, date range, or search by person, email, IP or device.
+  - **All activity**: every create, edit, delete or action (submit, approve, …) anyone made, including refused ones with their error code. Each entry links to the record where it has a page. A change made while the director was viewing as someone is labelled "by Director … viewing as …" and is not counted as that person's.
+  - The log is read-only and can't be edited or cleared from the app. Passwords are never recorded, not even wrong ones. Someone who tries a wrong password still sees only "Invalid credentials"; the reason is shown to the director alone.
 - **Attachments**: polymorphic, per-owner-type role visibility, authenticated downloads (no bare links), 20 MB cap. Director has an "All files" overview.
 - **Testing**: in-process e2e suites drive the real ASGI app against a scratch Postgres with per-role clients — DP flow, permissions, financial math, notification routing, push targeting, stage-task dating, exports/won-lost/revisions.
 

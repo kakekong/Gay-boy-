@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, String
+from sqlalchemy import Boolean, Date, DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,6 +43,11 @@ class User(Base, UUIDPK, TimestampMixin):
     bank_account_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
     bank_account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # The last time this account used the system — any request, not just a
+    # sign-in, since a session lives for days on its refresh token. Written by
+    # `core/presence.py` at most every few minutes, by plain SQL so it does not
+    # bump `updated_at`.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The person this login belongs to. Required for every internal role and
     # refused for portal accounts — a customer's login is not an employee.
     # Unique: one person, one login. Nullable only so the column could be

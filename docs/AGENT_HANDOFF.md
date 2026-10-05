@@ -1185,6 +1185,21 @@ unknown = 400), and `_logistics(db, p)` is the async payload, carrying
 (approvals `pending-documents`, the attachment lock). The tests are in
 `tests/e2e/test_per_supplier_docs.py`.
 
+**System log** — `models/login_event.py` (`LoginEvent`, `ActionLog`),
+`services/login_log.py`, `endpoints/system_log.py` (director only),
+`pages/SystemLog.tsx`, `lib/describeAction.ts`. Sign-in events are written in
+their **own session** (a failed login ends in a 401 and the request session
+rolls back). `ActionLogMiddleware` (pure ASGI, registered in `main.py`)
+writes one row for every POST/PUT/PATCH/DELETE under `/api/v1/` that has a
+valid access token, except the `/auth/login|refresh|logout|impersonate`
+paths; no bodies are stored. "View as" tokens now carry a `via` claim (the
+director's id) that survives refresh: the action log records it as `via_id`,
+and `get_current_user` skips the `users.last_seen_at` stamp for such
+sessions. `last_seen_at` is written by raw SQL at most every 5 minutes per
+process, so `updated_at` isn't bumped. The timeline attaches audit rows to the
+first action at or after them (within 60 s); audit rows from before the
+action log existed show standalone. Tests: `tests/e2e/test_system_log.py`.
+
 **Push notifications** — `app/services/webpush.py`. VAPID keys live in the DB,
 created under `pg_advisory_xact_lock(429173001)` with `ORDER BY created_at` so
 concurrent boots can't mint two keypairs. Background sends go through
@@ -1415,7 +1430,9 @@ figure, and the drawings split into the customer's and the supplier's with
 admin moved to the customer side of that wall. Later: shipping and import
 documents per supplier on a multi-vendor job (each supplier its own delivery
 mode, invoice, packing list and customs papers), and the project page's
-supplier PO totals in the order's own currency.
+supplier PO totals in the order's own currency. Then a director-only system
+log: every sign-in (failed and blocked included), sign-out and "View as",
+last seen per person, and every change request anyone made.
 
 ## 10. Open items
 

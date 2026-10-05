@@ -38,6 +38,7 @@ const ReportsPage          = lazy(() => import("@/pages/Reports"));
 const SalesTargetsPage     = lazy(() => import("@/pages/SalesTargets"));
 const MyCommissionPage     = lazy(() => import("@/pages/MyCommission"));
 const AuditLogPage         = lazy(() => import("@/pages/AuditLog"));
+const SystemLogPage        = lazy(() => import("@/pages/SystemLog"));
 const ProjectsPage         = lazy(() => import("@/pages/Projects"));
 const ProjectDetailPage    = lazy(() => import("@/pages/ProjectDetail"));
 const AttendancePage       = lazy(() => import("@/pages/Attendance"));
@@ -247,6 +248,7 @@ function MainApp() {
             </RequireRole>
           } />
           <Route path="/audit" element={<AuditLogPage />} />
+          <Route path="/system-log" element={<RequireRole roles={["director"]}><SystemLogPage /></RequireRole>} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route path="/attendance" element={<AttendancePage />} />

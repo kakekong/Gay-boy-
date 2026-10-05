@@ -19,6 +19,7 @@ from app.core.security import (
 )
 from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenPair, UserOut
+from app.services.login_log import record_login_event
 
 router = APIRouter()
 
@@ -57,12 +58,29 @@ async def login(
     # Prefer the leftmost X-Forwarded-For entry when behind a proxy (Caddy etc.)
     xff = request.headers.get("x-forwarded-for") or ""
     ip = xff.split(",")[0].strip() or (request.client.host if request.client else "anon")
-    _check_login_rate(ip)
-    user = await db.scalar(select(User).where(User.email == payload.email.lower()))
-    if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
+    email = payload.email.lower()
+    try:
+        _check_login_rate(ip)
+    except HTTPException:
+        known = await db.scalar(select(User.id).where(User.email == email))
+        await record_login_event(request, event="blocked", user_id=known,
+                                 email=email, reason="too_many_attempts")
+        raise
+    user = await db.scalar(select(User).where(User.email == email))
+    password_ok = bool(user) and verify_password(payload.password, user.password_hash)
+    if not user or not user.is_active or not password_ok:
         _record_login_fail(ip)
+        # Which of the three it was goes in the director's log only; the
+        # caller gets the same "Invalid credentials" either way, so the
+        # endpoint still doesn't say which addresses exist.
+        reason = ("unknown_email" if not user
+                  else "wrong_password" if not password_ok
+                  else "deactivated")
+        await record_login_event(request, event="failed", user_id=user.id if user else None,
+                                 email=email, reason=reason)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     _clear_login_fails(ip)
+    await record_login_event(request, event="login", user_id=user.id, email=email)
     return TokenPair(
         access_token=make_access_token(user.id, user.role),
         refresh_token=make_refresh_token(user.id),
@@ -102,10 +120,20 @@ async def refresh(
     user = await db.scalar(select(User).where(User.id == payload["sub"]))
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User unavailable")
+    via = payload.get("via")      # a "View as" session stays one when renewed
     return TokenPair(
-        access_token=make_access_token(user.id, user.role),
-        refresh_token=make_refresh_token(user.id),
+        access_token=make_access_token(user.id, user.role, via=via),
+        refresh_token=make_refresh_token(user.id, via=via),
     )
+
+
+@router.post("/logout", status_code=204)
+async def logout(request: Request, user: User = Depends(get_current_user)):
+    """Record a deliberate sign-out. Tokens are stateless, so the client
+    dropping them is what actually ends the session; this only puts the exit
+    on the history."""
+    await record_login_event(request, event="logout", user_id=user.id, email=user.email)
+    return None
 
 
 @router.get("/me", response_model=UserOut)
@@ -130,6 +158,7 @@ async def me(
 @router.post("/impersonate/{user_id}", response_model=TokenPair)
 async def impersonate(
     user_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     director: User = Depends(require(Role.DIRECTOR)),
 ):
@@ -149,7 +178,9 @@ async def impersonate(
         entity_id=target.id,
         after={"as_email": target.email, "as_role": target.role},
     )
+    await record_login_event(request, event="view_as", user_id=target.id,
+                             email=target.email, actor_id=director.id)
     return TokenPair(
-        access_token=make_access_token(target.id, target.role),
-        refresh_token=make_refresh_token(target.id),
+        access_token=make_access_token(target.id, target.role, via=director.id),
+        refresh_token=make_refresh_token(target.id, via=director.id),
     )

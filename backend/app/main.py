@@ -138,6 +138,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Every change request, for the director's system log (services/login_log.py).
+from app.services.login_log import ActionLogMiddleware  # noqa: E402
+app.add_middleware(ActionLogMiddleware)
+
 install_error_handlers(app)
 app.include_router(api_router, prefix="/api/v1")
 

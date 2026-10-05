@@ -27,14 +27,20 @@ def _encode(payload: dict, ttl: timedelta) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def make_access_token(user_id: UUID, role: str) -> str:
-    return _encode({"sub": str(user_id), "role": role, "type": "access"},
-                   timedelta(minutes=settings.JWT_ACCESS_TTL_MIN))
+def make_access_token(user_id: UUID, role: str, via: UUID | str | None = None) -> str:
+    """`via` marks a "View as" session: the director's id, carried so the
+    system log can say the director did it rather than the person viewed."""
+    payload = {"sub": str(user_id), "role": role, "type": "access"}
+    if via:
+        payload["via"] = str(via)
+    return _encode(payload, timedelta(minutes=settings.JWT_ACCESS_TTL_MIN))
 
 
-def make_refresh_token(user_id: UUID) -> str:
-    return _encode({"sub": str(user_id), "type": "refresh"},
-                   timedelta(days=settings.JWT_REFRESH_TTL_DAYS))
+def make_refresh_token(user_id: UUID, via: UUID | str | None = None) -> str:
+    payload = {"sub": str(user_id), "type": "refresh"}
+    if via:
+        payload["via"] = str(via)
+    return _encode(payload, timedelta(days=settings.JWT_REFRESH_TTL_DAYS))
 
 
 def decode_token(token: str) -> dict:

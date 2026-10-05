@@ -43,6 +43,7 @@ const PAGES: { label: string; sublabel: string; link: string; icon: any }[] = [
   { label: "AI Command Center",     sublabel: "Insights",     link: "/ai",        icon: BrainCircuit },
   { label: "Reports",               sublabel: "Insights",     link: "/reports",   icon: BookOpen },
   { label: "Audit log",             sublabel: "Insights",     link: "/audit",     icon: BookOpen },
+  { label: "System log",            sublabel: "Insights",     link: "/system-log", icon: BookOpen },
   { label: "Help",                  sublabel: "Insights",     link: "/help",      icon: HelpCircle },
 ];
 

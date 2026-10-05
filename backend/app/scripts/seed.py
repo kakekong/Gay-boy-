@@ -581,6 +581,7 @@ COLUMN_MIGRATIONS: list[str] = [
     # cannot end up with two accounts; nullable because portal logins
     # (customer / supplier) are not employees and never get a record.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id UUID",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_employee_id "
     "ON users (employee_id)",
     # Everybody who already had a login predates the register, so give each

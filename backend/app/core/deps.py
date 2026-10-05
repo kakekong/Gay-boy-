@@ -26,4 +26,10 @@ async def get_current_user(
     user = await db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    # "Last seen" for the director's system log — throttled, and in its own
+    # session so it never touches this request's transaction.
+    # Not while the director is viewing as them — that isn't them.
+    if not payload.get("via"):
+        from app.services.login_log import touch_last_seen
+        await touch_last_seen(user.id)
     return user

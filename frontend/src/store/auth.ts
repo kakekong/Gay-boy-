@@ -201,7 +201,7 @@ const authStorage = {
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       accessToken: null,
       refreshToken: null,
       user: null,
@@ -216,6 +216,20 @@ export const useAuthStore = create<AuthState>()(
         if (reason) {
           // eslint-disable-next-line no-console
           console.warn("[auth] logout:", reason);
+        }
+        // A deliberate sign-out (no reason) goes on the director's system
+        // log. Fire-and-forget with the token still in hand; a failure here
+        // must never keep anyone signed in. Not while viewing as someone
+        // else — that would log the other person signing out.
+        const { accessToken, impersonationOrigin } = get();
+        if (!reason && accessToken && !impersonationOrigin) {
+          const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api/v1";
+          try {
+            void fetch(`${base}/auth/logout`, {
+              method: "POST", keepalive: true,
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }).catch(() => {});
+          } catch {}
         }
         // This tab's copy always goes, so no stale token is rehydrated on the
         // next page load. The durable copy goes only if this tab is the one
