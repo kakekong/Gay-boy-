@@ -50,6 +50,13 @@ export default function CustomersPage() {
   const [stage, setStage] = useState("");
   // Deactivated customers are kept, not erased — one filter away.
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
+  // Looking a customer up by name has to find them whatever their state: a
+  // deactivated customer is kept precisely so it can still be looked up, and
+  // the default "Active customers" filter hid it from the one box people use
+  // to do that. Typing a name searches active and deactivated alike (the
+  // deactivated ones are marked); "Deactivated" still narrows to just those.
+  const searching = search.trim() !== "";
+  const statusSent = searching && activeFilter === "active" ? "all" : activeFilter;
   const [openNew, setOpenNew] = useState(false);
   // Who covers what is the director's call, so the filter and the bulk
   // hand-over only exist for them. "" = everyone, "none" = nobody is on it —
@@ -83,7 +90,7 @@ export default function CustomersPage() {
   const hint = rep.startsWith("hint:") ? rep.slice(5) : "";
   const q = useQuery({
     queryKey: ["customers", view === "pipeline" ? "" : search,
-               view === "pipeline" ? "" : stage, rep, page, pageSize, view, activeFilter],
+               view === "pipeline" ? "" : stage, rep, page, pageSize, view, statusSent],
     queryFn: () => {
       const params = {
         q: search || undefined,
@@ -91,7 +98,7 @@ export default function CustomersPage() {
         sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
         unassigned: rep === "none" ? true : undefined,
         rep_hint: hint || undefined,
-        status: activeFilter,
+        status: statusSent,
       };
       // The board shows every stage at once and doesn't page, so it takes
       // every customer — it used to take one page of 500 and drop the rest.
@@ -135,7 +142,7 @@ export default function CustomersPage() {
             sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
             unassigned: rep === "none" ? true : undefined,
             rep_hint: hint || undefined,
-            status: activeFilter,
+            status: statusSent,
             page: p, page_size: size,
           },
         });
@@ -244,6 +251,13 @@ export default function CustomersPage() {
           <option value="inactive">{t("Deactivated", "Dinonaktifkan")}</option>
           <option value="all">{t("Active and deactivated", "Aktif dan nonaktif")}</option>
         </select>
+        {searching && activeFilter === "active" && (
+          <span className="text-xs muted" title={t(
+            "A name search looks through deactivated customers too; they are greyed out and marked.",
+            "Pencarian nama juga mencakup pelanggan nonaktif; ditampilkan pudar dan diberi tanda.")}>
+            {t("incl. deactivated", "termasuk nonaktif")}
+          </span>
+        )}
         {isDirector && (
           <select value={rep} onChange={(e) => { setRep(e.target.value); setPicked(new Set()); }}
                   className="input max-w-[240px]"
