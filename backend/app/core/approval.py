@@ -365,6 +365,11 @@ async def apply_to_target(
                     pr.items = r.get("proposed_items") or pr.items
                     if r.get("proposed_notes") is not None:
                         pr.notes = r["proposed_notes"]
+                    # The director approved it, so it reaches the quotation
+                    # the way the director's own edit would.
+                    from app.services.quotation_sync import sync_from_price_request
+                    await db.flush()
+                    await sync_from_price_request(db, pr, decider)
                 applied["revision"] = n
                 applied["revision_status"] = r["status"]
                 break

@@ -21,6 +21,8 @@ interface DraftItem {
   qty: number;
   unit_price: number;
   uom?: string;
+  /** The quotation line it came from — lets the deal check pair them. */
+  line_no?: number;
   selected: boolean;
 }
 
@@ -85,6 +87,7 @@ export function SubmitCustomerPOModal({
         qty: Number(it.qty ?? 1),
         unit_price: Number(it.unit_price ?? 0),
         uom: it.uom ?? undefined,
+        line_no: it.line_no ?? undefined,
         selected: true,
       })));
     } catch {
@@ -118,6 +121,7 @@ export function SubmitCustomerPOModal({
             qty: Number(it.qty || 0),
             unit_price: Number(it.unit_price || 0),
             uom: it.uom ?? null,
+            line_no: it.line_no ?? null,
           })),
         notes: notes || null,
         is_downpayment: isDp,

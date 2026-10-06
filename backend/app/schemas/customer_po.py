@@ -11,6 +11,9 @@ class CustomerPOItem(BaseModel):
     qty: float = 1
     unit_price: float = 0
     uom: str | None = None
+    # The quotation line this one was ordered against, when it came from the
+    # quotation — how the deal check pairs the two (`order_consistency`).
+    line_no: int | None = None
 
 
 class CustomerPOCreate(BaseModel):

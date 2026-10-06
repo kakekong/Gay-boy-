@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     attachments,
     attendance,
     audit,
+    consistency,
     system_log,
     auth,
     portal,
@@ -90,6 +91,7 @@ api_router.include_router(imports.router, prefix="/imports", tags=["imports"])
 api_router.include_router(sales_targets.router, prefix="/sales-targets", tags=["sales-targets"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(system_log.router, prefix="/system-log", tags=["system-log"])
+api_router.include_router(consistency.router, prefix="/consistency", tags=["consistency"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
 api_router.include_router(portal.router, prefix="/portal", tags=["portal"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])

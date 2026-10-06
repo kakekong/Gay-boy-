@@ -1251,6 +1251,10 @@ async def apply_to_price_request(
             "status": pr.status,
             "lines_still_uncosted": missing,
         })
+        # The new cost reaches the quotation's estimate (never its price).
+        from app.services.quotation_sync import sync_from_price_request
+        await db.flush()
+        await sync_from_price_request(db, pr, None)
         await audit_record(db, actor=user, action="apply_quote",
                            entity="price_request", entity_id=pr.id,
                            after={"from": spr.number, "lines": touched,
@@ -1427,6 +1431,9 @@ async def change_currency(
                         + f"\n[purchasing] {spr.number} was quoted in "
                         + f"{currency}, not {before['currency'] or 'IDR'} — "
                         + f"cost recomputed at {rate:g}").strip()
+            from app.services.quotation_sync import sync_from_price_request
+            await db.flush()
+            await sync_from_price_request(db, pr, None)
             recosted.append({"price_request_id": str(pr.id),
                              "price_request_number": pr.number,
                              "recosted_lines": touched})

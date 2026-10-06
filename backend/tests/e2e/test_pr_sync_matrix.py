@@ -11,9 +11,15 @@ One state is reached by hand: nothing in the app ever sets a quotation to
 only exists on older data. The rule still has to cover it.
 
 It exists because the rule is invisible from the screen you are standing on.
-Edit a request whose quotation is won and nothing appears to happen, which
-looks exactly like a broken feature and is in fact the feature. The answer
-has to be somewhere you can point at.
+
+The rule changed: a request past its draft can only be edited by the
+director, and the director approves the quotation anyway — so their edit now
+carries through to an approved, sent or won quotation too (people read
+"edit the request, nothing happens" as a broken sync, and they were right).
+Only a quotation sitting in the approval queue is left alone, with a note,
+because it would change the document while the director is deciding it. Any
+copy that does not follow — the customer's PO above all — is reported as a
+discrepancy with a button instead (`test_deal_consistency.py`).
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -33,15 +39,16 @@ def why(r):
     return str(b.get("detail")
                or (b.get("errors") or [{}])[0].get("message", "")).lower()
 
-# What each state is expected to do. Written out rather than derived, so a
-# change to the rule has to be made here too, deliberately.
+# What each state is expected to do with the director's edit. Written out
+# rather than derived, so a change to the rule has to be made here too,
+# deliberately.
 EXPECTED = {
     "draft":            True,
     "rejected":         True,
     "pending_approval": False,
-    "approved":         False,
-    "sent":             False,
-    "won":              False,
+    "approved":         True,
+    "sent":             True,
+    "won":              True,
 }
 
 
@@ -112,6 +119,7 @@ async def main():
             await c.post(f"/customer-pos/{cpo}/approve", headers=d, json={"notes": ""})
 
     print("\n── what a price-request change does, per quotation status ──")
+    flagged_q = None
     for state, should_sync in EXPECTED.items():
         cust, pr_id, q_id = await make(state.replace("_", "")[:6])
         await drive(q_id, cust, state)
@@ -155,36 +163,33 @@ async def main():
                   str(rep.get("new_total")) not in ("None", "")
                   and rep.get("old_total") is not None,
                   str(rep)[:220])
+            flagged_q = q_id
 
     # ══ the case the report came from ════════════════════════════════════
-    # A won quotation with a project behind it is the one place a silent
-    # rewrite would be worst, and the one place somebody is most likely to
-    # try it. It must refuse *and* say so — not merely do nothing.
+    # A won quotation with a project behind it: the director corrects the
+    # request and the quotation the deal runs on follows. The customer's PO
+    # does not — it is their paper — and is flagged instead.
     print("\n── the reported case: won, with a project open ──")
     cust, pr_id, q_id = await make("Proyek")
     await drive(q_id, cust, "won")
     q = J(await c.get(f"/quotations/{q_id}", headers=d))
     check("the quotation is won", q.get("status") == "won", str(q.get("status")))
-    projs = J(await c.get("/operation/projects", headers=d, params={"limit": 200}))
-    rows = projs if isinstance(projs, list) else projs.get("items", [])
-    check("...and a project was opened from it",
-          any(str(x.get("customer_id")) == str(cust) for x in rows),
-          str(len(rows)))
     r = await c.patch(f"/price-requests/{pr_id}", headers=d, json={
         "items": [{"line_no": 1, "description": f"Rotor Proyek {TAG} rev C",
                    "qty": 4, "uom": "pcs"}]})
-    check("the request still takes the edit", r.status_code == 200,
+    check("the request takes the edit", r.status_code == 200,
           f"{r.status_code} {why(r)}")
     rep = (J(r).get("quotations") or [{}])[0]
-    check("...and the answer says the quotation was not rewritten",
-          rep.get("synced") is False and rep.get("status") == "won", str(rep)[:220])
+    check("...and the answer says the won quotation followed",
+          rep.get("synced") is True and rep.get("status") == "won", str(rep)[:220])
     q = J(await c.get(f"/quotations/{q_id}", headers=d))
-    check("...the quotation the customer signed is untouched",
-          q["items"][0]["description"] != f"Rotor Proyek {TAG} rev C",
+    check("...it now carries the new wording",
+          q["items"][0]["description"] == f"Rotor Proyek {TAG} rev C",
           str(q["items"][0].get("description")))
-    check("...and it carries the warning where somebody will read it",
-          "changed after this quotation was won" in (q.get("notes") or ""),
-          str(q.get("notes"))[:260])
+    rr = J(await c.get("/consistency", headers=d, params={"quotation_id": q_id}))
+    check("...and the customer PO that still says otherwise is flagged",
+          any(x["key"].startswith("quotation_cpo:") and x["lines"] for x in rr.get("checks", [])),
+          str(rr)[:300])
 
     # ══ the notice is ours, not the customer's ═══════════════════════════
     # The warning lives in the notes blob, which is printed on the quotation
@@ -192,12 +197,12 @@ async def main():
     # screen and be gone from the copy that leaves the building — those pull
     # from the same field, so one of them is always about to be wrong.
     print("\n── who gets to read the warning ──")
+    q_id = flagged_q
     q = J(await c.get(f"/quotations/{q_id}", headers=d))
     check("we can still read it after a reload",
           "[system]" in (q.get("notes") or "")
           or "changed after this quotation was" in (q.get("notes") or ""),
           str(q.get("notes"))[:260])
-
     r = await c.get(f"/quotations/{q_id}/export.pdf", headers=d)
     check("the customer's PDF still builds", r.status_code == 200,
           f"{r.status_code} {r.text[:150]}")

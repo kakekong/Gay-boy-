@@ -186,7 +186,9 @@ async def main():
           float(q2["total"]) > before_total, f"{q2['total']} vs {before_total}")
     check("...and it is still a draft", q2["status"] == "draft", q2["status"])
 
-    print("\n── one that has gone out is left alone ──")
+    print("\n── an approved one follows the director's correction ──")
+    # The director approves the quotation anyway, so their correction to the
+    # request reaches it rather than leaving two documents disagreeing.
     pr5 = await approved_pr()
     q5 = J(await c.post(f"/quotations/from-price-request/{pr5}", headers=s1))
     await c.post(f"/quotations/{q5['id']}/submit", headers=d)
@@ -196,16 +198,16 @@ async def main():
     out = J(await c.post(f"/price-requests/{pr5}/reprice", headers=d, json={
         "items": [{"line_no": 1, "sell_price": 2_500_000}],
         "reason": "price moved after the quote went out"}))
-    check("the response says so rather than pretending",
-          (out.get("quotation") or {}).get("action") == "left_alone",
+    check("the response says the quotation was updated",
+          (out.get("quotation") or {}).get("action") == "updated",
           str(out.get("quotation")))
     after = J(await c.get(f"/quotations/{q5['id']}", headers=d))
-    check("...the approved quotation is untouched",
-          float(after["items"][0]["unit_price"]) == 1_400_000,
+    check("...the approved quotation carries the new price",
+          float(after["items"][0]["unit_price"]) == 2_500_000,
           str(after["items"][0]["unit_price"]))
-    check("...and still approved", after["status"] == "approved", after["status"])
+    check("...and is still approved", after["status"] == "approved", after["status"])
     pr5_now = J(await c.get(f"/price-requests/{pr5}", headers=d))
-    check("...while the price request does carry the new figure",
+    check("...matching the price request",
           line(pr5_now, 1)["sell_price"] == 2_500_000,
           str(line(pr5_now, 1)["sell_price"]))
 

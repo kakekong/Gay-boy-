@@ -225,11 +225,20 @@ The price request and the quotation made from it are the same order twice, so th
 
 | Movement | How | Why |
 |---|---|---|
-| **Price request → quotation** | automatic, but only onto a quotation nobody has acted on (`draft` / `rejected`). Anything submitted, approved, sent or won gets a **note** instead | a quotation in a customer's hands must not silently become a different number |
+| **Price request → quotation** | automatic onto a quotation nobody has acted on (`draft` / `rejected`). **The director's own change** (an edit, a reprice, or an approved sales revision) also carries through to an **approved, sent or won** quotation, since the director approves the quotation anyway; a won one is re-posted to the ledger. Only a quotation **waiting for approval** is left alone, with a note. The **cost estimate** always follows, in every state, because the customer never sees it | the quotation is the deal; a request change that only the director can make is the director's decision about it |
 | **Quotation → price request** | **automatic, always** | the deal is negotiated on the quotation — a quantity moves, a price moves on a call, a line is reworded — and the price request is what purchasing buys against and what the project page shows as the order. A line edit on a PR-backed quotation has already been through the director (sales cannot make one at all), so by the time it is on the quotation it *is* the decision. Purchasing's **cost** is never touched: a quotation knows the selling price and carries cost only as an estimate |
 | **Price request → supplier price request** | **by hand**, on a button | the vendor has been sent a list and may have priced it. The drift is reported line by line on the supplier request ("line 2: qty 8 → 10"), and **Bring this list up to date** pulls it across. What the supplier quoted is kept — their price is per unit, so a line total simply follows the new quantity. Allowed while `draft` / `sent` / `quoted`; a closed request is the record of what was asked and answered |
 
-**The project needs nothing.** Its Order card reads the price request live, so once the request is right the project is right. The card compares itself against the live quotation and, when they disagree, says which lines and offers **Bring it into line with the quotation** (sales, manager or director) — that button is for jobs that were already running before any of this existed. Running it also lists the supplier requests that will not have noticed.
+**The project needs nothing.** Its Order card reads the price request live, so once the request is right the project is right.
+
+**Discrepancies are pointed out on every document of the deal.** The price request, the quotation, the customer PO and the project's Order card each carry a **deal check** card. When everything agrees it is one green line naming the documents. When something doesn't, it lists each disagreement, line by line and field by field, with both values side by side:
+
+- **Price request ↔ quotation:** description, qty, unit and selling price. The fix goes either way: *Make the price request match the quotation*, or *Make the quotation match the price request*.
+- **Quotation ↔ customer PO:** description, unit and price. Qty is compared as well when there is a single PO, not when the customer ordered in parts. The fix goes either way: *Make the customer PO match the quotation* (the customer's PO was typed wrong), or *Make the quotation match the customer PO* (the customer ordered differently, so the quotation and then the price request follow). The customer PO is never changed automatically: it records what the customer's paper says.
+- **Price request ↔ supplier price request** (purchasing, manager, director): what the vendor was asked for against what the job needs. One-click refresh, keeping the vendor's prices per unit.
+- **Price request ↔ supplier POs** (purchasing, manager, director): quantity ordered against quantity needed. This one is information only, since a placed order is changed with the supplier.
+
+Every fix follows the rules of editing that document by hand. A change to an approved, sent or won quotation by anyone but the director goes to the director for approval. An approved customer PO is the director's to change. Sales can't change prices on a quotation built from a price request. A button that isn't yours to press is greyed out and says why. Purchasing sees only the buy-side checks.
 
 ### 6.2 Revisions
 

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { DealCheck } from "@/components/DealCheck";
 import { QuotedMoney } from "@/components/QuotedMoney";
 import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
@@ -925,6 +926,9 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   return (
     <div className="space-y-5">
       <button className="btn-ghost -ml-3" onClick={onBack}><ArrowLeft size={15} /> {t("Back", "Kembali")}</button>
+      {/* The quotation, customer PO and supplier documents built from this
+          request — and anywhere they no longer say the same thing. */}
+      <DealCheck where={{ price_request_id: id }} />
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>

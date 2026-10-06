@@ -180,8 +180,10 @@ async def main():
     check("...its total following with it",
           float(q["total"]) > 0, str(q.get("total")))
 
-    # ══ but not one that has gone out ════════════════════════════════════
-    print("\n── a quotation the customer may be holding ──")
+    # ══ one that has gone out follows the director ══════════════════════
+    # Past its draft a request is the director's to edit, and the director
+    # approves the quotation anyway — so their change carries through.
+    print("\n── an approved quotation follows the director's change ──")
     cust3, pr3 = await costed("Kirim")
     q3 = J(await c.post(f"/quotations/from-price-request/{pr3}", headers=s1))
     q3_id = q3["id"]
@@ -189,36 +191,48 @@ async def main():
     r = await c.post(f"/quotations/{q3_id}/approve", headers=d, json={"notes": ""})
     check("the quotation is approved and out of sales' hands",
           r.status_code == 200, f"{r.status_code} {why(r)}")
-    sent_total = float(J(await c.get(f"/quotations/{q3_id}", headers=s1))["total"])
-
     r = await c.patch(f"/price-requests/{pr3}", headers=d, json={
         "items": [{"line_no": 1, "description": f"Rotor Kirim {TAG}", "qty": 40,
                    "uom": "pcs"}]})
     check("the request can still be changed", r.status_code == 200,
           f"{r.status_code} {why(r)}")
     rep = (J(r).get("quotations") or [{}])[0]
-    check("...but the quotation is reported as left alone",
-          rep.get("synced") is False, str(rep)[:250])
-
+    check("...and the quotation is reported as updated", rep.get("synced") is True,
+          str(rep)[:250])
     q3 = J(await c.get(f"/quotations/{q3_id}", headers=s1))
-    check("...its figure is untouched", float(q3["total"]) == sent_total,
-          f"{q3['total']} vs {sent_total}")
-    check("...its line is untouched too",
-          float(q3["items"][0]["qty"]) == 4, str(q3["items"][0].get("qty")))
-    check("...and it says on the quotation that the request moved",
-          "changed after this quotation was" in (q3.get("notes") or ""),
-          str(q3.get("notes"))[:300])
-    check("...naming both figures, so somebody can decide",
-          "against the" in (q3.get("notes") or ""), str(q3.get("notes"))[:300])
+    check("...its line follows", float(q3["items"][0]["qty"]) == 40,
+          str(q3["items"][0].get("qty")))
+    check("...and it stays approved", q3["status"] == "approved", q3["status"])
 
-    # Changing it twice must not paper the quotation with the same note.
-    await c.patch(f"/price-requests/{pr3}", headers=d, json={
-        "items": [{"line_no": 1, "description": f"Rotor Kirim {TAG}", "qty": 40,
+    # ══ but not one the director is deciding ═════════════════════════════
+    print("\n── a quotation waiting for approval ──")
+    cust4, pr4b = await costed("Antri")
+    q4 = J(await c.post(f"/quotations/from-price-request/{pr4b}", headers=s1))
+    q4_id = q4["id"]
+    await c.post(f"/quotations/{q4_id}/submit", headers=s1)
+    waiting_total = float(J(await c.get(f"/quotations/{q4_id}", headers=s1))["total"])
+    r = await c.patch(f"/price-requests/{pr4b}", headers=d, json={
+        "items": [{"line_no": 1, "description": f"Rotor Antri {TAG}", "qty": 40,
                    "uom": "pcs"}]})
-    q3b = J(await c.get(f"/quotations/{q3_id}", headers=s1))
+    rep = (J(r).get("quotations") or [{}])[0]
+    check("...is reported as left alone", rep.get("synced") is False, str(rep)[:250])
+    q4 = J(await c.get(f"/quotations/{q4_id}", headers=s1))
+    check("...its figure is untouched", float(q4["total"]) == waiting_total,
+          f"{q4['total']} vs {waiting_total}")
+    check("...its line is untouched too",
+          float(q4["items"][0]["qty"]) == 4, str(q4["items"][0].get("qty")))
+    check("...and it says on the quotation that the request moved",
+          "changed after this quotation was" in (q4.get("notes") or ""),
+          str(q4.get("notes"))[:300])
+    check("...naming both figures, so somebody can decide",
+          "against the" in (q4.get("notes") or ""), str(q4.get("notes"))[:300])
+    await c.patch(f"/price-requests/{pr4b}", headers=d, json={
+        "items": [{"line_no": 1, "description": f"Rotor Antri {TAG}", "qty": 40,
+                   "uom": "pcs"}]})
+    q4b = J(await c.get(f"/quotations/{q4_id}", headers=s1))
     check("...and the same warning is not written twice",
-          (q3b.get("notes") or "").count("changed after this quotation was") == 1,
-          str(q3b.get("notes"))[:300])
+          (q4b.get("notes") or "").count("changed after this quotation was") == 1,
+          str(q4b.get("notes"))[:300])
 
     # ══ nothing said, nothing done ═══════════════════════════════════════
     print("\n── an edit that changes nothing ──")

@@ -1042,8 +1042,19 @@ async def reprice_price_request(
         after={"items": items, "reason": reason},
     )
     await db.flush()
-    return {**await _serialize(db, pr, Role(user.role)),
-            "changed_lines": len(changes), "quotation": quote_result}
+    # Past the draft, the rest of the deal: the director's new price carries
+    # to an approved/sent/won quotation, a cost always reaches the estimate,
+    # and anything that can't follow is reported as a discrepancy.
+    synced = await sync_from_price_request(db, pr, user)
+    if quote_result and quote_result.get("action") == "left_alone" and any(
+            x.get("synced") and x.get("quotation_id") == quote_result["id"] for x in synced):
+        # Same dict the price history holds, so the record says it too.
+        quote_result["action"] = "updated"
+    out = {**await _serialize(db, pr, Role(user.role)),
+           "changed_lines": len(changes), "quotation": quote_result}
+    if synced:
+        out["quotations"] = synced
+    return out
 
 
 @router.post("/{pr_id}/reject")

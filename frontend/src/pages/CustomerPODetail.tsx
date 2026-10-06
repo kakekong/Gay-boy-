@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { DealCheck } from "@/components/DealCheck";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { ExportAddressDialog } from "@/components/ExportAddressDialog";
 import { CommentThread } from "@/components/CommentThread";
@@ -400,6 +401,9 @@ export default function CustomerPODetailPage() {
       >
         <ArrowLeft size={14} /> {t("All customer POs", "Semua PO pelanggan")}
       </Link>
+
+      {/* The customer's paper against the quotation it was ordered from. */}
+      <DealCheck where={{ customer_po_id: p.id }} />
 
       <div className="card p-6 lg:p-8 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">

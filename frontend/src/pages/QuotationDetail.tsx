@@ -11,6 +11,7 @@ import {
 import clsx from "clsx";
 import { UserLink } from "@/components/UserLink";
 import { api } from "@/api/client";
+import { DealCheck } from "@/components/DealCheck";
 import { Modal } from "@/components/Modal";
 import { FollowupForm } from "@/components/forms/FollowupForm";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
@@ -279,6 +280,10 @@ export default function QuotationDetailPage() {
           }}
         />
       )}
+
+      {/* Does the request, the customer's PO and the rest of the deal still
+          say what this quotation says? Differences, with the fix. */}
+      <DealCheck where={{ quotation_id: id! }} />
 
       {/* Why it was sent back. It used to live only in the audit log and the
           approvals queue, so the person who has to fix it could not read it

@@ -21,6 +21,13 @@ customer holding a quotation for Rp 12 million must not find it silently
 became Rp 14 million. Those get a note instead, saying the request moved and
 by how much, so a person decides whether to revise it.
 
+Two exceptions. The cost estimate always follows: it never reaches the
+customer, and a margin worked from a stale cost is just wrong. And the
+director's own edit to the request carries through to an approved, sent or
+won quotation — the director approves the quotation anyway, so making them
+approve the same change twice was the "it doesn't sync" people hit. Anything
+left unsynced shows up as a discrepancy (`order_consistency`) with a button.
+
 The second rule is the one that matters. Syncing everything would be easier
 to write and would eventually rewrite a number under somebody's signature.
 """
@@ -96,10 +103,45 @@ async def sync_from_price_request(
 
     wanted = [_line_of(it, i) for i, it in enumerate(pr.items or [])]
     out: list[dict] = []
+    from app.core.permissions import Role
+    by_director = actor is not None and Role(actor.role) == Role.DIRECTOR
 
     for q in quotes:
         existing = list(q.items)
+        if q.status in ("lost", "cancelled", "superseded"):
+            continue
+        # What we pay is never on the customer's copy — it rides on the
+        # quotation only as the estimate its margin is worked from. So a cost
+        # correction on the request always reaches the quotation, whatever
+        # state it is in: nobody outside the company sees it change.
+        cost_by_no = {w["line_no"]: w["cost_estimate"] for w in wanted}
+        for it in existing:
+            c = cost_by_no.get(int(it.line_no or 0))
+            if c is not None and abs(float(it.cost_estimate or 0) - c) > 0.005:
+                it.cost_estimate = c
         if not _differs(existing, wanted):
+            continue
+        # The director's own change to the request is the director's decision
+        # about the deal, and the quotation is the director's to approve
+        # anyway — asking them to approve it a second time on the quotation
+        # is the "it doesn't sync" people hit. So their edit carries through
+        # to an approved, sent or won quotation too (a won one is re-posted).
+        if by_director and q.status in ("approved", "sent", "won"):
+            from app.api.v1.endpoints.quotations import _restate_posting
+            was_total = float(q.total or 0)
+            for it in existing:
+                await db.delete(it)
+            await db.flush()
+            rows = [QuotationItem(quotation_id=q.id, source="custom", **w) for w in wanted]
+            db.add_all(rows)
+            q.updated_by = actor.id
+            _recalc(q, rows)
+            await db.flush()
+            await db.refresh(q, ["items"])
+            await _restate_posting(db, q, was_total)
+            out.append({"quotation_id": str(q.id), "number": q.number,
+                        "status": q.status, "synced": True,
+                        "lines": len(rows), "new_total": float(q.total or 0)})
             continue
         if q.status not in REWRITABLE:
             # Not ours to rewrite. Say so on the quotation itself, where

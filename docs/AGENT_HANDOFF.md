@@ -1185,6 +1185,29 @@ unknown = 400), and `_logistics(db, p)` is the async payload, carrying
 (approvals `pending-documents`, the attachment lock). The tests are in
 `tests/e2e/test_per_supplier_docs.py`.
 
+**Deal consistency** — `services/order_consistency.py` +
+`endpoints/consistency.py` (`GET /consistency?price_request_id|quotation_id|
+customer_po_id|project_id`, `POST /consistency/fix {…, check, action}`),
+`components/DealCheck.tsx` (on the PR detail, QuotationDetail,
+CustomerPODetail and the project's Order card; it replaced `OrderDrift`).
+`resolve_chain` finds the whole deal from any one document; `report` compares
+the pairs (`pr_quotation`, `quotation_cpo:<id>`, `supplier_request:<id>`,
+`supplier_po_qty`), and `fix` applies a direction (`use_left` = the right-hand
+document follows the left, `use_right` = the reverse). The quotation side
+always goes through `_write_quotation`, which restates `update_quotation`'s
+rules (`_quotation_edit_rule`): direct for draft/rejected and for the director,
+`file_or_revise` a `quotation_edit` approval for others on approved/sent/won.
+It applies via `_apply_quotation_changes`, so the PR follows and a posted
+quotation is restated. Customer PO lines now carry the quotation `line_no`
+(`CustomerPOItem.line_no`, sent by `SubmitCustomerPOModal`); older lines pair
+by normalised description. Sync rule change: `sync_from_price_request` now
+copies `cost_estimate` onto every live quotation and rewrites
+approved/sent/won quotations when the actor is the director (reprice, PATCH,
+approved revision). It's also called after supplier quotes are applied as
+cost. Tests: `test_deal_consistency.py`; the old "won quotation is left
+alone" expectations were rewritten in `test_pr_sync_matrix.py`,
+`test_pr_quotation_sync.py` and `test_pr_reprice.py`.
+
 **System log** — `models/login_event.py` (`LoginEvent`, `ActionLog`),
 `services/login_log.py`, `endpoints/system_log.py` (director only),
 `pages/SystemLog.tsx`, `lib/describeAction.ts`. Sign-in events are written in
@@ -1432,7 +1455,9 @@ documents per supplier on a multi-vendor job (each supplier its own delivery
 mode, invoice, packing list and customs papers), and the project page's
 supplier PO totals in the order's own currency. Then a director-only system
 log: every sign-in (failed and blocked included), sign-out and "View as",
-last seen per person, and every change request anyone made.
+last seen per person, and every change request anyone made. Then a deal check: price request, quotation, customer PO and the
+supplier documents compared on every page of the deal, with a one-click fix
+each way, and the director's request changes reaching approved/won quotations.
 
 ## 10. Open items
 
