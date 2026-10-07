@@ -1082,6 +1082,7 @@ export const ID_STATIC: Record<string, string> = {
   "more claim(s) in the verification queue.": "klaim lagi dalam antrean verifikasi.",
   "navigate": "navigasi",
   "new": "baru",
+  "removed": "dihapus",
   "new password (optional)": "kata sandi baru (opsional)",
   "no messages yet": "belum ada pesan",
   "of": "dari",

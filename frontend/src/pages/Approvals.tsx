@@ -577,6 +577,8 @@ interface PreviewShape {
     was_qty?: number | null; is_new?: boolean;
     /** Set on a purchasing cost revision: the figure this one replaces. */
     was_unit_price?: number | null;
+    /** A proposed quotation edit: the wording it replaces, or a line dropped. */
+    was_description?: string | null; is_removed?: boolean;
   }[];
   total: number | null;
   /** What the figures on this document are denominated in. A purchasing PO
@@ -699,11 +701,17 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                     </thead>
                     <tbody>
                       {p.items.map((it, i) => (
-                        <tr key={i} className="border-t border-ink-100">
+                        <tr key={i} className={clsx("border-t border-ink-100", it.is_removed && "line-through muted")}>
                           <td className="td">
+                            {it.was_description && it.was_description !== it.description && (
+                              <div className="muted line-through text-xs">{it.was_description}</div>
+                            )}
                             {it.description}
                             {it.is_new && (
                               <span className="chip bg-emerald-100 text-emerald-800 ml-1">{T("new")}</span>
+                            )}
+                            {it.is_removed && (
+                              <span className="chip bg-red-100 text-red-800 ml-1 no-underline">{T("removed")}</span>
                             )}
                           </td>
                           <td className="td text-right tabular-nums">

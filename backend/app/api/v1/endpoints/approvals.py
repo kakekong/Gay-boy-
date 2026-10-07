@@ -331,8 +331,21 @@ async def inbox(
             "uploaded_at": a.created_at,
         })
 
+    # Customer names for the quotation rows, so a row reads "QT-… · PT …".
+    q_cust_ids = {q.customer_id for q in all_quotes.values() if q.customer_id}
+    q_customers: dict[UUID, Customer] = {}
+    if q_cust_ids:
+        q_customers = {c.id: c for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_(q_cust_ids)))).all()}
+
     out = []
     for r in rows:
+        # Reset per row. It used to be set only in some branches, so a
+        # quotation row either showed the *previous* row's number (a supplier
+        # PO's, reading as if no quotation was waiting at all) or — when a
+        # quotation was the oldest request — raised before any branch had set
+        # it, failing the whole inbox, which the page showed as "inbox zero".
+        target_label = None
         cust = customers.get(r.target_id) if r.target_type == "customer" else None
         requester = requesters.get(r.requested_by)
         payload = dict(r.payload or {})
@@ -362,6 +375,9 @@ async def inbox(
         elif r.target_type in ("quotation", "discount", "quotation_edit"):
             qq = all_quotes.get(r.target_id)
             row_currency = (getattr(qq, "currency", None) or "IDR") if qq else "IDR"
+            if qq:
+                qc = q_customers.get(qq.customer_id)
+                target_label = qq.number + (f" · {qc.company_name}" if qc else "")
         elif r.target_type == "purchase_request":
             pp = prs.get(r.target_id)
             target_label = pp.number if pp else None
@@ -384,6 +400,14 @@ async def inbox(
         elif r.target_type in ("customer", "followup"):
             c = customers.get(r.target_id)
             target_label = c.company_name if c else None
+        elif r.target_type == "customer_po":
+            po = cpos.get(r.target_id)
+            if po:
+                target_label = po.number
+        elif r.target_type == "price_request_revision":
+            from app.models.price_request import PriceRequest as _PR
+            pq = await db.get(_PR, r.target_id)
+            target_label = pq.number if pq else None
         else:
             target_label = cust.company_name if cust else None
         out.append({
@@ -552,6 +576,63 @@ async def preview_request(
                         {"label": "Valid until", "value": str(q.valid_until or "—")}],
             )
             out["attachments"] += await _attachments_for(db, "quotation", q.id)
+
+    elif t == "quotation_edit":
+        # A proposed change to an approved quotation. It used to render as the
+        # request's one-line reason and nothing else — the director was asked
+        # to approve lines they could not see. Show the lines as they would
+        # be, each beside what it replaces, the way a cost revision is shown.
+        from app.models.quotation import Quotation, QuotationItem
+        q = await db.get(Quotation, tid)
+        if q:
+            cust = await db.get(Customer, q.customer_id) if q.customer_id else None
+            changes = (req.payload or {}).get("changes") or {}
+            now_rows = (await db.scalars(select(QuotationItem)
+                        .where(QuotationItem.quotation_id == q.id))).all()
+            current = {int(i.line_no): i for i in now_rows}
+            proposed = changes.get("items")
+            items = []
+            if proposed is not None:
+                seen = set()
+                for it in proposed:
+                    no = int(it.get("line_no") or 0)
+                    seen.add(no)
+                    old = current.get(no)
+                    qty, price = _money(it.get("qty")), _money(it.get("unit_price"))
+                    items.append({
+                        "description": it.get("description"),
+                        "was_description": old.description if old is not None else None,
+                        "qty": qty, "was_qty": _money(old.qty) if old is not None else None,
+                        "unit_price": price,
+                        "was_unit_price": _money(old.unit_price) if old is not None else None,
+                        "line_total": qty * price, "is_new": old is None,
+                    })
+                for no, old in sorted(current.items()):
+                    if no not in seen:
+                        items.append({"description": old.description, "qty": _money(old.qty),
+                                      "unit_price": _money(old.unit_price), "line_total": 0,
+                                      "is_removed": True})
+                sub = sum(i["line_total"] for i in items)
+                disc = float(changes.get("discount_pct", q.discount_pct) or 0)
+                tax = float(changes.get("tax_pct", q.tax_pct) or 0)
+                new_total = sub * (1 - disc / 100) * (1 + tax / 100)
+            else:
+                items = [{"description": i.description, "qty": _money(i.qty),
+                          "unit_price": _money(i.unit_price),
+                          "line_total": _money(i.qty) * _money(i.unit_price)} for i in now_rows]
+                new_total = _money(q.total)
+            other = [{"label": k.replace("_", " ").capitalize(), "value": str(v)}
+                     for k, v in changes.items() if k != "items"]
+            out.update(
+                title=f"{q.number} — proposed changes",
+                subtitle=cust.company_name if cust else None,
+                link=f"/quotations/{q.id}", notes=None,
+                currency=getattr(q, "currency", None) or "IDR",
+                total=new_total, items=items,
+                fields=[{"label": "Change requested by", "value": requester_name},
+                        {"label": "Status", "value": q.status},
+                        {"label": "Total now", "value": _rupiah(q.total)}] + other,
+            )
 
     elif t == "customer_po":
         from app.models.customer_po import CustomerPO
