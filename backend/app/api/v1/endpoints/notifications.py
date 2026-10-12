@@ -151,8 +151,8 @@ async def list_notifications(
                 CustomerPO.is_downpayment.is_(True),
                 CustomerPO.status == "pending_finance",
             )
-            .order_by(CustomerPO.created_at.asc())
-            .limit(20)
+            .order_by(CustomerPO.created_at.desc())
+            .limit(100)   # newest first; a queue must not drop new arrivals
         )).all()
         for po, c in dp_wait_fin:
             items.append({
@@ -174,8 +174,8 @@ async def list_notifications(
                 CustomerPO.is_downpayment.is_(True),
                 CustomerPO.status == "pending_payment_confirm",
             )
-            .order_by(CustomerPO.dp_finance_approved_at.asc().nullslast())
-            .limit(20)
+            .order_by(CustomerPO.dp_finance_approved_at.desc().nullslast())
+            .limit(100)   # newest first; a queue must not drop new arrivals
         )
         for po, c in (await db.execute(dp_wait_pay_stmt)).all():
             items.append({
@@ -280,8 +280,12 @@ async def list_notifications(
                 & (ApprovalRequest.decided_at >= now - timedelta(days=2))
             ),
         )
-        .order_by(ApprovalRequest.decided_at.desc())
-        .limit(20)
+        # Rejections first: they are work still owed. Newest-first alone let a
+        # run of routine "approved" notices (one per supplier PO edit) push a
+        # three-day-old rejection past the cap, and it vanished unfixed.
+        .order_by((ApprovalRequest.status == ApprovalStatus.REJECTED.value).desc(),
+                  ApprovalRequest.decided_at.desc())
+        .limit(40)
     )
     for a in (await db.scalars(decided_stmt)).all():
         approved = a.status == ApprovalStatus.APPROVED.value
@@ -362,8 +366,12 @@ async def list_notifications(
                 PriceRequest.is_deleted.is_(False),
                 PriceRequest.status == "pending_purchasing",
             )
-            .order_by(PriceRequest.updated_at.asc())
-            .limit(20)
+            # Newest first. This was oldest-first with a cap of 20, so once
+            # twenty requests were waiting every NEW one fell off the end and
+            # purchasing was never told it had arrived — the one item the
+            # alert exists for. The bell sorts by time anyway.
+            .order_by(PriceRequest.updated_at.desc())
+            .limit(100)
         )).all()
         for pr, c in pr_cost:
             items.append({
@@ -387,6 +395,31 @@ async def list_notifications(
     # needs nothing bought (stock already on the shelf) ages out after a
     # month rather than nagging forever. And it stays customer-blind — the
     # code and the price request number, never the company.
+    # 1c1. A new project, for the director: which customer, which customer
+    # PO, how much. News rather than a queue — it shows for three days and
+    # can be dismissed — and not for one the director opened themselves.
+    if role is Role.DIRECTOR:
+        fresh = (await db.execute(
+            select(Project, Customer)
+            .outerjoin(Customer, Project.customer_id == Customer.id)
+            .where(
+                Project.is_deleted.is_(False),
+                Project.created_at >= now - timedelta(days=3),
+                (Project.created_by.is_(None)) | (Project.created_by != me.id),
+            ).order_by(Project.created_at.desc()).limit(30)
+        )).all()
+        for pj, cu in fresh:
+            value = float(pj.po_value or 0)
+            items.append({
+                "id": f"project-dir:{pj.id}",
+                "kind": "project_created",
+                "severity": "medium",
+                "title": f"New project {pj.code}" + (f" — {cu.company_name}" if cu else ""),
+                "body": ((f"From customer PO {pj.po_number}" if pj.po_number else "New job")
+                         + (f" · Rp {value:,.0f}".replace(",", ".") if value else "")),
+                "link": f"/projects/{pj.id}",
+                "at": pj.created_at,
+            })
     if role is Role.PURCHASING:
         from app.models.purchasing import PurchaseRequest as _PR, SupplierPO as _SPO
         from app.models.price_request import PriceRequest as _PriceReq
@@ -427,8 +460,8 @@ async def list_notifications(
                 PriceRequest.is_deleted.is_(False),
                 PriceRequest.status == "pending_director",
             )
-            .order_by(PriceRequest.priced_at.asc().nullslast())
-            .limit(20)
+            .order_by(PriceRequest.priced_at.desc().nullslast())
+            .limit(100)   # newest first; a queue must not drop new arrivals
         )).all()
         for pr, c in pr_price:
             items.append({

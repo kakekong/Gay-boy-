@@ -12,6 +12,7 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import (
+    staff_except,
     Role,
     can_view_customer,
     filter_to_role_scope,
@@ -33,11 +34,12 @@ from app.services import storage
 from app.schemas.common import Page
 from app.schemas.customer import CustomerCreate, CustomerOut, CustomerUpdate
 
+# Closed to purchasing (kept customer-blind) and HR (people, not deals).
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
     # supplier, hierarchy tier 0) must never reach the CRM, pricing,
     # calendar or notification data — they have /portal/* instead.
-    dependencies=[Depends(require_min(Role.SALES))]
+    dependencies=[Depends(staff_except(Role.PURCHASING, Role.HR))]
 )
 
 

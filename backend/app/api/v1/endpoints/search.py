@@ -144,21 +144,35 @@ async def search(
 
     # Who can be offered what. Each set mirrors the roles that can open the
     # page the result links to.
-    sees_purchasing = role in (Role.PURCHASING, Role.ADMIN, Role.MANAGER, Role.DIRECTOR)
+    # Not admin: admin is kept off the vendor side everywhere else.
+    sees_purchasing = role in (Role.PURCHASING, Role.MANAGER, Role.DIRECTOR)
     sees_supplier_po = role in (Role.PURCHASING, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
     sees_finance = role in (Role.FINANCE, Role.ADMIN, Role.MANAGER, Role.DIRECTOR)
+    # The customer side. Purchasing is kept customer-blind everywhere else —
+    # the price request page hides the company, the project page hides the
+    # customer's PO — and this box handed it all back: type "pt" and every
+    # customer in the book came up, with their quotations and POs. HR and
+    # admin don't work the customer list either. Each set is the roles whose
+    # sidebar opens that page (Shell.tsx: nav roles + ROLE_PAGE_ALLOWLIST).
+    sees_customers = role in (Role.SALES, Role.MANAGER, Role.DIRECTOR)
+    sees_quotations = role in (Role.SALES, Role.MANAGER, Role.DIRECTOR)
+    sees_customer_pos = role in (Role.SALES, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
+    sees_projects = role is not Role.HR
+    sees_inventory = role in (Role.PURCHASING, Role.ADMIN, Role.MANAGER, Role.DIRECTOR)
+    # Purchasing may find a request or a job, but never learn whose it is.
+    customer_blind = role is Role.PURCHASING
 
     # ── Customers ────────────────────────────────────────────────────────
-    c_stmt = (
+    c_stmt = None if not sees_customers else (
         select(Customer)
         .where(Customer.is_deleted.is_(False))
         .where(or_(Customer.company_name.ilike(like), Customer.pic_name.ilike(like)))
         .order_by(Customer.company_name.asc())
         .limit(limit)
     )
-    if is_sales:
+    if c_stmt is not None and is_sales:
         c_stmt = c_stmt.where(Customer.sales_pic_id == me.id)
-    add("Customers", [
+    add("Customers", [] if c_stmt is None else [
         {
             "id": str(c.id),
             "label": c.company_name,
@@ -185,7 +199,8 @@ async def search(
         if is_sales:
             pr_stmt = pr_stmt.where(PriceRequest.sales_pic_id == me.id)
         prs = (await db.scalars(pr_stmt)).all()
-        cust_names = await _customer_names(db, [p.customer_id for p in prs])
+        cust_names = ({} if customer_blind
+                      else await _customer_names(db, [p.customer_id for p in prs]))
         add("Price requests", [
             {
                 "id": str(p.id),
@@ -205,7 +220,7 @@ async def search(
         .where(QuotationItem.description.ilike(like))
         .scalar_subquery()
     )
-    q_stmt = (
+    q_stmt = None if not sees_quotations else (
         select(Quotation)
         .where(or_(
             _number_match(Quotation.number, term),
@@ -215,9 +230,9 @@ async def search(
         .order_by(Quotation.created_at.desc())
         .limit(limit)
     )
-    if is_sales:
+    if q_stmt is not None and is_sales:
         q_stmt = q_stmt.where(Quotation.sales_pic_id == me.id)
-    quotations = (await db.scalars(q_stmt)).all()
+    quotations = (await db.scalars(q_stmt)).all() if q_stmt is not None else []
     q_lines = await _quotation_lines(db, [qt.id for qt in quotations], like)
     add("Quotations", [
         {
@@ -230,7 +245,7 @@ async def search(
     ])
 
     # ── Customer POs ─────────────────────────────────────────────────────
-    cpo_stmt = (
+    cpo_stmt = None if not sees_customer_pos else (
         select(CustomerPO)
         .where(or_(
             _number_match(CustomerPO.number, term),
@@ -240,10 +255,10 @@ async def search(
         .order_by(CustomerPO.created_at.desc())
         .limit(limit)
     )
-    if is_sales:
+    if cpo_stmt is not None and is_sales:
         cpo_stmt = cpo_stmt.where(CustomerPO.customer_id.in_(
             select(Customer.id).where(Customer.sales_pic_id == me.id)))
-    cpos = (await db.scalars(cpo_stmt)).all()
+    cpos = (await db.scalars(cpo_stmt)).all() if cpo_stmt is not None else []
     cpo_names = await _customer_names(db, [p.customer_id for p in cpos])
     add("Customer POs", [
         {
@@ -257,29 +272,31 @@ async def search(
     ])
 
     # ── Projects ─────────────────────────────────────────────────────────
-    p_stmt = (
+    p_stmt = None if not sees_projects else (
         select(Project)
         .where(Project.is_deleted.is_(False))
         .where(or_(
             _number_match(Project.code, term),
-            _number_match(Project.po_number, term),
+            # The customer's PO number names the customer in all but words;
+            # purchasing finds a job by its own code only.
+            *(() if customer_blind else (_number_match(Project.po_number, term),)),
         ))
         .order_by(Project.created_at.desc())
         .limit(limit)
     )
-    if is_sales:
+    if p_stmt is not None and is_sales:
         p_stmt = p_stmt.where(Project.customer_id.in_(
             select(Customer.id).where(Customer.sales_pic_id == me.id)))
-    add("Projects", [
+    add("Projects", [] if p_stmt is None else [
         {
             "id": str(p.id),
             "label": p.code,
-            "sublabel": _join(p.status, p.po_number),
+            "sublabel": _join(p.status, None if customer_blind else p.po_number),
             # This used to point at the list rather than the project, so
             # every project result landed you on the same page.
             "link": f"/projects/{p.id}",
         }
-        for p in (await db.scalars(p_stmt)).all()
+        for p in ((await db.scalars(p_stmt)).all() if p_stmt is not None else [])
     ])
 
     # ── Invoices ─────────────────────────────────────────────────────────
@@ -383,7 +400,7 @@ async def search(
         .order_by(InventoryItem.name.asc())
         .limit(limit)
     )
-    add("Inventory", [
+    add("Inventory", [] if not sees_inventory else [
         {
             "id": str(it.id),
             "label": f"{it.sku} · {it.name}",
@@ -412,8 +429,10 @@ async def search(
             for u in (await db.scalars(u_stmt)).all()
         ])
 
-    # ── Chart of accounts (admin + director) ─────────────────────────────
-    if role in (Role.ADMIN, Role.DIRECTOR):
+    # ── Chart of accounts — the roles that keep the books ────────────────
+    # (Admin had it here, but admin's pages stop at operations; finance, who
+    # actually opens the chart, did not.)
+    if role in (Role.FINANCE, Role.MANAGER, Role.DIRECTOR):
         a_stmt = (
             select(Account)
             .where(or_(_number_match(Account.account_no, term),

@@ -21,7 +21,7 @@ from app.core.audit import record as audit_record
 from app.services.quotation_sync import sync_from_price_request
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require_min, sales_may_see, sales_scope
+from app.core.permissions import Role, require_min, sales_may_see, sales_scope, staff_except
 from app.models.crm import Customer
 from app.models.inventory import (
     CATEGORIES,
@@ -35,7 +35,8 @@ from app.models.user import User
 from app.services.numbering import next_price_request_number
 
 # Internal-only (sales tier and up); tier-0 externals (customer/supplier) blocked.
-router = APIRouter(dependencies=[Depends(require_min(Role.SALES))])
+# Closed to HR. Purchasing costs these, customer-blind (see _serialize).
+router = APIRouter(dependencies=[Depends(staff_except(Role.HR))])
 
 # Who fills the buying cost. Admin is deliberately absent: they run the
 # customer side of a job and may not see what the goods cost us, so they
@@ -790,6 +791,15 @@ async def submit_price_request(
                        entity_id=pr.id,
                        after={"status": pr.status, "catalogued": skus})
     await db.flush()
+    # Tell purchasing now, on their phones — not on the sweeper's next tick.
+    # Customer-blind, like their bell: the number and the size, no company.
+    from app.services.role_push import push_to_role
+    from app.services.webpush import fire_and_forget
+    n = len(pr.items or [])
+    fire_and_forget(push_to_role(
+        "purchasing", title=f"New price request to cost: {pr.number}",
+        body=f"{n} line{'s' if n != 1 else ''} waiting for your cost",
+        url=f"/price-requests?open={pr.id}", item_id=f"pr-cost:{pr.id}"))
     return await _serialize(db, pr, Role(user.role))
 
 

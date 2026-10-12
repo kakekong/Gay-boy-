@@ -55,6 +55,24 @@ def require_min(role: Role):
     return _dep
 
 
+def staff_except(*barred: Role):
+    """Staff (sales and up), minus the roles a whole area is closed to.
+
+    The internal routers used to gate on `require_min(Role.SALES)` alone, which
+    lets every staff role in. Purchasing is kept customer-blind and HR works
+    people, not deals, so the CRM side closes to them by name here, where the
+    router is declared, rather than being trusted to the sidebar.
+    """
+    barred_set = {Role(b) for b in barred}
+
+    async def _dep(user: User = Depends(get_current_user)) -> User:
+        if not at_least(Role.SALES, user.role) or Role(user.role) in barred_set:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not available for your role")
+        return user
+
+    return _dep
+
+
 def can_view_customer(user: User, sales_pic_id) -> bool:
     """Sales sees only their own customers; everyone else sees all."""
     if Role(user.role) == Role.SALES:

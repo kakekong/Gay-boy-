@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai import deal_risk, profit_engine, smart_reminder
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require_min
+from app.core.permissions import Role, require, require_min
 from app.models.crm import Customer
 from app.models.quotation import Quotation
 from app.models.user import User
@@ -144,7 +144,9 @@ async def my_queue(
 @router.get("/ai-command")
 async def ai_command(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    # The selling side: it lists at-risk deals by customer. Purchasing (kept
+    # customer-blind) and HR could read it; their pages never link here.
+    user: User = Depends(require(Role.SALES, Role.MANAGER, Role.DIRECTOR)),
 ):
     # Sales only ever see their own data — their personal priority actions,
     # but none of the company-wide analytics (other reps' at-risk deals,

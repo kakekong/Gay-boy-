@@ -92,7 +92,41 @@ async def create_project(
     )
     db.add(project)
     await db.flush()
+    await _announce(db, project, user, po)
     return project
+
+
+async def _announce(db: AsyncSession, project: Project, user: User,
+                    po: CustomerPO | None) -> None:
+    """Tell the people a new job starts work for — on their phones, now.
+
+    The director hears which customer and how much. Purchasing hears that
+    there is a job to source and which price request it came from — never the
+    customer, the same wall as everywhere else on their side. The bell rows
+    (`notifications.py`, `project-dir:` and `project-new:`) use the same ids,
+    so the 15-minute sweeper does not send these twice. Whoever opened the
+    project is left out: they know.
+    """
+    from app.models.crm import Customer
+    from app.models.price_request import PriceRequest
+    from app.services.role_push import after_commit, push_to_role
+
+    cust = await db.get(Customer, project.customer_id) if project.customer_id else None
+    pr = await db.get(PriceRequest, project.price_request_id) if project.price_request_id else None
+    value = float(project.po_value or 0)
+    money = f" · Rp {value:,.0f}".replace(",", ".") if value else ""
+    url = f"/projects/{project.id}"
+    code, actor = project.code, user.id
+    dir_title = f"New project {code}" + (f" — {cust.company_name}" if cust else "")
+    dir_body = ((f"From customer PO {po.number}" if po else "New job") + money)
+    pur_body = ("Nothing ordered against it yet"
+                + (f" · from price request {pr.number}" if pr else ""))
+    after_commit(db, lambda: push_to_role(
+        "director", title=dir_title, body=dir_body, url=url,
+        item_id=f"project-dir:{project.id}", exclude_user_id=actor))
+    after_commit(db, lambda: push_to_role(
+        "purchasing", title=f"New job to source: {code}", body=pur_body, url=url,
+        item_id=f"project-new:{project.id}", exclude_user_id=actor))
 
 
 async def ensure_project_for_quotation(

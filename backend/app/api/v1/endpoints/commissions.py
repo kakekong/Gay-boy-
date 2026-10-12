@@ -28,18 +28,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
-from app.core.permissions import Role, require
+from app.core.permissions import Role, require, require_min
 from app.models.commission import (
-    CommissionClaim, DEFAULT_RATE_PCT, LIVE_STATUSES,
+    DEFAULT_RATE_PCT,
+    LIVE_STATUSES,
+    CommissionClaim,
 )
 from app.models.crm import Customer
 from app.models.operation import Project
 from app.models.user import User
 from app.services.commission import (
-    claim_out, claims_for_projects, collected_for_projects,
+    claim_out,
+    claims_for_projects,
+    collected_for_projects,
 )
 
-router = APIRouter()
+# Staff only — portal (customer/supplier) logins never reach this.
+router = APIRouter(dependencies=[Depends(require_min(Role.SALES))])
 
 # Filing one is the rep's own act, or somebody doing it for them. Deciding it
 # is the director's, like every other figure that leaves the company.
