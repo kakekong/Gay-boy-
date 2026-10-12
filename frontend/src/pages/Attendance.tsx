@@ -12,6 +12,7 @@ import {
   DailyLogSection, DailyLogHistory, TeamDailyLogs,
 } from "@/components/DailyLogSection";
 import { T, locale, t as tt } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface AttendanceRow {
   id: string;
@@ -69,7 +70,7 @@ export default function AttendancePage() {
   const today = useQuery({
     queryKey: ["attendance-today"],
     queryFn: () => api.get("/attendance/me/today").then((r) => r.data),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   const myHistory = useQuery({

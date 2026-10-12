@@ -5,12 +5,13 @@ import {
 import { api } from "@/api/client";
 import { RiskFlag } from "@/components/RiskFlag";
 import { T, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 export default function AICommandCenter() {
   const q = useQuery({
     queryKey: ["ai-command"],
     queryFn: () => api.get("/dashboard/ai-command").then((r) => r.data),
-    refetchInterval: 60_000,
+    refetchInterval: poll(60_000),
   });
   const idr = (n: number) =>
     "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));

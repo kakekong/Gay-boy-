@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
-import "./store/theme";  // applies the persisted dark/light class at boot
+import "./store/theme";
+import { startActivityWatch } from "./lib/activity";  // applies the persisted dark/light class at boot
 
 // After a deploy, an open tab may lazy-load a chunk that no longer exists
 // (the server answers with HTML → "not a valid JavaScript MIME type").
@@ -23,6 +24,8 @@ window.addEventListener("vite:preloadError", (e) => {
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
+// Polling stops while nobody is at the screen (see lib/activity.ts).
+startActivityWatch(qc);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

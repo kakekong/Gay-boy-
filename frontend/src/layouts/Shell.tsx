@@ -22,6 +22,7 @@ import { NotificationsBell } from "@/components/NotificationsBell";
 import { FeedbackButton } from "@/components/FeedbackButton";
 import { NotificationBanner, NotificationStripe } from "@/components/NotificationBanner";
 import { exitViewAs } from "@/lib/viewAs";
+import { poll } from "@/lib/activity";
 
 interface NavItem {
   to: string;
@@ -362,90 +363,29 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   useTrackNavHistory();
 
-  const unread = useQuery({
-    queryKey: ["chat-unread"],
-    queryFn: () => api.get("/chat/unread").then((r) => r.data.unread as number),
-    refetchInterval: 15_000,
-    enabled: !!user,
-  });
-
-  // Unread @mentions. Every role gets this one — anyone can be pulled into a
-  // conversation, including on a document they cannot open.
-  const mentions = useQuery({
-    queryKey: ["mentions-unread"],
-    queryFn: () => api.get("/comments/mentions", { params: { unread_only: true } })
-      .then((r) => (Array.isArray(r.data) ? r.data.length : 0)),
-    refetchInterval: 30_000,
-    enabled: !!user,
-  });
-
-  // Role-scoped sidebar counters — surface each queue's pending pile as
-  // a red badge on the item it lives under. Same 30s cadence as the
-  // notification bell so both surfaces stay in sync.
+  // Every sidebar badge in one request, once a minute, and not at all once
+  // nobody is at the screen (lib/activity). It used to be eight separate
+  // queries on 15–30 second timers, on every page, for everyone — which kept
+  // the serverless database awake (and billed) whenever a tab was open.
+  // `/nav/badges` answers from the same handlers the pages use.
   const role = user?.role ?? "";
-  const canSeePendingInvoices = ["finance", "manager", "director"].includes(role);
-  const canSeePendingClaims   = ["finance", "manager", "director"].includes(role);
-  // GET /approvals accepts finance too, and scopes the list to the requests
-  // addressed to them — the DP customer POs and mark-won. The old comment
-  // here said the endpoint was manager/director-only and that polling it as
-  // finance would 403; that stopped being true when DP POs started routing to
-  // finance, and it left them with a queue nothing counted.
-  const canSeePendingApprovals = ["manager", "director", "finance"].includes(role);
-  // The DP customer-PO queue is finance's from end to end: they approve the
-  // PO, invoice it, and then say whether the money arrived. Sales no longer
-  // has a step here, so no longer has a badge.
-  const dpQueueStatus =
-    role === "finance" || role === "director" ? "pending_finance" : null;
-
-  const pendingInvoices = useQuery({
-    queryKey: ["nav-pending-invoices"],
-    queryFn: () => api.get("/finance/invoices/pending")
-      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
-    refetchInterval: 30_000,
-    enabled: !!user && canSeePendingInvoices,
+  const nb = useQuery({
+    queryKey: ["nav-badges"],
+    queryFn: () => api.get("/nav/badges").then((r) => r.data as Record<string, number | null>),
+    refetchInterval: poll(60_000),
+    enabled: !!user,
   });
-  const pendingClaims = useQuery({
-    queryKey: ["nav-pending-claims"],
-    queryFn: () => api.get("/payments/claims", { params: { status_eq: "pending" } })
-      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
-    refetchInterval: 30_000,
-    enabled: !!user && canSeePendingClaims,
-  });
-  const pendingApprovals = useQuery({
-    queryKey: ["nav-pending-approvals"],
-    queryFn: () => api.get("/approvals")
-      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
-    refetchInterval: 30_000,
-    enabled: !!user && canSeePendingApprovals,
-  });
-  // Status-based decision docs (drawings, shipping docs, delivery proofs,
-  // pending-director PRs) — counted into the same Approvals badge so the
-  // sidebar number reflects EVERYTHING waiting on a decision.
-  const pendingDocs = useQuery({
-    queryKey: ["nav-pending-docs"],
-    queryFn: () => api.get("/approvals/pending-documents")
-      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
-    refetchInterval: 30_000,
-    enabled: !!user && canSeePendingApprovals,
-  });
-  // Jobs this person could claim commission on right now. Everyone who can
-  // open the page has their own figure, so there is no role gate beyond the
-  // nav item's — the endpoint answers for whoever is asking.
-  const canClaimCommission = ["sales", "manager", "director"].includes(role);
-  const claimableCommission = useQuery({
-    queryKey: ["nav-commission-claimable"],
-    queryFn: () => api.get("/commissions/summary")
-      .then((r) => Number(r.data?.totals?.claimable_jobs) || 0),
-    refetchInterval: 30_000,
-    enabled: !!user && canClaimCommission,
-  });
-  const pendingDp = useQuery({
-    queryKey: ["nav-pending-dp", dpQueueStatus],
-    queryFn: () => api.get("/customer-pos", { params: { status_eq: dpQueueStatus } })
-      .then((r) => Array.isArray(r.data) ? r.data.length : 0),
-    refetchInterval: 30_000,
-    enabled: !!user && !!dpQueueStatus,
-  });
+  // The shapes the badges and the banner below read: a count and whether it
+  // has answered yet.
+  const part = (k: string) => ({ data: (nb.data?.[k] ?? 0) as number, isPending: nb.isPending });
+  const unread = part("chat_unread");
+  const mentions = part("mentions_unread");
+  const pendingInvoices = part("pending_invoices");
+  const pendingClaims = part("pending_claims");
+  const pendingApprovals = part("pending_approvals");
+  const pendingDocs = part("pending_documents");
+  const claimableCommission = part("commission_claimable");
+  const pendingDp = part("pending_dp");
 
   const badges: Record<string, number> = {
     "chat-unread": unread.data ?? 0,
@@ -465,7 +405,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const notif = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.get("/notifications").then((r) => r.data),
-    refetchInterval: 30_000,
+    refetchInterval: poll(60_000),
     enabled: !!user,
   });
   // Keep the ids, not just the tally. Marking a section read has to clear
@@ -913,6 +853,45 @@ export function Shell({ children }: { children: React.ReactNode }) {
               link: "/customer-pos",
               severity: "high" as const,
             },
+            // Price requests that need this person's move — purchasing to
+            // cost, the director to price. Read off the bell's own items, so
+            // it costs no extra request; a rise slides in with the chime like
+            // the approval queue does. (Before, a new request only ever
+            // showed up as a silent number on the bell.)
+            ...(role === "purchasing" || role === "director" ? [{
+              key: "pr-action",
+              count: ((notif.data?.items ?? []) as { id: string }[]).filter((i) =>
+                i.id.startsWith(role === "purchasing" ? "pr-cost:" : "pr-price:")).length,
+              loaded: !notif.isPending,
+              title: role === "purchasing"
+                ? t("Price requests to cost", "Permintaan harga untuk dihitung biayanya")
+                : t("Price requests to price", "Permintaan harga untuk diberi harga jual"),
+              body: (n: number) => role === "purchasing"
+                ? t(`${n} price request${n === 1 ? "" : "s"} waiting for your cost.`,
+                    `${n} permintaan harga menunggu biaya dari Anda.`)
+                : t(`${n} price request${n === 1 ? "" : "s"} costed and waiting for your sell price.`,
+                    `${n} permintaan harga sudah dihitung biayanya, menunggu harga jual Anda.`),
+              link: "/price-requests",
+              severity: "high" as const,
+            }] : []),
+            // A new project — the start of purchasing's sourcing and the
+            // director's view of what was just won. Also off the bell's items.
+            ...(role === "purchasing" || role === "director" ? [{
+              key: "project-new",
+              count: ((notif.data?.items ?? []) as { id: string }[]).filter((i) =>
+                i.id.startsWith(role === "purchasing" ? "project-new:" : "project-dir:")).length,
+              loaded: !notif.isPending,
+              title: role === "purchasing"
+                ? t("New jobs to source", "Pekerjaan baru untuk dibelikan")
+                : t("New projects", "Proyek baru"),
+              body: (n: number) => role === "purchasing"
+                ? t(`${n} new job${n === 1 ? "" : "s"} with nothing ordered yet.`,
+                    `${n} pekerjaan baru belum ada pesanan.`)
+                : t(`${n} new project${n === 1 ? "" : "s"} opened.`,
+                    `${n} proyek baru dibuka.`),
+              link: "/projects",
+              severity: "high" as const,
+            }] : []),
             {
               key: "chat-unread",
               count: unread.data ?? 0,

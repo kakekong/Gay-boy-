@@ -10,6 +10,7 @@ import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
 import { MessageQuote } from "@/components/MessageQuote";
 import { useAuthStore } from "@/store/auth";
 import { T, locale, t as tt } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface Channel {
   id: string;
@@ -104,14 +105,14 @@ export default function ChatPage() {
   const channels = useQuery({
     queryKey: ["chat-channels"],
     queryFn: () => api.get("/chat/channels").then((r) => r.data as Channel[]),
-    refetchInterval: 8_000,
+    refetchInterval: poll(8_000),
   });
 
   const messages = useQuery({
     queryKey: ["chat-messages", active],
     queryFn: () => api.get(`/chat/channels/${active}/messages`).then((r) => r.data as Message[]),
     enabled: !!active,
-    refetchInterval: 5_000,
+    refetchInterval: poll(5_000),
   });
 
   const contacts = useQuery({
@@ -132,7 +133,7 @@ export default function ChatPage() {
     if (!active) return;
     api.post(`/chat/channels/${active}/read`).then(() => {
       qc.invalidateQueries({ queryKey: ["chat-channels"] });
-      qc.invalidateQueries({ queryKey: ["chat-unread"] });
+      qc.invalidateQueries({ queryKey: ["nav-badges"] });
     });
   }, [active, messages.data?.length, qc]);
 

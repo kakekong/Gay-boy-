@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { LoadMore } from "@/components/LoadMore";
 import { T, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface AuditRow {
   id: string;
@@ -63,7 +64,7 @@ export default function AuditLogPage() {
     }).then((r) => r.data as AuditRow[]),
     placeholderData: (prev, prevQuery) =>
       prevQuery?.queryKey[1] === entity && prevQuery?.queryKey[2] === action ? prev : undefined,
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   const visible = (rows.data ?? []).filter((r) => {

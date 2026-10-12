@@ -357,6 +357,50 @@ async def sweep_once(db: AsyncSession) -> int:
     return total
 
 
+def seconds_until_active(now=None) -> float:
+    """0 inside the sweeper's working window, else how long until it opens.
+
+    Read from WEBPUSH_ACTIVE_HOURS / WEBPUSH_ACTIVE_DAYS in the office's time
+    zone. Computed without any database access — the whole point is that the
+    database is left alone outside the window.
+    """
+    from datetime import datetime, time as dtime, timedelta
+    from zoneinfo import ZoneInfo
+    from app.core.config import settings
+
+    spec = (settings.WEBPUSH_ACTIVE_HOURS or "").strip()
+    days_spec = (settings.WEBPUSH_ACTIVE_DAYS or "").strip()
+    if not spec and not days_spec:
+        return 0.0
+    tz = ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")
+    now = (now or datetime.now(tz)).astimezone(tz)
+    try:
+        a, b = (spec or "00:00-24:00").split("-")
+        start = dtime.fromisoformat(a.strip())
+        end_s = b.strip()
+        end = dtime.max if end_s in ("24:00", "24:00:00") else dtime.fromisoformat(end_s)
+        days = ({int(x) for x in days_spec.split(",") if x.strip()}
+                if days_spec else set(range(7)))
+    except (ValueError, TypeError):
+        log.warning("WEBPUSH_ACTIVE_HOURS/DAYS unreadable (%r / %r) — sweeping always",
+                    spec, days_spec)
+        return 0.0
+    if not days:
+        return 0.0
+    if now.weekday() in days and start <= now.time() < end:
+        return 0.0
+    # Next opening: today if we're before it on a working day, else the next
+    # working day's start.
+    for add in range(0, 8):
+        d = (now + timedelta(days=add)).date()
+        if d.weekday() not in days:
+            continue
+        opening = datetime.combine(d, start, tzinfo=tz)
+        if opening > now:
+            return (opening - now).total_seconds()
+    return 3600.0
+
+
 async def sweeper_loop(interval: int | None = None,
                        idle_interval: int | None = None) -> None:
     """Background task: run sweep_once forever, one runner per deployment.
@@ -396,6 +440,13 @@ async def sweeper_loop(interval: int | None = None,
     last_prune: float | None = None
     while True:
         nap = interval
+        closed = seconds_until_active()
+        if closed > 0:
+            # Outside the working window: sleep without touching the
+            # database. Capped at an hour so a changed setting or clock is
+            # picked up without a restart.
+            await asyncio.sleep(min(closed, 3600))
+            continue
         try:
             async with SessionLocal() as db:
                 got = (await db.execute(

@@ -26,6 +26,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { T, t, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -45,7 +46,7 @@ export default function PaymentVerificationPage() {
     queryFn: () => api.get("/payments/claims", {
       params: { status_eq: filter || undefined },
     }).then((r) => r.data as any[]),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   // The verify path fans out into invoice status, project status, ledger

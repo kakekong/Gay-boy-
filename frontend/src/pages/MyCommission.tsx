@@ -104,7 +104,7 @@ export default function MyCommissionPage() {
       }),
     onSuccess: (_r, row) => {
       qc.invalidateQueries({ queryKey: ["commission-summary"] });
-      qc.invalidateQueries({ queryKey: ["nav-commission-claimable"] });
+      qc.invalidateQueries({ queryKey: ["nav-badges"] });
       setFlash(t(
         `Claimed ${idr(row.amount)} on ${row.project_code}. It is with the director now.`,
         `${idr(row.amount)} diklaim untuk ${row.project_code}. Sekarang di direktur.`));

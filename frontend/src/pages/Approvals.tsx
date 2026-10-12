@@ -11,6 +11,7 @@ import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { GeneratedSheetModal } from "@/components/GeneratedSheetModal";
 import { T, locale, t as tt } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface ApprovalAttachment {
   id: string;
@@ -54,7 +55,7 @@ export default function ApprovalsPage() {
   const q = useQuery({
     queryKey: ["approvals"],
     queryFn: () => api.get("/approvals").then((r) => r.data as ApprovalRow[]),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   // Documents that need your decision but live OUTSIDE the request system —
@@ -65,7 +66,7 @@ export default function ApprovalsPage() {
     queryFn: () => api.get("/approvals/pending-documents").then((r) => r.data as Array<{
       kind: string; title: string; body: string; link: string; at: string | null;
     }>),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   const decide = useMutation({
@@ -81,6 +82,7 @@ export default function ApprovalsPage() {
       qc.invalidateQueries({ queryKey: ["quotations"] });
       qc.invalidateQueries({ queryKey: ["customer"] });
       qc.invalidateQueries({ queryKey: ["notifications"] });
+      qc.invalidateQueries({ queryKey: ["nav-badges"] });   // the sidebar count drops now, not in a minute
       const applied = data?.applied;
       let detail = "";
       if (applied?.new_status) {

@@ -9,6 +9,7 @@ import { api } from "@/api/client";
 import { LoadMore } from "@/components/LoadMore";
 import { describeAction } from "@/lib/describeAction";
 import { useT, t as tt, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 /**
  * The director's system log: who has been in the system, when, from where —
@@ -135,7 +136,7 @@ function PeopleTab({ onOpen }: { onOpen: (p: Person) => void }) {
   const people = useQuery({
     queryKey: ["system-log", "people"],
     queryFn: () => api.get("/system-log/people").then((r) => r.data as Person[]),
-    refetchInterval: 60_000,
+    refetchInterval: poll(60_000),
   });
   const rows = (people.data ?? []).filter((p) =>
     !q || `${p.full_name} ${p.email} ${p.role}`.toLowerCase().includes(q.toLowerCase()));
@@ -230,7 +231,7 @@ function SignInsTab() {
       date_from: from || undefined, date_to: to || undefined, limit: shown,
     } }).then((r) => r.data as { total: number; items: SignIn[] }),
     placeholderData: (prev) => prev,
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   const items = list.data?.items ?? [];
 
@@ -369,7 +370,7 @@ function ActivityTab() {
       date_from: from || undefined, date_to: to || undefined, limit: shown,
     } }).then((r) => r.data as { total: number; items: Action[] }),
     placeholderData: (prev) => prev,
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   const items = list.data?.items ?? [];
 

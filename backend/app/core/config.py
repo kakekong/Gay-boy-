@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     # inline by an event (a mention, a new discussion message) still go out.
     WEBPUSH_SWEEP_SECONDS: int = 900
     WEBPUSH_IDLE_SECONDS: int = 3600
+    # ...and only during the working day (TIMEZONE). Outside these hours the
+    # sweeper does not touch the database at all, so the compute can sleep
+    # through the night and the weekend: a tick every 15 minutes overnight
+    # was keeping it awake about a third of every night hour, every night,
+    # to deliver alerts nobody reads at 3 a.m. Whatever piled up goes out on
+    # the first tick of the morning. Pushes raised by an event (a mention, a
+    # chat message) are not affected — they go out whenever the event happens.
+    # Days are Python weekdays (0 = Monday); "" or "00:00-24:00" = always.
+    WEBPUSH_ACTIVE_HOURS: str = "07:00-19:00"
+    WEBPUSH_ACTIVE_DAYS: str = "0,1,2,3,4,5"
 
     # Misc
     DEFAULT_CURRENCY: str = "IDR"

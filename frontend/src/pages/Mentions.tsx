@@ -9,6 +9,7 @@ import { api } from "@/api/client";
 import { ForwardDialog, type ForwardSource } from "@/components/ForwardDialog";
 import { MessageQuote } from "@/components/MessageQuote";
 import { useT, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface Mention {
   id: string;
@@ -60,7 +61,7 @@ export default function MentionsPage() {
   const q = useQuery({
     queryKey: ["mentions"],
     queryFn: () => api.get("/comments/mentions").then((r) => r.data as Mention[]),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   const markRead = useMutation({

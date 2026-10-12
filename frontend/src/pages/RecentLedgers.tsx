@@ -4,6 +4,7 @@ import { BookOpen, RefreshCw, FileText, Building2 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { T, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface LedgerEntry {
   posted_at: string;
@@ -33,7 +34,7 @@ export default function RecentLedgersPage() {
     queryFn: () =>
       api.get("/ledger/recent", { params: { limit: 100 } })
         .then((r) => r.data as { entries: LedgerEntry[]; count: number }),
-    refetchInterval: 60_000,
+    refetchInterval: poll(60_000),
   });
 
   const entries = q.data?.entries ?? [];

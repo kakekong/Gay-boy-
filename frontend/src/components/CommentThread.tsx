@@ -11,6 +11,7 @@ import { MessageQuote } from "@/components/MessageQuote";
 import { useFormDraft } from "@/lib/draft";
 import { useAuthStore } from "@/store/auth";
 import { useT, T, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 interface Mentioned { id: string; name: string }
 interface Comment {
@@ -155,7 +156,7 @@ export function CommentThread({
     queryFn: () => api.get("/comments", {
       params: { owner_type: ownerType, owner_id: ownerId },
     }).then((r) => r.data as Comment[]),
-    refetchInterval: 20_000,
+    refetchInterval: poll(20_000),
   });
 
   const send = useMutation({

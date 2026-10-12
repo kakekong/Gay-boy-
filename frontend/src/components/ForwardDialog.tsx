@@ -73,7 +73,7 @@ export function ForwardDialog({
     ).then((r) => r.data as { count: number }),
     onSuccess: (d) => {
       qc.invalidateQueries({ queryKey: ["chat-channels"] });
-      qc.invalidateQueries({ queryKey: ["chat-unread"] });
+      qc.invalidateQueries({ queryKey: ["nav-badges"] });
       qc.invalidateQueries({ queryKey: ["forward-targets"] });
       onSent?.(d.count);
       onClose();

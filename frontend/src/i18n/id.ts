@@ -114,7 +114,7 @@ export const ID_STATIC: Record<string, string> = {
   "Audit log": "Log audit",
   "Auto-approved": "Disetujui otomatis",
   "Auto-generated if blank (PO-YYMMDD-NNN)": "Dibuat otomatis jika kosong (PO-YYMMDD-NNN)",
-  "Auto-refreshes every 30 seconds. Click any item to act on it.": "Diperbarui otomatis setiap 30 detik. Klik item mana pun untuk menindaklanjuti.",
+  "Auto-refreshes every minute while you are here. Click any item to act on it.": "Diperbarui otomatis setiap menit selama Anda di sini. Klik item mana pun untuk menindaklanjuti.",
   "Avg lead": "Rata-rata lead",
   "Avg lead time": "Rata-rata lead time",
   "Back": "Kembali",

@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { t as tt, T } from "@/store/lang";
 import { isPushSupported, subscribePush, unsubscribePush } from "@/lib/push";
+import { poll } from "@/lib/activity";
 
 interface NotificationItem {
   id: string;
@@ -192,7 +193,7 @@ export function NotificationsBell() {
       items: NotificationItem[];
       counts: { total: number; high: number; medium: number; low: number };
     }),
-    refetchInterval: 30_000,
+    refetchInterval: poll(60_000),
   });
 
   // Optimistically remove item(s) from the cached payload so the row
@@ -320,7 +321,7 @@ export function NotificationsBell() {
             <PushToggleRow />
 
             <div className="border-t border-ink-100 px-4 py-2 text-[11px] muted text-center">
-              {T("Auto-refreshes every 30 seconds. Click any item to act on it.")}</div>
+              {T("Auto-refreshes every minute while you are here. Click any item to act on it.")}</div>
           </div>
         </>
       )}

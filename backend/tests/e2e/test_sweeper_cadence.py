@@ -36,7 +36,7 @@ class Stop(Exception):
     """Ends the loop after we have watched enough of it."""
 
 
-async def run_loop(ticks: int, **kw):
+async def run_loop(ticks: int, window=lambda *a: 0.0, **kw):
     """Run the sweeper for `ticks` naps, counting SQL as it goes.
 
     `asyncio.sleep` is replaced so the test doesn't actually wait a quarter
@@ -62,12 +62,17 @@ async def run_loop(ticks: int, **kw):
         await real_sleep(0)
 
     asyncio.sleep = fake_sleep
+    # The working-hours window is tested on its own below; here the loop must
+    # tick whatever time of day the suite happens to run.
+    real_window = webpush.seconds_until_active
+    webpush.seconds_until_active = window
     try:
         await webpush.sweeper_loop(**kw)
     except Stop:
         pass
     finally:
         asyncio.sleep = real_sleep
+        webpush.seconds_until_active = real_window
         event.remove(engine.sync_engine, "before_cursor_execute", _seen)
     return naps, sql
 
@@ -152,6 +157,14 @@ async def main():
     naps, sql = await run_loop(2, interval=900, idle_interval=60)
     check("an idle interval shorter than the working one is clamped, "
           "not obeyed", naps[1] == 900, str(naps))
+
+    # ══ outside working hours ═══════════════════════════════════════════════
+    print("\n── at night and at the weekend ──")
+    naps, sql = await run_loop(2, window=lambda *a: 8 * 3600, interval=900, idle_interval=3600)
+    check("outside the working window it sleeps — in hour-long naps",
+          naps[1:] == [3600, 3600], str(naps))
+    check("...without a single query, so the database can sleep too",
+          sql == [], str(sql)[:200])
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

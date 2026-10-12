@@ -69,7 +69,8 @@ async def lifespan(_app: FastAPI):
             print(f"[boot] web-push sweeper started "
                   f"(every {settings.WEBPUSH_SWEEP_SECONDS}s, "
                   f"{settings.WEBPUSH_IDLE_SECONDS}s while nothing is "
-                  f"subscribed).", flush=True)
+                  f"subscribed; only {settings.WEBPUSH_ACTIVE_HOURS or 'all day'} "
+                  f"on days {settings.WEBPUSH_ACTIVE_DAYS or 'all'}).", flush=True)
         else:
             print("[boot] web-push sweeper off (WEBPUSH_SWEEP_SECONDS=0); "
                   "event-driven pushes still send.", flush=True)

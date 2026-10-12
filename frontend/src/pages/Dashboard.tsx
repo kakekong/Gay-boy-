@@ -9,6 +9,7 @@ import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
 import { useAuthStore } from "@/store/auth";
 import { useT, T } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 export default function DashboardPage() {
   const t = useT();
@@ -191,7 +192,7 @@ function MyQueueCard() {
   const q = useQuery({
     queryKey: ["my-queue"],
     queryFn: () => api.get("/dashboard/my-queue").then((r) => r.data as MyQueue),
-    refetchInterval: 60_000,
+    refetchInterval: poll(60_000),
   });
   const idr = (n: number) =>
     "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));

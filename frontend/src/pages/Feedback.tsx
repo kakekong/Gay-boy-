@@ -4,6 +4,7 @@ import { CheckCircle2, Inbox, Loader2, MessageSquarePlus } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT, T, locale } from "@/store/lang";
+import { poll } from "@/lib/activity";
 
 /** Director-only inbox for feedback sent by any account. */
 export default function FeedbackPage() {
@@ -16,7 +17,7 @@ export default function FeedbackPage() {
     queryFn: () => api.get("/feedback", {
       params: { status_eq: filter || undefined },
     }).then((r) => r.data as any[]),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
 
   const resolve = useMutation({
