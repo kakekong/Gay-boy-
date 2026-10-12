@@ -581,6 +581,8 @@ interface PreviewShape {
     was_unit_price?: number | null;
     /** A proposed quotation edit: the wording it replaces, or a line dropped. */
     was_description?: string | null; is_removed?: boolean;
+    /** The unit, and on a supplier PO edit the one it replaces. */
+    uom?: string | null; was_uom?: string | null;
   }[];
   total: number | null;
   /** What the figures on this document are denominated in. A purchasing PO
@@ -721,6 +723,10 @@ function DocumentPreview({ requestId }: { requestId: string }) {
                               <span className="muted line-through mr-1">{it.was_qty}</span>
                             )}
                             {it.qty}
+                            {it.was_uom && it.uom && it.was_uom !== it.uom && (
+                              <span className="muted line-through ml-1">{it.was_uom}</span>
+                            )}
+                            {it.uom && <span className="muted"> {it.uom}</span>}
                           </td>
                           {p.items.some((x) => x.unit_price != null) && (
                             <>

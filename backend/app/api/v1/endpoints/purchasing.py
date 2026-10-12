@@ -1099,7 +1099,7 @@ async def create_po(
     # Lines carry the job they belong to. A line that does not name one is
     # for the PO's own project, which is every ordinary single-job order.
     # A PO with no job yet has lines with no job either, until one is given.
-    items = [dict(it) for it in (payload.items or [])]
+    items = _units_normalised([dict(it) for it in (payload.items or [])])
     project_cache: dict[str, Project] = {str(project.id): project} if project else {}
     for it in items:
         raw = it.get("project_id") or (str(project.id) if project else None)
@@ -1464,6 +1464,34 @@ async def export_po_excel(
     )
 
 
+def _units_normalised(items: list, old_items: list | None = None) -> list:
+    """Each line's unit in the house spelling ("mtr" → meter, "links" → link).
+
+    A unit the list doesn't know is refused rather than stored: receiving
+    books the quantity into stock in this unit, and a stock row counted in
+    something nobody else uses is the start of 40 links meeting 40 metres.
+    A line that still carries the odd unit it was saved with is left alone,
+    so an old PO can still be edited.
+    """
+    from app.models.inventory import UNITS, normalise_uom
+    old = list(old_items or [])
+    out = []
+    for n, it in enumerate(items or [], start=1):
+        row = dict(it or {})
+        raw = (row.get("uom") or "").strip()
+        before = ((old[n - 1] or {}).get("uom") or "").strip() if n - 1 < len(old) else ""
+        if raw and raw != before:
+            u = normalise_uom(raw)
+            if u is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Line {n}: “{raw}” is not a unit we count in. Use one of: "
+                    f"{', '.join(UNITS)}.")
+            row["uom"] = u
+        out.append(row)
+    return out
+
+
 def _non_price_change(old_items: list, new_items: list) -> str | None:
     """What finance tried to change other than a price, if anything.
 
@@ -1566,6 +1594,8 @@ async def update_po(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
 
     data = payload.model_dump(exclude_unset=True)
+    if data.get("items"):
+        data["items"] = _units_normalised(data["items"], po.items or [])
 
     # What finance may touch on a supplier PO: the exchange rate, and the
     # prices.

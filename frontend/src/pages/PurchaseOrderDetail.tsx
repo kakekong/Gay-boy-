@@ -15,6 +15,7 @@ import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
 import { CommentThread } from "@/components/CommentThread";
 import { UserLink } from "@/components/UserLink";
+import { UnitSelect } from "@/components/UnitSelect";
 import { useAuthStore } from "@/store/auth";
 import { T, locale, t as tt } from "@/store/lang";
 
@@ -768,7 +769,7 @@ export default function PurchaseOrderDetailPage() {
             )}
             {draftItems.map((it, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-5">
+                <div className="col-span-4">
                   <span className="text-[10px] uppercase muted">{T("Description")}</span>
                   <input
                     className="input"
@@ -781,23 +782,50 @@ export default function PurchaseOrderDetailPage() {
                     }
                   />
                 </div>
-                <div className="col-span-2">
+                {/* Quantity and the unit it counts in, side by side: the
+                    supplier quotes chain per link, cable per metre, and a
+                    PO saying "40" means nothing without which. */}
+                <div className="col-span-3">
                   <span className="text-[10px] uppercase muted">{T("Qty")}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    className="input"
-                    disabled={isFinance}
-                    value={it.qty ?? 0}
-                    onChange={(e) =>
-                      setDraftItems((cur) =>
-                        cur.map((x, j) =>
-                          j === i ? { ...x, qty: Number(e.target.value) } : x
+                  <div className="flex gap-1">
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      className="input min-w-0 flex-1"
+                      disabled={isFinance}
+                      value={it.qty ?? 0}
+                      onChange={(e) =>
+                        setDraftItems((cur) =>
+                          cur.map((x, j) =>
+                            j === i ? { ...x, qty: Number(e.target.value) } : x
+                          )
                         )
-                      )
-                    }
-                  />
+                      }
+                    />
+                    {isFinance ? (
+                      <span className="input w-20 bg-ink-50/60 truncate">{it.uom || "—"}</span>
+                    ) : (
+                      <UnitSelect
+                        className="input w-24 shrink-0"
+                        label={tt(`Unit, line ${i + 1}`, `Satuan, baris ${i + 1}`)}
+                        value={it.uom ?? ""}
+                        onChange={(v) => setDraftItems((cur) =>
+                          cur.map((x, j) => j === i ? { ...x, uom: v } : x))}
+                      />
+                    )}
+                  </div>
+                  {(() => {
+                    // Say it when a unit changes: the quantity now means
+                    // something else, and the price is per the new unit.
+                    const was = (p.items?.[i]?.uom ?? "") as string;
+                    return was && it.uom && was !== it.uom ? (
+                      <div className="text-[10px] text-amber-700 mt-0.5">
+                        {tt(`Was ${was} — check the quantity and price are per ${it.uom}.`,
+                            `Sebelumnya ${was} — pastikan jumlah dan harga per ${it.uom}.`)}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 {/* The price we agreed per unit. Editing only the PO total
                     meant a renegotiated rate had to be back-solved by hand,
@@ -893,7 +921,9 @@ export default function PurchaseOrderDetailPage() {
                       {it.project_code ?? "—"}
                     </td>
                   )}
-                  <td className="td text-right tabular-nums">{it.qty ?? 0}</td>
+                  <td className="td text-right tabular-nums whitespace-nowrap">
+                    {it.qty ?? 0}{it.uom ? <span className="muted"> {it.uom}</span> : null}
+                  </td>
                   <td className="td text-right tabular-nums">
                     {it.unit_price == null ? "—" : money(it.unit_price, p.currency)}
                   </td>

@@ -682,6 +682,7 @@ async def preview_request(
             is_update = action == "update" and changes
             fields = [{"label": "Status", "value": sp.status}]
             items = [{"description": i.get("description"), "qty": _money(i.get("qty")),
+                      "uom": i.get("uom"),
                       "unit_price": _money(i.get("unit_price")),
                       "line_total": _money(i.get("qty")) * _money(i.get("unit_price"))}
                      for i in (getattr(sp, "items", None) or [])]
@@ -738,6 +739,11 @@ async def preview_request(
                               "was_qty": (_money(was[i.get("description")].get("qty"))
                                           if i.get("description") in was else None),
                               "is_new": i.get("description") not in was,
+                              # A unit change is a change to what was ordered
+                              # (40 links is not 40 metres) — show both.
+                              "uom": i.get("uom"),
+                              "was_uom": (was[i.get("description")].get("uom")
+                                          if i.get("description") in was else None),
                               "unit_price": _money(i.get("unit_price")),
                               "was_unit_price": (
                                   _money(was[i.get("description")].get("unit_price"))
