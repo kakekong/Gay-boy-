@@ -19,7 +19,10 @@ from app.services import order_consistency as oc
 
 router = APIRouter()
 
-_ROLES = (Role.SALES, Role.PURCHASING, Role.ADMIN, Role.FINANCE, Role.MANAGER, Role.DIRECTOR)
+# The director's panel. Everyone else's edits still sync the way they always
+# did (`quotation_sync` / `price_request_sync`); deciding which copy of a deal
+# is right, and changing the other to match, is the director's call.
+_ROLES = (Role.DIRECTOR,)
 
 
 class Where(BaseModel):
@@ -31,7 +34,7 @@ class Where(BaseModel):
 
 async def _chain(db: AsyncSession, user: User, where: Where) -> dict:
     if Role(user.role) not in _ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not available for your role")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "The deal check is the director's")
     if not any(where.model_dump().values()):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Say which document")
     chain = await oc.resolve_chain(db, **where.model_dump())

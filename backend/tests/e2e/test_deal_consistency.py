@@ -10,8 +10,8 @@ that document by hand.
 Here: a won deal with a project; the director changes the request and the
 won quotation follows on its own; the customer PO is left saying what it said
 and is flagged; the fix is applied each way; cost corrections reach the
-quotation's estimate silently; a rep's fix to an approved quotation is filed
-for the director rather than applied; purchasing sees only the buy side.
+quotation's estimate silently. The check and its fixes are the director's:
+sales and purchasing are refused.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -111,13 +111,10 @@ async def main():
           and acts["use_left"]["allowed"] and acts["use_right"]["allowed"], str(acts)[:200])
 
     code, r = await rep(who=s1, quotation_id=q)
-    a = {x["id"]: x for x in chk(r, "quotation_cpo:")["actions"]}
-    check("the rep sees it too, but the approved PO is the director's to change",
-          a["use_left"]["allowed"] is False and "director" in (a["use_left"]["reason"] or "").lower(),
-          str(a)[:200])
+    check("the deal check is the director's — the rep can't open it", code == 403, str(code))
     r = await c.post("/consistency/fix", headers=s1, json={
         "quotation_id": q, "check": f"quotation_cpo:{cpo['id']}", "action": "use_left"})
-    check("...and pressing it anyway is refused", r.status_code == 409, f"{r.status_code}")
+    check("...or use it", r.status_code == 403, f"{r.status_code}")
 
     r = await c.post("/consistency/fix", headers=d, json={
         "quotation_id": q, "check": f"quotation_cpo:{cpo['id']}", "action": "use_left"})
@@ -138,14 +135,6 @@ async def main():
     check("a price typed differently from the customer's paper is flagged",
           cc["lines"] and cc["lines"][0]["fields"][0] == {"field": "price", "left": 400_000.0,
                                                           "right": 380_000.0}, str(cc)[:250])
-    r = await c.post("/consistency/fix", headers=s1, json={
-        "customer_po_id": cpo["id"], "check": f"quotation_cpo:{cpo['id']}", "action": "use_right"})
-    b = J(r)
-    check("the rep's fix to the won quotation goes to the director, not straight in",
-          r.status_code == 200 and b.get("queued") is True, f"{r.status_code} {str(b)[:200]}")
-    qd = J(await c.get(f"/quotations/{q}", headers=d))
-    check("...so nothing has changed yet",
-          float(next(i for i in qd["items"] if i["line_no"] == 2)["unit_price"]) == 400_000)
     r = await c.post("/consistency/fix", headers=d, json={
         "customer_po_id": cpo["id"], "check": f"quotation_cpo:{cpo['id']}", "action": "use_right"})
     b = J(r)
@@ -177,14 +166,14 @@ async def main():
         its[0]["description"] = f"ROLLER CHAIN OLD WORDING {TAG}"
         p.items = its
         await s.commit()
-    code, r = await rep(who=s1, price_request_id=pr)
+    code, r = await rep(price_request_id=pr)
     pq = chk(r, "pr_quotation")
     check("the request and quotation disagreeing is shown, with both wordings",
           pq["lines"] and pq["lines"][0]["fields"][0]["field"] == "description"
           and "OLD WORDING" in pq["lines"][0]["fields"][0]["left"], str(pq)[:250])
-    r = await c.post("/consistency/fix", headers=s1, json={
+    r = await c.post("/consistency/fix", headers=d, json={
         "price_request_id": pr, "check": "pr_quotation", "action": "use_right"})
-    check("the rep makes the request match the quotation", r.status_code == 200
+    check("the director makes the request match the quotation", r.status_code == 200
           and J(r)["report"]["issues"] == 0, f"{r.status_code} {str(J(r))[:200]}")
 
     print("\n── the buy side: purchasing's view ──")
@@ -198,17 +187,14 @@ async def main():
              for it in prd["items"]]
     items[1]["qty"] = 6
     await c.patch(f"/price-requests/{pr}", headers=d, json={"items": items})
-    code, r = await rep(who=pur, price_request_id=pr)
-    keys = [x["key"] for x in r.get("checks", [])]
-    check("purchasing sees the supplier request, not the selling side",
-          code == 200 and not any(k.startswith(("pr_quotation", "quotation_cpo")) for k in keys)
-          and r["documents"]["quotation"] is None and r["documents"]["customer_pos"] == [],
-          f"{code} {keys}")
+    code, _ = await rep(who=pur, price_request_id=pr)
+    check("purchasing can't open the deal check either", code == 403, str(code))
+    code, r = await rep(price_request_id=pr)
     sc = chk(r, "supplier_request:")
     check("...with the quantity the vendor was asked for flagged",
           sc and any(f["field"] == "qty" and f["left"] == 6.0 and f["right"] == 4.0
                      for l in sc["lines"] for f in l.get("fields", [])), str(sc)[:300])
-    r = await c.post("/consistency/fix", headers=pur, json={
+    r = await c.post("/consistency/fix", headers=d, json={
         "price_request_id": pr, "check": sc["key"], "action": "use_left"})
     b = J(r)
     check("...and refreshes it in one press", r.status_code == 200
@@ -220,7 +206,7 @@ async def main():
                    "unit_price": 250_000, "amount": 1_250_000,
                    "source_pr_id": pr, "source_line_no": 2}],
         "total": 1_250_000}))
-    code, r = await rep(who=pur, price_request_id=pr)
+    code, r = await rep(price_request_id=pr)
     so = chk(r, "supplier_po_qty")
     check("ordering 5 of a line the job needs 6 of is pointed out",
           so and so.get("info_only") and so["lines"]
