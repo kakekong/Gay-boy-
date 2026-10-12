@@ -1223,6 +1223,30 @@ process, so `updated_at` isn't bumped. The timeline attaches audit rows to the
 first action at or after them (within 60 s); audit rows from before the
 action log existed show standalone. Tests: `tests/e2e/test_system_log.py`.
 
+**Polling is a database bill.** Neon bills by awake hours and sleeps after 5
+minutes without a query, so anything on a timer keeps it awake. The rules:
+every `refetchInterval` goes through `poll(ms)` from `lib/activity.ts`, which
+returns `false` after 10 minutes without input and re-arms on activity
+(`refetchQueries({type:"active"})`). Sidebar badges are one request,
+`GET /nav/badges` (`endpoints/nav.py`), which calls the same handlers the
+pages use (`test_nav_badges.py` checks each count against its list); add a
+new badge there, not as another polling query. The push sweeper skips the
+database outside `WEBPUSH_ACTIVE_HOURS`/`DAYS` (`webpush.seconds_until_active`).
+Measured on a director's dashboard: 20 requests a minute before, 2 after,
+0 when idle.
+
+**Who reaches what is declared on the router, not trusted to the sidebar.**
+`permissions.staff_except(*roles)` is staff (sales and up) minus named roles:
+customers, quotations and customer POs are `staff_except(PURCHASING, HR)`;
+price requests and operation are `staff_except(HR)`. Every router that serves
+staff must carry a gate; `ai`, `commissions` and `nav` had none, and portal
+logins could call them. The search bar (`search.py`) decides per group with
+the same rules as the pages (`sees_customers`, `sees_quotations`, …), and
+`customer_blind` (purchasing) drops customer names and the customer's PO
+number. `tests/e2e/test_role_walls.py` checks it; when adding an area, call
+every GET as purchasing, HR and both portal roles and look for customer
+names in the responses (that's how these were found).
+
 **Push notifications** — `app/services/webpush.py`. VAPID keys live in the DB,
 created under `pg_advisory_xact_lock(429173001)` with `ORDER BY created_at` so
 concurrent boots can't mint two keypairs. Background sends go through

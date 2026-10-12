@@ -120,6 +120,7 @@ Nine base roles. Internal roles are capped by a sidebar/route allowlist enforced
 - **Admin is procurement-blind**, the mirror of purchasing's customer-blindness. They may not see what the goods cost us, the margin (which is that cost by subtraction against the PO value they *do* see, because they invoice against it), the supplier price requests, or any supplier PO. The project's shipment list still gives them every arrival date — that is their job — with the vendor stripped out of it.
 - **Sales is money/ops-blind.** On a project, sales sees only the customer-facing shell (header, pipeline, shipping timeline, drawings upload). Work orders, invoices, margins, supplier POs, QC internals and the ledger are hidden. Sales never sees procurement cost on a price request.
 - **Internal note scrubbing.** Lines beginning with `[purchasing]`, `[director]`, etc. in price-request notes are a staff side-channel; they are stripped before sales sees the PR and before notes are copied to a customer-facing quotation.
+- **Every area is closed at the server, not just hidden in the menu.** Customers, quotations and customer POs refuse purchasing and HR; price requests and projects refuse HR. The AI tools, commissions and sidebar counts are for staff only. Within that, the all-reps deal-risk report is for manager and director, project profit for finance, manager and director, supply risk for purchasing, and a sales rep sees only their own coaching and their own customers' scores. Portal logins reach only their own portal pages.
 - **Sales sees only its own records** — customers where they are the sales PIC, and the quotations/PRs/POs/projects of those customers. Enforced on every list *and* detail endpoint, not just hidden in the UI.
 
 ---
@@ -231,7 +232,7 @@ The price request and the quotation made from it are the same order twice, so th
 
 **The project needs nothing.** Its Order card reads the price request live, so once the request is right the project is right.
 
-**Discrepancies are pointed out on every document of the deal.** The price request, the quotation, the customer PO and the project's Order card each carry a **deal check** card. When everything agrees it is one green line naming the documents. When something doesn't, it lists each disagreement, line by line and field by field, with both values side by side:
+**Discrepancies are pointed out on every document of the deal.** The price request, the quotation, the customer PO and the project's Order card each carry a **deal check**. When everything agrees, it is one small green line ("Price request, quotation and customer PO all match"). When something doesn't, an amber box says how many things don't match, and each one is spelled out in a plain sentence, e.g. *"SPROCKET: quantity is 6 on the quotation, 4 on the customer PO."* Under it is one question, **Which one is right?**, with the two documents as the answers. Picking one shows exactly what will change ("The customer PO (PO-…) will be changed to match the quotation (QT-…)") and a **Yes, change it** button. If the change needs the director's approval, it says so and the button reads **Send to director**. The pairs it compares:
 
 - **Price request ↔ quotation:** description, qty, unit and selling price. The fix goes either way: *Make the price request match the quotation*, or *Make the quotation match the price request*.
 - **Quotation ↔ customer PO:** description, unit and price. Qty is compared as well when there is a single PO, not when the customer ordered in parts. The fix goes either way: *Make the customer PO match the quotation* (the customer's PO was typed wrong), or *Make the quotation match the customer PO* (the customer ordered differently, so the quotation and then the price request follow). The customer PO is never changed automatically: it records what the customer's paper says.
@@ -508,7 +509,9 @@ Every item is routed **only to who can act on it**, with a severity that control
 |---|---|---|
 | `approval` — request waiting | manager (manager-tier) / director (all) | high (director-tier) / medium |
 | `approval_decided` — *your* request decided, with reason | the requester | low (approved) / medium (rejected) |
-| `price_request` — PR handoff (submitted → purchasing; costed → director) | the next actor | medium |
+| `price_request` — PR handoff (submitted → purchasing; costed → director) | the next actor | high for the one who must act |
+| `project_new` — a new job to source (customer-blind; clears once something is ordered for it) | purchasing | high |
+| `project_created` — a new project: customer, customer PO, value (3 days; not for the director who opened it) | director | medium |
 | `price_request_decided` — PR approved/rejected | the requesting sales rep | low / medium |
 | `at_risk_deal` — open quote idle ≥ 7 days | owning sales + management | high ≥ 14 d / medium |
 | `payment_due` — invoice due ≤ 3 days or overdue | finance + owning sales + management | high (overdue) / medium |
@@ -521,6 +524,8 @@ Every item is routed **only to who can act on it**, with a severity that control
 | `chat` — unread messages roll-up | the recipient | low |
 | `chat_oversight` — cross-department chat digest | director | low |
 
+Work queues (price requests waiting for cost or price, customer POs and DP POs waiting) list the **newest first**, up to 100. They used to keep the oldest 20, so once a queue held twenty items every new arrival fell off the end and nobody was told. A rejection of your own request is always listed before routine "approved" notices.
+
 Housekeeping: every item has an **✕ dismiss** — dismissed items stay gone until their underlying state changes (e.g. new unread messages revive the chat row). High-severity items are red; the bell badge shows the count.
 
 ### 10.3 Device push (your phone)
@@ -531,9 +536,11 @@ Turn on **Device notifications** in the bell menu (per device). From then on, hi
 - A **"Send test notification"** button in the bell menu verifies the pipe end-to-end.
 - Dead subscriptions (uninstalled app, cleared browser) are cleaned automatically.
 
-### 10.4 Instant pushes (chat & discussions)
+### 10.4 Instant pushes
 
-Two sources skip the sweeper and push **immediately**:
+These skip the sweeper and push **immediately**:
+- **A new price request** (when sales submits it): to purchasing, as "New price request to cost: PR-…". It shows the number of lines, never the customer.
+- **A new project**: to the director, with the customer, customer PO and value, and to purchasing, as "New job to source: PRJ-…" (customer-blind). It is sent once the project is saved, and never to the person who opened it.
 - **Chat**: every message pushes to the other members of the conversation — sender's name (+ group name) as the title, the message as the body, tap opens the chat. Multiple messages in one conversation collapse into a single re-alerting notification.
 - **Discussions**: a comment on a price request / quotation / customer PO / supplier PO pushes to everyone already in the thread **plus** the document's natural stakeholders (requester, coster, approver) — so the *first* comment already reaches the right person. Title carries the document number; tap deep-links to it.
 
@@ -560,6 +567,16 @@ A month grid aggregating the same material with identical role routing and purch
 ## 11b. Finding things (⌘K)
 
 The header search box, and `⌘K` / `Ctrl-K` anywhere. It searches **customers, price requests, quotations, customer POs, projects, invoices, suppliers, supplier price requests, purchasing POs, inventory, employees and the chart of accounts** — each group scoped to the roles that can open the page it links to, because a result nobody can open is a dead end, and a result nobody *should* open is a leak.
+
+**It only offers what you could open.** Each group follows the same rules as the pages:
+- customers and quotations are for sales, manager and director;
+- customer POs also go to finance;
+- price requests and projects go to purchasing, without the customer's name or the customer's PO number;
+- HR gets employees only;
+- suppliers and supplier requests go to purchasing, manager and director;
+- the chart of accounts goes to finance, manager and director.
+
+Portal accounts can't search at all.
 
 Two things it does that are worth knowing:
 
@@ -630,6 +647,7 @@ A **supplier's page** answers the same question from the other side: alongside t
 | **Backend deploys** | automatic on every git push (Render builds the repo it checked out), live in a few minutes |
 | **Uploaded files** | live in the Cloudflare R2 bucket and survive deploys. Anything uploaded during the old Hugging Face Space era is gone — that storage was wiped on every rebuild |
 | **Database** | Neon Postgres; suspends when idle — first request after a quiet period is slow; boot logs `[boot]…` progress and never hangs silently |
+| **Keeping the database asleep** | Neon bills for every hour the database is awake and sleeps after 5 minutes with no queries. To let it sleep: the sidebar badges come from **one** request (`/nav/badges`) once a minute instead of eight requests every 15–30 seconds; **every screen stops polling after 10 minutes with no mouse, keyboard or touch activity** and catches up the moment someone comes back; and the push-notification sweeper only runs **07:00–19:00, Monday–Saturday** (Jakarta time; `WEBPUSH_ACTIVE_HOURS` / `WEBPUSH_ACTIVE_DAYS` on Render). Pushes caused by an action (a mention, a chat message) still go out at any hour. |
 | **Migrations** | none to run by hand — the Render start command runs the idempotent `seed.py` before uvicorn on every deploy (create-all + `IF NOT EXISTS` column adds + forward-only data repairs), so a schema change ships with the code that needs it |
 | **Push keys (VAPID)** | auto-generated on first use, stored in the DB — nothing to configure |
 | **Key env vars** | `DATABASE_URL`, `JWT_SECRET`, `APP_ENV` (`prod` enforces safety checks), `CORS_ORIGINS`, `STORAGE_LOCAL_DIR`, optional `OPENAI_API_KEY` (AI features), `DEMO_SEED_PASSWORD` (dev-only demo users) |
