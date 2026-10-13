@@ -825,9 +825,13 @@ DOCS_DUE_WINDOW_DAYS = 14
 # So the two have different authors and different readers, and the walls are
 # the same ones the rest of the app already keeps:
 #
-#   * **Sales** may see the customer drawing (they are the ones showing it to
-#     the customer) but never file one, and never see the supplier's at all —
-#     that is the vendor relationship, which sales is kept out of.
+#   * **Sales** see and file the customer drawing — they are often the ones
+#     the customer hands it to, and the order they raised is where they go
+#     looking for it. Only on their own customers' jobs, and never the
+#     supplier's at all — that is the vendor relationship, which sales is kept
+#     out of. (Sales were made readers only for a while; it left the drawing
+#     card missing from their project page, with no way to file what the
+#     customer had just sent them.)
 #   * **Purchasing** sees the supplier drawing; the customer drawing carries
 #     the customer, and purchasing stays blind to it.
 #   * **Admin** works the customer side — they file the customer drawing and
@@ -843,7 +847,7 @@ DOCS_DUE_WINDOW_DAYS = 14
 DRAWING_KINDS = ("customer", "supplier")
 
 _DRAWING_UPLOAD_ROLES: dict[str, set[Role]] = {
-    "customer": {Role.ADMIN, Role.MANAGER, Role.DIRECTOR},
+    "customer": {Role.SALES, Role.ADMIN, Role.MANAGER, Role.DIRECTOR},
     "supplier": {Role.PURCHASING, Role.MANAGER, Role.DIRECTOR},
 }
 # The portal roles belong in here too, and not as an afterthought: the whole
@@ -1046,11 +1050,12 @@ async def upload_drawing(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """File a drawing — purchasing the supplier's, admin the customer's.
+    """File a drawing — purchasing the supplier's, admin or sales the customer's.
 
     It lands as 'submitted', awaiting the director's sign-off. `kind` decides
-    who may file it at all (see `_DRAWING_UPLOAD_ROLES`): sales are readers of
-    the customer drawing, not its authors, and never touch the supplier's.
+    who may file it at all (see `_DRAWING_UPLOAD_ROLES`): sales file the
+    customer drawing on their own customers' jobs, and never touch the
+    supplier's.
 
     Send a `file`, or a `link_url` pointing at where the drawing already
     lives — vendors send Drive folders, and a link is a better record than a
@@ -1069,6 +1074,12 @@ async def upload_drawing(
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    # The same scope as opening the project: a rep's own customers only.
+    if role == Role.SALES:
+        customer = await db.get(Customer, p.customer_id) if p.customer_id else None
+        if not customer or customer.sales_pic_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Only the customer's own sales rep may file their drawing")
 
     # A customer drawing may be drawn up *from* a supplier's; keep the link so
     # the lineage survives, and refuse a source the caller cannot even open.

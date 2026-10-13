@@ -313,6 +313,8 @@ export default function ProjectDetailPage() {
     if (defaultWoCode) setNewWoCode(defaultWoCode);
   }, [defaultWoCode]);
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
+  // Bumped after an upload so the file picker forgets the name it was showing.
+  const [drawingPick, setDrawingPick] = useState(0);
   // Link mode is its own flag rather than "is the URL box non-empty", so the
   // form doesn't snap back to the file picker the moment the box is cleared.
   const [drawingLinkMode, setDrawingLinkMode] = useState(false);
@@ -756,7 +758,7 @@ export default function ProjectDetailPage() {
   const supplierDrawings = data.data.supplier_drawings ?? [];
   // Who may file which kind is the server's answer, echoed back on the project
   // payload — a second copy of the matrix in the client is how the two drift
-  // apart. Sales are readers of the customer drawing, never its author.
+  // apart. Sales file the customer drawing on their own jobs; never the supplier's.
   const mayUpload: Record<string, boolean> = data.data.may_upload_drawing ?? {};
   // Who may ASK to skip the drawing, which is wider than who may decide it.
   // The server holds the real rule both ways; this only decides whether the
@@ -807,8 +809,8 @@ export default function ProjectDetailPage() {
                   "Gambar yang dikirim vendor sebagai acuan pembuatan. Pembelian yang mengunggah; direktur menyetujui. Tidak ditunjukkan ke pelanggan — gambar pelanggan dibuat dari gambar ini.",
                 )
                 : t(
-                  "What the customer approves. Admin files it, the director signs it off, and that approval moves the project to \"drawing approved\" so logistics can begin. Sales can open it to show the customer, but do not upload it.",
-                  "Gambar yang disetujui pelanggan. Admin yang mengunggah, direktur menyetujui, dan persetujuan itu memindahkan proyek ke \"gambar disetujui\" sehingga logistik bisa dimulai. Sales bisa membukanya untuk ditunjukkan ke pelanggan, tetapi tidak mengunggah.",
+                  "What the customer approves. Sales or admin files it, the director signs it off, and that approval moves the project to \"drawing approved\" so logistics can begin.",
+                  "Gambar yang disetujui pelanggan. Sales atau admin yang mengunggah, direktur menyetujui, dan persetujuan itu memindahkan proyek ke \"gambar disetujui\" sehingga logistik bisa dimulai.",
                 )}
             </div>
           </div>
@@ -843,7 +845,7 @@ export default function ProjectDetailPage() {
                     onChange={(e) => setDrawingLink(e.target.value)}
                     placeholder="https://drive.google.com/…" />
                 ) : (
-                  <input type="file"
+                  <input type="file" key={drawingPick}
                     className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-1.5 file:text-white file:text-xs hover:file:bg-brand-700"
                     onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)} />
                 )}
@@ -878,6 +880,7 @@ export default function ProjectDetailPage() {
                   },
                   { onSuccess: () => {
                     setDrawingFile(null); setDrawingLink(""); setDrawingNotes("");
+                    setDrawingPick((n) => n + 1);
                   } },
                 )}>
                 {uploadDrawing.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
@@ -1570,9 +1573,9 @@ export default function ProjectDetailPage() {
 
       {/* Drawings — visible to sales too: they're often the ones holding the
           customer's drawing and need to file it. Sales gets upload + the
-          revision list only; approve/reject stays with director/manager/
-          admin (canApproveDrawing). All other ops cards remain hidden from
-          sales via canSeeOpsDetails. */}
+          revision list of the customer drawing only; approve/reject stays
+          with director/manager/admin (canApproveDrawing). All other ops cards
+          remain hidden from sales via canSeeOpsDetails. */}
       {/* Two piles, not one. Each renders only if this role may see that
           kind — the server already filtered the lists, so an empty array here
           means either "none yet" or "not yours", and the card only shows when

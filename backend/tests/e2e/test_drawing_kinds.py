@@ -11,9 +11,11 @@ being the same sheet forwarded on. They were one undifferentiated pile.
 
 Who may do what, and the reason each rule exists:
 
-* **Sales file neither and see only the customer's.** They were filing the
-  customer's; they are its reader, not its author. The supplier's is the
-  vendor relationship, which sales is kept out of everywhere else.
+* **Sales file and see only the customer's — on their own customers' jobs.**
+  They were briefly made its readers only, which left the drawing card off
+  their project page with no way to file what the customer had just sent
+  them. The supplier's is the vendor relationship, which sales is kept out of
+  everywhere else.
 * **Purchasing file the supplier's and see only that** — the customer drawing
   carries the customer, and purchasing stays blind to that side.
 * **Admin file the customer's and see only that.**
@@ -60,6 +62,7 @@ async def main():
     adm = await login("admin@demo.local")
     pur = await login("purchasing@demo.local")
     s1 = await login("sales1@demo.local")
+    s2 = await login("sales2@demo.local")
     mgr = await login("manager@demo.local")
 
     async def up(headers, project, kind, note, source=None):
@@ -96,11 +99,8 @@ async def main():
 
     # ══ who may file which ═══════════════════════════════════════════════════
     print("\n── who files what ──")
-    r = await up(s1, proj, "customer", f"sales try {tag}")
-    check("sales cannot file the customer's drawing", r.status_code == 403,
-          f"{r.status_code} {J(r)}"[:140])
     r = await up(s1, proj, "supplier", f"sales try {tag}")
-    check("...nor the supplier's", r.status_code == 403, str(r.status_code))
+    check("sales cannot file the supplier's drawing", r.status_code == 403, str(r.status_code))
 
     # The vendor's sheet is filed by the people who deal with the vendor. It
     # briefly sat with the director instead — "for right now" — and has been
@@ -146,6 +146,15 @@ async def main():
     r = await up(pur, proj, "sideways", f"bad kind {tag}")
     check("an unknown kind is refused", r.status_code == 400, str(r.status_code))
 
+    # Sales file the customer's drawing — but only on their own customer's job.
+    r = await up(s2, proj, "customer", f"another rep {tag}")
+    check("another rep cannot file on this customer's job", r.status_code == 403,
+          f"{r.status_code} {J(r)}"[:140])
+    r = await up(s1, proj, "customer", f"from the customer {tag}")
+    check("the customer's own rep files the customer's drawing", r.status_code == 201
+          and J(r).get("kind") == "customer", f"{r.status_code} {J(r)}"[:140])
+    sales_drw = J(r).get("id")
+
     # ══ who may see which ════════════════════════════════════════════════════
     print("\n── who sees what ──")
 
@@ -155,7 +164,8 @@ async def main():
                 [x["id"] for x in (got.get("supplier_drawings") or [])])
 
     cus_seen, sup_seen = await seen(s1)
-    check("sales see the customer's drawings", cus_drw in cus_seen, str(cus_seen))
+    check("sales see the customer's drawings, their own included",
+          cus_drw in cus_seen and sales_drw in cus_seen, str(cus_seen))
     check("...and no supplier drawing at all", sup_seen == [], str(sup_seen))
 
     cus_seen, sup_seen = await seen(adm)
@@ -175,8 +185,8 @@ async def main():
           got["may_upload_drawing"] == {"customer": True, "supplier": False},
           str(got.get("may_upload_drawing")))
     got = J(await c.get(f"/operation/projects/{proj}/full", headers=s1))
-    check("...and sales are offered neither",
-          got["may_upload_drawing"] == {"customer": False, "supplier": False},
+    check("...and sales are offered the customer's only",
+          got["may_upload_drawing"] == {"customer": True, "supplier": False},
           str(got.get("may_upload_drawing")))
 
     # ══ a row you can actually open ══════════════════════════════════════════
