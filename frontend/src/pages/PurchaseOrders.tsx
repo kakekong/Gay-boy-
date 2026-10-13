@@ -377,6 +377,7 @@ function NewPOModal({
   const [poNumber, setPoNumber] = useState("");
   const [poDate, setPoDate] = useState(today);
   const [leadDays, setLeadDays] = useState("");
+  const [poNotes, setPoNotes] = useState("");
   // Rupiah unless told otherwise — most orders are local.
   const [currency, setCurrency] = useState("IDR");
   const [total, setTotal] = useState("");
@@ -453,6 +454,7 @@ function NewPOModal({
       number: poNumber.trim() || null,
       po_date: poDate || null,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
+      notes: poNotes.trim() || null,
       currency,
       total: total ? Number(total) : 0,
       price_request_id: linkedPR,
@@ -618,6 +620,13 @@ function NewPOModal({
                 {T("The day the PO is issued.")}</span>
             </Field>
           </div>
+
+          <label className="block">
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Notes for the supplier")}</span>
+              <textarea className="input min-h-[64px]" rows={2} value={poNotes}
+                onChange={(e) => setPoNotes(e.target.value)}
+                placeholder={tt("Delivery instructions, packing, terms… printed on the PO", "Instruksi pengiriman, kemasan, syarat… dicetak di PO")} />
+            </label>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label={T("Lead time (days)")}>

@@ -497,6 +497,7 @@ class PoCreate(BaseModel):
     # When this shipment lands. Per PO, because a job split across three
     # vendors arrives in three deliveries.
     eta: str | None = None      # ISO date
+    notes: str | None = None      # printed on the vendor's copy
     items: list[dict] = []
     total: float = 0
     # What the figures are denominated in. Defaults to rupiah because most
@@ -1130,6 +1131,7 @@ async def create_po(
         po_date=po_date_parsed,
         eta=eta_parsed,
         quoted_lead_days=payload.quoted_lead_days,
+        notes=(payload.notes or "").strip() or None,
         currency=_cur,
         # A rupiah order converts at 1 by definition — filling it in here
         # saves every reader downstream a "is it IDR?" special case.
@@ -1261,6 +1263,7 @@ async def get_po(
         "quoted_lead_days": po.quoted_lead_days,
         "total": float(po.total or 0),
         "items": po.items,
+        "notes": po.notes,
         "project_ids": [str(x) for x in (po.project_ids or [])],
         "created_at": po.created_at,
     }
@@ -1351,9 +1354,7 @@ async def export_po_pdf(
         rows=rows,
         currency=po.currency or "IDR",
         total=float(po.total or 0),
-        # A supplier PO has no keterangan field of its own yet; when it
-        # gains one this is where it prints.
-        notes=None,
+        notes=po.notes,
         issued_by=user.full_name or "—",
         issuer_signature=await load_for(user),
     )
@@ -1447,6 +1448,15 @@ async def export_po_excel(
     tot.font = bold
     tot.number_format = money_fmt
     tot.alignment = right
+
+    if (po.notes or "").strip():
+        row += 2
+        ws.cell(row=row, column=1, value="NOTES").font = bold
+        row += 1
+        note = ws.cell(row=row, column=1, value=po.notes.strip())
+        note.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+        ws.row_dimensions[row].height = 15 * (po.notes.strip().count("\n") + 1)
 
     for col, width in zip("ABCDEF", (6, 46, 10, 10, 16, 18)):
         ws.column_dimensions[col].width = width
@@ -1562,6 +1572,7 @@ class POPatch(BaseModel):
     total: float | None = None
     status: str | None = None         # open | received | closed | cancelled
     items: list | None = None
+    notes: str | None = None          # printed on the vendor's copy; "" clears
     # Give the PO its job, move it to another, or clear it (send null). Which
     # vendor serves which job is the director's call, so from anyone else
     # this queues for approval like every other PO edit.
@@ -1685,6 +1696,16 @@ async def update_po(
     # around live in WhatsApp again. It is audited instead, and it changes no
     # customer-facing date: the project's target/actual delivery stay gated in
     # operation.py, where the customer sees them.
+    # Notes apply straight away too, like the ETA: they print on the vendor's
+    # copy but change nothing that was priced or counted. Audited.
+    if "notes" in data:
+        before = po.notes
+        po.notes = (data.pop("notes") or "").strip() or None
+        if po.notes != before:
+            await audit_record(
+                db, actor=user, action="update", entity="supplier_po", entity_id=po.id,
+                before={"notes": before}, after={"notes": po.notes},
+            )
     if "eta" in data:
         raw = data.pop("eta")
         before = po.eta

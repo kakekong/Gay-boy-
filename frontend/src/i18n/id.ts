@@ -637,6 +637,8 @@ export const ID_STATIC: Record<string, string> = {
   "Notes (optional)": "Catatan (opsional)",
   "Notes / description": "Catatan / deskripsi",
   "Notes:": "Catatan:",
+  "Notes for the supplier": "Catatan untuk supplier",
+  "Notes from the buyer": "Catatan dari pembeli",
   "Nothing here yet.": "Belum ada apa-apa di sini.",
   "Nothing yet.": "Belum ada.",
   "Notifications": "Notifikasi",

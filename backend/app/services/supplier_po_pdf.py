@@ -24,6 +24,7 @@ currency too, dots for rupiah and a decimal point for everything else.
 """
 
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -203,7 +204,7 @@ def build_supplier_po_pdf(
     if (notes or "").strip():
         flow.append(Paragraph("NOTES", lbl))
         flow.append(Table(
-            [[Paragraph(notes.strip().replace("\n", "<br/>"), panel_body)]],
+            [[Paragraph(escape(notes.strip()).replace("\n", "<br/>"), panel_body)]],
             colWidths=[content_w],
             style=TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), PANEL),

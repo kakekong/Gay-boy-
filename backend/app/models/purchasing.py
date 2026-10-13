@@ -216,6 +216,10 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # in rupiah. Grows with each goods receipt (value of what arrived), and is
     # what finance pays down with SupplierPayment rows.
     payable_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    # Notes for the vendor — delivery instructions, packing, terms — printed
+    # under the lines on the PO they receive (PDF and spreadsheet). Internal
+    # talk belongs in the PO's discussion thread, which never leaves.
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SupplierPayment(Base, UUIDPK, TimestampMixin):

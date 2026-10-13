@@ -264,6 +264,8 @@ async def supplier_orders(
             "po_date": p.po_date, "quoted_lead_days": p.quoted_lead_days,
             "total": float(p.total or 0), "currency": (p.currency or "IDR").upper(),
             "items": p.items,
+            # Written for the vendor — it prints on their copy of the PO too.
+            "notes": p.notes,
             "created_at": p.created_at,
             "project_id": str(p.project_id) if p.project_id else None,
             "project_code": proj.code if proj else None,

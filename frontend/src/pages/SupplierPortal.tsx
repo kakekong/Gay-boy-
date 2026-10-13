@@ -28,6 +28,7 @@ interface PO {
   act_arrive_our_warehouse: string | null;
   act_ship_from_origin: string | null;
   has_drawing: boolean;
+  notes?: string | null;
 }
 
 export default function SupplierPortalPage() {
@@ -210,6 +211,13 @@ function POCard({ po }: { po: PO }) {
           <span className="chip bg-ink-100 text-ink-700 uppercase">{po.status}</span>
         </div>
       </div>
+
+      {po.notes && (
+        <div className="rounded-xl border border-ink-200 bg-ink-50/60 p-3 text-sm">
+          <div className="text-[10px] uppercase muted mb-1">{T("Notes from the buyer")}</div>
+          <div className="whitespace-pre-wrap">{po.notes}</div>
+        </div>
+      )}
 
       {/* Required-action banner */}
       {(needsProject || needsDrawing || needsEta) && (

@@ -16,6 +16,7 @@ import { useFormDraft } from "@/lib/draft";
 import { CommentThread } from "@/components/CommentThread";
 import { UserLink } from "@/components/UserLink";
 import { UnitSelect } from "@/components/UnitSelect";
+import { PONotes } from "@/components/PONotes";
 import { useAuthStore } from "@/store/auth";
 import { T, locale, t as tt } from "@/store/lang";
 
@@ -47,6 +48,8 @@ interface PO {
   /** What the supplier says, not what the lead time implies. Drives the
    *  project page's shipment list. */
   eta: string | null;
+  /** Free text printed on the vendor's copy and shown in their portal. */
+  notes?: string | null;
   quoted_lead_days: number | null;
   currency: string;
   /** Rupiah per unit of `currency`; null until someone sets one. */
@@ -944,6 +947,8 @@ export default function PurchaseOrderDetailPage() {
           </table>
         )}
       </div>
+
+      <PONotes poId={p.id} notes={p.notes ?? null} canEdit={!isFinance} />
 
       {/* Attachments (PO-scoped) */}
       <AttachmentsSection ownerType="supplier_po" ownerId={p.id} />

@@ -1156,6 +1156,7 @@ function NewPOModal({
   const [poNumber, setPoNumber] = useState("");
   const [poDate, setPoDate] = useState(new Date().toISOString().slice(0, 10));
   const [leadDays, setLeadDays] = useState("");
+  const [poNotes, setPoNotes] = useState("");
   // Blank on purpose: an ETA guessed at PO time is worse than no ETA, because
   // the project page presents it as the date this shipment lands.
   const [eta, setEta] = useState("");
@@ -1234,6 +1235,7 @@ function NewPOModal({
       eta: eta || null,
       currency,
       quoted_lead_days: leadDays ? Number(leadDays) : null,
+      notes: poNotes.trim() || null,
       total: total ? Number(total) : 0,
       price_request_id: linkedPR,
       items: prItems.length ? pickedItems : (description ? [{ description, qty: 1 }] : []),
@@ -1411,6 +1413,12 @@ function NewPOModal({
               />
               <span className="block text-[10px] text-ink-400 mt-1">
                 {T("When this order lands. The project lists it as a shipment on this date; leave blank if the supplier hasn't said.")}</span>
+            </label>
+<label className="block md:col-span-2">
+              <span className="block text-xs font-medium text-ink-600 mb-1">{T("Notes for the supplier")}</span>
+              <textarea className="input min-h-[64px]" rows={2} value={poNotes}
+                onChange={(e) => setPoNotes(e.target.value)}
+                placeholder={t("Delivery instructions, packing, terms… printed on the PO", "Instruksi pengiriman, kemasan, syarat… dicetak di PO")} />
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-ink-600 mb-1">{T("Lead time (days)")}</span>
