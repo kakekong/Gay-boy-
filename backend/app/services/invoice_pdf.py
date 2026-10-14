@@ -33,6 +33,7 @@ because that is the number the customer's tax people will ask for.
 """
 
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -69,6 +70,25 @@ def lines_explain_total(rows: list[dict], amount: float) -> bool:
     return _lines_total(rows) + _TOLERANCE >= float(amount or 0)
 
 
+def _draw_draft(canvas, doc) -> None:
+    """The letterhead, plus DRAFT struck across the page — the same stamp the
+    delivery order's preview carries. It is the real sheet, so whoever issued
+    the invoice checks what would actually print; and it is unmistakably not
+    the one to send, so nobody can pass it to a customer for payment."""
+    _draw_frame_and_chrome(canvas, doc)
+    w, h = A4
+    canvas.saveState()
+    canvas.translate(w / 2, h / 2)
+    canvas.rotate(38)
+    canvas.setFont("Helvetica-Bold", 96)
+    canvas.setFillColor(colors.Color(0.85, 0.30, 0.10, alpha=0.14))
+    canvas.drawCentredString(0, -30, "DRAFT")
+    canvas.setFont("Helvetica-Bold", 14)
+    canvas.setFillColor(colors.Color(0.85, 0.30, 0.10, alpha=0.30))
+    canvas.drawCentredString(0, -56, "BELUM DISETUJUI — NOT YET APPROVED")
+    canvas.restoreState()
+
+
 def build_invoice_pdf(
     *, number: str, issue_date: str, due_date: str | None,
     customer_name: str, customer_address: str,
@@ -79,13 +99,19 @@ def build_invoice_pdf(
     bank_name: str, bank_account_no: str, bank_account_name: str,
     bank_branch: str,
     issued_by: str, issuer_signature: bytes | None = None,
+    typed: bool = False,
+    draft: bool = False,
 ) -> bytes:
+    """`typed` says the rows are the lines someone wrote for this invoice
+    (see invoice_lines): they print as written, on a down payment too, rather
+    than being second-guessed into one LOT line. The edit that saved them
+    already checked they account for the amount."""
     buf = BytesIO()
     doc = _Doc(
         buf, pagesize=A4,
         leftMargin=MARGIN_X, rightMargin=MARGIN_X,
         topMargin=18 * mm + HEADER_H - 18 * mm, bottomMargin=FOOTER_H + 14 * mm,
-        title=f"Invoice {number}",
+        title=("DRAFT — " if draft else "") + f"Invoice {number}",
     )
     content_w = A4[0] - 2 * MARGIN_X
     frame = Frame(
@@ -94,7 +120,8 @@ def build_invoice_pdf(
         leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
     )
     doc.addPageTemplates([
-        PageTemplate(id="sheet", frames=[frame], onPage=_draw_frame_and_chrome),
+        PageTemplate(id="sheet", frames=[frame],
+                     onPage=(_draw_draft if draft else _draw_frame_and_chrome)),
     ])
 
     title = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=21,
@@ -166,7 +193,9 @@ def build_invoice_pdf(
         gross = _lines_total(printable)
         if gross - float(amount or 0) > _TOLERANCE:
             discount = gross - float(amount or 0)
-    if kind == "dp" or not printable or not lines_explain_total(printable, amount):
+    if typed and printable:
+        pass                       # as written; the discount above still applies
+    elif kind == "dp" or not printable or not lines_explain_total(printable, amount):
         printable = [{
             "description": ("Uang muka pekerjaan" if kind == "dp"
                             else (f"Pekerjaan {project_code}" if project_code
@@ -180,9 +209,11 @@ def build_invoice_pdf(
         qty = float(r.get("qty") or 0)
         unit = float(r.get("unit_price") or 0)
         data.append([
-            Paragraph(f"{qty:g} {(r.get('uom') or 'PCS').upper()}", cell),
-            Paragraph(str(r.get("sku") or "—"), cell),
-            Paragraph(str(r.get("description") or "—"), cell),
+            # Escaped: these are typed by hand now, and "Chain & Sprocket"
+            # would otherwise break the sheet.
+            Paragraph(escape(f"{qty:g} {(r.get('uom') or 'PCS').upper()}"), cell),
+            Paragraph(escape(str(r.get("sku") or "—")), cell),
+            Paragraph(escape(str(r.get("description") or "—")), cell),
             Paragraph(_idr_plain(unit), cell),
             Paragraph(_idr_plain(qty * unit), cell),
         ])

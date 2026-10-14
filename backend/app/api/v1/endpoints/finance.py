@@ -293,6 +293,9 @@ class InvoiceEdit(BaseModel):
     amount: float | None = None
     tax_amount: float | None = None
     notes: str | None = None
+    # The lines as they print, in the customer's names. An empty list (or
+    # null) clears them, and the sheet prints the customer's PO lines again.
+    items: list[dict] | None = None
 
 
 # An invoice finance has signed off is the customer's document: it carries a
@@ -371,6 +374,15 @@ async def invoice_detail(invoice_id: UUID,
         .order_by(Attachment.created_at.asc())
     )).all()]
 
+    if inv.items:
+        lines = [dict(r) for r in inv.items]
+    else:
+        from app.services.invoice_lines import auto_lines
+        lines, _ = await auto_lines(db, inv)
+        lines = [{"description": r.get("description"), "sku": r.get("sku"),
+                  "qty": float(r.get("qty") or 0), "uom": r.get("uom"),
+                  "unit_price": float(r.get("unit_price") or 0)} for r in lines]
+
     role = Role(user.role)
     unsigned = inv.status in _UNSIGNED
     unpaid = paid <= 0
@@ -389,6 +401,10 @@ async def invoice_detail(invoice_id: UUID,
         "approved_at": inv.approved_at,
         "notes": inv.notes,
         "created_at": inv.created_at,
+        # What the sheet prints: the typed lines, else the customer's PO lines
+        # it falls back to. `lines_typed` says which.
+        "lines": lines,
+        "lines_typed": bool(inv.items),
         "customer_id": str(cust.id) if cust else None,
         "customer_name": cust.company_name if cust else None,
         "project_id": str(proj.id) if proj else None,
@@ -416,6 +432,9 @@ async def invoice_detail(invoice_id: UUID,
             # status derived from it. The director's alone.
             "reverse_payment": role is Role.DIRECTOR,
             "download": not unsigned,
+            # The sheet as it will print, stamped DRAFT, while it can still
+            # be corrected.
+            "preview": unsigned,
         },
         "locked_because": (
             "Finance has signed this invoice off — it carries a tax number "
@@ -498,6 +517,26 @@ async def update_invoice(
     if money_changed:
         inv.total = float(inv.amount or 0) + float(inv.tax_amount or 0)
 
+    # Typed lines — and, with or without new ones, whether the lines on the
+    # invoice still account for what it bills. An amount edited down past
+    # its lines is refused the same as lines that fall short of it.
+    from app.services.invoice_lines import clean_lines, misfit
+    lines_before = inv.items
+    if "items" in data:
+        try:
+            inv.items = clean_lines(data["items"] or []) or None
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    if inv.items:
+        why = misfit(inv.items, float(inv.amount or 0), inv.type)
+        if why:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, why)
+    if "items" in data and inv.items != lines_before:
+        from app.core.audit import record as audit_record
+        await audit_record(db, actor=user, action="update", entity="invoice",
+                           entity_id=inv.id, before={"items": lines_before},
+                           after={"items": inv.items})
+
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="update", entity="invoice",
                        entity_id=inv.id,
@@ -516,6 +555,7 @@ async def update_invoice(
 @invoice_desk.get("/invoices/{invoice_id}/pdf")
 async def invoice_pdf(
     invoice_id: UUID,
+    draft: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -525,46 +565,39 @@ async def invoice_pdf(
     being agreed and the faktur pajak number does not exist yet, so a sheet
     printed then would be a demand for payment that nobody approved and that
     the customer's tax people would send straight back.
+
+    `draft=1` is the exception, as it is for the delivery order: the same
+    sheet with DRAFT struck across it, for whoever issued the invoice to check
+    the lines they wrote before finance signs — the names on it are typed by
+    hand now, and the place to catch a wrong one is before it is approved.
     """
     from app.core.config import settings
     from app.models.crm import Customer
-    from app.models.customer_po import CustomerPO
     from app.models.operation import Project
 
     inv = await db.get(Invoice, invoice_id)
     if not inv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice not found")
-    if inv.status in _UNSIGNED:
+    if inv.status in _UNSIGNED and not draft:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This invoice hasn't been approved yet — finance signs it off "
             "with its faktur pajak number, and the sheet is generated from "
-            "what they approved.",
+            "what they approved. Add ?draft=1 to preview it.",
         )
+    # Once it is signed the draft stamp would be a lie.
+    draft = bool(draft and inv.status in _UNSIGNED)
 
     cust = await db.get(Customer, inv.customer_id) if inv.customer_id else None
     project = await db.get(Project, inv.project_id) if inv.project_id else None
 
-    # What the customer ordered, in their words. Their PO first — the invoice
-    # is checked against it — then the quotation behind the job.
-    rows: list[dict] = []
-    order_number = None
-    po = None
-    if inv.customer_po_id:
-        po = await db.get(CustomerPO, inv.customer_po_id)
-    if po is None and project:
-        po = (await db.scalars(
-            select(CustomerPO).where(CustomerPO.project_id == project.id)
-            .order_by(CustomerPO.created_at.desc()).limit(1)
-        )).first()
-    if po:
-        order_number = po.number
-        rows = [dict(i) for i in (po.items or [])]
-    from app.services.item_codes import fill_item_codes, quotation_rows
-    quote_rows = await quotation_rows(db, project)
-    if not rows:
-        rows = quote_rows
-    rows = await fill_item_codes(db, rows, project, quote_rows)
+    # The lines admin typed, word for word; else what the customer ordered, in
+    # their words — their PO, then the quotation behind the job.
+    from app.services.invoice_lines import auto_lines
+    rows, order_number = await auto_lines(db, inv)
+    typed = bool(inv.items)
+    if typed:
+        rows = [dict(r) for r in inv.items]
 
     signer = await db.get(User, inv.approved_by) if inv.approved_by else user
     from app.services.invoice_pdf import build_invoice_pdf
@@ -579,6 +612,8 @@ async def invoice_pdf(
         project_code=project.code if project else None,
         invoice_type=inv.type,
         rows=rows,
+        typed=typed,
+        draft=draft,
         amount=float(inv.amount or 0),
         tax_amount=float(inv.tax_amount or 0),
         total=float(inv.total or 0),
@@ -587,14 +622,16 @@ async def invoice_pdf(
         bank_account_no=settings.COMPANY_BANK_ACCOUNT_NO,
         bank_account_name=settings.COMPANY_BANK_ACCOUNT_NAME,
         bank_branch=settings.COMPANY_BANK_BRANCH,
-        issued_by=(signer.full_name if signer else (user.full_name or "")),
-        issuer_signature=await _load_signature(signer or user),
+        # A draft carries nobody's name or signature: nobody has signed it.
+        issued_by=("" if draft
+                   else (signer.full_name if signer else (user.full_name or ""))),
+        issuer_signature=(None if draft else await _load_signature(signer or user)),
     )
     from fastapi.responses import Response
+    name = ("DRAFT-" if draft else "") + f"Invoice-{inv.number}.pdf"
     return Response(
         content=pdf, media_type="application/pdf",
-        headers={"Content-Disposition":
-                 f'inline; filename="Invoice-{inv.number}.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="{name}"'},
     )
 
 

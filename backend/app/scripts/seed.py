@@ -356,6 +356,7 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by UUID',
     'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_by UUID',
     'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ',
+    'ALTER TABLE invoices ADD COLUMN IF NOT EXISTS items JSONB',
 
     # Supplier PO can be linked to the price request it sources against, so the
     # PO auto-fills the buying (cost) price purchasing already entered.

@@ -2,12 +2,12 @@ from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
-from app.models.base import TimestampMixin, UUIDPK
-
+from app.models.base import UUIDPK, TimestampMixin
 
 # Invoice lifecycle actually written by the app:
 #   pending_finance → approved → partial → paid   (or → rejected)
@@ -58,6 +58,12 @@ class Invoice(Base, UUIDPK, TimestampMixin):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pdf_url: Mapped[str | None] = mapped_column(String(500))
     notes: Mapped[str | None] = mapped_column(Text)
+    # The lines as they print, typed by whoever issues the invoice. The trade
+    # uses one set of names with the vendor and another with the customer, and
+    # turning one into the other takes someone who knows both — so the invoice
+    # does not guess: admin write the customer's names here. None means
+    # nobody has yet, and the sheet prints the customer's PO lines as before.
+    items: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
 
 class Payment(Base, UUIDPK, TimestampMixin):

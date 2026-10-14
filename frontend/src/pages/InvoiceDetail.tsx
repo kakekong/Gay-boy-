@@ -26,6 +26,7 @@ import { downloadFile } from "@/lib/download";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
 import { GeneratedSheetModal } from "@/components/GeneratedSheetModal";
+import { InvoiceLinesCard, type InvoiceLine } from "@/components/InvoiceLines";
 import { useT, T, locale } from "@/store/lang";
 
 interface Money { id: string; amount: number; paid_at: string | null;
@@ -54,9 +55,13 @@ interface Inv {
   may: {
     edit: boolean; approve: boolean; reject: boolean;
     set_faktur_pajak: boolean; delete: boolean; download: boolean;
+    /** The sheet stamped DRAFT, while it can still be corrected. */
+    preview?: boolean;
     reverse_payment?: boolean;
   };
   locked_because: string | null;
+  /** What the sheet prints — typed for this invoice, or the PO lines it falls back to. */
+  lines: InvoiceLine[]; lines_typed: boolean;
 }
 
 const idr = (n: number) =>
@@ -87,7 +92,7 @@ export default function InvoiceDetailPage() {
   const [draftTax, setDraftTax] = useState("");
   const [draftDue, setDraftDue] = useState("");
   const [fp, setFp] = useState("");
-  const [sheet, setSheet] = useState(false);
+  const [sheet, setSheet] = useState<false | "final" | "draft">(false);
 
   const q = useQuery({
     queryKey: ["invoice", id],
@@ -315,7 +320,7 @@ export default function InvoiceDetailPage() {
             </span>
             {v.may.download && (
               <>
-                <button className="btn-ghost" onClick={() => setSheet(true)}>
+                <button className="btn-ghost" onClick={() => setSheet("final")}>
                   <Eye size={15} /> {t("View", "Lihat")}
                 </button>
                 <button className="btn-ghost"
@@ -324,6 +329,13 @@ export default function InvoiceDetailPage() {
                   <FileDown size={15} /> {T("PDF")}
                 </button>
               </>
+            )}
+            {v.may.preview && (
+              <button className="btn-ghost" onClick={() => setSheet("draft")}
+                title={t("The invoice as it will print, stamped DRAFT until finance signs it",
+                         "Faktur seperti akan dicetak, bercap DRAF sampai keuangan menyetujuinya")}>
+                <Eye size={15} /> {t("Preview (draft)", "Pratinjau (draf)")}
+              </button>
             )}
             {v.may.approve && (
               <button className="btn-primary" disabled={approve.isPending}
@@ -437,6 +449,9 @@ export default function InvoiceDetailPage() {
           </Meta>
         </div>
       </div>
+
+      {/* What it bills for, in the customer's names. */}
+      <InvoiceLinesCard inv={v} />
 
       {/* The tax number, which is finance's and arrives on its own schedule. */}
       <div className="card p-5 space-y-3">
@@ -643,9 +658,9 @@ export default function InvoiceDetailPage() {
 
       {sheet && (
         <GeneratedSheetModal
-          url={`/finance/invoices/${v.id}/pdf`}
-          filename={`Invoice-${v.number}.pdf`}
-          title={v.number}
+          url={`/finance/invoices/${v.id}/pdf${sheet === "draft" ? "?draft=1" : ""}`}
+          filename={`${sheet === "draft" ? "DRAFT-" : ""}Invoice-${v.number}.pdf`}
+          title={sheet === "draft" ? `${v.number} — ${t("draft", "draf")}` : v.number}
           onClose={() => setSheet(false)} />
       )}
     </div>

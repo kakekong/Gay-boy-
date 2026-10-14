@@ -21,6 +21,7 @@ import { ShippingTimeline } from "@/components/ShippingTimeline";
 import { ShippingTimelineEditor } from "@/components/ShippingTimelineEditor";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { NewDeliveryOrderModal } from "@/components/NewDeliveryOrderModal";
+import { InvoiceLinesEditor } from "@/components/InvoiceLines";
 import { QuotedMoney } from "@/components/QuotedMoney";
 
 const STATUS_CHIP: Record<string, string> = {
@@ -313,6 +314,8 @@ export default function ProjectDetailPage() {
     if (defaultWoCode) setNewWoCode(defaultWoCode);
   }, [defaultWoCode]);
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
+  // The invoice just issued, whose lines are being written in the pop-up.
+  const [linesFor, setLinesFor] = useState<string | null>(null);
   // Bumped after an upload so the file picker forgets the name it was showing.
   const [drawingPick, setDrawingPick] = useState(0);
   // Link mode is its own flag rather than "is the URL box non-empty", so the
@@ -575,7 +578,13 @@ export default function ProjectDetailPage() {
       fd.append("create_delivery_order", withDo ? "true" : "false");
       return api.post(`/operation/projects/${id}/issue-invoice`, fd);
     },
-    onSuccess: refresh,
+    // Straight on to its lines: the names the customer reads are written by
+    // hand, and the moment it is issued is when the person knows them.
+    onSuccess: (r: any) => {
+      refresh();
+      const newId = r?.data?.invoice?.id ?? r?.data?.data?.invoice?.id;
+      if (newId) setLinesFor(newId);
+    },
     // A project is billed once — a second invoice is refused, and the
     // message names the one already there. No "raise another anyway".
     onError: onErr,
@@ -2881,6 +2890,9 @@ export default function ProjectDetailPage() {
         ownerId={p.id}
         title={t("Discussion", "Diskusi")}
       />
+
+      <InvoiceLinesEditor invoiceId={linesFor} open={!!linesFor} firstTime
+        onClose={() => setLinesFor(null)} />
 
       <NewDeliveryOrderModal
         open={newDoOpen}
