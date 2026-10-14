@@ -819,6 +819,8 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
   // supplier id → the "prId:lineNo" keys they are being asked about
   const [assign, setAssign] = useState<Record<string, string[]>>({});
   const [notes, setNotes] = useState("");
+  // For the vendor — goes into the message purchasing sends them.
+  const [supplierNotes, setSupplierNotes] = useState("");
   const [validUntil, setValidUntil] = useState("");
   const [lines, setLines] = useState([{ description: "", qty: 1, uom: "pcs" }]);
   const [search, setSearch] = useState("");
@@ -882,6 +884,7 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
         return api.post("/purchasing/price-requests", {
           price_request_ids: prIds,
           notes: notes.trim() || null,
+          supplier_notes: supplierNotes.trim() || null,
           valid_until: validUntil || null,
           assignments: picked.map((sid) => ({
             supplier_id: sid,
@@ -902,6 +905,7 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
             qty: Number(l.qty) || 0, uom: l.uom || null,
           })),
         notes: notes.trim() || null,
+        supplier_notes: supplierNotes.trim() || null,
         valid_until: validUntil || null,
       });
     },
@@ -1107,6 +1111,13 @@ function AskSuppliersModal({ suppliers, onClose, onCreated, onError }: {
               })}
             </div>
           )}
+
+          <Field label={T("Notes for the supplier")}>
+            <textarea className="input min-h-[64px]" rows={2} value={supplierNotes}
+              onChange={(e) => setSupplierNotes(e.target.value)}
+              placeholder={t("e.g. Quote CIF Jakarta, include your drawing, material SS304",
+                              "cth. Harga CIF Jakarta, sertakan gambar, bahan SS304")} />
+          </Field>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label={T("Quote valid until")}>

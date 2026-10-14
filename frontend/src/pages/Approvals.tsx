@@ -7,6 +7,7 @@ import {
   MessageSquare, Trophy, Truck, Clock,
 } from "lucide-react";
 import clsx from "clsx";
+import { SupplierQuoteList, hasNotes, type SupplierQuote } from "@/components/SupplierQuoteNotes";
 import { api } from "@/api/client";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { GeneratedSheetModal } from "@/components/GeneratedSheetModal";
@@ -65,6 +66,8 @@ export default function ApprovalsPage() {
     queryKey: ["approvals-pending-docs"],
     queryFn: () => api.get("/approvals/pending-documents").then((r) => r.data as Array<{
       kind: string; title: string; body: string; link: string; at: string | null;
+      /** On a price request: the supplier quotes behind its cost, and their notes. */
+      supplier_quotes?: SupplierQuote[];
     }>),
     refetchInterval: poll(30_000),
   });
@@ -183,9 +186,28 @@ export default function ApprovalsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">{d.title}</div>
                     <div className="text-xs muted">{d.body}</div>
+                    {d.supplier_quotes && d.supplier_quotes.length > 0 && (
+                      <div className="text-xs mt-0.5">
+                        <span className="muted">
+                          {d.supplier_quotes.length} {T("supplier quote(s)")}
+                        </span>
+                        {d.supplier_quotes.some(hasNotes) && (
+                          <span className="ml-1.5 chip bg-amber-50 text-amber-700">
+                            {T("notes from purchasing — read below")}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <ChevronRight size={14} className="text-ink-300 group-hover:text-ink-600 shrink-0 mt-1.5" />
                 </Link>
+                {/* The quotes behind the cost, with their notes, in front of
+                    the decision rather than a click per supplier away. */}
+                {d.supplier_quotes && d.supplier_quotes.length > 0 && (
+                  <div className="pl-16 pr-5 pb-3 -mt-1">
+                    <SupplierQuoteList quotes={d.supplier_quotes} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>

@@ -123,6 +123,8 @@ class CreateIn(BaseModel):
     items: list[ItemIn] = []
 
     notes: str | None = None
+    # For the vendor, not for us — copied into the message that goes to them.
+    supplier_notes: str | None = None
     valid_until: date | None = None
     currency: str = "IDR"
 
@@ -134,6 +136,7 @@ class UpdateIn(BaseModel):
     number: str | None = None
     items: list[ItemIn] | None = None
     notes: str | None = None
+    supplier_notes: str | None = None
     valid_until: date | None = None
     currency: str | None = None
 
@@ -215,6 +218,7 @@ def _out(spr: SupplierPriceRequest, supplier: Supplier | None,
         "requested_by": str(spr.requested_by) if spr.requested_by else None,
         "items": items,
         "notes": spr.notes,
+        "supplier_notes": spr.supplier_notes,
         "currency": spr.currency,
         "fx_rate": float(spr.fx_rate) if spr.fx_rate is not None else None,
         "valid_until": spr.valid_until,
@@ -479,6 +483,11 @@ async def supplier_requests_for_pr(db: AsyncSession, pr_id: UUID) -> list[dict]:
     rows = await _touching(db, pr_id)
     if not rows:
         return []
+    # Which quote the cost on this request actually came from: applying one
+    # stamps its number on every line it priced.
+    pr = await db.get(PriceRequest, pr_id)
+    used_numbers = {str(i.get("cost_source")) for i in ((pr.items or []) if pr else [])
+                    if isinstance(i, dict) and i.get("cost_source")}
     sups = {s.id: s for s in (await db.scalars(
         select(Supplier).where(Supplier.id.in_({r.supplier_id for r in rows}))
     )).all()}
@@ -512,6 +521,20 @@ async def supplier_requests_for_pr(db: AsyncSession, pr_id: UUID) -> list[dict]:
             "quoted_total": (sum(_line_total(i) for i in mine)
                              if mine and len(quoted) == len(mine) else None),
             "is_joint": len(r.source_pr_ids or []) > 1,
+            "used_for_cost": r.number in used_numbers,
+            # What purchasing wrote down about the quote — MOQ, what the
+            # price leaves out, how long it holds. The director sets the
+            # margin on this cost, so these are read at the moment of
+            # deciding, not found later by opening each request.
+            "notes": (r.notes or "").strip() or None,
+            # What the vendor was asked for — CIF or ex-works, the grade, the
+            # paperwork — which is what the quoted cost does or doesn't cover.
+            "supplier_notes": (r.supplier_notes or "").strip() or None,
+            "line_notes": [
+                {"line_no": i.get("line_no"), "description": i.get("description"),
+                 "note": str(i.get("note")).strip()}
+                for i in mine if str(i.get("note") or "").strip()
+            ],
         })
     return out
 
@@ -648,6 +671,7 @@ async def create_requests(
             status="draft",
             items=items,
             notes=payload.notes,
+            supplier_notes=(payload.supplier_notes or "").strip() or None,
             currency=payload.currency or "IDR",
             valid_until=payload.valid_until,
             # What this request is the whole OF, recorded rather than guessed
@@ -811,6 +835,17 @@ async def update_request(
     for field in ("notes", "valid_until", "currency"):
         if field in data:
             setattr(spr, field, data[field])
+    # Editable until the vendor answers (the request is still open): adding
+    # "please quote CIF Jakarta" after the list went out is a follow-up
+    # message, not a different request.
+    if "supplier_notes" in data:
+        before = spr.supplier_notes
+        spr.supplier_notes = (data["supplier_notes"] or "").strip() or None
+        if spr.supplier_notes != before:
+            await audit_record(db, actor=user, action="update",
+                               entity="supplier_price_request", entity_id=spr.id,
+                               before={"supplier_notes": before},
+                               after={"supplier_notes": spr.supplier_notes})
     await audit_record(db, actor=user, action="update",
                        entity="supplier_price_request", entity_id=spr.id,
                        after={"number": spr.number, "fields": sorted(data)})

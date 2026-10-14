@@ -189,13 +189,29 @@ async def pending_documents(
                 PriceRequest.status == "pending_director",
             ).order_by(PriceRequest.created_at.asc()).limit(50)
         )).all()
+        from app.api.v1.endpoints.supplier_price_requests import (
+            supplier_requests_for_pr,
+        )
+        pr_custs = {c.id: c for c in (await db.scalars(
+            select(Customer).where(Customer.id.in_({p.customer_id for p in prows
+                                                   if p.customer_id}))
+        )).all()} if prows else {}
         for pr in prows:
+            cust = pr_custs.get(pr.customer_id)
+            # The supplier quotes behind the cost, with what purchasing noted
+            # on them. The margin is set on that cost, so a "price excludes
+            # freight" or "MOQ 100 m" belongs in front of the director here,
+            # not three clicks away on each supplier request.
+            quotes = [q for q in await supplier_requests_for_pr(db, pr.id)
+                      if q["status"] != "cancelled"]
             items.append({
                 "kind": "price_request",
-                "title": f"Price request {pr.number}",
+                "title": f"Price request {pr.number}"
+                         + (f" — {cust.company_name}" if cust else ""),
                 "body": "Costed by purchasing — set the sell price and approve.",
-                "link": "/price-requests",
+                "link": f"/price-requests?open={pr.id}",
                 "at": pr.priced_at or pr.created_at,
+                "supplier_quotes": quotes,
             })
 
     items.sort(key=lambda x: (x["at"] is None, x["at"]))

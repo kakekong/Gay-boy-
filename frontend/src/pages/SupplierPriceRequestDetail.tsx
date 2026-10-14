@@ -23,6 +23,7 @@ import { api } from "@/api/client";
 import { QuotedMoney } from "@/components/QuotedMoney";
 import { AttachmentsSection } from "@/components/AttachmentsSection";
 import { CommentThread } from "@/components/CommentThread";
+import { SupplierRequestNotes } from "@/components/SupplierRequestNotes";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
 import { useT, T } from "@/store/lang";
@@ -73,6 +74,8 @@ interface SPR {
   is_joint: boolean;
   items: Line[];
   notes: string | null;
+  /** For the vendor — copied into the message that goes to them. */
+  supplier_notes?: string | null;
   currency: string;
   fx_rate: number | null;
   valid_until: string | null;
@@ -546,10 +549,19 @@ export default function SupplierPriceRequestDetailPage() {
                 {t("Quote valid until", "Penawaran berlaku sampai")} {r.valid_until}
               </div>
             )}
-            {r.notes && <div className="whitespace-pre-wrap text-ink-700">{r.notes}</div>}
+            {r.notes && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide muted">
+                  {t("Your notes (not sent to the supplier)", "Catatan Anda (tidak dikirim ke supplier)")}
+                </div>
+                <div className="whitespace-pre-wrap text-ink-700">{r.notes}</div>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      <SupplierRequestNotes req={r} />
 
       {/* The customer request moved under this one. */}
       {(r.source_drift?.length ?? 0) > 0 && (

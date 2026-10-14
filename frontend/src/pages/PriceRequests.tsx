@@ -6,6 +6,7 @@ import {
   Pencil, ClipboardList, Search, Filter,
 } from "lucide-react";
 import clsx from "clsx";
+import { QuoteNotes, hasNotes, type SupplierQuote } from "@/components/SupplierQuoteNotes";
 import { api } from "@/api/client";
 import { DealCheck } from "@/components/DealCheck";
 import { QuotedMoney } from "@/components/QuotedMoney";
@@ -1650,7 +1651,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
 
 /* ── The supplier requests raised off this price request ─────────────────── */
 
-interface SupplierRequestLink {
+interface SupplierRequestLink extends Partial<SupplierQuote> {
   id: string;
   number: string;
   status: string;
@@ -1810,6 +1811,11 @@ function SupplierRequestsStrip({ rows }: { rows: SupplierRequestLink[] }) {
                   SPR_CHIP[r.status] ?? "bg-ink-100 text-ink-700")}>
                   {t(r.status, r.status)}
                 </span>
+                {r.used_for_cost && (
+                  <span className="chip bg-emerald-50 text-emerald-700">
+                    {t("cost taken from this quote", "biaya diambil dari penawaran ini")}
+                  </span>
+                )}
                 {r.is_joint && (
                   <span className="chip bg-violet-50 text-violet-700"
                         title={t("This request also covers other jobs; only this one's lines are counted here.",
@@ -1838,6 +1844,13 @@ function SupplierRequestsStrip({ rows }: { rows: SupplierRequestLink[] }) {
                       </span>}
                 </span>
               </Link>
+              {/* What purchasing noted on this quote, readable without
+                  opening it — the director sets the margin on this cost. */}
+              {hasNotes(r as SupplierQuote) && (
+                <div className="px-3 pb-2.5 -mt-0.5">
+                  <QuoteNotes q={r as SupplierQuote} />
+                </div>
+              )}
             </li>
           ))}
         </ul>

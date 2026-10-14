@@ -111,7 +111,14 @@ class SupplierPriceRequest(Base, UUIDPK, TimestampMixin):
     # asks, and it stays queryable with a JSONB containment test instead of
     # scanning every row's items.
     source_pr_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # Purchasing's own notes — and the request's log: the quote, the close
+    # reason and a refresh from the customer request are appended here.
     notes: Mapped[str | None] = mapped_column(Text)
+    # What the supplier should read with the list: the grade, the delivery
+    # point, "quote CIF", "need your drawing". Kept apart from `notes` because
+    # that one is internal and the system writes into it; this one is copied
+    # into the message purchasing sends the vendor.
+    supplier_notes: Mapped[str | None] = mapped_column(Text)
     # What the supplier quoted in. Overseas vendors answer in USD or CNY, and
     # a quote read as rupiah is off by a factor of fifteen thousand — a cost
     # that then becomes a margin the director sets on a number that never
