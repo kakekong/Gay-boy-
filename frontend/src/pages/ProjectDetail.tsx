@@ -512,6 +512,21 @@ export default function ProjectDetailPage() {
     },
     onError: onErr,
   });
+  // The director answering a skip request from the drawings card — the same
+  // decision as in the Approvals inbox, so the person who asked hears back.
+  const decideSkip = useMutation({
+    mutationFn: (b: { reqId: string; approve: boolean; notes?: string }) =>
+      api.post(`/approvals/${b.reqId}/${b.approve ? "approve" : "reject"}`, null,
+               { params: b.notes ? { notes: b.notes } : {} }),
+    onSuccess: (_r, b) => {
+      refresh();
+      setSkipNote(b.approve
+        ? tt("Approved — the drawing stage is skipped and logistics can start.",
+             "Disetujui — tahap gambar dilewati dan logistik bisa dimulai.")
+        : tt("Declined — the drawing stage stays.", "Ditolak — tahap gambar tetap."));
+    },
+    onError: onErr,
+  });
   const unskipDrawing = useMutation({
     mutationFn: () => api.post(`/operation/projects/${id}/unskip-drawing`),
     onSuccess: () => {
@@ -773,7 +788,10 @@ export default function ProjectDetailPage() {
   // The server holds the real rule both ways; this only decides whether the
   // row is worth rendering.
   const isDirector = role === "director";
-  const canAskSkipDrawing = ["purchasing", "director", "manager", "admin"].includes(role);
+  // Sales included: the rep is often first to know the customer is buying a
+  // standard part with nothing to draw. The server limits them to their own
+  // customers' jobs, as it does everything else on a project.
+  const canAskSkipDrawing = ["purchasing", "director", "manager", "admin", "sales"].includes(role);
   // Same set the server allows to receive goods (_RECEIVING_ROLES).
   const canReceive = ["purchasing", "admin", "manager", "director"].includes(role);
   // Same set the server lets file and remove a work order (_WO_MUTATOR_ROLES).
@@ -836,7 +854,8 @@ export default function ProjectDetailPage() {
             dismissNote={() => setSkipNote(null)}
             onSkip={(reason) => skipDrawing.mutate(reason)}
             onUnskip={() => unskipDrawing.mutate()}
-            busy={skipDrawing.isPending || unskipDrawing.isPending}
+            onDecide={(reqId, approve, notes) => decideSkip.mutate({ reqId, approve, notes })}
+            busy={skipDrawing.isPending || unskipDrawing.isPending || decideSkip.isPending}
           />}
 
           {mayUpload[kind] && (
@@ -3188,7 +3207,7 @@ function Stat({ label, value, tone }: {
  */
 function SkipDrawingRow({
   project, canAsk, isDirector, hasApproved, note, dismissNote,
-  onSkip, onUnskip, busy,
+  onSkip, onUnskip, onDecide, busy,
 }: {
   project: any;
   canAsk: boolean;
@@ -3198,14 +3217,20 @@ function SkipDrawingRow({
   dismissNote: () => void;
   onSkip: (reason: string) => void;
   onUnskip: () => void;
+  onDecide: (reqId: string, approve: boolean, notes?: string) => void;
   busy: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [declining, setDeclining] = useState(false);
+  const [why, setWhy] = useState("");
   const skipped = !!project?.drawing_skipped;
+  // A request already with the director.
+  const pending: { id: string; reason: string | null; requested_by: string | null;
+                   requested_at: string } | null = project?.drawing_skip_pending ?? null;
 
-  if (!skipped && (!canAsk || hasApproved)) return note ? (
+  if (!skipped && !pending && (!canAsk || hasApproved)) return note ? (
     <div className="px-5 py-2 border-b border-ink-100 text-xs text-emerald-800 bg-emerald-50 flex items-start gap-2">
       <span className="flex-1">{note}</span>
       <button onClick={dismissNote} className="opacity-60 hover:opacity-100">×</button>
@@ -3221,7 +3246,53 @@ function SkipDrawingRow({
         </div>
       )}
 
-      {skipped ? (
+      {!skipped && pending ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="chip bg-amber-50 text-amber-800">
+              {isDirector
+                ? t("Asked to skip the drawing", "Diminta melewati gambar")
+                : t("Waiting for the director", "Menunggu direktur")}
+            </span>
+            <span className="text-ink-700">
+              {pending.reason
+                ? <>&ldquo;{pending.reason}&rdquo;</>
+                : <span className="muted">{t("No reason given", "Tanpa alasan")}</span>}
+            </span>
+            <span className="muted">
+              — {pending.requested_by ?? t("someone", "seseorang")}
+              {pending.requested_at && <>, {new Date(pending.requested_at).toLocaleDateString(locale())}</>}
+            </span>
+          </div>
+          {isDirector && (declining ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <input className="input text-xs flex-1 min-w-[220px]" value={why} autoFocus
+                aria-label={t("Why not?", "Kenapa tidak?")}
+                onChange={(e) => setWhy(e.target.value)}
+                placeholder={t("Why not? They will see this (optional)",
+                               "Kenapa tidak? Mereka akan melihat ini (opsional)")} />
+              <button type="button" disabled={busy} className="btn-ghost text-xs text-red-600"
+                onClick={() => { onDecide(pending.id, false, why.trim() || undefined); setDeclining(false); setWhy(""); }}>
+                {t("Decline", "Tolak")}
+              </button>
+              <button type="button" className="btn-ghost text-xs" onClick={() => setDeclining(false)}>
+                {t("Cancel", "Batal")}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" disabled={busy} className="btn-primary text-xs"
+                onClick={() => onDecide(pending.id, true)}>
+                {t("Approve — skip the drawing", "Setujui — lewati gambar")}
+              </button>
+              <button type="button" disabled={busy} className="btn-ghost text-xs text-red-600"
+                onClick={() => setDeclining(true)}>
+                {t("Decline", "Tolak")}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : skipped ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="chip bg-amber-50 text-amber-800">
             {t("Drawing skipped", "Gambar dilewati")}

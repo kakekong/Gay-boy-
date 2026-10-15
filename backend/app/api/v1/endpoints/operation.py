@@ -458,6 +458,10 @@ async def project_full(project_id: UUID,
             # So the drawings card can say "skipped, by the director, because
             # …" instead of showing an empty shelf that reads as work missing.
             **_skip_payload(p),
+            # And "asked, waiting for the director" — without it the row
+            # offered the same button again after a reload, as if nothing had
+            # been sent.
+            "drawing_skip_pending": await _skip_pending(db, p.id),
         },
         "price_request": price_request,
         # Null for anyone outside procurement, which is how the page knows to
@@ -1204,6 +1208,24 @@ class SkipDrawingIn(BaseModel):
     reason: str | None = None
 
 
+async def _skip_pending(db: AsyncSession, project_id) -> dict | None:
+    """The skip request waiting on the director for this job, if any."""
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+    req = await db.scalar(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "project_skip_drawing",
+            ApprovalRequest.target_id == project_id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        ).order_by(ApprovalRequest.created_at.desc()).limit(1)
+    )
+    if req is None:
+        return None
+    who = await db.get(User, req.requested_by) if req.requested_by else None
+    return {"id": str(req.id), "reason": (req.payload or {}).get("reason") or None,
+            "requested_by": who.full_name if who else None,
+            "requested_at": req.created_at}
+
+
 def _skip_payload(p: Project) -> dict:
     return {
         "drawing_skipped": p.drawing_skipped_at is not None,
@@ -1304,8 +1326,10 @@ async def skip_drawing(
 
     So the skip is a decision in its own right, with a reason attached, and it
     is **the director's** — the same signature that approves a real drawing.
-    Anyone else on the logistics or ops side may ask for it; the request lands
-    in the director's queue like every other one, and this returns 202.
+    Anyone else on the logistics or ops side may ask for it — and the sales
+    rep on their own customer's job, who is usually the first to know the
+    customer is buying a standard part — the request lands in the director's
+    queue like every other one, and this returns 202.
 
     It is not a status. `drawing_skipped_at` records the decision; the project
     advances to `drawing_approved` because that is the milestone now settled,
@@ -1321,9 +1345,16 @@ async def skip_drawing(
     role = Role(user.role)
     # Who may ASK. Who may decide is director, checked below — the two are
     # different questions and this is the looser one.
-    if role not in (_LOGISTICS_ROLES | _OPS_ROLES | {Role.DIRECTOR}):
+    if role not in (_LOGISTICS_ROLES | _OPS_ROLES | {Role.DIRECTOR, Role.SALES}):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Purchasing, operations or management only")
+                            "Purchasing, operations, sales or management only")
+    # A rep asks about their own customers' jobs, the same scope as opening
+    # the project or filing its drawing.
+    if role == Role.SALES:
+        customer = await db.get(Customer, p.customer_id) if p.customer_id else None
+        if not customer or customer.sales_pic_id != user.id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Only the customer's own sales rep may ask to skip its drawing")
     if p.drawing_skipped_at is not None:
         return {"ok": True, "already": True, **_skip_payload(p)}
     if await _has_approved_drawing(db, project_id):
@@ -1360,6 +1391,20 @@ async def skip_drawing(
         )
 
     apply_drawing_skip(p, actor_id=user.id, reason=reason)
+    # Someone may have asked first. Deciding it here answers them too — left
+    # pending, it sat in the director's own queue asking for a decision that
+    # had already been made, and the person who asked never heard back.
+    for req in (await db.scalars(
+        select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "project_skip_drawing",
+            ApprovalRequest.target_id == project_id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value,
+        )
+    )).all():
+        req.status = ApprovalStatus.APPROVED.value
+        req.decided_by = user.id
+        req.decided_at = datetime.now(UTC)
+        req.decision_notes = "Skipped on the project page"
     await db.flush()
     return {"ok": True, **_skip_payload(p), "project_status": p.status}
 

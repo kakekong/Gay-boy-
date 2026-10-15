@@ -49,6 +49,21 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+// What each kind of request is, as people say it.
+const REQUEST_KIND: Record<string, [string, string]> = {
+  project_skip_drawing: ["Skip drawing", "Lewati gambar"],
+  supplier_po: ["Purchase order", "PO pembelian"],
+  purchase_request: ["Purchase request", "Permintaan pembelian"],
+  customer_po: ["Customer PO", "PO pelanggan"],
+  quotation: ["Quotation", "Penawaran"],
+  quotation_edit: ["Quotation edit", "Ubah penawaran"],
+  price_request_revision: ["Price revision", "Revisi harga"],
+  inventory_item: ["New inventory items", "Barang inventaris baru"],
+  cross_dept_chat: ["Cross-department chat", "Chat lintas divisi"],
+  project: ["Project", "Proyek"],
+  customer: ["Customer", "Pelanggan"],
+};
+
 export default function ApprovalsPage() {
   const qc = useQueryClient();
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -324,8 +339,11 @@ function ApprovalCard({ row: r, decide }: { row: ApprovalRow; decide: any }) {
               <span className="chip bg-lime-50 text-lime-700 inline-flex items-center gap-1">
                 <Truck size={11} /> {T("Delivery order")}</span>
             ) : (
-              <span className="chip bg-brand-50 text-brand-700 capitalize">
-                {r.target_type}
+              <span className="chip bg-brand-50 text-brand-700">
+                {/* In words, not the column name ("Project_skip_drawing"). */}
+                {REQUEST_KIND[r.target_type]
+                  ? tt(...REQUEST_KIND[r.target_type])
+                  : r.target_type.replace(/_/g, " ")}
               </span>
             )}
             <span className="chip bg-amber-50 text-amber-700 uppercase">

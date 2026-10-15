@@ -14,9 +14,9 @@ drawing. Purchasing and ops may ask; the request goes to the director's queue.
 
 The two things that matter beyond "the button works":
 
-* **It must not become a way past the director.** Sales cannot touch it,
-  purchasing gets a request rather than a skip, and the request has to be
-  approved before anything changes.
+* **It must not become a way past the director.** Purchasing — and the
+  customer's own sales rep, but no other rep — get a request rather than a
+  skip, and the request has to be approved before anything changes.
 * **It must not fake an approved drawing.** The job moves on because the
   drawing question is settled, not because a drawing exists — so the drawings
   list stays empty and the record says "skipped", not "approved".
@@ -50,6 +50,7 @@ async def main():
         return {"Authorization": f"Bearer {r.json()['access_token']}"}
     d = await login("director@demo.local")
     s1 = await login("sales1@demo.local")
+    s2 = await login("sales2@demo.local")
     pur = await login("purchasing@demo.local")
 
     n = [0]
@@ -92,9 +93,11 @@ async def main():
 
     # ══ who may decide ═══════════════════════════════════════════════════
     print("\n── and it is not something anybody can wave through ──")
-    r = await c.post(f"/operation/projects/{p1}/skip-drawing", headers=s1,
+    # The customer's own rep may ask (test_sales_skip_drawing covers that);
+    # a rep who isn't on the account can't.
+    r = await c.post(f"/operation/projects/{p1}/skip-drawing", headers=s2,
                      json={"reason": "off the shelf"})
-    check("sales cannot even ask", r.status_code == 403, str(r.status_code))
+    check("another sales rep cannot even ask", r.status_code == 403, str(r.status_code))
 
     r = await c.post(f"/operation/projects/{p1}/skip-drawing", headers=pur,
                      json={"reason": "catalogue part, nothing to draw"})

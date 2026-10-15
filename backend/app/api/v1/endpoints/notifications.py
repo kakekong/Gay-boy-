@@ -56,6 +56,9 @@ _TARGET_LINK = {
     "inventory_item":         "/inventory",
     "cross_dept_chat":        "/chat",
     "overtime":               "/approvals",
+    # Sales can ask to skip a job's drawing now; the answer belongs on the
+    # project, not the dashboard.
+    "project_skip_drawing":   "/projects/{id}",
 }
 
 
@@ -86,7 +89,16 @@ _APPROVAL_LABEL = {
     "price_request_revision": "price revision",
     "cross_dept_chat": "cross-department chat",
     "inventory_item": "new inventory items",
+    "project_skip_drawing": "skip-the-drawing",
+    "project": "project",
+    "customer": "customer",
+    "quotation": "quotation",
 }
+
+
+def _what(target_type: str) -> str:
+    """A request's subject in words — never the column name."""
+    return _APPROVAL_LABEL.get(target_type or "", (target_type or "request").replace("_", " "))
 
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
@@ -295,7 +307,7 @@ async def list_notifications(
             "id": f"approval-decided:{a.id}",
             "kind": "approval_decided",
             "severity": "low" if approved else "medium",
-            "title": f"Your {a.target_type} request was {verb}",
+            "title": f"Your {_what(a.target_type)} request was {verb}",
             "body": (f"Reason: {reason}" if reason
                      else ("Approved." if approved
                            else "Rejected (no reason given).")),
