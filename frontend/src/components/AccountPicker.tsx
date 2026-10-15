@@ -33,11 +33,26 @@ interface Props {
   placeholder?: string;
   /** Limit the list, e.g. to Cash & Bank for a payment form. */
   onlyTypes?: string[];
+  /** Leave these kinds out — a payment's "what it was for" is never one of
+   *  our own banks; money between two of ours is a transfer. */
+  excludeTypes?: string[];
+  /** Shown first, in this order, before anything is typed. A cash-out form
+   *  wants the expense accounts on top, not the forty asset accounts that
+   *  happen to have the lowest numbers. */
+  preferTypes?: string[];
   disabled?: boolean;
 }
 
+// The same word, two spellings: people say "biaya" (and write "By") for a
+// cost, and this chart names most of them "Beban". Searching one finds both.
+const SYNONYMS: string[][] = [["biaya", "beban", "by "], ["pendapatan", "penjualan"]];
+function terms(q: string): string[] {
+  const group = SYNONYMS.find((g) => g.some((w) => q.startsWith(w.trim())));
+  return group ? group.map((w) => q.replace(/^\S+/, w.trim())) : [q];
+}
+
 export function AccountPicker({
-  value, onChange, ariaLabel, placeholder, onlyTypes, disabled,
+  value, onChange, ariaLabel, placeholder, onlyTypes, excludeTypes, preferTypes, disabled,
 }: Props) {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -65,14 +80,21 @@ export function AccountPicker({
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const words = q ? terms(q) : [];
+    const rank = (a: PickableAccount) => {
+      const i = preferTypes?.indexOf(a.account_type) ?? -1;
+      return i < 0 ? 99 : i;
+    };
     return all
       .filter((a) => !onlyTypes?.length || onlyTypes.includes(a.account_type))
+      .filter((a) => !excludeTypes?.includes(a.account_type))
       .filter((a) => !a.is_suspended)
-      .filter((a) => !q
-        || a.account_no.toLowerCase().includes(q)
-        || (a.name ?? "").toLowerCase().includes(q))
-      .slice(0, 40);
-  }, [all, query, onlyTypes]);
+      .filter((a) => !q || words.some((w) =>
+        a.account_no.toLowerCase().includes(w)
+        || (a.name ?? "").toLowerCase().includes(w)))
+      .sort((a, b) => rank(a) - rank(b) || a.account_no.localeCompare(b.account_no))
+      .slice(0, 80);
+  }, [all, query, onlyTypes, excludeTypes, preferTypes]);
 
   return (
     <div className="relative" ref={box}>

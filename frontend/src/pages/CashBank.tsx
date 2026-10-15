@@ -333,7 +333,9 @@ export default function CashBankPage() {
       ) : (
         <>
           {/* ── the form ─────────────────────────────────────────────────── */}
-          <div className="card overflow-hidden">
+          {/* Not overflow-hidden: the account list opens below its box and
+              was cut off at the card's edge, three rows visible at most. */}
+          <div className="card">
             <header className="px-5 py-3 border-b border-ink-100">
               <div className="font-semibold">
                 {tab === "payment" ? t("Money out", "Uang keluar")
@@ -455,6 +457,15 @@ export default function CashBankPage() {
                       <div className="col-span-6">
                         <AccountPicker value={l.account_no}
                           ariaLabel={`${t("Account", "Akun")} ${i + 1}`}
+                          // Never one of our own banks: that is the "out
+                          // of" side already, and money between two of ours
+                          // is a transfer.
+                          excludeTypes={["Cash & Bank"]}
+                          preferTypes={tab === "payment"
+                            ? ["Expense", "Cost Of Good Sold", "Other Expense", "Payable",
+                               "Other Current Liability", "Inventory", "Fixed Asset"]
+                            : ["Receivable", "Revenue", "Other Income",
+                               "Other Current Liability", "Equity"]}
                           onChange={(no) => setLines((c) =>
                             c.map((x, j) => (j === i ? { ...x, account_no: no } : x)))} />
                       </div>

@@ -222,6 +222,25 @@ async def create_transaction(payload: TxIn,
             if value <= 0:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                     f"Line {i} has no amount.")
+            # "What it was for" can't be one of our own banks. On the same
+            # account it posted the bank in and out for the same figure — an
+            # entry that records nothing (BKK-2026-0001, FedEx, 1.250.000);
+            # on another of ours it is a transfer, which belongs on both
+            # banks' statements, not one.
+            target = await db.scalar(select(Account).where(
+                Account.account_no == (ln.account_no or "").strip()))
+            if target is not None and target.account_type == "Cash & Bank":
+                same = target.account_no == bank.account_no
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    (f"Line {i}: {target.account_no} {target.name} is the account the "
+                     "money " + ("left" if kind == "payment" else "went into")
+                     + " — pick what it was " + ("for" if kind == "payment" else "from")
+                     + ", e.g. an expense account (Beban …).")
+                    if same else
+                    (f"Line {i}: {target.account_no} {target.name} is one of our own "
+                     "cash or bank accounts. Money moved between two of ours is a "
+                     "transfer — record it on the Transfer tab."))
             amount += value
             lines.append(CashLine(
                 line_no=i, account_no=ln.account_no.strip(), amount=value,
