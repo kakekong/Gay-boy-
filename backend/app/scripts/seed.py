@@ -338,6 +338,13 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS import_docs JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS supplier_delivery_modes JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS notes TEXT",
+    # Paying a supplier: from which of our accounts, and at what real rate.
+    "ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS bank_account_no VARCHAR(40)",
+    "ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS currency VARCHAR(8)",
+    "ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS currency_amount NUMERIC(18,2)",
+    "ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(18,6)",
+    "ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS bank_amount NUMERIC(18,2)",
+    "ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS fx_difference NUMERIC(18,2)",
 
     # The director's decision that a job has no drawing to wait for. Nullable
     # throughout: every project on file predates the decision and none of them

@@ -312,18 +312,34 @@ async def post_goods_receipt(
     return moves
 
 
+# Where the gap between a foreign order's booked rate and the rate the bank
+# really paid at goes: Laba/Rugi Terealisasi IDR. A loss raises it, a gain
+# lowers it.
+FX_REALISED_ACCOUNT = "720101"
+
+
 async def post_supplier_payment(
     db: AsyncSession, *, amount: float, entry_date: date, po_number: str,
     supplier_name: str | None = None, payment_id: UUID | None = None,
-    created_by: UUID | None = None, cash_account_no: str = PAYMENT_CASH_DEFAULT,
+    created_by: UUID | None = None, cash_account_no: str | None = None,
+    cash_amount: float | None = None,
 ) -> list[dict]:
-    """Paying a supplier: Utang Usaha down, the bank down."""
+    """Paying a supplier: Utang Usaha down by what the payment settles, the
+    bank down by what actually left it, and — on a foreign order paid at a
+    different rate than it was booked at — the difference to Laba/Rugi
+    Terealisasi, so the entry still balances."""
     if amount <= 0:
         return []
+    cash_amount = amount if cash_amount is None else cash_amount
     moves: list[dict] = []
     who = f" — {supplier_name}" if supplier_name else ""
-    for acc_no, role in ((PAYABLE_ACCOUNT, "payable"), (cash_account_no, "cash")):
-        m = await _bump(db, acc_no, -amount)
+    legs = [(PAYABLE_ACCOUNT, "payable", -amount),
+            (cash_account_no or PAYMENT_CASH_DEFAULT, "cash", -cash_amount)]
+    diff = round(cash_amount - amount, 2)
+    if abs(diff) >= 0.01:
+        legs.append((FX_REALISED_ACCOUNT, "exchange loss" if diff > 0 else "exchange gain", diff))
+    for acc_no, role, delta in legs:
+        m = await _bump(db, acc_no, delta)
         if not m:
             continue
         await journal_post(

@@ -1020,6 +1020,29 @@ async def list_payables(
         select(GoodsReceipt.po_id, func.max(GoodsReceipt.received_at))
         .where(GoodsReceipt.po_id.in_(ids)).group_by(GoodsReceipt.po_id)
     )).all())
+    # Each payment, so the row can say which bank and at what rate.
+    from app.models.account import Account
+    banks = {a.account_no: a.name for a in (await db.scalars(
+        select(Account).where(Account.account_type == "Cash & Bank"))).all()}
+    pays_by_po: dict = {}
+    for sp in (await db.scalars(
+        select(SupplierPayment).where(SupplierPayment.po_id.in_(ids))
+        .order_by(SupplierPayment.paid_at.asc(), SupplierPayment.created_at.asc())
+    )).all():
+        pays_by_po.setdefault(sp.po_id, []).append({
+            "paid_at": sp.paid_at, "amount": float(sp.amount or 0),
+            "bank_account_no": sp.bank_account_no,
+            "bank_name": banks.get(sp.bank_account_no) if sp.bank_account_no else None,
+            "currency": sp.currency,
+            "currency_amount": (float(sp.currency_amount)
+                                if sp.currency_amount is not None else None),
+            "fx_rate": float(sp.fx_rate) if sp.fx_rate is not None else None,
+            "bank_amount": (float(sp.bank_amount) if sp.bank_amount is not None
+                            else float(sp.amount or 0)),
+            "fx_difference": (float(sp.fx_difference)
+                              if sp.fx_difference is not None else 0.0),
+            "method": sp.method, "reference": sp.reference,
+        })
     sups = {s.id: s.name for s in (await db.scalars(
         select(Supplier).where(Supplier.id.in_({p.supplier_id for p in pos if p.supplier_id}))
     )).all()}
@@ -1051,6 +1074,7 @@ async def list_payables(
                                  else None),
             "last_received_at": last_rcv.get(p.id),
             "status": state,
+            "payments": pays_by_po.get(p.id, []),
         }
         if show == "owed" and out <= 0.004:
             continue
@@ -1070,7 +1094,14 @@ async def list_payables(
 
 
 class SupplierPaymentIn(BaseModel):
-    amount: float
+    # Rupiah, on a rupiah order. On a foreign order send `currency_amount`
+    # and `fx_rate` instead; `amount` alone there is read as rupiah at the
+    # order's own rate, as it always was.
+    amount: float | None = None
+    currency_amount: float | None = None
+    fx_rate: float | None = None
+    # Which of our own Cash & Bank accounts it left. Default: BCA.
+    bank_account_no: str | None = None
     paid_at: str | None = None
     method: str | None = None
     reference: str | None = None
@@ -1084,9 +1115,17 @@ async def pay_supplier(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Finance records paying the supplier: Utang Usaha down, the bank down."""
+    """Finance records paying the supplier: Utang Usaha down, the bank down.
+
+    On a foreign order the debt was booked at the order's estimated rate and
+    the bank converts at the real one, so finance gives what went in the
+    supplier's currency and the rate it went at. The payment settles that
+    amount of the debt at the booked rate, the bank drops by what it really
+    paid, and the gap is a realised exchange gain or loss.
+    """
+    from app.models.account import Account
     from app.models.purchasing import Supplier, SupplierPayment, SupplierPO
-    from app.services.ledger import post_supplier_payment
+    from app.services.ledger import PAYMENT_CASH_DEFAULT, post_supplier_payment
 
     if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
@@ -1094,8 +1133,35 @@ async def pay_supplier(
     po = await db.get(SupplierPO, po_id)
     if not po:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
-    if payload.amount <= 0:
+
+    cur = (po.currency or "IDR").upper()
+    foreign = cur != "IDR"
+    cur_amount = rate = None
+    if foreign and payload.currency_amount is not None:
+        cur_amount = float(payload.currency_amount)
+        rate = float(payload.fx_rate or 0)
+        if cur_amount <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"The amount in {cur} must be above zero.")
+        if rate <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Give the rate the bank paid at — rupiah per {cur}.")
+        # The rate the debt was booked at. An order that never had one is
+        # booked at this payment's rate, so there is no difference to post.
+        booked = float(po.fx_rate) if po.fx_rate else rate
+        settles = round(cur_amount * booked, 2)
+        bank_out = round(cur_amount * rate, 2)
+    else:
+        settles = bank_out = round(float(payload.amount or 0), 2)
+    if settles <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The amount must be above zero.")
+
+    bank_no = (payload.bank_account_no or "").strip() or PAYMENT_CASH_DEFAULT
+    bank = await db.scalar(select(Account).where(Account.account_no == bank_no))
+    if (not bank or bank.account_type != "Cash & Bank" or bank.is_parent
+            or bank.is_suspended):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"{bank_no} isn't one of our cash or bank accounts.")
     paid = float(await db.scalar(
         select(func.coalesce(func.sum(SupplierPayment.amount), 0))
         .where(SupplierPayment.po_id == po.id)) or 0)
@@ -1108,11 +1174,13 @@ async def pay_supplier(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"{po.number} is already paid in full.")
-    if payload.amount > left + 0.01:
+    if settles > left + 0.01:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"That is more than {po.number} is worth — "
-            f"Rp {left:,.0f} is left to pay on the order.")
+            f"Rp {left:,.0f} is left to pay on the order"
+            + (f" (about {cur} {left / float(po.fx_rate):,.2f})." if foreign and po.fx_rate
+               else "."))
     outstanding = round(float(po.payable_amount or 0) - paid, 2)
     when = date.today()
     if payload.paid_at:
@@ -1120,24 +1188,36 @@ async def pay_supplier(
             when = date.fromisoformat(payload.paid_at)
         except ValueError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "paid_at must be YYYY-MM-DD")
-    pay = SupplierPayment(po_id=po.id, paid_at=when, amount=round(payload.amount, 2),
+    pay = SupplierPayment(po_id=po.id, paid_at=when, amount=settles,
                           method=(payload.method or "").strip() or None,
                           reference=(payload.reference or "").strip() or None,
                           notes=(payload.notes or "").strip() or None,
-                          recorded_by=user.id)
+                          recorded_by=user.id,
+                          bank_account_no=bank.account_no,
+                          currency=cur if cur_amount is not None else None,
+                          currency_amount=cur_amount,
+                          fx_rate=rate,
+                          bank_amount=bank_out,
+                          fx_difference=round(bank_out - settles, 2))
     db.add(pay)
     await db.flush()
     sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
-    await post_supplier_payment(db, amount=pay.amount, entry_date=when,
+    await post_supplier_payment(db, amount=settles, cash_amount=bank_out,
+                                cash_account_no=bank.account_no, entry_date=when,
                                 po_number=po.number,
                                 supplier_name=sup.name if sup else None,
                                 payment_id=pay.id, created_by=user.id)
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="pay_supplier", entity="supplier_po",
-                       entity_id=po.id, after={"amount": pay.amount,
-                                               "paid_at": when.isoformat()})
+                       entity_id=po.id, after={
+                           "amount": settles, "paid_at": when.isoformat(),
+                           "bank_account_no": bank.account_no, "bank_amount": bank_out,
+                           "currency_amount": cur_amount, "fx_rate": rate,
+                           "fx_difference": round(bank_out - settles, 2)})
     await db.flush()
     return {"ok": True, "id": str(pay.id), "po_number": po.number,
-            "paid": round(paid + pay.amount, 2),
-            "outstanding": max(round(outstanding - pay.amount, 2), 0.0),
-            "left_on_order": round(left - pay.amount, 2)}
+            "paid": round(paid + settles, 2),
+            "outstanding": max(round(outstanding - settles, 2), 0.0),
+            "left_on_order": round(left - settles, 2),
+            "bank_account_no": bank.account_no, "bank_name": bank.name,
+            "bank_amount": bank_out, "fx_difference": round(bank_out - settles, 2)}

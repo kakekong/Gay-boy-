@@ -243,6 +243,20 @@ class SupplierPayment(Base, UUIDPK, TimestampMixin):
     reference: Mapped[str | None] = mapped_column(String(120))
     notes: Mapped[str | None] = mapped_column(Text)
     recorded_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Which of our own accounts the money left: BCA, BNI, Kas Besar… It used
+    # to be BCA whatever finance actually paid from.
+    bank_account_no: Mapped[str | None] = mapped_column(String(40))
+    # A foreign order is printed and booked at an estimated rate; the bank
+    # converts at the real one on the day. `amount` above stays the rupiah
+    # this payment settles at the order's booked rate — what every "paid"
+    # sum compares against the debt — and these record what really happened:
+    # how much of the supplier's currency went, at what rate, what left the
+    # bank, and the difference, booked as a realised exchange gain or loss.
+    currency: Mapped[str | None] = mapped_column(String(8))
+    currency_amount: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    fx_rate: Mapped[float | None] = mapped_column(Numeric(18, 6))
+    bank_amount: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    fx_difference: Mapped[float | None] = mapped_column(Numeric(18, 2))
 
 
 class GoodsReceipt(Base, UUIDPK, TimestampMixin):

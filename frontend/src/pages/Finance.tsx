@@ -67,8 +67,28 @@ function Payables() {
   const [err, setErr] = useState<string | null>(null);
   const [show, setShow] = useState<"all" | "owed" | "open" | "paid">("open");
   const [paying, setPaying] = useState<string | null>(null);
-  const [form, setForm] = useState({ amount: "", paid_at: "", method: "Transfer", reference: "" });
+  const [form, setForm] = useState({
+    amount: "", paid_at: "", method: "Transfer", reference: "",
+    // A foreign order: how much of the supplier's currency, at the rate the
+    // bank really converted at. Both start from the order.
+    cur_amount: "", rate: "", bank: "",
+  });
   const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
+  // Our own bank and cash accounts — where the money leaves from.
+  const banks = useQuery({
+    queryKey: ["cash-accounts"],
+    queryFn: () => api.get("/cash/accounts").then((r) => r.data as
+      { account_no: string; name: string; balance: number }[]),
+    staleTime: 5 * 60_000,
+  });
+  const isCashBox = (name: string) => /^kas\b/i.test(name.trim());
+  // Cash is paid from a cash box, everything else from a bank; BCA first,
+  // since that is where most of it goes.
+  const defaultBank = (method: string) => {
+    const all = banks.data ?? [];
+    const fit = all.filter((b) => (method === "Cash") === isCashBox(b.name));
+    return (fit.find((b) => b.account_no === "1101-01") ?? fit[0] ?? all[0])?.account_no ?? "";
+  };
   const list = useQuery({
     queryKey: ["payables", show],
     queryFn: () => api.get("/finance/payables", { params: { show } }).then((r) => r.data as {
@@ -78,13 +98,21 @@ function Payables() {
         order_total: number; order_total_idr: number | null;
         received_value: number; paid: number; outstanding: number;
         not_yet_received: number | null; last_received_at: string | null; status: string;
+        payments?: Array<{
+          paid_at: string; amount: number; bank_name: string | null; method: string | null;
+          currency: string | null; currency_amount: number | null; fx_rate: number | null;
+          bank_amount: number; fx_difference: number;
+        }>;
       }>;
       total_outstanding: number; total_ordered: number;
     }),
   });
   const pay = useMutation({
-    mutationFn: (poId: string) => api.post(`/finance/payables/${poId}/pay`, {
-      amount: Number(form.amount) || 0,
+    mutationFn: (b: { poId: string; foreign: boolean }) => api.post(`/finance/payables/${b.poId}/pay`, {
+      ...(b.foreign
+        ? { currency_amount: Number(form.cur_amount) || 0, fx_rate: Number(form.rate) || 0 }
+        : { amount: Number(form.amount) || 0 }),
+      bank_account_no: form.bank || defaultBank(form.method) || null,
       paid_at: form.paid_at || null,
       method: form.method || null,
       reference: form.reference || null,
@@ -174,7 +202,23 @@ function Payables() {
                         {idr(r.received_value)}
                         {r.last_received_at && <div className="text-[10px] muted">{r.last_received_at}</div>}
                       </td>
-                      <td className="td text-right tabular-nums">{idr(r.paid)}</td>
+                      <td className="td text-right tabular-nums">
+                        {idr(r.paid)}
+                        {/* Each payment: from which bank, and at what rate. */}
+                        {(r.payments ?? []).map((p, i) => (
+                          <div key={i} className="text-[10px] muted leading-snug">
+                            {p.paid_at} · {p.bank_name ?? p.method ?? "—"}
+                            {p.currency_amount != null && p.fx_rate != null && (
+                              <> · {money(p.currency_amount, p.currency ?? r.currency)} @ {new Intl.NumberFormat("id-ID").format(p.fx_rate)}</>
+                            )}
+                            {Math.abs(p.fx_difference) >= 1 && (
+                              <span className={p.fx_difference > 0 ? "text-red-700" : "text-emerald-700"}>
+                                {" "}· {p.fx_difference > 0 ? t("loss", "rugi") : t("gain", "laba")} {idr(Math.abs(p.fx_difference))}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </td>
                       <td className="td text-right tabular-nums font-semibold">{idr(r.outstanding)}</td>
                       <td className="td"><span className={clsx("chip", chip[2])}>{t(chip[0], chip[1])}</span></td>
                       <td className="td text-right">
@@ -182,7 +226,12 @@ function Payables() {
                           <button className="btn-ghost text-xs"
                             onClick={() => {
                               setPaying(paying === r.po_id ? null : r.po_id);
-                              setForm({ amount: String(Math.round(r.outstanding > 0 ? r.outstanding : left)),
+                              const due = r.outstanding > 0 ? r.outstanding : left;
+                              setForm({ amount: String(Math.round(due)),
+                                        cur_amount: r.currency !== "IDR" && r.fx_rate
+                                          ? String(Math.round((due / r.fx_rate) * 100) / 100) : "",
+                                        rate: r.fx_rate ? String(r.fx_rate) : "",
+                                        bank: defaultBank("Transfer"),
                                         paid_at: "", method: "Transfer", reference: "" });
                             }}>
                             <Banknote size={13} /> {t("Pay", "Bayar")}
@@ -190,24 +239,58 @@ function Payables() {
                         )}
                       </td>
                     </tr>
-                    {paying === r.po_id && (
+                    {paying === r.po_id && (() => {
+                      // A foreign order is paid in its own currency at the
+                      // bank's real rate; the debt was booked at the order's.
+                      const foreign = r.currency !== "IDR";
+                      const qty = Number(form.cur_amount) || 0;
+                      const rate = Number(form.rate) || 0;
+                      const booked = r.fx_rate ?? rate;
+                      const bankPays = qty * rate;
+                      const settles = qty * booked;
+                      const diff = bankPays - settles;
+                      const ready = foreign ? qty > 0 && rate > 0 : Number(form.amount) > 0;
+                      return (
                       <tr className="bg-ink-50/50">
                         <td className="td" colSpan={8}>
                           <div className="flex flex-wrap items-end gap-2">
-                            <label className="text-[11px]">{t("Amount (Rp)", "Jumlah (Rp)")}
-                              <input className="input text-sm w-40" type="number" min={0} value={form.amount}
-                                onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+                            {foreign ? (
+                              <>
+                                <label className="text-[11px]">{t(`Amount (${r.currency})`, `Jumlah (${r.currency})`)}
+                                  <input className="input text-sm w-36" type="number" min={0} step="0.01" value={form.cur_amount}
+                                    onChange={(e) => setForm({ ...form, cur_amount: e.target.value })} /></label>
+                                <label className="text-[11px]">{t(`Rate paid (Rp per ${r.currency})`, `Kurs dibayar (Rp per ${r.currency})`)}
+                                  <input className="input text-sm w-36" type="number" min={0} step="0.01" value={form.rate}
+                                    onChange={(e) => setForm({ ...form, rate: e.target.value })} /></label>
+                              </>
+                            ) : (
+                              <label className="text-[11px]">{t("Amount (Rp)", "Jumlah (Rp)")}
+                                <input className="input text-sm w-40" type="number" min={0} value={form.amount}
+                                  onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+                            )}
                             <label className="text-[11px]">{t("Date", "Tanggal")}
                               <input className="input text-sm" type="date" value={form.paid_at}
                                 onChange={(e) => setForm({ ...form, paid_at: e.target.value })} /></label>
                             <label className="text-[11px]">{t("Method", "Metode")}
-                              <input className="input text-sm w-32" value={form.method}
-                                onChange={(e) => setForm({ ...form, method: e.target.value })} /></label>
+                              <select className="input text-sm w-32" value={form.method}
+                                onChange={(e) => setForm({ ...form, method: e.target.value, bank: defaultBank(e.target.value) })}>
+                                <option value="Transfer">{t("Transfer", "Transfer")}</option>
+                                <option value="Cash">{t("Cash", "Tunai")}</option>
+                                <option value="Giro">{t("Giro", "Giro")}</option>
+                                <option value="Cheque">{t("Cheque", "Cek")}</option>
+                              </select></label>
+                            <label className="text-[11px]">{t("Paid from", "Dibayar dari")}
+                              <select className="input text-sm w-56" value={form.bank || defaultBank(form.method)}
+                                onChange={(e) => setForm({ ...form, bank: e.target.value })}>
+                                {(banks.data ?? []).map((b) => (
+                                  <option key={b.account_no} value={b.account_no}>{b.name}</option>
+                                ))}
+                              </select></label>
                             <label className="text-[11px]">{t("Reference", "Referensi")}
                               <input className="input text-sm w-40" value={form.reference}
                                 onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
-                            <button className="btn-primary text-sm" disabled={pay.isPending || !Number(form.amount)}
-                              onClick={() => pay.mutate(r.po_id)}>
+                            <button className="btn-primary text-sm" disabled={pay.isPending || !ready}
+                              onClick={() => pay.mutate({ poId: r.po_id, foreign })}>
                               {pay.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
                               {t("Record payment", "Catat pembayaran")}
                             </button>
@@ -218,9 +301,36 @@ function Payables() {
                               </span>
                             )}
                           </div>
+                          {/* What the rate means in rupiah, before it is recorded. */}
+                          {foreign && qty > 0 && rate > 0 && (
+                            <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs max-w-3xl">
+                              <div className="rounded-lg bg-white border border-ink-100 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider muted">{t("Leaves the bank", "Keluar dari bank")}</div>
+                                <div className="font-semibold tabular-nums">{idr(bankPays)}</div>
+                                <div className="muted">{money(qty, r.currency)} × {new Intl.NumberFormat("id-ID").format(rate)}</div>
+                              </div>
+                              <div className="rounded-lg bg-white border border-ink-100 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider muted">{t("Settles of the debt", "Melunasi utang")}</div>
+                                <div className="font-semibold tabular-nums">{idr(settles)}</div>
+                                <div className="muted">{t("at the PO's rate", "dengan kurs PO")} {new Intl.NumberFormat("id-ID").format(booked)}</div>
+                              </div>
+                              <div className={clsx("rounded-lg border px-3 py-2",
+                                Math.abs(diff) < 1 ? "bg-white border-ink-100"
+                                : diff > 0 ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200")}>
+                                <div className="text-[10px] uppercase tracking-wider muted">{t("Exchange difference", "Selisih kurs")}</div>
+                                <div className={clsx("font-semibold tabular-nums",
+                                  Math.abs(diff) < 1 ? "" : diff > 0 ? "text-red-700" : "text-emerald-700")}>
+                                  {Math.abs(diff) < 1 ? t("none", "tidak ada")
+                                    : `${diff > 0 ? t("loss", "rugi") : t("gain", "laba")} ${idr(Math.abs(diff))}`}
+                                </div>
+                                <div className="muted">{t("booked to Laba/Rugi Terealisasi", "dicatat ke Laba/Rugi Terealisasi")}</div>
+                              </div>
+                            </div>
+                          )}
                         </td>
                       </tr>
-                    )}
+                      );
+                    })()}
                   </Fragment>
                 );
               })}
