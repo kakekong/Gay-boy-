@@ -3,12 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, Bell, FileText,
-  Truck, AlertCircle, CheckCircle2, ListChecks,
+  Truck, AlertCircle, CheckCircle2, ListChecks, Pencil,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { Modal } from "@/components/Modal";
-import { NewReminderForm } from "@/components/forms/NewReminderForm";
+import { NewReminderForm, type ReminderRow } from "@/components/forms/NewReminderForm";
+import { localDay } from "@/lib/localDate";
 import { useT } from "@/store/lang";
 
 interface CalEvent {
@@ -20,6 +21,8 @@ interface CalEvent {
   status?: string;
   link?: string | null;
   color: "brand" | "violet" | "emerald" | "amber" | "red" | "ink";
+  /** Manual reminders only — what the edit form needs. */
+  reminder?: ReminderRow;
 }
 
 const COLOR: Record<CalEvent["color"], string> = {
@@ -42,7 +45,9 @@ const KIND_META: Record<CalEvent["kind"], { label: string; labelId: string; Icon
 
 function startOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(d.getDate() + n); return x; }
-function fmtIsoDay(d: Date) { return d.toISOString().slice(0, 10); }
+// The cell's own day, in the viewer's clock — not toISOString(), which is UTC
+// and in WIB names the day before for every cell (midnight local = 17:00 UTC).
+const fmtIsoDay = localDay;
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -55,7 +60,7 @@ export default function CalendarPage() {
   const [filters, setFilters] = useState<Record<CalEvent["kind"], boolean>>({
     reminder: true, activity: true, quotation_expiry: true, payment_due: true, delivery: true, stage_task: true,
   });
-  const [openNew, setOpenNew] = useState<{ open: boolean; date?: string }>({ open: false });
+  const [openNew, setOpenNew] = useState<{ open: boolean; date?: string; editing?: ReminderRow }>({ open: false });
 
   // Build a 6-row × 7-col grid, Monday-first
   const grid = useMemo(() => {
@@ -77,11 +82,12 @@ export default function CalendarPage() {
 
   const filtered = (events.data ?? []).filter((e) => filters[e.kind]);
 
-  // Index by YYYY-MM-DD for fast cell lookup
+  // Index by the local YYYY-MM-DD the event falls on. Reminders come back in
+  // UTC ("…T01:00:00Z" for 08:00 WIB), so the day is read after converting.
   const byDay = useMemo(() => {
     const m = new Map<string, CalEvent[]>();
     for (const e of filtered) {
-      const k = e.at.slice(0, 10);
+      const k = fmtIsoDay(new Date(e.at));
       const arr = m.get(k) ?? [];
       arr.push(e);
       m.set(k, arr);
@@ -251,6 +257,7 @@ export default function CalendarPage() {
             <ul className="space-y-2">
               {dayEvents.map((e) => {
                 const M = KIND_META[e.kind];
+                const rem = e.reminder;
                 return (
                   <li
                     key={e.id}
@@ -266,6 +273,11 @@ export default function CalendarPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{e.title}</div>
+                        {rem?.message && rem.message.trim().includes("\n") && (
+                          <div className="text-xs text-ink-600 mt-1 whitespace-pre-line line-clamp-4">
+                            {rem.message.trim().split("\n").slice(1).join("\n")}
+                          </div>
+                        )}
                         <div className="text-[11px] muted mt-0.5 flex items-center gap-1.5">
                           {new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           <span>·</span>
@@ -273,6 +285,16 @@ export default function CalendarPage() {
                           {e.status && <><span>·</span><span>{e.status}</span></>}
                         </div>
                       </div>
+                      {rem?.editable && (
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 px-2 text-xs shrink-0"
+                          title={t("Edit reminder", "Ubah pengingat")}
+                          onClick={(ev) => { ev.stopPropagation(); setOpenNew({ open: true, editing: rem }); }}
+                        >
+                          <Pencil size={13} /> {t("Edit", "Ubah")}
+                        </button>
+                      )}
                     </div>
                   </li>
                 );
@@ -285,13 +307,18 @@ export default function CalendarPage() {
       <Modal
         open={openNew.open}
         onClose={() => setOpenNew({ open: false })}
-        title={t("New reminder", "Pengingat baru")}
-        subtitle={t(
+        title={openNew.editing ? t("Edit reminder", "Ubah pengingat") : t("New reminder", "Pengingat baru")}
+        subtitle={openNew.editing
+          ? t("Change the note, time or customer — no need to make a new one.",
+              "Ubah catatan, waktu, atau pelanggan — tidak perlu membuat jadwal baru.")
+          : t(
           "Schedule a follow-up, payment chase, or delivery check.",
           "Jadwalkan tindak lanjut, penagihan pembayaran, atau pengecekan pengiriman."
         )}
       >
         <NewReminderForm
+          key={openNew.editing?.id ?? openNew.date ?? "new"}
+          editing={openNew.editing}
           defaultDate={openNew.date}
           onClose={() => setOpenNew({ open: false })}
         />

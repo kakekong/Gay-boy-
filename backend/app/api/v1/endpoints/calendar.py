@@ -2,12 +2,15 @@
 
 from datetime import date, datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import record as audit_record
+from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require_min
@@ -18,6 +21,13 @@ from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
+
+def _office_tz() -> ZoneInfo:
+    # The office runs on WIB. Calendar days are office days, not UTC days:
+    # 08:00 WIB on the 15th is 01:00 UTC the same day but 23:00 WIB on the
+    # 15th is already the 16th in UTC.
+    return ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")
+
 
 router = APIRouter(
     # Internal-only surface. External portal accounts (customer /
@@ -47,8 +57,13 @@ async def list_events(
     oversight = role in (Role.MANAGER, Role.DIRECTOR)
     # Purchasing stays customer-blind everywhere, the calendar included.
     blind = role == Role.PURCHASING
-    start_dt = datetime.combine(range_from, time.min)
-    end_dt = datetime.combine(range_to, time.max)
+    # Whole office days, from the first day's midnight up to (not including)
+    # the midnight after the last — so a reminder set for 06:00 WIB, which is
+    # still "yesterday" in UTC, is inside the range of the day it was set on.
+    tz = _office_tz()
+    start_dt = datetime.combine(range_from, time.min, tzinfo=tz)
+    end_dt = datetime.combine(range_to + timedelta(days=1), time.min, tzinfo=tz)
+    office_today = datetime.now(tz).date()
 
     events: list[dict] = []
 
@@ -60,7 +75,7 @@ async def list_events(
     rem_stmt = (
         select(Reminder, Customer)
         .outerjoin(Customer, Reminder.customer_id == Customer.id)
-        .where(Reminder.due_at >= start_dt, Reminder.due_at <= end_dt)
+        .where(Reminder.due_at >= start_dt, Reminder.due_at < end_dt)
     )
     if sales_only:
         rem_stmt = rem_stmt.where(Reminder.user_id == user.id)
@@ -82,7 +97,8 @@ async def list_events(
         else:
             if not oversight and r.user_id != user.id:
                 continue
-            title = r.message or r.kind.replace("_", " ").title()
+            title = (r.message or "").strip().splitlines()[0] if (r.message or "").strip() \
+                else r.kind.replace("_", " ").title()
             if c and not blind:
                 title = f"{title} · {c.company_name}"
             subtype = r.kind
@@ -96,13 +112,27 @@ async def list_events(
             "status": r.status,
             "link": f"/customers/{c.id}" if c and not blind else None,
             "color": color,
+            # Manual reminders can be changed by whoever set them (managers+
+            # too); stage tasks are dated from the project's checklist.
+            **({} if stage_info else {"reminder": {
+                "id": str(r.id),
+                "kind": r.kind,
+                "due_at": r.due_at,
+                "channel": r.channel,
+                "message": r.message,
+                "customer_id": str(r.customer_id) if r.customer_id else None,
+                "customer_name": None if blind or not c else c.company_name,
+                "recurs": r.recurs,
+                "recurs_until": r.recurs_until,
+                "editable": r.user_id == user.id or oversight,
+            }}),
         })
 
     # Activities (logged interactions) — CRM ground: sales + oversight only.
     if sales_only or oversight:
         act_stmt = select(Activity, Customer).join(
             Customer, Activity.customer_id == Customer.id
-        ).where(Activity.occurred_at >= start_dt, Activity.occurred_at <= end_dt)
+        ).where(Activity.occurred_at >= start_dt, Activity.occurred_at < end_dt)
         if sales_only:
             act_stmt = act_stmt.where(Customer.sales_pic_id == user.id)
         for a, c in (await db.execute(act_stmt)).all():
@@ -162,7 +192,7 @@ async def list_events(
                 "at": datetime.combine(inv.due_date, time(12, 0)),
                 "status": inv.status,
                 "link": None,
-                "color": "red" if inv.due_date < date.today() else "amber",
+                "color": "red" if inv.due_date < office_today else "amber",
             })
 
     # Project target deliveries — everyone who works projects, but the
@@ -192,11 +222,10 @@ async def list_events(
         })
 
     # Reminder.due_at is timezone-aware while the datetime.combine() rows
-    # above are naive — comparing them raises. Coerce naive → UTC for the
-    # sort so mixed event types can share a calendar without crashing.
-    from datetime import timezone as _tz
+    # above are naive office times (a quote expires at 17:00 WIB) — comparing
+    # them raises. Read the naive ones as office time for the sort.
     events.sort(key=lambda e: e["at"] if e["at"].tzinfo
-                else e["at"].replace(tzinfo=_tz.utc))
+                else e["at"].replace(tzinfo=tz))
     return events
 
 
@@ -256,6 +285,78 @@ async def create_reminder(
     return {"id": str(r.id), "ok": True, "recurs": r.recurs}
 
 
+class ReminderEdit(BaseModel):
+    customer_id: UUID | None = None
+    kind: str | None = None
+    due_at: datetime | None = None
+    channel: str | None = None
+    message: str | None = None
+    recurs: str | None = None
+    recurs_until: date | None = None
+
+
+async def _own_reminder(db: AsyncSession, reminder_id: UUID, user: User) -> Reminder:
+    """A manual reminder the user may change: their own, or anyone's for
+    managers and the director. Stage-checklist tasks are dated from the
+    project, not edited here."""
+    r = await db.get(Reminder, reminder_id)
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
+    if parse_stage_task_kind(r.kind):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "This is a project checklist task — change it on the project.")
+    if r.user_id != user.id and Role(user.role) not in (Role.MANAGER, Role.DIRECTOR):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only whoever set this reminder can change it")
+    return r
+
+
+def _snapshot(r: Reminder) -> dict:
+    return {"kind": r.kind, "due_at": r.due_at, "channel": r.channel, "message": r.message,
+            "customer_id": r.customer_id, "recurs": r.recurs, "recurs_until": r.recurs_until}
+
+
+@router.patch("/reminders/{reminder_id}")
+async def edit_reminder(
+    reminder_id: UUID,
+    payload: ReminderEdit,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Change a reminder in place — its note, time, customer or repeat —
+    instead of making a new one."""
+    r = await _own_reminder(db, reminder_id, user)
+    before = _snapshot(r)
+    sent = payload.model_fields_set
+    for f in ("kind", "due_at", "channel", "recurs"):
+        if f in sent and getattr(payload, f) is not None:
+            setattr(r, f, getattr(payload, f))
+    if "message" in sent:
+        r.message = (payload.message or "").strip() or None
+    if "customer_id" in sent:
+        r.customer_id = payload.customer_id
+    if "recurs_until" in sent or r.recurs == "none":
+        r.recurs_until = None if r.recurs == "none" else payload.recurs_until
+    await db.flush()
+    await audit_record(db, actor=user, action="update", entity="reminder",
+                       entity_id=r.id, before=before, after=_snapshot(r))
+    return {"ok": True, "id": str(r.id), "due_at": r.due_at, "message": r.message}
+
+
+@router.delete("/reminders/{reminder_id}")
+async def delete_reminder(
+    reminder_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    r = await _own_reminder(db, reminder_id, user)
+    await audit_record(db, actor=user, action="delete", entity="reminder",
+                       entity_id=r.id, before=_snapshot(r))
+    await db.delete(r)
+    await db.flush()
+    return {"ok": True}
+
+
 @router.patch("/reminders/{reminder_id}/done")
 async def mark_done(
     reminder_id: UUID,
@@ -298,4 +399,4 @@ async def mark_done(
 # Convenience: tomorrow as a default for forms
 @router.get("/defaults")
 async def defaults():
-    return {"tomorrow": (date.today() + timedelta(days=1)).isoformat()}
+    return {"tomorrow": (datetime.now(_office_tz()).date() + timedelta(days=1)).isoformat()}
