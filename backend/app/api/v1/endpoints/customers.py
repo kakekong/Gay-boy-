@@ -26,6 +26,7 @@ from app.core.stage_tasks import (
     stage_task_kind,
 )
 from app.models.crm import Activity, Customer, CustomerContact, Reminder
+from app.services import reminders as reminders_svc
 from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.operation import Project
 from app.models.quotation import Quotation
@@ -776,7 +777,12 @@ async def create_activity(
     )
     db.add(a)
     await db.flush()
-    return {"id": str(a.id), "ok": True}
+    # The call/visit/message *is* the follow-up: close the ones due today or
+    # overdue, so My Queue doesn't keep listing work that's been done.
+    closed = 0
+    if reminders_svc.is_contact(a.type, a.direction):
+        closed = await reminders_svc.close_due_followups(db, customer_id)
+    return {"id": str(a.id), "ok": True, "closed_followups": closed}
 
 
 # ─── Aggregated summary + export ─────────────────────────────────────────────

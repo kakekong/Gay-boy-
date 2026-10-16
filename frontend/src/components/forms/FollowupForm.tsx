@@ -45,6 +45,7 @@ export function FollowupForm({ quotationId, customerId, onClose }: Props) {
       qc.invalidateQueries({ queryKey: ["followups", quotationId] });
       qc.invalidateQueries({ queryKey: ["activities", customerId] });
       qc.invalidateQueries({ queryKey: ["calendar-events"] });
+      qc.invalidateQueries({ queryKey: ["my-queue"] });
       qc.invalidateQueries({ queryKey: ["approvals"] });
       // A follow-up used to be held for the director when sales logged it, and
       // this kept the modal open to explain why the timeline had not changed.

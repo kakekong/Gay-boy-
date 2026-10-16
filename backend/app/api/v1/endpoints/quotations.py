@@ -35,6 +35,7 @@ from app.schemas.quotation import (
     QuotationUpdate,
 )
 from app.services import ledger, quote_import
+from app.services import reminders as reminders_svc
 from app.services.numbering import next_quotation_number
 
 # Closed to purchasing (kept customer-blind) and HR (people, not deals).
@@ -1686,6 +1687,10 @@ async def log_followup(
     )
     db.add(activity)
     await db.flush()
+    # This follow-up answers the ones that were due; the next one, if any,
+    # is made below.
+    closed = await reminders_svc.close_due_followups(db, q.customer_id) \
+        if q.customer_id else 0
 
     reminder_id: str | None = None
     if payload.next_at:
@@ -1706,6 +1711,7 @@ async def log_followup(
         "activity_id": str(activity.id),
         "reminder_id": reminder_id,
         "occurred_at": activity.occurred_at,
+        "closed_followups": closed,
     }
 
 
@@ -1777,7 +1783,7 @@ async def followup_reminder_done(
     # tasks just by knowing an id.
     if rem.customer_id != q.customer_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found")
-    rem.status = "done"
+    await reminders_svc.complete(db, rem)
     return {"ok": True}
 
 

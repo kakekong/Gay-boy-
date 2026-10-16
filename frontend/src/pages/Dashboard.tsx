@@ -1,9 +1,9 @@
 import clsx from "clsx";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   ArrowUpRight, Sparkles, Target,
-  ListTodo, Send, Clock, BellRing, Trophy,
+  ListTodo, Send, Clock, BellRing, Trophy, Check, Loader2,
 } from "lucide-react";
 import { api } from "@/api/client";
 import { StageBadge } from "@/components/StageBadge";
@@ -169,6 +169,8 @@ interface QueueItem {
 interface ReminderDue {
   id: string;
   kind: string;
+  label: string;
+  is_stage_task: boolean;
   due_at: string;
   message: string | null;
   customer_id: string | null;
@@ -187,12 +189,29 @@ interface MyQueue {
   };
 }
 
+const KIND_ID: Record<string, string> = {
+  follow_up: "Tindak lanjut",
+  after_sales: "Purna jual",
+  delivery: "Pengiriman",
+  payment_due: "Jatuh tempo pembayaran",
+};
+
 function MyQueueCard() {
   const t = useT();
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["my-queue"],
     queryFn: () => api.get("/dashboard/my-queue").then((r) => r.data as MyQueue),
     refetchInterval: poll(60_000),
+  });
+  // Tick a follow-up off right here. Before, the only way out of the queue was
+  // a quotation's follow-up panel, so done work piled up.
+  const done = useMutation({
+    mutationFn: (id: string) => api.patch(`/calendar/reminders/${id}/done`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-queue"] });
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
+    },
   });
   const idr = (n: number) =>
     "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -229,22 +248,45 @@ function MyQueueCard() {
           count={c?.reminders_due ?? 0}
           tone="red"
         >
-          {(q.data?.reminders_due ?? []).map((r) => (
-            <Link
-              key={r.id}
-              to={r.customer_id ? `/customers/${r.customer_id}` : "/calendar"}
-              className="flex items-center justify-between gap-2 text-sm py-1 hover:text-brand-700"
-            >
-              <span className="truncate">
-                {r.customer_name ?? r.kind}
-                {r.message ? <span className="muted"> · {r.message}</span> : null}
-              </span>
-              <span className="text-[11px] text-red-600 shrink-0 inline-flex items-center gap-1">
-                <Clock size={11} />
-                {new Date(r.due_at).toLocaleDateString(t("en-US", "id-ID"))}
-              </span>
+          {(q.data?.reminders_due ?? []).map((r) => {
+            const busy = done.isPending && done.variables === r.id;
+            return (
+              <div key={r.id} className="flex items-center gap-2 text-sm py-1">
+                <Link
+                  to={r.customer_id ? `/customers/${r.customer_id}` : "/calendar"}
+                  className="flex-1 min-w-0 truncate hover:text-brand-700"
+                  title={[r.customer_name, r.message].filter(Boolean).join(" · ")}
+                >
+                  {/* The note says what to do; the kind only stands in when there's no note. */}
+                  {r.customer_name
+                    ? <>{r.customer_name}{r.message ? <span className="muted"> · {r.message.split("\n")[0]}</span> : null}</>
+                    : (r.message?.split("\n")[0] || t(r.label, KIND_ID[r.kind] ?? r.label))}
+                </Link>
+                <span className="text-[11px] text-red-600 shrink-0 inline-flex items-center gap-1">
+                  <Clock size={11} />
+                  {new Date(r.due_at).toLocaleDateString(t("en-US", "id-ID"), { day: "numeric", month: "short" })}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 h-6 px-1.5 rounded-md border border-ink-200 text-[11px] font-medium text-ink-600 inline-flex items-center gap-1 hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                  title={t("Mark as done", "Tandai selesai")}
+                  disabled={busy}
+                  onClick={() => done.mutate(r.id)}
+                >
+                  {busy ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                  {t("Done", "Selesai")}
+                </button>
+              </div>
+            );
+          })}
+          {(c?.reminders_due ?? 0) > (q.data?.reminders_due.length ?? 0) && (
+            <Link to="/calendar" className="block text-xs text-brand-700 hover:underline pt-1.5">
+              {t(
+                `+${(c?.reminders_due ?? 0) - (q.data?.reminders_due.length ?? 0)} more — see them on the calendar`,
+                `+${(c?.reminders_due ?? 0) - (q.data?.reminders_due.length ?? 0)} lagi — lihat di kalender`,
+              )}
             </Link>
-          ))}
+          )}
         </QueueBucket>
 
         <QueueBucket

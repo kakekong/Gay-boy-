@@ -21,6 +21,8 @@ from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES
 from app.models.operation import Project
 from app.models.quotation import Quotation
 from app.models.user import User
+from app.services import reminders as reminders_svc
+
 
 def _office_tz() -> ZoneInfo:
     # The office runs on WIB. Calendar days are office days, not UTC days:
@@ -251,18 +253,6 @@ class ReminderCreate(BaseModel):
     recurs_until: date | None = None
 
 
-def _next_due(current: datetime, recurs: str) -> datetime | None:
-    """Compute the next due_at for a recurring reminder, or None if it ended."""
-    if recurs == "daily":      return current + timedelta(days=1)
-    if recurs == "weekly":     return current + timedelta(days=7)
-    if recurs == "biweekly":   return current + timedelta(days=14)
-    if recurs == "monthly":
-        # Add ~30 days (good enough for follow-up cadence; calendar-month edge
-        # cases not worth the complexity here)
-        return current + timedelta(days=30)
-    return None
-
-
 @router.post("/reminders", status_code=201)
 async def create_reminder(
     payload: ReminderCreate,
@@ -368,31 +358,8 @@ async def mark_done(
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if r.user_id != user.id and Role(user.role) == Role.SALES:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
-    r.status = "done"
-
-    # Chain the next instance if recurring and not past the end date
-    next_id: str | None = None
-    if r.recurs and r.recurs != "none":
-        nxt = _next_due(r.due_at, r.recurs)
-        if nxt is not None:
-            end = r.recurs_until
-            nxt_d = nxt.date() if hasattr(nxt, "date") else nxt
-            if end is None or nxt_d <= end:
-                child = Reminder(
-                    customer_id=r.customer_id,
-                    user_id=r.user_id,
-                    kind=r.kind,
-                    due_at=nxt,
-                    channel=r.channel,
-                    message=r.message,
-                    status="pending",
-                    recurs=r.recurs,
-                    recurs_until=r.recurs_until,
-                    parent_reminder_id=r.parent_reminder_id or r.id,
-                )
-                db.add(child)
-                await db.flush()
-                next_id = str(child.id)
+    nxt = await reminders_svc.complete(db, r)
+    next_id = str(nxt.id) if nxt else None
     return {"ok": True, "next_reminder_id": next_id}
 
 

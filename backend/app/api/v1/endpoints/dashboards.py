@@ -114,10 +114,23 @@ async def my_queue(
             select(Customer).where(Customer.id.in_(rem_cust_ids))
         )).all():
             rem_names[c.id] = c.company_name
+    from app.core.stage_playbook import playbook_for
+    from app.core.stage_tasks import parse_stage_task_kind
+
+    def _label(kind: str) -> str:
+        # "follow_up" → "Follow up"; a stage task → its checklist title.
+        st = parse_stage_task_kind(kind)
+        if st:
+            item = next((t for t in playbook_for(st[0]) if t["key"] == st[1]), None)
+            return item["title"] if item else st[1].replace("_", " ").capitalize()
+        return kind.replace("_", " ").capitalize()
+
     reminders_due = [
         {
             "id": str(r.id),
             "kind": r.kind,
+            "label": _label(r.kind),
+            "is_stage_task": bool(parse_stage_task_kind(r.kind)),
             "due_at": r.due_at,
             "message": r.message,
             "channel": r.channel,

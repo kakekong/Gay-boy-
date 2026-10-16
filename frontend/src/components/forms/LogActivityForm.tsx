@@ -46,6 +46,8 @@ export function LogActivityForm({ customerId, onClose }: Props) {
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["activities", customerId] });
       qc.invalidateQueries({ queryKey: ["approvals"] });
+      qc.invalidateQueries({ queryKey: ["my-queue"] });
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
       // Sales follow-ups are held for director approval.
       if (data?.status === "pending_approval") {
         setInfo(data?.message ?? tt(

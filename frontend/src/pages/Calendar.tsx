@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, Bell, FileText,
-  Truck, AlertCircle, CheckCircle2, ListChecks, Pencil,
+  Truck, AlertCircle, CheckCircle2, ListChecks, Pencil, Check,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -78,6 +78,15 @@ export default function CalendarPage() {
     queryFn: () =>
       api.get("/calendar/events", { params: { from: range.from, to: range.to } })
         .then((r) => r.data as CalEvent[]),
+  });
+
+  const qc = useQueryClient();
+  const markDone = useMutation({
+    mutationFn: (id: string) => api.patch(`/calendar/reminders/${id}/done`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
+      qc.invalidateQueries({ queryKey: ["my-queue"] });
+    },
   });
 
   const filtered = (events.data ?? []).filter((e) => filters[e.kind]);
@@ -285,6 +294,17 @@ export default function CalendarPage() {
                           {e.status && <><span>·</span><span>{e.status}</span></>}
                         </div>
                       </div>
+                      {rem?.editable && e.status === "pending" && (
+                        <button
+                          type="button"
+                          className="btn-ghost h-8 px-2 text-xs shrink-0 hover:text-emerald-700"
+                          title={t("Mark as done", "Tandai selesai")}
+                          disabled={markDone.isPending && markDone.variables === rem.id}
+                          onClick={(ev) => { ev.stopPropagation(); markDone.mutate(rem.id); }}
+                        >
+                          <Check size={13} /> {t("Done", "Selesai")}
+                        </button>
+                      )}
                       {rem?.editable && (
                         <button
                           type="button"
