@@ -102,6 +102,7 @@ async def _pnl_span(db: AsyncSession, start: date, end: date
                func.coalesce(func.sum(JournalLine.credit), 0))
         .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
         .where(JournalEntry.is_posted.is_(True),
+               JournalEntry.is_void.is_(False),
                JournalEntry.entry_date >= start,
                JournalEntry.entry_date <= end,
                JournalLine.account_type.in_(PNL_ORDER))
@@ -258,6 +259,7 @@ async def balances_at(db: AsyncSession, on: date) -> dict[str, dict]:
                func.coalesce(func.sum(JournalLine.credit), 0))
         .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
         .where(JournalEntry.is_posted.is_(True),
+               JournalEntry.is_void.is_(False),
                JournalEntry.entry_date <= on)
         .group_by(JournalLine.account_no, JournalLine.account_type,
                   JournalLine.account_name))).all()

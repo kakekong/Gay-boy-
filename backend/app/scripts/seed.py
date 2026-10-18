@@ -684,6 +684,20 @@ COLUMN_MIGRATIONS: list[str] = [
 
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
+    # ── Voided (batal) cash entries leave every list, ledger and report ──
+    "ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS is_void BOOLEAN NOT NULL DEFAULT false",
+    # Entries voided before the flag: the journal behind a voided cash
+    # transaction, and the reversal that undid it.
+    """UPDATE journal_entries SET is_void = true
+        WHERE NOT is_void AND (
+              id IN (SELECT journal_id FROM cash_transactions
+                      WHERE is_void AND journal_id IS NOT NULL)
+           OR reverses_id IN (SELECT journal_id FROM cash_transactions
+                               WHERE is_void AND journal_id IS NOT NULL))""",
+    # ...and their lines in the reporting journal, which the P&L, cash flow
+    # and money in/out read. The pair nets to zero, so balances don't move.
+    """DELETE FROM ledger_entries
+        WHERE source_id IN (SELECT id FROM journal_entries WHERE is_void)""",
     # ── Beban Pokok Penjualan booked per purchasing PO (null = before it) ─
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS cogs_posted NUMERIC(18,2)",
     # 5101 was seeded as a header with nothing under it. Reports skip headers,

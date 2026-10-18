@@ -80,6 +80,11 @@ class JournalEntry(Base, UUIDPK, TimestampMixin):
     # list can show it struck through rather than pretending it never was.
     reverses_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
     reversed_by_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
+    # Voided (batal) — the entry and the reversal that undid it. The pair
+    # nets to nothing and stays on file for the audit, but it is left out of
+    # every list, ledger and report, as if it had never been entered.
+    is_void: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                          index=True)
     created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
     lines: Mapped[list["JournalLine"]] = relationship(

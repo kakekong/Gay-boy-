@@ -84,11 +84,14 @@ export default function GeneralJournalPage() {
   // 100 at a time, with "Load more" — past the latest 100 entries used to
   // be unreachable except by searching.
   const [shown, setShown] = useState(100);
+  // Voided (batal) cash entries and their reversals are hidden unless asked for.
+  const [showVoid, setShowVoid] = useState(false);
   useEffect(() => { setShown(100); }, [period, search]);
   const list = useQuery({
-    queryKey: ["journals", period, search, shown],
+    queryKey: ["journals", period, search, shown, showVoid],
     queryFn: () => api.get("/journals", {
-      params: { period: period || undefined, q: search || undefined, limit: shown },
+      params: { period: period || undefined, q: search || undefined, limit: shown,
+                show_void: showVoid || undefined },
     }).then((r) => r.data as { total: number; items: Entry[] }),
     placeholderData: (prev, prevQuery) =>
       prevQuery?.queryKey[1] === period && prevQuery?.queryKey[2] === search ? prev : undefined,
@@ -357,6 +360,11 @@ export default function GeneralJournalPage() {
             <button className="btn-ghost py-1 px-2 text-xs"
               onClick={() => setPeriod("")}>{t("All", "Semua")}</button>
           )}
+          <label className="text-xs flex items-center gap-2 muted">
+            <input type="checkbox" checked={showVoid}
+              onChange={(e) => setShowVoid(e.target.checked)} />
+            {t("Show voided", "Tampilkan yang batal")}
+          </label>
         </header>
 
         {list.isLoading ? (

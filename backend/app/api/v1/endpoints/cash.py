@@ -143,8 +143,12 @@ async def list_transactions(
     q: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    show_void: bool = False,
 ):
     stmt = select(CashTransaction)
+    # A voided (batal) one is gone unless asked for — the audit can still see it.
+    if not show_void:
+        stmt = stmt.where(CashTransaction.is_void.is_(False))
     if kind:
         stmt = stmt.where(CashTransaction.kind == kind)
     if account_no:
@@ -412,11 +416,24 @@ async def void_transaction(tx_id: UUID,
         entry = await db.get(JournalEntry, tx.journal_id)
         if entry:
             try:
-                await journal_svc.reverse_entry(
-                    db, entry, actor_id=user.id,
+                # Dated with the original, so no month shows one half of it.
+                mirror = await journal_svc.reverse_entry(
+                    db, entry, actor_id=user.id, on=entry.entry_date,
                     reason=(reason or f"Void of {tx.number}"))
             except journal_svc.JournalError as e:
                 raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+            # Batal means it never happened. The reversal has already put
+            # every balance back; marking the pair void takes it out of the
+            # lists and ledgers, and its lines come out of the reporting
+            # journal so no P&L, cash flow or money-in/out total counts it
+            # (once out and once back in). Both entries stay on file.
+            from sqlalchemy import delete
+
+            from app.models.finance import LedgerEntry
+            entry.is_void = True
+            mirror.is_void = True
+            await db.execute(delete(LedgerEntry).where(
+                LedgerEntry.source_id.in_([entry.id, mirror.id])))
     tx.is_void = True
     tx.void_reason = reason
     tx.voided_at = datetime.now(UTC)

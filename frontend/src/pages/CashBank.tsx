@@ -80,10 +80,14 @@ export default function CashBankPage() {
   // 50 at a time, with "Load more" — it used to stop at the latest 50 and
   // say nothing about the rest.
   const [shown, setShown] = useState(50);
+  // Voided (batal) entries are gone from the list; this brings them back
+  // for whoever needs to see what was undone.
+  const [showVoid, setShowVoid] = useState(false);
   const list = useQuery({
-    queryKey: ["cash-tx", tab, shown],
+    queryKey: ["cash-tx", tab, shown, showVoid],
     queryFn: () => api.get("/cash", {
-      params: { kind: tab === "statement" ? undefined : tab, limit: shown },
+      params: { kind: tab === "statement" ? undefined : tab, limit: shown,
+                show_void: showVoid || undefined },
     }).then((r) => r.data as { total: number; items: Tx[] }),
     enabled: tab !== "statement",
     // Keep the rows on screen while the next 50 load, but not across tabs.
@@ -130,8 +134,8 @@ export default function CashBankPage() {
       api.post(`/cash/${v.id}/void`, null, { params: { reason: v.reason } }),
     onSuccess: () => {
       refresh();
-      setFlash({ kind: "ok", text: t("Voided — the entry was reversed.",
-                                     "Dibatalkan — jurnalnya dibalik.") });
+      setFlash({ kind: "ok", text: t("Voided — it's gone from the lists, ledgers and reports, and the balance is back.",
+                                     "Dibatalkan — sudah hilang dari daftar, buku besar, dan laporan, dan saldonya kembali.") });
     },
     onError: onErr,
   });
@@ -533,9 +537,16 @@ export default function CashBankPage() {
 
           {/* ── what has been recorded ───────────────────────────────────── */}
           <div className="card overflow-hidden">
-            <header className="px-5 py-3 border-b border-ink-100">
-              <div className="font-semibold">{t("Recorded", "Sudah dicatat")}</div>
-              <div className="text-xs muted">{list.data?.total ?? 0}</div>
+            <header className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold">{t("Recorded", "Sudah dicatat")}</div>
+                <div className="text-xs muted">{list.data?.total ?? 0}</div>
+              </div>
+              <label className="text-xs flex items-center gap-2 muted">
+                <input type="checkbox" checked={showVoid}
+                  onChange={(e) => setShowVoid(e.target.checked)} />
+                {t("Show voided", "Tampilkan yang batal")}
+              </label>
             </header>
             {list.isLoading ? (
               <div className="p-8 text-center text-sm muted flex items-center justify-center gap-2">

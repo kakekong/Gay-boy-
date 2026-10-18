@@ -113,6 +113,13 @@ async def main():
     check("...and the account still closes at its balance", closes(L),
           f'{L["closing_balance"]} vs {L["account"]["balance"]}')
 
+    # The balances set here are one-sided on purpose; zero them so the
+    # shared test database's balance sheet still balances for other tests.
+    async with SessionLocal() as s:
+        await s.execute(update(Account).where(Account.account_no.in_([no, no2]))
+                        .values(balance=0))
+        await s.commit()
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

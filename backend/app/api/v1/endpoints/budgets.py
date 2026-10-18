@@ -215,6 +215,7 @@ async def monitor(db: AsyncSession = Depends(get_db),
                func.coalesce(func.sum(JournalLine.credit), 0))
         .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
         .where(JournalEntry.is_posted.is_(True),
+               JournalEntry.is_void.is_(False),
                JournalEntry.entry_date >= start,
                JournalEntry.entry_date <= end)
         .group_by(JournalLine.account_no, JournalLine.account_type))).all()

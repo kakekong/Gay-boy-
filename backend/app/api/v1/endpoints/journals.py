@@ -107,8 +107,12 @@ async def list_entries(
     q: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    show_void: bool = False,
 ):
     stmt = select(JournalEntry)
+    # Voided (batal) entries and their reversals are gone unless asked for.
+    if not show_void:
+        stmt = stmt.where(JournalEntry.is_void.is_(False))
     p_start, p_end = _period_bounds(period)
     if p_start:
         stmt = stmt.where(JournalEntry.entry_date >= p_start,
@@ -302,7 +306,8 @@ async def account_ledger(
         select(JournalLine, JournalEntry)
         .join(JournalEntry, JournalLine.journal_id == JournalEntry.id)
         .where(JournalLine.account_no == account_no,
-               JournalEntry.is_posted.is_(True))
+               JournalEntry.is_posted.is_(True),
+               JournalEntry.is_void.is_(False))     # batal: as if never entered
     )).all():
         events.append({
             "kind": "journal", "journal_id": str(e.id), "number": e.number,
