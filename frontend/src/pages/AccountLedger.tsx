@@ -6,7 +6,9 @@
  * period, and a running balance down the right-hand side. "Where did this
  * number come from" had no answer before — balances moved and nothing said
  * why — and this is the answer, one line at a time, each linking back to
- * the journal entry that wrote it.
+ * what wrote it: a journal entry, a posting the app made on its own (a goods
+ * receipt, a payment), a balance typed in by hand — or, for what none of
+ * those explain, a row that says there is no record of it.
  */
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -19,8 +21,15 @@ import { api } from "@/api/client";
 import { useT, T, locale } from "@/store/lang";
 
 interface Row {
-  journal_id: string;
+  /** journal: a journal entry · auto: posted by the app (a receipt, a
+   *  payment…) · by_hand: a balance typed in on the chart of accounts ·
+   *  unrecorded: what nothing on record explains. */
+  kind: "journal" | "auto" | "by_hand" | "unrecorded";
+  journal_id: string | null;
   number: string;
+  label?: string;
+  link: string | null;
+  by: string | null;
   entry_date: string;
   memo: string | null;
   source_type: string;
@@ -37,6 +46,18 @@ interface Ledger {
   total_credit: number;
   items: Row[];
 }
+
+// Indonesian names for what the app posts on its own and the other row kinds.
+const LABEL_ID: Record<string, string> = {
+  "Goods received": "Penerimaan barang",
+  "Supplier payment": "Pembayaran pemasok",
+  "PO cost (HPP)": "HPP dari PO",
+  "Quotation won": "Penawaran menang",
+  "Customer payment": "Pembayaran pelanggan",
+  "Payroll": "Penggajian",
+  "Set by hand": "Diisi manual",
+  "No record": "Tanpa catatan",
+};
 
 const idr = (n: number) => {
   const s = new Intl.NumberFormat("id-ID", {
@@ -146,31 +167,6 @@ export default function AccountLedgerPage() {
           </label>
         </div>
 
-        {/* When the whole record still doesn't add up to the account, the
-            account is carrying a figure the journal never wrote — almost
-            always a balance brought in with the chart of accounts before
-            anybody kept a journal here. Saying so beats showing two numbers
-            that disagree and leaving the reader to wonder which is wrong. */}
-        {allTime && Math.abs(d.closing_balance - d.account.balance) > 0.005 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
-            <AlertCircle size={14} className="mt-0.5 shrink-0" />
-            <div>
-              <div className="font-medium">
-                {t("The journal doesn't explain all of this balance",
-                   "Jurnal belum menjelaskan seluruh saldo ini")}
-              </div>
-              <div className="text-xs mt-0.5">
-                {t("The account holds", "Akun ini memuat")}{" "}
-                <b className="tabular-nums">
-                  {idr(d.account.balance - d.closing_balance)}
-                </b>{" "}
-                {t("that no entry here accounts for — a balance carried in before the books were kept here. Recording the opening balances writes it down, once.",
-                   "yang tidak berasal dari jurnal mana pun — saldo bawaan dari sebelum pembukuan di sini. Mencatat saldo awal menuliskannya, sekali saja.")}
-              </div>
-            </div>
-          </div>
-        )}
-
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {([
             [t("Opening", "Saldo awal"), idr(d.opening_balance)],
@@ -218,20 +214,32 @@ export default function AccountLedgerPage() {
                   </td>
                 </tr>
                 {d.items.map((r, i) => (
-                  <tr key={`${r.journal_id}-${i}`} className="border-t border-ink-100">
+                  <tr key={`${r.kind}-${r.journal_id ?? r.number}-${i}`}
+                    className={clsx("border-t border-ink-100",
+                      r.kind === "unrecorded" && "bg-amber-50/50")}>
                     <td className="td whitespace-nowrap">
                       {new Date(r.entry_date).toLocaleDateString(locale())}
                     </td>
                     <td className="td font-mono text-xs">
-                      <Link to={`/journals?open=${r.journal_id}`}
-                        className="text-brand-700 hover:underline">
-                        {r.number}
-                      </Link>
-                      <span className={clsx("block chip mt-1 text-[10px]",
-                        r.source_type === "manual"
-                          ? "bg-brand-50 text-brand-700"
+                      {r.kind === "journal" ? (
+                        <Link to={`/journals?open=${r.journal_id}`}
+                          className="text-brand-700 hover:underline">
+                          {r.number}
+                        </Link>
+                      ) : r.link ? (
+                        <Link to={r.link} className="text-brand-700 hover:underline">
+                          {r.number}
+                        </Link>
+                      ) : (
+                        <span>{r.number}</span>
+                      )}
+                      <span className={clsx("block chip mt-1 text-[10px] font-sans w-fit whitespace-nowrap",
+                        r.kind === "unrecorded" ? "bg-amber-100 text-amber-800"
+                          : r.kind === "by_hand" ? "bg-violet-50 text-violet-700"
+                          : r.kind === "auto" ? "bg-emerald-50 text-emerald-700"
+                          : r.source_type === "manual" ? "bg-brand-50 text-brand-700"
                           : "bg-ink-100 text-ink-600")}>
-                        {r.source_type}
+                        {r.label ? t(r.label, LABEL_ID[r.label] ?? r.label) : r.source_type}
                       </span>
                     </td>
                     <td className="td">
@@ -239,6 +247,11 @@ export default function AccountLedgerPage() {
                       {r.source_ref && r.source_ref !== r.number && (
                         <span className="block text-[11px] muted font-mono">
                           {r.source_ref}
+                        </span>
+                      )}
+                      {r.by && (
+                        <span className="block text-[11px] muted">
+                          {t("by", "oleh")} {r.by}
                         </span>
                       )}
                     </td>
