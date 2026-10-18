@@ -529,6 +529,8 @@ async def apply_to_target(
             if received_early:
                 po.status = "received"
                 applied["new_status"] = po.status
+                from app.services.ledger import sync_po_cogs
+                await sync_po_cogs(db, po, start=True, created_by=req.decided_by)
                 applied["note"] = "goods were already received against this order"
                 if po.project_id:
                     from app.models.operation import Project, advance_project_status
@@ -547,6 +549,10 @@ async def apply_to_target(
             if action == "create":
                 po.status = "open" if approve else "cancelled"
                 applied["new_status"] = po.status
+                # Approved: the cost of the goods is booked now (for the time
+                # being — see ledger.sync_po_cogs).
+                from app.services.ledger import sync_po_cogs
+                await sync_po_cogs(db, po, start=approve, created_by=req.decided_by)
                 # Releasing the PO registers its parts in the catalogue; the
                 # goods enter stock when they are received, not here.
                 if approve:
@@ -610,6 +616,9 @@ async def apply_to_target(
                     # approved "received" receives what nobody recorded.
                     from app.services.receiving import po_status_changed
                     await po_status_changed(db, po, was_status, None)
+                # A new price, rate or a cancellation moves the cost booked.
+                from app.services.ledger import sync_po_cogs
+                await sync_po_cogs(db, po, created_by=req.decided_by)
     elif req.target_type == "delivery_order":
         # Finance's release of a delivery order, taken from the inbox
         # instead of the project page. Approving it is the same act as the

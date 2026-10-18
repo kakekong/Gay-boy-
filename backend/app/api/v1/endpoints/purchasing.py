@@ -1144,7 +1144,11 @@ async def create_po(
     db.add(po)
     await db.flush()
 
-    if not is_director:
+    if is_director:
+        # The director's own order is approved as it is made: book its cost.
+        from app.services.ledger import sync_po_cogs
+        await sync_po_cogs(db, po, start=True, created_by=user.id)
+    else:
         await request_approval(
             db,
             target_type="supplier_po",
@@ -1775,6 +1779,9 @@ async def update_po(
         # get_db's exception handler, which would discard the approval we just
         # filed. The PO is intentionally left unchanged until the director signs
         # off; the changes ride in the approval payload.
+        # A rate applied straight away above changes what the order is worth.
+        from app.services.ledger import sync_po_cogs
+        await sync_po_cogs(db, po, created_by=user.id)
         return {
             "id": str(po.id), "number": po.number, "status": po.status,
             "supplier_id": str(po.supplier_id),
@@ -1829,6 +1836,10 @@ async def update_po(
         from app.services.po_project import assign_po_project
         await assign_po_project(db, po, new_project)
 
+    # A new total, rate or currency books the difference; cancelling takes
+    # the whole cost back.
+    from app.services.ledger import sync_po_cogs
+    await sync_po_cogs(db, po, created_by=user.id)
     await db.flush()
     return {
         "id": str(po.id), "number": po.number, "status": po.status,

@@ -312,6 +312,104 @@ async def post_goods_receipt(
     return moves
 
 
+# ─── Beban Pokok Penjualan: booked when a purchasing PO is approved ──────────
+#
+# An interim rule, chosen to have the cost on the books now and the finer
+# points later: the cost of the goods is booked when the order is approved,
+# not when they are sold. HPP up, Persediaan down, by the order's value in
+# rupiah. Receiving puts Persediaan back up (and Utang Usaha up), so once the
+# goods are in, the order sits as cost in HPP and as debt in Utang Usaha, with
+# Persediaan back where it started — nothing counted twice. Between approval
+# and receipt, Persediaan reads low by what is on order.
+#
+# The amount booked is kept on the order (`cogs_posted`) and kept equal to the
+# order's value: a price or rate correction books the difference, cancelling
+# takes it all back. An order of unknown worth — foreign currency, no rate yet
+# — books nothing until the rate is set.
+COGS_ACCOUNT = "5101"            # Beban Pokok Penjualan
+_PO_NOT_LIVE = ("pending_approval", "cancelled", "rejected")
+
+
+async def _cogs_account(db: AsyncSession) -> str | None:
+    """5101 itself — or, if a chart keeps it as a header with accounts under
+    it, the first of those. Reports skip headers, so cost booked on one would
+    show nowhere."""
+    acc = await db.scalar(select(Account).where(Account.account_no == COGS_ACCOUNT))
+    if acc is None:
+        return None
+    if not acc.is_parent:
+        return acc.account_no
+    return await db.scalar(
+        select(Account.account_no).where(Account.parent_account_no == COGS_ACCOUNT,
+                                         Account.is_parent.is_(False))
+        .order_by(Account.account_no).limit(1))
+
+
+def po_value_idr(po) -> float | None:
+    """The order's total in rupiah, or None when its rate isn't known yet."""
+    cur = (po.currency or "IDR").upper()
+    rate = 1.0 if cur == "IDR" else (None if po.fx_rate is None else float(po.fx_rate))
+    if rate is None:
+        return None
+    return round(float(po.total or 0) * rate, 2)
+
+
+async def sync_po_cogs(
+    db: AsyncSession, po, *, start: bool = False, created_by: UUID | None = None,
+) -> list[dict]:
+    """Bring the HPP booked for `po` in line with what the order is worth now.
+
+    `start` is passed where an order is approved: it begins tracking an order
+    nothing was booked for. Elsewhere an untracked order (approved before this
+    rule) is left alone, so editing an old order doesn't suddenly book its
+    whole value today.
+    """
+    if po.cogs_posted is None:
+        if not start:
+            return []
+        po.cogs_posted = 0
+    booked = float(po.cogs_posted or 0)
+    if po.status in _PO_NOT_LIVE:
+        target = 0.0
+    else:
+        value = po_value_idr(po)
+        if value is None:
+            return []                    # wait for the rate
+        target = value
+    delta = round(target - booked, 2)
+    if abs(delta) < 0.005:
+        return []
+    # Both sides or neither: a chart missing either account must not leave
+    # half an entry on the books.
+    cogs_no = await _cogs_account(db)
+    stock = await db.scalar(select(Account.account_no).where(
+        Account.account_no == INVENTORY_ACCOUNT))
+    if not cogs_no or not stock:
+        return []
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import settings
+    today = datetime.now(ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")).date()
+    why = ("approved" if booked == 0 and delta > 0
+           else "cancelled" if target == 0 else "value changed")
+    moves: list[dict] = []
+    for acc_no, sign, role in ((cogs_no, 1, "cogs"), (INVENTORY_ACCOUNT, -1, "inventory")):
+        m = await _bump(db, acc_no, sign * delta)
+        if not m:
+            continue
+        await journal_post(
+            db, entry_date=today, account_no=m["account_no"],
+            account_type=m["account_type"], account_name=m["name"],
+            amount=m["delta"], source_type="supplier_po_cogs", source_id=po.id,
+            source_ref=po.number,
+            memo=f"Cost of goods on {po.number} — order {why} ({role})",
+            created_by=created_by,
+        )
+        moves.append({**m, "role": role})
+    po.cogs_posted = target
+    return moves
+
+
 # Where the gap between a foreign order's booked rate and the rate the bank
 # really paid at goes: Laba/Rugi Terealisasi IDR. A loss raises it, a gain
 # lowers it.

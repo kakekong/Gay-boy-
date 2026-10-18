@@ -73,6 +73,18 @@ async def pnl(
             Project.price_request_id.is_not(None),
         )
     )).all()
+    # A job whose purchasing PO books its cost on approval is already in the
+    # ledger's HPP — estimating it again from the price request would count
+    # it twice. The estimate stays for jobs bought before that rule.
+    from app.models.purchasing import SupplierPO
+    booked: set = set()
+    for po in (await db.scalars(select(SupplierPO).where(
+            SupplierPO.cogs_posted.is_not(None)))).all():
+        if po.project_id:
+            booked.add(po.project_id)
+        booked.update(str(x) for x in (po.project_ids or []))
+    committed_projects = [p for p in committed_projects
+                          if p.id not in booked and str(p.id) not in booked]
     committed_cogs = 0.0
     if committed_projects:
         pr_ids = {p.price_request_id for p in committed_projects}

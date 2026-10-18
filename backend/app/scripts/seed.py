@@ -684,6 +684,14 @@ COLUMN_MIGRATIONS: list[str] = [
 
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
+    # ── Beban Pokok Penjualan booked per purchasing PO (null = before it) ─
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS cogs_posted NUMERIC(18,2)",
+    # 5101 was seeded as a header with nothing under it. Reports skip headers,
+    # so a cost booked there would show nowhere and leave the balance sheet
+    # out by that much. With no sub-accounts it is simply the account.
+    """UPDATE accounts SET is_parent = false
+        WHERE account_no = '5101' AND is_parent
+          AND NOT EXISTS (SELECT 1 FROM accounts c WHERE c.parent_account_no = '5101')""",
 
     # ── Delivery order: where it goes, to whom, and the expedition page ──
     "ALTER TABLE delivery_orders ADD COLUMN IF NOT EXISTS ship_to TEXT",

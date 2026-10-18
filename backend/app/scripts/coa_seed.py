@@ -105,7 +105,8 @@ COA_SEED: list[tuple[str, str, str, str | None, bool, int]] = [
     ("4401-01", "Diskon Penjualan Retensi",          "Revenue",     "4401", False, 1),
 
     # ─── COGS ────────────────────────────────────────────────────────────────
-    ("5101",    "Beban Pokok Penjualan",             "Cost Of Good Sold", None, True, 0),
+    # A postable account, not a header: purchasing POs book their cost here.
+    ("5101",    "Beban Pokok Penjualan",             "Cost Of Good Sold", None, False, 0),
 
     # ─── EXPENSES ────────────────────────────────────────────────────────────
     ("6000",    "Beban Operasional",                 "Expense",     None,   True,  0),
