@@ -616,9 +616,11 @@ async def apply_to_target(
                     # approved "received" receives what nobody recorded.
                     from app.services.receiving import po_status_changed
                     await po_status_changed(db, po, was_status, None)
-                # A new price, rate or a cancellation moves the cost booked.
+                # A new price, rate or a cancellation moves the cost booked;
+                # an order taken off pending_approval this way is approved.
                 from app.services.ledger import sync_po_cogs
-                await sync_po_cogs(db, po, created_by=req.decided_by)
+                await sync_po_cogs(db, po, created_by=req.decided_by,
+                                   start=was_status == "pending_approval")
     elif req.target_type == "delivery_order":
         # Finance's release of a delivery order, taken from the inbox
         # instead of the project page. Approving it is the same act as the

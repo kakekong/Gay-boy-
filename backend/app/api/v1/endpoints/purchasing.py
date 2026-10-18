@@ -1795,6 +1795,7 @@ async def update_po(
         }
 
     # Director path: apply immediately.
+    status_before = po.status
     if "number" in data:
         po.number = data["number"]
     if "po_date" in data:
@@ -1837,9 +1838,11 @@ async def update_po(
         await assign_po_project(db, po, new_project)
 
     # A new total, rate or currency books the difference; cancelling takes
-    # the whole cost back.
+    # the whole cost back. Moving it off pending_approval on this page is the
+    # director approving it, the same as from the inbox: book its cost.
     from app.services.ledger import sync_po_cogs
-    await sync_po_cogs(db, po, created_by=user.id)
+    await sync_po_cogs(db, po, created_by=user.id,
+                       start=status_before == "pending_approval")
     await db.flush()
     return {
         "id": str(po.id), "number": po.number, "status": po.status,

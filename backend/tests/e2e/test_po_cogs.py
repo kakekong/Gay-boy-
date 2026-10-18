@@ -97,6 +97,20 @@ async def main():
     check("...the debt is in Utang Usaha", moved(b2, b3, AP) == 1_000_000, str(moved(b2, b3, AP)))
     check("...and the cost stays in HPP", moved(b1, b3, HPP) == 1_000_000)
 
+    print("\n── approved on the PO's own page ──")
+    po_p = J(await order(pur, "PULLEY", 4, 250_000))
+    b4a = await bal()
+    r = await c.patch(f"/purchasing/po/{po_p['id']}", headers=d, json={"status": "open"})
+    b4b = await bal()
+    check("the director sets it Open on the PO page: it books like an approval",
+          r.status_code == 200 and moved(b4a, b4b, HPP) == 1_000_000
+          and moved(b4a, b4b, STOCK) == -1_000_000, f"{r.status_code} {moved(b4a, b4b, HPP)}")
+    req = (await pending(po_p["id"]) or [{}])[0].get("id")
+    if req:     # the request left in the inbox, approved later, books nothing more
+        await c.post(f"/approvals/{req}/approve", headers=d)
+    check("...and isn't booked a second time", moved(b4a, await bal(), HPP) == 1_000_000,
+          str(moved(b4a, await bal(), HPP)))
+
     print("\n── rejected ──")
     po_r = J(await order(pur, "BOLT", 5, 20_000))
     b4 = await bal()
