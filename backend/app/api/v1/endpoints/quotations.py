@@ -1107,7 +1107,11 @@ async def mark_lost(q_id: UUID, reason: str,
             "marking the quotation Lost.",
         )
     q.status = "lost"
-    q.notes = (q.notes or "") + f"\n[lost @ {datetime.now(UTC).isoformat()}] {reason}"
+    # Its own fields, shown at the top of the quotation — not a line in the
+    # notes, which are the customer's and print on the PDF.
+    q.lost_reason = reason
+    q.lost_at = datetime.now(UTC)
+    q.lost_by = user.id
     await audit_record(db, actor=user, action="lost", entity="quotation",
                        entity_id=q.id, after={"status": "lost", "reason": reason})
     return await _load(q.id, db)
@@ -1633,6 +1637,10 @@ async def get_quotation(
         rep = await db.get(User, q.sales_pic_id)
         if rep:
             q.sales_pic_name = rep.full_name
+    # ...and who marked it lost, for the banner.
+    if q.lost_by:
+        who = await db.get(User, q.lost_by)
+        q.lost_by_name = who.full_name if who else None
     return q
 
 

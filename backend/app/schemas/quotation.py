@@ -78,6 +78,10 @@ class QuotationOut(BaseModel):
     # Why it was sent back, when it was. Survives a resubmission so the
     # director can see what they asked for last time.
     decision_notes: str | None = None
+    # Why it was lost, when, and by whom — the banner at the top of the page.
+    lost_reason: str | None = None
+    lost_at: datetime | None = None
+    lost_by_name: str | None = None
     items: list[QuotationItemOut] = []
     # CoA linkage
     account_revenue_no:    str | None = None

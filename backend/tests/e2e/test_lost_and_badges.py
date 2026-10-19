@@ -73,8 +73,9 @@ async def main():
     check("a real reason is accepted", r.status_code == 200, J(r))
     got = J(await c.get(f"/quotations/{q}", headers=s1))
     check("the quotation is lost", got.get("status") == "lost", str(got.get("status")))
+    # Its own field now (shown at the top of the quotation), not the notes.
     check("the reason is kept on the record",
-          "competitor 12% lower" in (got.get("notes") or ""), str(got.get("notes"))[:120])
+          "competitor 12% lower" in (got.get("lost_reason") or ""), str(got.get("lost_reason"))[:120])
 
     # ── 2. a dismissed alert stays dismissed ─────────────────────────────────
     # The attendance alert is the one that misbehaved: its id carried the count

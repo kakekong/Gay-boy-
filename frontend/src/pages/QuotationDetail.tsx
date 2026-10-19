@@ -285,6 +285,30 @@ export default function QuotationDetailPage() {
           say what this quotation says? Differences, with the fix. */}
       <DealCheck where={{ quotation_id: id! }} />
 
+      {/* Why the deal was lost — at the top of the quotation, where anyone
+          opening it looks first. It used to be a "[lost @ …]" line appended
+          to the notes, buried among the customer's terms. */}
+      {Q.status === "lost" && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-start gap-2">
+          <Frown size={16} className="mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <div className="font-semibold">{t("Lost", "Kalah")}</div>
+            <div className="mt-0.5 whitespace-pre-wrap text-red-900">
+              {Q.lost_reason
+                || <span className="italic">{t("No reason was recorded.", "Tidak ada alasan yang dicatat.")}</span>}
+            </div>
+            {(Q.lost_by_name || Q.lost_at) && (
+              <div className="mt-1 text-xs text-red-700/80">
+                {Q.lost_by_name && <>{t("Marked lost by", "Ditandai kalah oleh")} {Q.lost_by_name}</>}
+                {Q.lost_by_name && Q.lost_at && " · "}
+                {Q.lost_at && new Date(Q.lost_at).toLocaleString(locale(),
+                  { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Why it was sent back. It used to live only in the audit log and the
           approvals queue, so the person who has to fix it could not read it
           on the page they were fixing. Kept visible after a resubmission so

@@ -321,9 +321,10 @@ async def lost_deals(
     by_reason: dict[str, int] = defaultdict(int)
     items = []
     for q, c in lost:
-        # Extract last "[lost @ ...] reason" from notes
-        reason = "unspecified"
-        if q.notes and "[lost @" in q.notes:
+        # The reason has its own field now; older ones were a
+        # "[lost @ ...] reason" line in the notes.
+        reason = (q.lost_reason or "").strip()[:80] or "unspecified"
+        if not q.lost_reason and q.notes and "[lost @" in q.notes:
             last = q.notes.split("[lost @")[-1]
             if "]" in last:
                 reason = last.split("]", 1)[1].strip()[:80] or "unspecified"
@@ -338,7 +339,7 @@ async def lost_deals(
             "discount_pct": float(q.discount_pct or 0),
             "total": float(q.total or 0),
             "reason": reason,
-            "lost_at": q.updated_at,
+            "lost_at": q.lost_at or q.updated_at,
         })
     return {
         "items": items,

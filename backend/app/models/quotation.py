@@ -65,6 +65,12 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     # Kept after a resubmission on purpose: the director deciding it a second
     # time wants to see what they asked for the first time.
     decision_notes: Mapped[str | None] = mapped_column(Text)
+    # Why the deal was lost, when, and who said so. Shown at the top of the
+    # quotation. It used to be appended to `notes` as "[lost @ …] reason" —
+    # buried among the customer-facing notes, and printed on the PDF.
+    lost_reason: Mapped[str | None] = mapped_column(Text)
+    lost_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lost_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     pdf_url: Mapped[str | None] = mapped_column(String(500))
 
     # ── Chart-of-Accounts linkage ─────────────────────────────────────────

@@ -684,6 +684,30 @@ COLUMN_MIGRATIONS: list[str] = [
 
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
+    # ── Why a quotation was lost: its own fields, not a line in the notes ──
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS lost_reason TEXT",
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS lost_at TIMESTAMPTZ",
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS lost_by UUID",
+    # Reasons written before: "[lost @ <time>] reason" lines in the notes.
+    # Lift the last one into the fields on a lost quotation, and take every
+    # such line out of the notes — they print on the customer's PDF.
+    """UPDATE quotations q SET
+          lost_reason = CASE WHEN q.status = 'lost'
+                             THEN COALESCE(q.lost_reason, NULLIF(btrim(s.m[2]), ''))
+                             ELSE q.lost_reason END,
+          lost_at = CASE WHEN q.status = 'lost' AND q.lost_at IS NULL
+                              AND s.m[1] ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+                         THEN s.m[1]::timestamptz ELSE q.lost_at END,
+          notes = NULLIF(btrim(regexp_replace(q.notes, '\n?\[lost @ [^]]*\][^\n]*', '', 'g')), '')
+        FROM (SELECT id, regexp_match(notes, '.*\[lost @ ([^]]*)\][ ]*([^\n]*)', 's') AS m
+                FROM quotations WHERE notes LIKE '%[lost @%') s
+       WHERE q.id = s.id""",
+    # Who marked it lost, from the audit trail.
+    """UPDATE quotations q SET lost_by = (
+          SELECT a.actor_id FROM audit_log a
+           WHERE a.entity = 'quotation' AND a.action = 'lost' AND a.entity_id = q.id
+           ORDER BY a.occurred_at DESC LIMIT 1)
+        WHERE q.status = 'lost' AND q.lost_by IS NULL""",
     # ── Voided (batal) cash entries leave every list, ledger and report ──
     "ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS is_void BOOLEAN NOT NULL DEFAULT false",
     # Entries voided before the flag: the journal behind a voided cash
