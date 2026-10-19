@@ -9,7 +9,6 @@ was no answer: balances moved and nothing said why.
 """
 
 from datetime import date as date_t
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,7 +20,7 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.permissions import Role, require
 from app.models.account import Account
-from app.models.journal import JournalEntry, JournalLine, signed_delta
+from app.models.journal import JournalEntry
 from app.models.user import User
 from app.services import journal as journal_svc
 
@@ -201,58 +200,6 @@ async def opening_balances(
     return {"ok": True, "written": True, **_entry_out(entry)}
 
 
-# Labels for the postings the app makes on its own, keyed by source_type.
-_AUTO_LABEL = {
-    "goods_receipt": "Goods received",
-    "supplier_payment": "Supplier payment",
-    "supplier_po_cogs": "PO cost (HPP)",
-    "quotation": "Quotation won",
-    "payment": "Customer payment",
-    "salary": "Payroll",
-}
-
-
-def _debit_credit(account_type: str, delta: float) -> tuple[float, float]:
-    """A change in the account's own direction, as a debit or a credit."""
-    from app.models.journal import CREDIT_NORMAL
-    up = delta >= 0
-    if account_type in CREDIT_NORMAL:
-        return (0.0, delta) if up else (-delta, 0.0)
-    return (delta, 0.0) if up else (0.0, -delta)
-
-
-async def _auto_links(db: AsyncSession, rows) -> dict:
-    """Where each automatic posting came from, as a page to open."""
-    from app.models.finance import Payment
-    from app.models.purchasing import GoodsReceipt, SupplierPayment
-
-    def ids(kind):
-        return {r.source_id for r in rows if r.source_type == kind and r.source_id}
-
-    out: dict = {}
-    for r in rows:
-        if not r.source_id:
-            continue
-        if r.source_type == "quotation":
-            out[r.id] = f"/quotations/{r.source_id}"
-        elif r.source_type == "supplier_po_cogs":
-            out[r.id] = f"/purchase-orders/{r.source_id}"
-    for model, kind, fk, path in (
-        (GoodsReceipt, "goods_receipt", "po_id", "/purchase-orders/"),
-        (SupplierPayment, "supplier_payment", "po_id", "/purchase-orders/"),
-        (Payment, "payment", "invoice_id", "/invoices/"),
-    ):
-        keys = ids(kind)
-        if not keys:
-            continue
-        found = {x.id: getattr(x, fk) for x in (await db.scalars(
-            select(model).where(model.id.in_(keys)))).all()}
-        for r in rows:
-            if r.source_type == kind and found.get(r.source_id):
-                out[r.id] = f"{path}{found[r.source_id]}"
-    return out
-
-
 @router.get("/account/{account_no}")
 async def account_ledger(
     account_no: str,
@@ -270,20 +217,12 @@ async def account_ledger(
     down. Without the opening figure the closing one is unexplained, which is
     the reason a plain filtered list of movements is never enough.
 
-    Every way a balance moves is read, not only the general journal:
-
-    * journal entries — manual ones, the cash desk, assets, opening balances;
-    * the postings the app makes on its own — goods received, supplier and
-      customer payments, a quotation won, payroll, a PO's cost. These never
-      went through the journal, so the ledger used to say "nothing has ever
-      been posted" beside an account holding 1,8 billion of goods receipts;
-    * balances typed in or changed by hand on the chart of accounts, read
-      from the audit trail, with who and when;
-    * and whatever is still left, as one row that says plainly there is no
-      record of it — so the closing figure always is the account's balance.
+    Every way a balance moves is read (see services/account_history): the
+    journal, the app's own postings, balances set by hand, and one row for
+    whatever none of those explain — so the closing figure always is the
+    account's balance.
     """
-    from app.models.audit import AuditLog
-    from app.models.finance import LedgerEntry
+    from app.services.account_history import account_events, walk
 
     acc = await db.scalar(select(Account).where(Account.account_no == account_no))
     if not acc:
@@ -299,143 +238,12 @@ async def account_ledger(
         from datetime import timedelta
         end = end + timedelta(days=1)
 
-    events: list[dict] = []
-
-    # 1. The general journal.
-    for ln, e in (await db.execute(
-        select(JournalLine, JournalEntry)
-        .join(JournalEntry, JournalLine.journal_id == JournalEntry.id)
-        .where(JournalLine.account_no == account_no,
-               JournalEntry.is_posted.is_(True),
-               JournalEntry.is_void.is_(False))     # batal: as if never entered
-    )).all():
-        events.append({
-            "kind": "journal", "journal_id": str(e.id), "number": e.number,
-            "entry_date": e.entry_date, "_at": e.created_at,
-            "memo": ln.memo or e.memo,
-            "source_type": e.source_type, "source_ref": e.source_ref,
-            "debit": float(ln.debit or 0), "credit": float(ln.credit or 0),
-            "delta": signed_delta(ln.account_type, ln.debit, ln.credit),
-            "link": None, "by": None,
-        })
-
-    # 2. What the app posted on its own. A journal entry mirrors itself into
-    # the same table, with its own id as the source — those are row 1 above.
-    auto = (await db.scalars(
-        select(LedgerEntry).where(
-            LedgerEntry.account_no == account_no,
-            or_(LedgerEntry.source_id.is_(None),
-                LedgerEntry.source_id.not_in(select(JournalEntry.id))),
-        )
-    )).all()
-    links = await _auto_links(db, auto)
-    for r in auto:
-        delta = float(r.amount or 0)
-        debit, credit = _debit_credit(acc.account_type, delta)
-        events.append({
-            "kind": "auto", "journal_id": None,
-            "number": r.source_ref or _AUTO_LABEL.get(r.source_type, r.source_type),
-            "entry_date": r.entry_date, "_at": r.created_at,
-            "memo": r.memo, "source_type": r.source_type, "source_ref": r.source_ref,
-            "label": _AUTO_LABEL.get(r.source_type, r.source_type.replace("_", " ")),
-            "debit": debit, "credit": credit, "delta": delta,
-            "link": links.get(r.id), "by": None,
-        })
-
-    # 3. Balances set by hand — typed in when the account was made, or
-    # changed on the chart of accounts. A cash correction is in the audit too,
-    # but it went through the journal, so it is row 1 already.
-    hand = (await db.scalars(
-        select(AuditLog).where(AuditLog.entity == "account",
-                               AuditLog.entity_id == acc.id)
-        .order_by(AuditLog.occurred_at.asc())
-    )).all()
-    names = {u.id: u.full_name for u in (await db.scalars(
-        select(User).where(User.id.in_({a.actor_id for a in hand if a.actor_id}))
-    )).all()} if hand else {}
-
-    def _num(v) -> float:
-        try:
-            return float(v or 0)
-        except (TypeError, ValueError):
-            return 0.0
-
-    # Recorded opening balances state the account as it stood then, so a
-    # balance typed in before them is already inside that figure.
-    opened = [e["_at"] for e in events
-              if e["source_type"] == "opening" and e["_at"] is not None]
-    opened_at = min(opened) if opened else None
-    for a in hand:
-        after, before = a.after or {}, a.before or {}
-        if "balance" not in after or "journal" in after:
-            continue
-        if opened_at and a.occurred_at <= opened_at:
-            continue
-        if a.action == "create":
-            delta = _num(after["balance"])
-            memo = "Balance entered when the account was created"
-        elif a.action == "update":
-            delta = _num(after["balance"]) - _num(before.get("balance"))
-            memo = (f"Balance changed by hand on the chart of accounts: "
-                    f"{_num(before.get('balance')):,.2f} → {_num(after['balance']):,.2f}")
-        else:
-            continue
-        if abs(delta) < 0.005:
-            continue
-        debit, credit = _debit_credit(acc.account_type, delta)
-        events.append({
-            "kind": "by_hand", "journal_id": None, "number": "—",
-            "entry_date": a.occurred_at.date(), "_at": a.occurred_at,
-            "memo": memo, "source_type": "by_hand", "source_ref": None,
-            "label": "Set by hand",
-            "debit": debit, "credit": credit, "delta": delta,
-            "link": None, "by": names.get(a.actor_id),
-        })
-
-    # 4. What none of that explains: there before anything was recorded —
-    # brought in with the chart, or moved by something that kept no trail.
-    rest = round(float(acc.balance or 0) - sum(e["delta"] for e in events), 2)
-    if abs(rest) >= 0.005:
-        debit, credit = _debit_credit(acc.account_type, rest)
-        made = acc.created_at or datetime.min
-        events.append({
-            "kind": "unrecorded", "journal_id": None, "number": "—",
-            "entry_date": made.date(), "_at": made,
-            "memo": "No record of where this came from — it was on the account "
-                    "before changes were recorded (brought in with the chart of "
-                    "accounts, or moved by something that kept no trail).",
-            "source_type": "unrecorded", "source_ref": None,
-            "label": "No record",
-            "debit": debit, "credit": credit, "delta": rest,
-            "link": None, "by": None,
-        })
-
-    def _key(e):
-        at = e["_at"]
-        return (e["entry_date"], at.replace(tzinfo=None) if at else datetime.min)
-    events.sort(key=_key)
-
-    opening = sum(e["delta"] for e in events if start and e["entry_date"] < start)
-    window = [e for e in events
-              if (not start or e["entry_date"] >= start)
-              and (not end or e["entry_date"] < end)]
-    running = opening
-    items = []
-    total_d = total_c = 0.0
-    for e in window[:min(limit, 2000)]:
-        running += e["delta"]
-        total_d += e["debit"]
-        total_c += e["credit"]
-        items.append({k: v for k, v in e.items() if not k.startswith("_")}
-                     | {"balance": round(running, 2)})
+    events = (await account_events(db, [acc]))[acc.account_no]
     return {
         "account": {"account_no": acc.account_no, "name": acc.name,
                     "account_type": acc.account_type,
                     "balance": float(acc.balance or 0)},
-        "opening_balance": round(opening, 2),
-        "closing_balance": round(running, 2),
-        "total_debit": round(total_d, 2), "total_credit": round(total_c, 2),
-        "items": items,
+        **walk(events, start, end, min(limit, 2000)),
     }
 
 

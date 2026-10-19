@@ -736,14 +736,43 @@ CATALOGUE = [
      "params": ["months"],
      "about": "From the plan rather than from obligations — it covers months "
               "no invoice exists for yet."},
+    {"key": "purchase-recap", "group": "Rekap",
+     "name": "Rekap Pembelian", "name_en": "Purchases recap",
+     "path": "/finance/reports/purchase-recap", "params": ["year", "month"],
+     "roles": ["finance", "manager", "director"],
+     "about": "The month's approved purchasing POs, by supplier, in rupiah."},
+    {"key": "sales-recap", "group": "Rekap",
+     "name": "Rekap Penjualan", "name_en": "Sales recap",
+     "path": "/finance/reports/sales-recap", "params": ["year", "month"],
+     "about": "The month's issued invoices, by customer: DPP, PPN, total and "
+              "what is paid."},
+    {"key": "payables-recap", "group": "Rekap",
+     "name": "Rekap Hutang", "name_en": "Payables recap",
+     "path": "/finance/reports/payables-recap", "params": [],
+     "roles": ["finance", "manager", "director"],
+     "about": "What we owe each supplier today — received and not yet paid, "
+              "and for how long."},
+    {"key": "receivables-recap", "group": "Rekap",
+     "name": "Rekap Piutang", "name_en": "Receivables recap",
+     "path": "/finance/reports/receivables-recap", "params": [],
+     "about": "What each customer owes us today, how far past due, and the "
+              "aging buckets."},
+    {"key": "general-ledger", "group": "Buku Besar",
+     "name": "Buku Besar", "name_en": "General ledger",
+     "path": "/finance/reports/general-ledger", "params": ["year", "month"],
+     "roles": ["finance", "manager", "director"],
+     "about": "Every account for the month: opening, each line, debit, credit "
+              "and closing — the same as each account's own ledger."},
 ]
 
 
 @router.get("/catalogue")
-async def catalogue(_u: User = Depends(get_current_user)):
-    """Daftar Laporan — what can be run, and what each one is for."""
-    return {"reports": CATALOGUE,
-            "groups": list(dict.fromkeys(r["group"] for r in CATALOGUE))}
+async def catalogue(u: User = Depends(get_current_user)):
+    """Daftar Laporan — what can be run, and what each one is for. A report
+    that names its roles is listed only to them."""
+    mine = [r for r in CATALOGUE if not r.get("roles") or u.role in r["roles"]]
+    return {"reports": mine,
+            "groups": list(dict.fromkeys(r["group"] for r in mine))}
 
 
 @router.get("/pnl-columns")
@@ -837,3 +866,286 @@ async def cash_projection(
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "basis is 'commitments' or 'budget'.")
     return await multi.cash_projection(db, months=months, basis=basis)
+
+
+# ─── Rekap & Buku Besar ──────────────────────────────────────────────────────
+# Asked for by finance: four recaps (purchases, sales, what we owe, what we
+# are owed) and the general ledger, in the same catalogue as the rest.
+#
+# Purchases, payables and the general ledger carry what we pay suppliers —
+# admin, who can open the catalogue for the sales side, is kept off them as
+# everywhere else.
+
+def _month(year: int | None, month: int | None) -> tuple[date, date, str]:
+    today = _office_today()
+    y, m = year or today.year, month or today.month
+    if not 1 <= m <= 12:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "month must be 1–12")
+    start = date(y, m, 1)
+    end = date(y + (m == 12), m % 12 + 1, 1)
+    return start, end, f"{y}-{m:02d}"
+
+
+def _office_today() -> date:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import settings
+    return datetime.now(ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")).date()
+
+
+def _no_admin(user: User) -> None:
+    if Role(user.role) == Role.ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Supplier costs are finance's and management's.")
+
+
+def _aging_bucket(days_overdue: int | None) -> str:
+    if days_overdue is None or days_overdue <= 0:
+        return "current"
+    if days_overdue <= 30:
+        return "1-30"
+    if days_overdue <= 60:
+        return "31-60"
+    if days_overdue <= 90:
+        return "61-90"
+    return "90+"
+
+
+AGING = ["current", "1-30", "31-60", "61-90", "90+"]
+
+
+@router.get("/purchase-recap")
+async def purchase_recap(
+    year: int | None = None, month: int | None = None,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Rekap Pembelian: the purchasing POs of a month, by supplier, in rupiah.
+
+    Approved orders only — one waiting for the director isn't a purchase yet,
+    a cancelled one never was. A foreign order with no rate is listed but
+    can't be added up in rupiah, and is counted so the total says so."""
+    _no_admin(user)
+    from app.models.operation import Project
+    from app.models.purchasing import Supplier, SupplierPO
+    from app.services.ledger import po_value_idr
+
+    start, end, label = _month(year, month)
+    day = func.coalesce(SupplierPO.po_date, func.date(SupplierPO.created_at))
+    pos = (await db.scalars(
+        select(SupplierPO).where(
+            SupplierPO.status.not_in(("pending_approval", "cancelled", "rejected", "draft")),
+            day >= start, day < end,
+        ).order_by(day.asc(), SupplierPO.number.asc())
+    )).all()
+    sups = {s.id: s.name for s in (await db.scalars(select(Supplier).where(
+        Supplier.id.in_({p.supplier_id for p in pos if p.supplier_id}))))} if pos else {}
+    projs = {p.id: p.code for p in (await db.scalars(select(Project).where(
+        Project.id.in_({p.project_id for p in pos if p.project_id}))))} if pos else {}
+
+    groups: dict = {}
+    total = 0.0
+    no_rate = 0
+    for p in pos:
+        idr = po_value_idr(p)
+        name = sups.get(p.supplier_id) or "—"
+        g = groups.setdefault(name, {"supplier": name, "count": 0, "total_idr": 0.0,
+                                     "rows": []})
+        g["count"] += 1
+        g["total_idr"] += idr or 0
+        total += idr or 0
+        no_rate += idr is None
+        g["rows"].append({
+            "po_id": str(p.id), "number": p.number,
+            "date": p.po_date or (p.created_at.date() if p.created_at else None),
+            "project": projs.get(p.project_id), "currency": (p.currency or "IDR").upper(),
+            "total": float(p.total or 0),
+            "fx_rate": float(p.fx_rate) if p.fx_rate else None,
+            "total_idr": idr, "received_idr": float(p.payable_amount or 0),
+            "status": p.status,
+        })
+    out = sorted(groups.values(), key=lambda g: -g["total_idr"])
+    for g in out:
+        g["total_idr"] = round(g["total_idr"], 2)
+    return {"period": label, "start": start, "end": end, "groups": out,
+            "count": len(pos), "total_idr": round(total, 2), "without_rate": no_rate}
+
+
+SALES_STATUSES = ("approved", "issued", "partial", "overdue", "paid")
+
+
+@router.get("/sales-recap")
+async def sales_recap(
+    year: int | None = None, month: int | None = None,
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """Rekap Penjualan: the invoices issued in a month, by customer — DPP,
+    PPN and total, and how much of each is paid. Drafts and invoices still
+    waiting on finance aren't sales yet."""
+    from app.models.finance import Invoice, Payment
+    from app.models.operation import Project
+
+    start, end, label = _month(year, month)
+    invs = (await db.scalars(
+        select(Invoice).where(Invoice.status.in_(SALES_STATUSES),
+                              Invoice.issue_date >= start, Invoice.issue_date < end)
+        .order_by(Invoice.issue_date.asc(), Invoice.number.asc())
+    )).all()
+    ids = [i.id for i in invs]
+    paid = dict((await db.execute(
+        select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id.in_(ids)).group_by(Payment.invoice_id))).all()) if ids else {}
+    custs = {c.id: c.company_name for c in (await db.scalars(select(Customer).where(
+        Customer.id.in_({i.customer_id for i in invs}))))} if invs else {}
+    projs = {p.id: p.code for p in (await db.scalars(select(Project).where(
+        Project.id.in_({i.project_id for i in invs if i.project_id}))))} if invs else {}
+
+    groups: dict = {}
+    tot = {"amount": 0.0, "tax": 0.0, "total": 0.0, "paid": 0.0}
+    for i in invs:
+        name = custs.get(i.customer_id) or "—"
+        g = groups.setdefault(name, {"customer": name, "count": 0, "amount": 0.0,
+                                     "tax": 0.0, "total": 0.0, "paid": 0.0, "rows": []})
+        row = {"invoice_id": str(i.id), "number": i.number, "date": i.issue_date,
+               "due_date": i.due_date, "project": projs.get(i.project_id),
+               "amount": float(i.amount or 0), "tax": float(i.tax_amount or 0),
+               "total": float(i.total or 0), "paid": float(paid.get(i.id) or 0),
+               "status": i.status}
+        g["rows"].append(row)
+        g["count"] += 1
+        for k in ("amount", "tax", "total", "paid"):
+            g[k] += row[k]
+            tot[k] += row[k]
+    out = sorted(groups.values(), key=lambda g: -g["total"])
+    for g in out:
+        for k in ("amount", "tax", "total", "paid"):
+            g[k] = round(g[k], 2)
+    return {"period": label, "start": start, "end": end, "groups": out,
+            "count": len(invs), **{k: round(v, 2) for k, v in tot.items()}}
+
+
+@router.get("/payables-recap")
+async def payables_recap(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Rekap Hutang: what we owe each supplier today — goods received and not
+    yet paid, order by order, with how long it has been owed. The same
+    figures as Finance › Payables, added up per supplier."""
+    _no_admin(user)
+    from app.api.v1.endpoints.finance import list_payables
+
+    today = _office_today()
+    book = await list_payables(show="owed", db=db)
+    groups: dict = {}
+    total = 0.0
+    for r in book["items"]:
+        out = float(r["outstanding"] or 0)
+        if out <= 0.004:
+            continue
+        name = r["supplier_name"] or "—"
+        g = groups.setdefault(name, {"supplier": name, "count": 0, "outstanding": 0.0,
+                                     "rows": []})
+        last = r.get("last_received_at")
+        days = (today - last).days if last else None
+        g["rows"].append({
+            "po_id": r["po_id"], "number": r["po_number"], "po_date": r["po_date"],
+            "received_idr": r["received_value"], "paid": r["paid"], "outstanding": out,
+            "last_received_at": last, "days_owed": days, "status": r["status"],
+        })
+        g["count"] += 1
+        g["outstanding"] += out
+        total += out
+    out = sorted(groups.values(), key=lambda g: -g["outstanding"])
+    for g in out:
+        g["outstanding"] = round(g["outstanding"], 2)
+        g["rows"].sort(key=lambda x: -(x["days_owed"] or 0))
+    return {"as_of": today, "groups": out, "outstanding": round(total, 2),
+            "count": sum(g["count"] for g in out)}
+
+
+@router.get("/receivables-recap")
+async def receivables_recap(
+    db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
+):
+    """Rekap Piutang: what each customer owes us today — every unpaid or
+    part-paid invoice, how far past due it is, and the aging buckets, per
+    customer and in total."""
+    from app.models.finance import OUTSTANDING_INVOICE_STATUSES, Invoice, Payment
+    from app.models.operation import Project
+
+    today = _office_today()
+    invs = (await db.scalars(
+        select(Invoice).where(Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES))
+        .order_by(Invoice.due_date.asc().nullslast(), Invoice.number.asc())
+    )).all()
+    ids = [i.id for i in invs]
+    paid = dict((await db.execute(
+        select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id.in_(ids)).group_by(Payment.invoice_id))).all()) if ids else {}
+    custs = {c.id: c.company_name for c in (await db.scalars(select(Customer).where(
+        Customer.id.in_({i.customer_id for i in invs}))))} if invs else {}
+    projs = {p.id: p.code for p in (await db.scalars(select(Project).where(
+        Project.id.in_({i.project_id for i in invs if i.project_id}))))} if invs else {}
+
+    groups: dict = {}
+    buckets = dict.fromkeys(AGING, 0.0)
+    total = 0.0
+    for i in invs:
+        out = round(float(i.total or 0) - float(paid.get(i.id) or 0), 2)
+        if out <= 0.004:
+            continue
+        overdue = (today - i.due_date).days if i.due_date else None
+        b = _aging_bucket(overdue)
+        name = custs.get(i.customer_id) or "—"
+        g = groups.setdefault(name, {"customer": name, "count": 0, "outstanding": 0.0,
+                                     "buckets": dict.fromkeys(AGING, 0.0), "rows": []})
+        g["rows"].append({
+            "invoice_id": str(i.id), "number": i.number, "date": i.issue_date,
+            "due_date": i.due_date, "project": projs.get(i.project_id),
+            "total": float(i.total or 0), "paid": float(paid.get(i.id) or 0),
+            "outstanding": out, "days_overdue": overdue if (overdue or 0) > 0 else 0,
+            "bucket": b,
+        })
+        g["count"] += 1
+        g["outstanding"] += out
+        g["buckets"][b] += out
+        buckets[b] += out
+        total += out
+    out = sorted(groups.values(), key=lambda g: -g["outstanding"])
+    for g in out:
+        g["outstanding"] = round(g["outstanding"], 2)
+        g["buckets"] = {k: round(v, 2) for k, v in g["buckets"].items()}
+    return {"as_of": today, "groups": out, "outstanding": round(total, 2),
+            "buckets": {k: round(v, 2) for k, v in buckets.items()},
+            "count": sum(g["count"] for g in out)}
+
+
+@router.get("/general-ledger")
+async def general_ledger(
+    year: int | None = None, month: int | None = None,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Buku Besar: every account for a month — opening, each line, debit,
+    credit, closing. Read exactly as each account's own ledger page reads it
+    (services/account_history), so the two always agree; an account with no
+    balance and nothing in the month is left out."""
+    _no_admin(user)
+    from app.services.account_history import account_events, walk
+
+    start, end, label = _month(year, month)
+    accounts = (await db.scalars(
+        select(Account).where(Account.is_parent.is_(False))
+        .order_by(Account.account_no.asc()))).all()
+    events = await account_events(db, accounts)
+    rows = []
+    tot_d = tot_c = 0.0
+    for a in accounts:
+        w = walk(events[a.account_no], start, end, 300)
+        if not w["items"] and abs(w["opening_balance"]) < 0.005:
+            continue
+        rows.append({"account_no": a.account_no, "name": a.name,
+                     "account_type": a.account_type, **w})
+        tot_d += w["total_debit"]
+        tot_c += w["total_credit"]
+    return {"period": label, "start": start, "end": end, "accounts": rows,
+            "total_debit": round(tot_d, 2), "total_credit": round(tot_c, 2)}

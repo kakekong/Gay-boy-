@@ -20,10 +20,16 @@ import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen, Loader2, AlertCircle, CheckCircle2, TrendingUp, Scale, Waves,
+  ClipboardList, Library,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT } from "@/store/lang";
+import {
+  PurchaseRecap, SalesRecap, PayablesRecap, ReceivablesRecap, GeneralLedger,
+  type PurchaseRecapData, type SalesRecapData, type PayablesRecapData,
+  type ReceivablesRecapData, type GeneralLedgerData,
+} from "@/components/reports/Recaps";
 
 interface CatalogueEntry {
   key: string; group: string; name: string; name_en: string;
@@ -99,6 +105,7 @@ const TOTAL_ROWS: [string, string, string][] = [
 
 const GROUP_ICON: Record<string, typeof TrendingUp> = {
   "Laba Rugi": TrendingUp, Neraca: Scale, "Arus Kas": Waves,
+  Rekap: ClipboardList, "Buku Besar": Library,
 };
 
 export default function ReportCataloguePage() {
@@ -234,6 +241,13 @@ function ReportBody({ entry, year, month }: {
     );
   }
 
+  if (entry.key === "purchase-recap") return <PurchaseRecap d={q.data as PurchaseRecapData} />;
+  if (entry.key === "sales-recap") return <SalesRecap d={q.data as SalesRecapData} />;
+  if (entry.key === "payables-recap") return <PayablesRecap d={q.data as PayablesRecapData} />;
+  if (entry.key === "receivables-recap") {
+    return <ReceivablesRecap d={q.data as ReceivablesRecapData} />;
+  }
+  if (entry.key === "general-ledger") return <GeneralLedger d={q.data as GeneralLedgerData} />;
   if (entry.key === "pnl-budget") return <BudgetTable d={q.data as BudgetPnl} />;
   if (entry.key === "balance-sheet-at") return <BalanceTable d={q.data as BalanceAt} />;
   if (entry.key === "balance-sheet") return <StandardBalance d={q.data} />;
