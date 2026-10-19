@@ -450,13 +450,13 @@ async def _decide_customer_po(
     """
     from app.core.approval import apply_to_target, decide
     from app.core.audit import record as audit_record
-    # A regular customer PO is filed with required_role=DIRECTOR, so decide()
-    # rejects a manager anyway — admitting them here only produced a second,
-    # contradictory 403. Finance stays for the DP path it owns.
+    # A regular customer PO is filed with required_role=DIRECTOR, and finance
+    # may settle it too (approval.FINANCE_ALSO_TARGETS) — it is in their inbox
+    # as well as the director's. A manager may not.
     if Role(user.role) not in (Role.DIRECTOR, Role.FINANCE):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only the director can approve / reject a customer PO.",
+            "Only the director or finance can approve / reject a customer PO.",
         )
     po = await db.get(CustomerPO, po_id)
     if not po:

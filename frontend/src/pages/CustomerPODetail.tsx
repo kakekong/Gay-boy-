@@ -108,7 +108,10 @@ export default function CustomerPODetailPage() {
   const qc = useQueryClient();
   const t = useT();
   const me = useAuthStore((s) => s.user);
-  const canDecide = me?.role === "manager" || me?.role === "director";
+  // The director or finance — a customer PO sits in both their inboxes and
+  // whoever acts first decides it. (A manager was shown the buttons and then
+  // refused by the server.)
+  const canDecide = me?.role === "director" || me?.role === "finance";
   // Both DP steps are finance's. Whether a deposit arrived is a fact about
   // the bank account, and finance is who can see it — so the same desk that
   // approved the PO and issued the invoice answers "did the money land".

@@ -42,6 +42,11 @@ FINANCE_ONLY_TARGETS = ("quotation_won", "delivery_order")
 # inbox must not be a way round it.
 FINANCE_EXCLUSIVE_TARGETS = ("delivery_order",)
 
+# Requests addressed to the director that finance may settle too, and which
+# therefore sit in finance's inbox as well: a customer's purchase order.
+# Whoever acts first decides it, and it leaves both inboxes.
+FINANCE_ALSO_TARGETS = ("customer_po",)
+
 
 async def drop_settled(db: AsyncSession, rows: list) -> list:
     """Pending requests minus the ones whose document no longer needs them.
@@ -136,7 +141,9 @@ def scope_to_inbox(stmt, role: Role):
     if role == Role.MANAGER:
         return stmt.where(ApprovalRequest.required_role == Role.MANAGER.value)
     if role == Role.FINANCE:
-        return stmt.where(ApprovalRequest.required_role == Role.FINANCE.value)
+        return stmt.where(
+            (ApprovalRequest.required_role == Role.FINANCE.value)
+            | ApprovalRequest.target_type.in_(FINANCE_ALSO_TARGETS))
     if role == Role.DIRECTOR:
         return stmt.where(~(
             (ApprovalRequest.required_role == Role.FINANCE.value)
@@ -290,7 +297,10 @@ async def decide(
         raise ValueError("approval already decided")
     if req.target_type in FINANCE_EXCLUSIVE_TARGETS and decider_role != Role.FINANCE:
         raise PermissionError("only finance can approve this")
-    if Role(req.required_role) == Role.DIRECTOR and decider_role != Role.DIRECTOR:
+    finance_too = (decider_role == Role.FINANCE
+                   and req.target_type in FINANCE_ALSO_TARGETS)
+    if (Role(req.required_role) == Role.DIRECTOR and decider_role != Role.DIRECTOR
+            and not finance_too):
         raise PermissionError("director approval required")
     if Role(req.required_role) == Role.MANAGER and decider_role not in (Role.MANAGER, Role.DIRECTOR):
         raise PermissionError("manager or director approval required")
