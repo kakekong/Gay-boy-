@@ -294,6 +294,15 @@
 /* Ring tints (stat tiles, tier cards) */
 .dark .ring-amber-200   { --tw-ring-color: rgba(245,158,11,0.30); }
 .dark .ring-red-200     { --tw-ring-color: rgba(239,68,68,0.30); }
+
+/* Rose — the reports' "short / overdue" tint. It had no dark mapping, so in
+   dark mode a short month in Proyeksi Arus Kas was a pale pink row with pale
+   text on it: unreadable. Same treatment as red. */
+.dark .bg-rose-50       { background-color: rgba(244,63,94,0.14); }
+.dark .bg-rose-50\/50   { background-color: rgba(244,63,94,0.10); }
+.dark .border-rose-200  { border-color: rgba(244,63,94,0.35); }
+.dark .text-rose-600, .dark .text-rose-700 { color: #fb7185; }
+.dark .text-rose-800    { color: #fda4af; }
 .dark .ring-emerald-200 { --tw-ring-color: rgba(16,185,129,0.30); }
 .dark .ring-violet-200  { --tw-ring-color: rgba(139,92,246,0.30); }
 .dark .ring-blue-200    { --tw-ring-color: rgba(59,130,246,0.30); }
