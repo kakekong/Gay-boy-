@@ -44,6 +44,29 @@ router = APIRouter(
 )
 
 
+@router.get("/industries")
+async def customer_industries(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    status_filter: str = Query("active", alias="status"),
+):
+    """The industries for the list's filter, each with how many of *your*
+    customers are in it — the same scope and active/inactive choice as the
+    list, so a count matches what choosing it shows."""
+    base = select(func.lower(Customer.industry).label("industry"), func.count()
+                  ).where(Customer.is_deleted.is_(False))
+    if status_filter == "active":
+        base = base.where(Customer.is_active.is_(True))
+    elif status_filter == "inactive":
+        base = base.where(Customer.is_active.is_(False))
+    base = filter_to_role_scope(user, base, Customer.sales_pic_id)
+    rows = (await db.execute(
+        base.where(Customer.industry.is_not(None))
+        .group_by(func.lower(Customer.industry))
+        .order_by(func.count().desc()))).all()
+    return [{"industry": i, "count": n} for i, n in rows if i]
+
+
 @router.get("", response_model=Page[CustomerOut])
 async def list_customers(
     db: AsyncSession = Depends(get_db),
@@ -82,7 +105,8 @@ async def list_customers(
     if stage:
         base = base.where(Customer.stage == stage)
     if industry:
-        base = base.where(Customer.industry == industry)
+        # Case-insensitive: an import may have written "Mining" beside "mining".
+        base = base.where(func.lower(Customer.industry) == industry.strip().lower())
 
     total = await db.scalar(
         select(func.count()).select_from(base.subquery())

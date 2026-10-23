@@ -20,6 +20,22 @@ import type { Customer } from "@/types";
 
 type ViewMode = "table" | "pipeline";
 
+// Display labels for the industry keys a customer is filed under.
+const INDUSTRY_LABEL: Record<string, [string, string]> = {
+  mining: ["Mining", "Tambang"],
+  pltu: ["Power plant (PLTU)", "PLTU"],
+  fertilizer: ["Fertilizer", "Pupuk"],
+  sugar: ["Sugar", "Gula"],
+  cement: ["Cement", "Semen"],
+  pulp_paper: ["Pulp & paper", "Pulp & kertas"],
+  food: ["Food", "Makanan"],
+  other: ["Other", "Lainnya"],
+};
+function industryLabel(key: string, t: (en: string, id: string) => string) {
+  const l = INDUSTRY_LABEL[key];
+  return l ? t(l[0], l[1]) : key.replace(/_/g, " ");
+}
+
 // Display labels for backend stage keys. Display only — the keys themselves
 // are still what is sent to the API as filter values.
 const STAGE_LABEL_EN: Record<string, string> = {
@@ -48,6 +64,7 @@ export default function CustomersPage() {
 
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("");
+  const [industry, setIndustry] = useState("");
   // Deactivated customers are kept, not erased — one filter away.
   const [activeFilter, setActiveFilter] = useState<"active" | "inactive" | "all">("active");
   // Looking a customer up by name has to find them whatever their state: a
@@ -77,7 +94,15 @@ export default function CustomersPage() {
   }, [pageSize]);
   // Any change to what is being looked at invalidates the page number.
   useEffect(() => { setPage(1); setPicked(new Set()); },
-            [search, stage, rep, pageSize, view, activeFilter]);
+            [search, stage, industry, rep, pageSize, view, activeFilter]);
+
+  // The industries in this view, each with its count — the same scope and
+  // active/inactive choice as the list, so a count matches what it shows.
+  const industries = useQuery({
+    queryKey: ["customer-industries", statusSent],
+    queryFn: () => api.get("/customers/industries", { params: { status: statusSent } })
+      .then((r) => r.data as { industry: string; count: number }[]),
+  });
 
   const reps = useQuery({
     queryKey: ["assignable-reps"],
@@ -90,11 +115,12 @@ export default function CustomersPage() {
   const hint = rep.startsWith("hint:") ? rep.slice(5) : "";
   const q = useQuery({
     queryKey: ["customers", view === "pipeline" ? "" : search,
-               view === "pipeline" ? "" : stage, rep, page, pageSize, view, statusSent],
+               view === "pipeline" ? "" : stage, industry, rep, page, pageSize, view, statusSent],
     queryFn: () => {
       const params = {
         q: search || undefined,
         stage: view === "table" ? (stage || undefined) : undefined,
+        industry: industry || undefined,
         sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
         unassigned: rep === "none" ? true : undefined,
         rep_hint: hint || undefined,
@@ -139,6 +165,7 @@ export default function CustomersPage() {
           params: {
             q: search || undefined,
             stage: stage || undefined,
+            industry: industry || undefined,
             sales_pic_id: rep && rep !== "none" && !hint ? rep : undefined,
             unassigned: rep === "none" ? true : undefined,
             rep_hint: hint || undefined,
@@ -244,6 +271,15 @@ export default function CustomersPage() {
             ))}
           </select>
         )}
+        <select value={industry} onChange={(e) => setIndustry(e.target.value)}
+          aria-label={t("Industry", "Industri")} className="input max-w-[200px]">
+          <option value="">{t("All industries", "Semua industri")}</option>
+          {(industries.data ?? []).map((i) => (
+            <option key={i.industry} value={i.industry}>
+              {industryLabel(i.industry, t)} ({i.count})
+            </option>
+          ))}
+        </select>
         <select value={activeFilter} aria-label={t("Active or inactive", "Aktif atau nonaktif")}
           onChange={(e) => setActiveFilter(e.target.value as typeof activeFilter)}
           className="input max-w-[170px]">
@@ -392,7 +428,7 @@ export default function CustomersPage() {
                           {t("Deactivated", "Nonaktif")}</span>
                       )}
                     </td>
-                    <td className="td capitalize muted">{c.industry}</td>
+                    <td className="td muted">{c.industry ? industryLabel(c.industry, t) : "—"}</td>
                     <td className="td">{c.pic_name ?? "—"}</td>
                     <td className="td muted">
                       {c.sales_pic_id
