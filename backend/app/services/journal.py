@@ -69,6 +69,11 @@ async def build_lines(db: AsyncSession, rows: list[dict]) -> list[JournalLine]:
             "A heading can't carry a posting — it is the sum of what is under "
             f"it: {', '.join(parents)}"
         )
+    from app.services.financials import EARNINGS_ACCOUNT
+    if EARNINGS_ACCOUNT in found:
+        raise JournalError(
+            f"{EARNINGS_ACCOUNT} is Laba/Rugi Tahun Berjalan — worked out from "
+            "revenue and expenses, it can't carry a posting.")
     suspended = sorted({n for n in numbers if found[n].is_suspended})
     if suspended:
         raise JournalError(f"Account suspended: {', '.join(suspended)}")

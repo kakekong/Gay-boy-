@@ -23,7 +23,7 @@ def J(r):
     try: return r.json()
     except Exception: return {"_": r.text[:200]}
 
-BNI, BCA, KAS, FX, AP = "1101-02", "1101-01", "1102-02", "720101", "210101"
+BNI, BCA, KAS, FX, AP = "1101-02", "1101-01", "1102-02", "7200-04", "210101"
 
 
 async def main():

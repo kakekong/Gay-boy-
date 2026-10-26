@@ -19,6 +19,8 @@ export interface AccountRow {
   level: number;
   is_tax: boolean;
   description?: string | null;
+  /** Laba/Rugi Tahun Berjalan: the balance is worked out, never stored. */
+  computed?: boolean;
 }
 
 interface Props {
@@ -127,9 +129,11 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
   });
 
   const del = useMutation({
-    mutationFn: () => api.delete(`/accounts/${account!.id}`),
+    mutationFn: (reason: string) =>
+      api.delete(`/accounts/${account!.id}`, { params: reason ? { reason } : {} }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["account-archives"] });
       onClose();
     },
     onError: (e: any) => {
@@ -217,12 +221,15 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
                 step="any"
                 className="input"
                 value={form.balance}
-                disabled={editing && !canSetBalance}
+                disabled={editing && (!canSetBalance || !!account?.computed)}
                 onChange={(e) => setForm({ ...form, balance: parseFloat(e.target.value || "0") })}
               />
               {editing && (
                 <span className="block text-[11px] muted mt-1">
-                  {canSetBalance
+                  {account?.computed
+                    ? t("Laba/Rugi Tahun Berjalan — worked out from revenue and expenses, not set by hand.",
+                        "Laba/Rugi Tahun Berjalan — dihitung dari pendapatan dan beban, tidak diisi manual.")
+                    : canSetBalance
                     ? t("Changes the account's balance directly. It shows on the ledger as set by hand, with your name.",
                         "Mengubah saldo akun langsung. Tercatat di buku besar sebagai diisi manual, atas nama Anda.")
                     : t("Only the director can change a balance.",
@@ -271,12 +278,15 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
 
         <footer className="px-5 py-3 border-t border-ink-100 flex items-center justify-between gap-2 bg-ink-50/50 rounded-b-2xl">
           <div>
-            {editing && (
+            {editing && canSetBalance && !account?.computed && (
               <button
                 type="button"
                 className="btn-ghost text-red-600 hover:bg-red-50"
                 onClick={() => {
-                  if (window.confirm("Delete this account?")) del.mutate();
+                  const reason = window.prompt(t(
+                    `Delete ${account!.account_no} ${account!.name}?\n\nIt and every line posted to it are saved to a file in storage and taken off the chart and the reports; its balance (${account!.balance}) leaves the books with it. Restore it from “Recently deleted” — from the copy kept here for 7 days, or from the file after that.\n\nReason (optional):`,
+                    `Hapus ${account!.account_no} ${account!.name}?\n\nAkun ini dan semua barisnya disimpan ke file di penyimpanan lalu dihapus dari bagan akun dan laporan; saldonya (${account!.balance}) ikut keluar dari pembukuan. Pulihkan dari “Baru dihapus” — dari salinan yang disimpan 7 hari, atau dari file sesudahnya.\n\nAlasan (opsional):`));
+                  if (reason !== null) del.mutate(reason.trim());
                 }}
                 disabled={del.isPending}
               >

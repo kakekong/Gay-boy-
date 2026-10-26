@@ -46,6 +46,9 @@ interface Ledger {
   total_debit: number;
   total_credit: number;
   items: Row[];
+  /** Laba/Rugi Tahun Berjalan: no lines — worked out from these. */
+  computed?: { revenue: number; other_income: number; cogs: number; expense: number;
+               other_expense: number; net_income: number };
 }
 
 // Indonesian names for what the app posts on its own and the other row kinds.
@@ -129,6 +132,53 @@ export default function AccountLedgerPage() {
   }
 
   const d = q.data;
+  if (d.computed) {
+    const c = d.computed;
+    const lines: [string, number, boolean?][] = [
+      [t("Revenue", "Pendapatan"), c.revenue],
+      [t("Cost of goods sold", "Beban pokok penjualan"), -c.cogs],
+      [t("Operating expenses", "Beban operasional"), -c.expense],
+      [t("Other income", "Pendapatan lain"), c.other_income],
+      [t("Other expenses", "Beban lain"), -c.other_expense],
+      [t("Laba/Rugi Tahun Berjalan", "Laba/Rugi Tahun Berjalan"), c.net_income, true],
+    ];
+    return (
+      <div className="space-y-5">
+        <Link to="/accounts"
+          className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-brand-700">
+          <ArrowLeft size={14} /> {t("Chart of accounts", "Akun perkiraan")}
+        </Link>
+        <div className="card p-6 space-y-4 max-w-2xl">
+          <div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider muted">
+              <BookOpen size={13} className="text-brand-600" />
+              {t("Computed account", "Akun terhitung")}
+            </div>
+            <div className="text-2xl font-semibold tracking-tight">
+              <span className="font-mono">{d.account.account_no}</span> {d.account.name}
+            </div>
+            <p className="text-sm muted mt-1">
+              {t("Laba/Rugi Tahun Berjalan: every revenue account less every cost and expense, worked out from the balances each time. Nothing is posted to it, so it has no lines of its own. It is the same figure the P&L ends on.",
+                 "Laba/Rugi Tahun Berjalan: semua akun pendapatan dikurangi semua HPP dan beban, dihitung dari saldo setiap kali. Tidak ada yang diposting ke akun ini, jadi tidak punya baris sendiri.")}
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              {lines.map(([label, v, total]) => (
+                <tr key={label} className={clsx("border-t border-ink-100", total && "border-t-2 border-ink-200 font-semibold")}>
+                  <td className="td">{label}</td>
+                  <td className={clsx("td text-right tabular-nums", v < 0 && !total && "text-ink-600")}>{idr(v)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Link to="/finance/reports" className="text-sm text-brand-700 hover:underline">
+            {t("Open the profit & loss", "Buka laporan laba rugi")}
+          </Link>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="space-y-5">
       <Link to="/accounts"

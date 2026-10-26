@@ -235,7 +235,9 @@ function BalanceSheet({ d }: { d: any }) {
             <span>{T("Equity")}</span><span className="tabular-nums">{idr(d?.equity?.total)}</span>
           </div>
           <TypeGroups groups={d?.equity?.by_type} />
-          <Row label="Laba/Rugi Tahun Berjalan"
+          <Row label={d?.equity?.earnings_account
+              ? `${d.equity.earnings_account.account_no} · Laba/Rugi Tahun Berjalan`
+              : "Laba/Rugi Tahun Berjalan"}
             value={idr(d?.equity?.current_earnings)} indent />
         </div>
         <div className={clsx("rounded-lg px-3 py-2 text-sm",

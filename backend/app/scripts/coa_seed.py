@@ -163,7 +163,8 @@ COA_SEED: list[tuple[str, str, str, str | None, bool, int]] = [
     ("7200-07", "Beban Diluar Usaha Lainnya",        "Other Expense", "7200", False, 1),
 
     ("7201",    "Laba/Rugi Terealisasi",             "Other Expense", None,   True,  0),
-    ("720101",  "Laba/Rugi Terealisasi IDR",         "Other Expense", "7201", False, 1),
+    # Computed — Laba/Rugi Tahun Berjalan (financials.EARNINGS_ACCOUNT).
+    ("720101",  "Laba/Rugi Terealisasi IDR",         "Equity",        "7201", False, 1),
 
     ("7202",    "Laba/Rugi Belum Terealisasi",       "Other Expense", None,   True,  0),
     ("720201",  "Laba/Rugi Belum Terealisasi IDR",   "Other Expense", "7202", False, 1),

@@ -75,7 +75,21 @@ class AccountPatch(BaseModel):
 
 class AccountOut(AccountIn):
     id: UUID
+    # Laba/Rugi Tahun Berjalan: the balance shown is worked out, not stored.
+    computed: bool = False
     model_config = {"from_attributes": True}
+
+
+async def _out(db: AsyncSession, rows) -> list[AccountOut]:
+    """Accounts as the page shows them — the profit line with its figure."""
+    from app.services.financials import EARNINGS_ACCOUNT
+    out = [AccountOut.model_validate(r) for r in rows]
+    if any(o.account_no == EARNINGS_ACCOUNT for o in out):
+        earned = (await current_earnings_totals(db))["net_income"]
+        for o in out:
+            if o.account_no == EARNINGS_ACCOUNT:
+                o.balance, o.computed = round(earned, 2), True
+    return out
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -119,7 +133,7 @@ async def list_accounts(
         like = f"%{q}%"
         stmt = stmt.where((Account.account_no.ilike(like)) | (Account.name.ilike(like)))
     rows = (await db.scalars(stmt)).all()
-    return [AccountOut.model_validate(r) for r in rows]
+    return await _out(db, rows)
 
 
 def _idr(n) -> str:
@@ -128,11 +142,8 @@ def _idr(n) -> str:
 
 async def _coa_sections(db: AsyncSession) -> list[dict]:
     rows = (await db.scalars(select(Account).order_by(Account.account_no.asc()))).all()
-    out = [[r.account_no, r.name, r.account_type, _idr(r.balance)] for r in rows]
-    # The profit line sits at the end of equity, as on the page.
-    earned = (await current_earnings_totals(db))["net_income"]
-    last_eq = max((i for i, r in enumerate(rows) if r.account_type == "Equity"), default=len(out) - 1)
-    out.insert(last_eq + 1, ["—", EARNINGS_NAME + " (computed)", "Equity", _idr(earned)])
+    out = [[r.account_no, r.name + (f" — {EARNINGS_NAME} (computed)" if r.computed else ""),
+            r.account_type, _idr(r.balance)] for r in await _out(db, rows)]
     return [{
         "name": "Chart of Accounts",
         "headers": ["Account No", "Name", "Type", "Balance"],
@@ -140,7 +151,7 @@ async def _coa_sections(db: AsyncSession) -> list[dict]:
     }]
 
 
-EARNINGS_NAME = "Laba/Rugi Tahun Berjalan"
+from app.services.financials import EARNINGS_TITLE as EARNINGS_NAME  # noqa: E402
 
 
 async def current_earnings_totals(db: AsyncSession) -> dict:
@@ -176,7 +187,77 @@ async def export_coa_xlsx(db: AsyncSession = Depends(get_db),
 @router.get("/current-earnings")
 async def current_earnings(db: AsyncSession = Depends(get_db),
                            _user: User = Depends(_coa_viewer)):
-    return {"name": EARNINGS_NAME, **await current_earnings_totals(db)}
+    from app.services.financials import EARNINGS_ACCOUNT
+    acc = await db.scalar(select(Account).where(Account.account_no == EARNINGS_ACCOUNT))
+    return {"name": EARNINGS_NAME, "account_no": EARNINGS_ACCOUNT,
+            "account_name": acc.name if acc else None,
+            **await current_earnings_totals(db)}
+
+
+# ─── Deleted accounts ────────────────────────────────────────────────────────
+# Deleting writes the account and its lines to a file in the document store
+# (Cloudflare R2) — see services/account_archive. Kept here for a week, then
+# only the file; either way it can be restored.
+
+def _archive_out(a, now) -> dict:
+    from app.services.account_archive import GRACE
+    return {
+        "id": str(a.id), "account_no": a.account_no, "name": a.name,
+        "account_type": a.account_type, "balance": float(a.balance or 0),
+        "entry_count": a.entry_count, "reason": a.reason,
+        "deleted_at": a.deleted_at, "deleted_by": a.deleted_by_name,
+        "kept_until": a.deleted_at + GRACE,
+        "in_database": a.data is not None,
+        "has_file": bool(a.storage_path),
+        "restored_at": a.restored_at, "restored_by": a.restored_by_name,
+    }
+
+
+@router.get("/archives")
+async def list_archives(db: AsyncSession = Depends(get_db),
+                        _user: User = Depends(require(Role.DIRECTOR))):
+    from datetime import UTC, datetime
+
+    from app.models.account import AccountArchive
+    from app.services.account_archive import purge_expired
+    await purge_expired(db)
+    rows = (await db.scalars(select(AccountArchive)
+                             .order_by(AccountArchive.deleted_at.desc()).limit(500))).all()
+    now = datetime.now(UTC)
+    return [_archive_out(a, now) for a in rows]
+
+
+@router.post("/archives/{archive_id}/restore")
+async def restore_archived(archive_id: UUID, db: AsyncSession = Depends(get_db),
+                           user: User = Depends(require(Role.DIRECTOR))):
+    from app.models.account import AccountArchive
+    from app.services.account_archive import ArchiveError, restore_archive
+    arc = await db.get(AccountArchive, archive_id)
+    if not arc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    from_file = arc.data is None
+    try:
+        acc = await restore_archive(db, arc, actor=user)
+    except ArchiveError as e:
+        raise HTTPException(e.code, str(e))
+    await audit_record(db, actor=user, action="restore", entity="account", entity_id=acc.id,
+                       after={"account_no": acc.account_no, "from_file": from_file})
+    return {"ok": True, "account_no": acc.account_no, "from_file": from_file}
+
+
+@router.get("/archives/{archive_id}/file")
+async def download_archive(archive_id: UUID, db: AsyncSession = Depends(get_db),
+                           _user: User = Depends(require(Role.DIRECTOR))):
+    from app.models.account import AccountArchive
+    from app.services import storage
+    arc = await db.get(AccountArchive, archive_id)
+    if not arc or not arc.storage_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    blob = await storage.load(arc.storage_path)
+    if not blob:
+        raise HTTPException(status.HTTP_410_GONE, "The archive file can't be found in storage.")
+    return Response(content=blob, media_type="application/json", headers={
+        "Content-Disposition": f'attachment; filename="{arc.account_no}-deleted.json"'})
 
 
 @router.get("/{account_id}", response_model=AccountOut)
@@ -227,6 +308,10 @@ async def update_account(account_id: UUID,
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     data = payload.model_dump(exclude_unset=True)
+    from app.services.financials import EARNINGS_ACCOUNT
+    if obj.account_no == EARNINGS_ACCOUNT:
+        # Its balance is worked out; the figure the form sends back is that.
+        data.pop("balance", None)
     # Setting an account's balance by hand is the director's: it moves the
     # books with nothing on the other side. It shows in the account's ledger
     # as "set by hand", with who and when.
@@ -277,24 +362,28 @@ async def clear_unrecorded(account_no: str,
     return {"ok": True, "removed": rest, "balance": float(acc.balance)}
 
 
-@router.delete("/{account_id}", status_code=204)
+@router.delete("/{account_id}")
 async def delete_account(account_id: UUID,
+                         reason: str | None = Query(None, max_length=500),
                          db: AsyncSession = Depends(get_db),
-                         _user: User = Depends(_admin_or_director)):
+                         user: User = Depends(require(Role.DIRECTOR))):
+    """The director deletes an account. It and every line posted to it go to
+    a file in the document store and leave the database; for a week a copy
+    is also kept here. Either way it can be restored (Recently deleted)."""
+    from app.services.account_archive import ArchiveError, archive_account, purge_expired
     obj = await db.get(Account, account_id)
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-    if float(obj.balance or 0) != 0:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Cannot delete an account with a non-zero balance.")
-    has_children = await db.scalar(
-        select(func.count(Account.id)).where(Account.parent_account_no == obj.account_no)
-    )
-    if has_children:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Cannot delete a parent account that still has children.")
-    await db.delete(obj)
-    return None
+    acc_id, no, bal = obj.id, obj.account_no, float(obj.balance or 0)
+    try:
+        arc = await archive_account(db, obj, actor=user, reason=reason)
+    except ArchiveError as e:
+        raise HTTPException(e.code, str(e))
+    await audit_record(db, actor=user, action="delete", entity="account", entity_id=acc_id,
+                       before={"account_no": no, "balance": bal},
+                       after={"archive_id": str(arc.id), "file": arc.storage_path})
+    await purge_expired(db)
+    return {"ok": True, "archive_id": str(arc.id), "entries": arc.entry_count}
 
 
 @router.post("/seed")

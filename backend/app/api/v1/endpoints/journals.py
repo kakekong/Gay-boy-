@@ -238,6 +238,19 @@ async def account_ledger(
         from datetime import timedelta
         end = end + timedelta(days=1)
 
+    from app.services.financials import EARNINGS_ACCOUNT, pnl_from_balances
+    if acc.account_no == EARNINGS_ACCOUNT:
+        # Laba/Rugi Tahun Berjalan has no lines: it is worked out from the
+        # revenue and expense accounts each time.
+        totals = (await pnl_from_balances(db))["totals"]
+        return {
+            "account": {"account_no": acc.account_no, "name": acc.name,
+                        "account_type": acc.account_type,
+                        "balance": round(totals["net_income"], 2)},
+            "computed": totals,
+            "opening_balance": 0.0, "closing_balance": round(totals["net_income"], 2),
+            "total_debit": 0.0, "total_credit": 0.0, "items": [],
+        }
     events = (await account_events(db, [acc]))[acc.account_no]
     return {
         "account": {"account_no": acc.account_no, "name": acc.name,

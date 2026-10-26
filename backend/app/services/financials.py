@@ -126,6 +126,13 @@ def _add_days(d: date, days: int) -> date:
 
 
 # ─── Profit & Loss ───────────────────────────────────────────────────────────
+# Laba/Rugi Tahun Berjalan lives on this account: every revenue account less
+# every cost and expense, worked out from the balances each time it is read.
+# Nothing is ever posted to it — its stored balance stays 0 — so it can't
+# count itself (ledger._bump and the general journal refuse it).
+EARNINGS_ACCOUNT = "720101"
+EARNINGS_TITLE = "Laba/Rugi Tahun Berjalan"
+
 def _pnl_totals(by_type: dict[str, float]) -> dict[str, float]:
     revenue = by_type.get("Revenue", 0.0)
     other_income = by_type.get("Other Income", 0.0)
@@ -225,6 +232,7 @@ async def balance_sheet(db: AsyncSession) -> dict:
     # Profit not yet rolled into equity = revenue − expenses (current earnings).
     pnl = _pnl_totals(totals)
     retained = pnl["net_income"]
+    earn = await db.scalar(select(Account).where(Account.account_no == EARNINGS_ACCOUNT))
     return {
         "assets": {
             "by_type": {t: accounts.get(t, []) for t in ASSET_ORDER if accounts.get(t)},
@@ -240,6 +248,8 @@ async def balance_sheet(db: AsyncSession) -> dict:
             "by_type": {"Equity": accounts.get("Equity", [])},
             "total": total_equity,
             "current_earnings": retained,
+            "earnings_account": ({"account_no": earn.account_no, "name": earn.name}
+                                 if earn else None),
             "total_with_earnings": total_equity + retained,
         },
         "balanced": abs(total_assets - (total_liabilities + total_equity + retained)) < 1.0,

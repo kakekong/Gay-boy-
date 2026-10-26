@@ -145,7 +145,9 @@ async def fix_posted_discounts(db: AsyncSession) -> dict:
 
 
 async def _bump(db: AsyncSession, account_no: str | None, delta: float) -> dict | None:
-    if not account_no:
+    from app.services.financials import EARNINGS_ACCOUNT
+    if not account_no or account_no == EARNINGS_ACCOUNT:
+        # The profit line is computed, never posted to.
         return None
     acc = await db.scalar(select(Account).where(Account.account_no == account_no))
     if not acc:
@@ -513,9 +515,10 @@ async def resync_all_cogs(db: AsyncSession) -> dict:
 
 
 # Where the gap between a foreign order's booked rate and the rate the bank
-# really paid at goes: Laba/Rugi Terealisasi IDR. A loss raises it, a gain
-# lowers it.
-FX_REALISED_ACCOUNT = "720101"
+# really paid at goes: Laba/Rugi Terealisasi (under Beban Diluar Usaha). A
+# loss raises it, a gain lowers it. It used to be 720101, which is now the
+# computed Laba/Rugi Tahun Berjalan.
+FX_REALISED_ACCOUNT = "7200-04"
 
 
 async def post_supplier_payment(
@@ -552,3 +555,49 @@ async def post_supplier_payment(
         )
         moves.append({**m, "role": role})
     return moves
+
+
+async def free_earnings_account(db: AsyncSession) -> dict:
+    """720101 became the computed Laba/Rugi Tahun Berjalan. What was posted
+    to it — exchange differences on supplier payments — moves, lines and
+    balance, to FX_REALISED_ACCOUNT, where those go from now on; 720101 is
+    left at 0 as an equity line. Run once."""
+    from sqlalchemy import update
+
+    from app.models.journal import JournalLine
+    from app.services.financials import EARNINGS_ACCOUNT, EARNINGS_TITLE
+
+    fx = await db.scalar(select(Account).where(Account.account_no == FX_REALISED_ACCOUNT))
+    if fx is None:
+        head = await db.scalar(select(Account).where(Account.account_no == "7200"))
+        fx = Account(account_no=FX_REALISED_ACCOUNT, name="Laba/Rugi Terealisasi",
+                     account_type="Other Expense",
+                     parent_account_no=head.account_no if head else None,
+                     level=1 if head else 0, balance=0)
+        db.add(fx)
+        await db.flush()
+    earn = await db.scalar(select(Account).where(Account.account_no == EARNINGS_ACCOUNT))
+    moved = 0.0
+    lines = 0
+    if earn is not None:
+        moved = float(earn.balance or 0)
+        res = await db.execute(update(LedgerEntry)
+                               .where(LedgerEntry.account_no == EARNINGS_ACCOUNT)
+                               .values(account_no=fx.account_no, account_name=fx.name,
+                                       account_type=fx.account_type))
+        lines = res.rowcount or 0
+        await db.execute(update(JournalLine)
+                         .where(JournalLine.account_no == EARNINGS_ACCOUNT)
+                         .values(account_no=fx.account_no, account_name=fx.name,
+                                 account_type=fx.account_type))
+        fx.balance = round(float(fx.balance or 0) + moved, 2)
+        earn.balance = 0
+        earn.account_type = "Equity"
+        earn.is_parent = False
+    else:
+        head = await db.scalar(select(Account).where(Account.account_no == "7201"))
+        db.add(Account(account_no=EARNINGS_ACCOUNT, name=EARNINGS_TITLE, account_type="Equity",
+                       parent_account_no=head.account_no if head else None,
+                       level=1 if head else 0, balance=0))
+    await db.flush()
+    return {"moved_balance": moved, "moved_lines": lines, "to": fx.account_no}

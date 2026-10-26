@@ -915,6 +915,16 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('hpp_on_paid_projects')"))
             await db.commit()
             print(f"HPP re-based on paid jobs: {res}")
+        # 720101 became the computed Laba/Rugi Tahun Berjalan: the exchange
+        # differences posted to it move to 7200-04, where they go from now on.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'earnings_on_720101'")):
+            from app.services.ledger import free_earnings_account
+            res = await free_earnings_account(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('earnings_on_720101')"))
+            await db.commit()
+            print(f"720101 is now Laba/Rugi Tahun Berjalan: {res}")
         # Delivery orders whose goods never came off the shelf.
         if not await db.scalar(text(
                 "SELECT 1 FROM data_fixes WHERE key = 'delivery_orders_stock_out'")):
