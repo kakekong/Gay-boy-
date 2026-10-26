@@ -52,6 +52,7 @@ function humanSize(bytes: number): string {
 // What each kind of request is, as people say it.
 const REQUEST_KIND: Record<string, [string, string]> = {
   project_skip_drawing: ["Skip drawing", "Lewati gambar"],
+  project_order: ["Order change", "Perubahan pesanan"],
   supplier_po: ["Purchase order", "PO pembelian"],
   purchase_request: ["Purchase request", "Permintaan pembelian"],
   customer_po: ["Customer PO", "PO pelanggan"],

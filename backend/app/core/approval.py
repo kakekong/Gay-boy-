@@ -82,7 +82,7 @@ async def drop_settled(db: AsyncSession, rows: list) -> list:
     spos = await load(SupplierPO, ids("supplier_po"))
     prs = await load(PurchaseRequest, ids("purchase_request"))
     dos = await load(DeliveryOrder, ids("delivery_order"))
-    projects = await load(Project, ids("project"))
+    projects = await load(Project, ids("project", "project_order"))
     customers = await load(Customer, ids("customer", "followup"))
 
     quote_closed = ("won", "lost", "cancelled", "superseded")
@@ -121,7 +121,7 @@ async def drop_settled(db: AsyncSession, rows: list) -> list:
             if d is None:
                 return True                     # withdrawn while it waited
             return bool(d.approved_at) or d.status == "delivered"
-        if t == "project":
+        if t in ("project", "project_order"):
             p = projects.get(r.target_id)
             return bool(p and p.is_deleted)
         if t in ("customer", "followup"):
@@ -765,6 +765,12 @@ async def apply_to_target(
                 db.add(act)
                 await db.flush()
                 applied["activity_id"] = str(act.id)
+    elif req.target_type == "project_order":
+        # The sales rep's change to a won job's order — moved lines, a new
+        # selling price, an added line. Applied by the same planner the
+        # director's own change goes through.
+        from app.api.v1.endpoints.project_order import apply_approved
+        applied.update(await apply_approved(db, req, approve))
     elif req.target_type == "project_skip_drawing":
         # Purchasing or ops asked to declare a job as having no drawing to
         # wait for. The decision is the director's, so it lands here; applying

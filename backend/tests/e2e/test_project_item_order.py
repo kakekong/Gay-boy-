@@ -3,8 +3,11 @@
 Drag line 3 to the top and it stays there, for everybody. Only the listing
 moves: every line keeps its price-request number, which supplier requests
 and POs refer to. A line the order doesn't name, or one named twice, is
-refused; clearing the order puts the request's own back. Sales, who don't
-see the card, can't reorder it.
+refused; clearing the order puts the request's own back.
+
+The director reorders directly here. The customer's sales rep arranges it
+too, through an approval (test_project_order_change); purchasing no longer
+does.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -58,7 +61,9 @@ async def main():
           [i["line_no"] for i in C["items"]] == [1, 2, 3] and not C["custom_order"])
 
     r = await c.put(f"/operation/projects/{pid}/item-order", headers=pur, json={"order": [3, 1, 2]})
-    check("purchasing moves line 3 to the top", r.status_code == 200, f"{r.status_code} {J(r)}"[:200])
+    check("purchasing doesn't arrange the order", r.status_code == 403, str(r.status_code))
+    r = await c.put(f"/operation/projects/{pid}/item-order", headers=d, json={"order": [3, 1, 2]})
+    check("the director moves line 3 to the top", r.status_code == 200, f"{r.status_code} {J(r)}"[:200])
     C = await card()
     check("...it's listed first now", [i["line_no"] for i in C["items"]] == [3, 1, 2]
           and C["items"][0]["description"] == names[2], str([i["line_no"] for i in C["items"]]))
@@ -67,12 +72,12 @@ async def main():
     check("...and the director sees the same order", [i["line_no"] for i in C["items"]] == [3, 1, 2]
           and C["custom_order"])
 
-    r = await c.put(f"/operation/projects/{pid}/item-order", headers=pur, json={"order": [3, 1]})
+    r = await c.put(f"/operation/projects/{pid}/item-order", headers=d, json={"order": [3, 1]})
     check("an order that leaves a line out is refused", r.status_code == 400, str(r.status_code))
-    r = await c.put(f"/operation/projects/{pid}/item-order", headers=pur, json={"order": [3, 3, 1]})
+    r = await c.put(f"/operation/projects/{pid}/item-order", headers=d, json={"order": [3, 3, 1]})
     check("...so is one that names a line twice", r.status_code == 400, str(r.status_code))
     r = await c.put(f"/operation/projects/{pid}/item-order", headers=s1, json={"order": [1, 2, 3]})
-    check("sales can't reorder it", r.status_code == 403, str(r.status_code))
+    check("sales can't reorder it directly", r.status_code == 403, str(r.status_code))
 
     r = await c.put(f"/operation/projects/{pid}/item-order", headers=d, json={"order": None})
     C = await card()

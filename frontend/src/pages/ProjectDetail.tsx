@@ -1344,8 +1344,9 @@ export default function ProjectDetailPage() {
           it here" when three vendors are bringing three parts of it. */}
       {canSeeOpsDetails && <SupplierShipments projectId={p.id} />}
 
-      {/* Price request (the approved order behind this project) */}
-      {priceReq && canSeeOpsDetails && (
+      {/* Price request (the approved order behind this project). The sales
+          rep sees it too — they arrange the order with the director. */}
+      {priceReq && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100">
             <div className="font-semibold flex items-center gap-2">
@@ -1355,9 +1356,8 @@ export default function ProjectDetailPage() {
           </div>
           {/* The whole deal, not only request ↔ quotation: the customer's PO
               and the supplier side too, each with its fix. */}
-          <div className="px-5 pt-3"><DealCheck where={{ project_id: p.id }} /></div>
-          <OrderLines projectId={p.id} items={priceReq.items ?? []}
-            customOrder={!!priceReq.custom_order} canReorder={canSeeOpsDetails} />
+          {canSeeOpsDetails && <div className="px-5 pt-3"><DealCheck where={{ project_id: p.id }} /></div>}
+          <OrderLines projectId={p.id} items={priceReq.items ?? []} />
         </div>
       )}
 

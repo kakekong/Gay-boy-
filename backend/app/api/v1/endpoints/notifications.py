@@ -59,6 +59,7 @@ _TARGET_LINK = {
     # Sales can ask to skip a job's drawing now; the answer belongs on the
     # project, not the dashboard.
     "project_skip_drawing":   "/projects/{id}",
+    "project_order":          "/projects/{id}",
 }
 
 
@@ -90,6 +91,7 @@ _APPROVAL_LABEL = {
     "cross_dept_chat": "cross-department chat",
     "inventory_item": "new inventory items",
     "project_skip_drawing": "skip-the-drawing",
+    "project_order": "order change",
     "project": "project",
     "customer": "customer",
     "quotation": "quotation",

@@ -404,7 +404,9 @@ async def project_full(project_id: UUID,
                     "line_no": it.get("line_no"), "description": it.get("description"),
                     "qty": it.get("qty"), "uom": it.get("uom"), "spec": it.get("spec"),
                 }
-                if show_cost:
+                # Sales now see this card (they arrange the order), but not
+                # what the goods cost us — as on a price request.
+                if show_cost and Role(user.role) != Role.SALES:
                     row["cost_price"] = it.get("cost_price")
                 if show_money:
                     row["sell_price"] = it.get("sell_price")
@@ -1592,13 +1594,18 @@ async def set_item_order(project_id: UUID, payload: ItemOrderIn,
                          user: User = Depends(get_current_user)):
     """Reorder the lines on the project's Order card — line 9 to the top,
     say. Only the listing moves: every line keeps its number, which the price
-    request, supplier requests and POs refer to. Anyone who works the
-    project may do it; sales, who don't see the card, may not."""
+    request, supplier requests and POs refer to.
+
+    The director's, directly. The customer's sales rep arranges the order too,
+    but through project_order (moves, prices and added lines together), and
+    theirs waits for the director."""
     from app.core.audit import record as audit_record
     from app.models.price_request import PriceRequest
 
-    if Role(user.role) == Role.SALES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not on the sales view")
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "The order is arranged by the customer's sales rep and the director.")
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")

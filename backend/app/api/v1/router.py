@@ -35,6 +35,7 @@ from app.api.v1.endpoints import (
     master,
     notifications,
     operation,
+    project_order,
     payments,
     price_requests,
     purchasing,
@@ -69,6 +70,7 @@ api_router.include_router(supplier_price_requests.router,
                           tags=["supplier-price-requests"])
 api_router.include_router(push.router, prefix="/push", tags=["push"])
 api_router.include_router(operation.router, prefix="/operation", tags=["operation"])
+api_router.include_router(project_order.router, prefix="/operation", tags=["operation"])
 api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 api_router.include_router(finance.router, prefix="/finance", tags=["finance"])
 # Same prefix, wider role gate — see finance.invoice_desk.
