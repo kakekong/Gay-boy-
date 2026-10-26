@@ -757,6 +757,47 @@ async def update_price_request(
     return out
 
 
+@router.delete("/{pr_id}")
+async def delete_price_request(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The director clears out a draft — one nobody sent on, so nobody has
+    priced it and nothing was made from it. Anything past draft has a trail
+    (costing, a quotation, a supplier request) and stays.
+
+    Soft: the row leaves every list and lookup but is kept, and the delete
+    is in the audit log with who and when."""
+    from datetime import UTC, datetime
+
+    from app.models.quotation import Quotation
+
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can delete a price request.")
+    pr = await db.get(PriceRequest, pr_id)
+    if not pr or pr.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Price request not found")
+    if pr.status != "draft":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Only a draft can be deleted — {pr.number} is '{pr.status}'. "
+            "Once it has been sent on, it has a trail to keep.")
+    made = await db.scalar(select(Quotation.number).where(
+        Quotation.price_request_id == pr.id).limit(1))
+    if made:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Quotation {made} was made from {pr.number}, so it stays.")
+    pr.is_deleted = True
+    pr.deleted_at = datetime.now(UTC)
+    await audit_record(db, actor=user, action="delete", entity="price_request",
+                       entity_id=pr.id, before={"number": pr.number, "status": pr.status})
+    await db.flush()
+    return {"ok": True, "number": pr.number}
+
+
 @router.post("/{pr_id}/submit")
 async def submit_price_request(
     pr_id: UUID,

@@ -756,6 +756,17 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   });
 
   const submit = useMutation(mut(() => api.post(`/price-requests/${id}/submit`)));
+  // The director clears out a draft nobody sent on. Gone from the list; the
+  // server keeps the row and logs who deleted it.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const remove = useMutation({
+    mutationFn: () => api.delete(`/price-requests/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["price-requests"] });
+      onBack();
+    },
+    onError: onErr,
+  });
   const price = useMutation(mut(() => api.post(`/price-requests/${id}/price`, {
     items: Object.entries(draft).map(([ln, v]) => ({
       line_no: Number(ln), cost_price: v.cost ?? 0, basis: v.costBasis ?? "unit",
@@ -1406,6 +1417,29 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             {t("A change is already with the director. Wait for that decision before proposing another.",
                "Sebuah perubahan sudah berada di direktur. Tunggu keputusannya sebelum mengajukan lagi.")}
+          </div>
+        )}
+
+        {isDirector && pr.status === "draft" && (
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            {confirmDelete ? (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {t(`Delete draft ${pr.number}? It leaves the list for everyone.`,
+                   `Hapus draf ${pr.number}? Draf ini hilang dari daftar untuk semua orang.`)}
+                <button className="btn-ghost" onClick={() => setConfirmDelete(false)}>
+                  {t("Keep it", "Batal")}
+                </button>
+                <button className="btn-primary bg-red-600 hover:bg-red-700"
+                  disabled={remove.isPending} onClick={() => remove.mutate()}>
+                  {remove.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  {t("Delete", "Hapus")}
+                </button>
+              </div>
+            ) : (
+              <button className="btn-ghost text-red-700" onClick={() => setConfirmDelete(true)}>
+                <Trash2 size={14} /> {t("Delete draft", "Hapus draf")}
+              </button>
+            )}
           </div>
         )}
 
