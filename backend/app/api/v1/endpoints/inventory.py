@@ -378,9 +378,14 @@ async def list_items(
         .limit(max(1, min(limit, 10000))).offset(max(0, offset))
     )).all()
     show_cost = _may_see_cost(_u)
+    # What is ordered and not yet in: on order (open POs) and short (POs
+    # received or closed under what they ordered).
+    from app.services.stock_sync import on_order
+    pending = await on_order(db, [r.id for r in rows]) if rows else {}
     out = []
     for r in rows:
         st = _status(r)
+        lines = pending.get(r.id, [])
         out.append({
             "id": str(r.id),
             "sku": r.sku, "name": r.name, "category": r.category,
@@ -395,6 +400,10 @@ async def list_items(
             "link": r.link,
             "notes": r.notes, "is_active": r.is_active,
             "stock_status": st,
+            "on_order": round(sum(x["outstanding"] for x in lines
+                                  if x["state"] == "on_order"), 4),
+            "short": round(sum(x["outstanding"] for x in lines
+                               if x["state"] == "short"), 4),
         })
     return {"items": out, "total": total, "limit": limit, "offset": offset}
 
@@ -448,7 +457,14 @@ async def get_item(item_id: UUID,
     r = await db.get(InventoryItem, item_id)
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
+    from app.services.stock_sync import on_order
+    pending = (await on_order(db, [r.id])).get(r.id, [])
     return {
+        # Ordered and not yet on the shelf, PO by PO: still to come, or
+        # short — received or closed under what was ordered.
+        "on_order_lines": pending,
+        "on_order": round(sum(x["outstanding"] for x in pending if x["state"] == "on_order"), 4),
+        "short": round(sum(x["outstanding"] for x in pending if x["state"] == "short"), 4),
         "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
         "uom": r.uom,
         **_cost_fields(r, _may_see_cost(_u)),
@@ -529,7 +545,13 @@ async def item_history(item_id: UUID,
             "by": users.get(m.user_id), "notes": m.notes,
         })
     out.reverse()                           # newest first on the page
+    from app.services.stock_sync import on_order
+    pending = (await on_order(db, [r.id])).get(r.id, [])
     return {
+        # Ordered and not yet on the shelf, PO by PO — still to come, or short
+        # (received or closed under what was ordered). Not stock: it joins the
+        # count only when it is received.
+        "on_order": pending,
         "item": {
             "id": str(r.id), "sku": r.sku, "name": r.name, "category": r.category,
             "uom": r.uom, **_cost_fields(r, show_cost),

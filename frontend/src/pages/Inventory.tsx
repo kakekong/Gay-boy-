@@ -34,6 +34,10 @@ interface Item {
   link: string | null;
   is_active: boolean;
   stock_status: "ok" | "low" | "out";
+  // Ordered and not yet on the shelf: still coming, and short (a PO
+  // received or closed under what it ordered).
+  on_order?: number;
+  short?: number;
 }
 
 // How many rows to fetch at a time. Comfortably more than this company's
@@ -243,6 +247,18 @@ export default function InventoryPage() {
                     <td className="td muted">{i.category ?? "—"}</td>
                     <td className="td text-right tabular-nums font-semibold">
                       {i.current_stock} <span className="muted text-xs">{i.uom}</span>
+                      {!!i.on_order && (
+                        <div className="text-[11px] font-normal text-brand-700"
+                          title={t("Ordered, not received yet", "Sudah dipesan, belum diterima")}>
+                          +{i.on_order} {t("on order", "dipesan")}
+                        </div>
+                      )}
+                      {!!i.short && (
+                        <div className="text-[11px] font-normal text-amber-700"
+                          title={t("Received less than was ordered", "Diterima kurang dari pesanan")}>
+                          {i.short} {t("short", "kurang")}
+                        </div>
+                      )}
                     </td>
                     <td className="td text-right tabular-nums muted">
                       {i.reorder_point} {i.uom}

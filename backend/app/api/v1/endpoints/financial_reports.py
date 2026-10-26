@@ -178,7 +178,7 @@ def _sections_balance_sheet(p: dict) -> list[dict]:
         ["Total assets", _idr(a["total"])],
         ["Total liabilities", _idr(lia["total"])],
         ["Equity", _idr(eq["total"])],
-        ["Current earnings", _idr(eq["current_earnings"])],
+        ["Laba/Rugi Tahun Berjalan", _idr(eq["current_earnings"])],
         ["Liabilities + equity", _idr(lia["total"] + eq["total_with_earnings"])],
     ]}
     secs = [summary]
@@ -738,23 +738,23 @@ CATALOGUE = [
               "no invoice exists for yet."},
     {"key": "purchase-recap", "group": "Rekap",
      "name": "Rekap Pembelian", "name_en": "Purchases recap",
-     "path": "/finance/reports/purchase-recap", "params": ["year", "month"],
+     "path": "/finance/reports/purchase-recap", "params": ["year", "month"], "history": True,
      "roles": ["finance", "manager", "director"],
      "about": "The month's approved purchasing POs, by supplier, in rupiah."},
     {"key": "sales-recap", "group": "Rekap",
      "name": "Rekap Penjualan", "name_en": "Sales recap",
-     "path": "/finance/reports/sales-recap", "params": ["year", "month"],
+     "path": "/finance/reports/sales-recap", "params": ["year", "month"], "history": True,
      "about": "The month's issued invoices, by customer: DPP, PPN, total and "
               "what is paid."},
     {"key": "payables-recap", "group": "Rekap",
      "name": "Rekap Hutang", "name_en": "Payables recap",
-     "path": "/finance/reports/payables-recap", "params": [],
+     "path": "/finance/reports/payables-recap", "params": [], "history": True,
      "roles": ["finance", "manager", "director"],
      "about": "What we owe each supplier today — received and not yet paid, "
               "and for how long."},
     {"key": "receivables-recap", "group": "Rekap",
      "name": "Rekap Piutang", "name_en": "Receivables recap",
-     "path": "/finance/reports/receivables-recap", "params": [],
+     "path": "/finance/reports/receivables-recap", "params": [], "history": True,
      "about": "What each customer owes us today, how far past due, and the "
               "aging buckets."},
     {"key": "general-ledger", "group": "Buku Besar",
@@ -915,29 +915,51 @@ def _aging_bucket(days_overdue: int | None) -> str:
 AGING = ["current", "1-30", "31-60", "61-90", "90+"]
 
 
+def _span(year: int | None, month: int | None, all_time: bool):
+    """A month, or — `all` — the whole history, with no bounds."""
+    if all_time:
+        return None, None, "All time"
+    return _month(year, month)
+
+
+def _by_month(rows: list[dict], value: str) -> list[dict]:
+    """The rows of a whole-history recap added up month by month, newest first."""
+    months: dict[str, dict] = {}
+    for r in rows:
+        d = r["date"]
+        key = d.strftime("%Y-%m") if d else "—"
+        m = months.setdefault(key, {"period": key, "count": 0, "total": 0.0})
+        m["count"] += 1
+        m["total"] += r[value] or 0
+    for m in months.values():
+        m["total"] = round(m["total"], 2)
+    return sorted(months.values(), key=lambda m: m["period"], reverse=True)
+
+
 @router.get("/purchase-recap")
 async def purchase_recap(
     year: int | None = None, month: int | None = None,
+    all: bool = Query(False, description="the whole history, every month"),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     """Rekap Pembelian: the purchasing POs of a month, by supplier, in rupiah.
 
     Approved orders only — one waiting for the director isn't a purchase yet,
     a cancelled one never was. A foreign order with no rate is listed but
-    can't be added up in rupiah, and is counted so the total says so."""
+    can't be added up in rupiah, and is counted so the total says so.
+    `all`: every month there has been, with a month-by-month total."""
     _no_admin(user)
     from app.models.operation import Project
     from app.models.purchasing import Supplier, SupplierPO
     from app.services.ledger import po_value_idr
 
-    start, end, label = _month(year, month)
+    start, end, label = _span(year, month, all)
     day = func.coalesce(SupplierPO.po_date, func.date(SupplierPO.created_at))
-    pos = (await db.scalars(
-        select(SupplierPO).where(
-            SupplierPO.status.not_in(("pending_approval", "cancelled", "rejected", "draft")),
-            day >= start, day < end,
-        ).order_by(day.asc(), SupplierPO.number.asc())
-    )).all()
+    stmt = select(SupplierPO).where(
+        SupplierPO.status.not_in(("pending_approval", "cancelled", "rejected", "draft")))
+    if not all:
+        stmt = stmt.where(day >= start, day < end)
+    pos = (await db.scalars(stmt.order_by(day.asc(), SupplierPO.number.asc()))).all()
     sups = {s.id: s.name for s in (await db.scalars(select(Supplier).where(
         Supplier.id.in_({p.supplier_id for p in pos if p.supplier_id}))))} if pos else {}
     projs = {p.id: p.code for p in (await db.scalars(select(Project).where(
@@ -967,8 +989,9 @@ async def purchase_recap(
     out = sorted(groups.values(), key=lambda g: -g["total_idr"])
     for g in out:
         g["total_idr"] = round(g["total_idr"], 2)
-    return {"period": label, "start": start, "end": end, "groups": out,
-            "count": len(pos), "total_idr": round(total, 2), "without_rate": no_rate}
+    return {"period": label, "start": start, "end": end, "all": all, "groups": out,
+            "count": len(pos), "total_idr": round(total, 2), "without_rate": no_rate,
+            "months": _by_month([r for g in out for r in g["rows"]], "total_idr")}
 
 
 SALES_STATUSES = ("approved", "issued", "partial", "overdue", "paid")
@@ -977,20 +1000,22 @@ SALES_STATUSES = ("approved", "issued", "partial", "overdue", "paid")
 @router.get("/sales-recap")
 async def sales_recap(
     year: int | None = None, month: int | None = None,
+    all: bool = Query(False, description="the whole history, every month"),
     db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
 ):
     """Rekap Penjualan: the invoices issued in a month, by customer — DPP,
     PPN and total, and how much of each is paid. Drafts and invoices still
-    waiting on finance aren't sales yet."""
+    waiting on finance aren't sales yet. `all`: every month there has been,
+    with a month-by-month total."""
     from app.models.finance import Invoice, Payment
     from app.models.operation import Project
 
-    start, end, label = _month(year, month)
+    start, end, label = _span(year, month, all)
+    stmt = select(Invoice).where(Invoice.status.in_(SALES_STATUSES))
+    if not all:
+        stmt = stmt.where(Invoice.issue_date >= start, Invoice.issue_date < end)
     invs = (await db.scalars(
-        select(Invoice).where(Invoice.status.in_(SALES_STATUSES),
-                              Invoice.issue_date >= start, Invoice.issue_date < end)
-        .order_by(Invoice.issue_date.asc(), Invoice.number.asc())
-    )).all()
+        stmt.order_by(Invoice.issue_date.asc(), Invoice.number.asc()))).all()
     ids = [i.id for i in invs]
     paid = dict((await db.execute(
         select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
@@ -1020,68 +1045,99 @@ async def sales_recap(
     for g in out:
         for k in ("amount", "tax", "total", "paid"):
             g[k] = round(g[k], 2)
-    return {"period": label, "start": start, "end": end, "groups": out,
-            "count": len(invs), **{k: round(v, 2) for k, v in tot.items()}}
+    return {"period": label, "start": start, "end": end, "all": all, "groups": out,
+            "count": len(invs), **{k: round(v, 2) for k, v in tot.items()},
+            "months": _by_month([r for g in out for r in g["rows"]], "total")}
 
 
 @router.get("/payables-recap")
 async def payables_recap(
+    all: bool = Query(False, description="every order, paid ones too, with what was paid"),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     """Rekap Hutang: what we owe each supplier today — goods received and not
     yet paid, order by order, with how long it has been owed. The same
-    figures as Finance › Payables, added up per supplier."""
+    figures as Finance › Payables, added up per supplier.
+
+    `all`: the whole history — every purchasing PO, settled ones included,
+    with each payment made on it."""
     _no_admin(user)
     from app.api.v1.endpoints.finance import list_payables
 
     today = _office_today()
-    book = await list_payables(show="owed", db=db)
+    book = await list_payables(show="all" if all else "owed", db=db)
     groups: dict = {}
-    total = 0.0
+    total = received_all = paid_all = 0.0
     for r in book["items"]:
         out = float(r["outstanding"] or 0)
-        if out <= 0.004:
+        if out <= 0.004 and not all:
             continue
         name = r["supplier_name"] or "—"
         g = groups.setdefault(name, {"supplier": name, "count": 0, "outstanding": 0.0,
-                                     "rows": []})
+                                     "received": 0.0, "paid": 0.0, "rows": []})
         last = r.get("last_received_at")
-        days = (today - last).days if last else None
+        days = (today - last).days if last and out > 0.004 else None
         g["rows"].append({
             "po_id": r["po_id"], "number": r["po_number"], "po_date": r["po_date"],
+            "order_idr": r.get("order_total_idr"),
             "received_idr": r["received_value"], "paid": r["paid"], "outstanding": out,
             "last_received_at": last, "days_owed": days, "status": r["status"],
+            "payments": [{"date": p["paid_at"], "amount": p["amount"],
+                          "bank": p.get("bank_name"), "reference": p.get("reference")}
+                         for p in r.get("payments") or []],
         })
         g["count"] += 1
         g["outstanding"] += out
+        g["received"] += float(r["received_value"] or 0)
+        g["paid"] += float(r["paid"] or 0)
         total += out
-    out = sorted(groups.values(), key=lambda g: -g["outstanding"])
+        received_all += float(r["received_value"] or 0)
+        paid_all += float(r["paid"] or 0)
+    out = sorted(groups.values(), key=lambda g: (-g["outstanding"], -g["received"]))
     for g in out:
-        g["outstanding"] = round(g["outstanding"], 2)
-        g["rows"].sort(key=lambda x: -(x["days_owed"] or 0))
-    return {"as_of": today, "groups": out, "outstanding": round(total, 2),
+        for k in ("outstanding", "received", "paid"):
+            g[k] = round(g[k], 2)
+        if all:
+            g["rows"].sort(key=lambda x: str(x["po_date"] or ""), reverse=True)
+        else:
+            g["rows"].sort(key=lambda x: -(x["days_owed"] or 0))
+    return {"as_of": today, "all": all, "groups": out, "outstanding": round(total, 2),
+            "received": round(received_all, 2), "paid": round(paid_all, 2),
             "count": sum(g["count"] for g in out)}
 
 
 @router.get("/receivables-recap")
 async def receivables_recap(
+    all: bool = Query(False, description="every invoice, paid ones too, with what was paid"),
     db: AsyncSession = Depends(get_db), _u: User = Depends(get_current_user),
 ):
     """Rekap Piutang: what each customer owes us today — every unpaid or
     part-paid invoice, how far past due it is, and the aging buckets, per
-    customer and in total."""
+    customer and in total.
+
+    `all`: the whole history — every invoice issued, paid ones included,
+    with each payment received on it. The aging still counts only what is
+    owed."""
     from app.models.finance import OUTSTANDING_INVOICE_STATUSES, Invoice, Payment
     from app.models.operation import Project
 
     today = _office_today()
     invs = (await db.scalars(
-        select(Invoice).where(Invoice.status.in_(OUTSTANDING_INVOICE_STATUSES))
+        select(Invoice).where(Invoice.status.in_(
+            SALES_STATUSES if all else OUTSTANDING_INVOICE_STATUSES))
         .order_by(Invoice.due_date.asc().nullslast(), Invoice.number.asc())
     )).all()
     ids = [i.id for i in invs]
     paid = dict((await db.execute(
         select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
         .where(Payment.invoice_id.in_(ids)).group_by(Payment.invoice_id))).all()) if ids else {}
+    pays: dict = {}
+    if all and ids:
+        for p in (await db.scalars(select(Payment).where(Payment.invoice_id.in_(ids))
+                                   .order_by(Payment.created_at.asc()))).all():
+            pays.setdefault(p.invoice_id, []).append({
+                "date": p.paid_at or p.created_at,
+                "amount": float(p.amount or 0), "reference": p.reference})
     custs = {c.id: c.company_name for c in (await db.scalars(select(Customer).where(
         Customer.id.in_({i.customer_id for i in invs}))))} if invs else {}
     projs = {p.id: p.code for p in (await db.scalars(select(Project).where(
@@ -1089,33 +1145,46 @@ async def receivables_recap(
 
     groups: dict = {}
     buckets = dict.fromkeys(AGING, 0.0)
-    total = 0.0
+    total = billed = paid_all = 0.0
     for i in invs:
         out = round(float(i.total or 0) - float(paid.get(i.id) or 0), 2)
-        if out <= 0.004:
+        if out <= 0.004 and not all:
             continue
-        overdue = (today - i.due_date).days if i.due_date else None
+        owed = out > 0.004
+        overdue = (today - i.due_date).days if i.due_date and owed else None
         b = _aging_bucket(overdue)
         name = custs.get(i.customer_id) or "—"
         g = groups.setdefault(name, {"customer": name, "count": 0, "outstanding": 0.0,
+                                     "total": 0.0, "paid": 0.0,
                                      "buckets": dict.fromkeys(AGING, 0.0), "rows": []})
         g["rows"].append({
             "invoice_id": str(i.id), "number": i.number, "date": i.issue_date,
             "due_date": i.due_date, "project": projs.get(i.project_id),
             "total": float(i.total or 0), "paid": float(paid.get(i.id) or 0),
-            "outstanding": out, "days_overdue": overdue if (overdue or 0) > 0 else 0,
-            "bucket": b,
+            "outstanding": max(out, 0.0),
+            "days_overdue": overdue if (overdue or 0) > 0 else 0,
+            "bucket": b if owed else None, "status": i.status,
+            "payments": pays.get(i.id, []),
         })
         g["count"] += 1
-        g["outstanding"] += out
-        g["buckets"][b] += out
-        buckets[b] += out
-        total += out
-    out = sorted(groups.values(), key=lambda g: -g["outstanding"])
+        g["total"] += float(i.total or 0)
+        g["paid"] += float(paid.get(i.id) or 0)
+        billed += float(i.total or 0)
+        paid_all += float(paid.get(i.id) or 0)
+        if owed:
+            g["outstanding"] += out
+            g["buckets"][b] += out
+            buckets[b] += out
+            total += out
+    out = sorted(groups.values(), key=lambda g: (-g["outstanding"], -g["total"]))
     for g in out:
-        g["outstanding"] = round(g["outstanding"], 2)
+        for k in ("outstanding", "total", "paid"):
+            g[k] = round(g[k], 2)
         g["buckets"] = {k: round(v, 2) for k, v in g["buckets"].items()}
-    return {"as_of": today, "groups": out, "outstanding": round(total, 2),
+        if all:
+            g["rows"].sort(key=lambda x: str(x["date"] or ""), reverse=True)
+    return {"as_of": today, "all": all, "groups": out, "outstanding": round(total, 2),
+            "total": round(billed, 2), "paid": round(paid_all, 2),
             "buckets": {k: round(v, 2) for k, v in buckets.items()},
             "count": sum(g["count"] for g in out)}
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,7 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
 import { AccountModal, type AccountRow } from "@/components/forms/AccountModal";
-import { T } from "@/store/lang";
+import { T, useT } from "@/store/lang";
 
 const SUSPEND_OPTS = [
   { value: "all",       label: "All" },
@@ -54,6 +54,18 @@ export default function ChartOfAccountsPage() {
         },
       }).then((r) => r.data as AccountRow[]),
   });
+
+  // Laba/Rugi Tahun Berjalan: every revenue account less every cost and
+  // expense, from the balances as they stand. Computed, never posted — the
+  // P&L ends on it and the balance sheet carries it under equity.
+  const earnings = useQuery({
+    queryKey: ["accounts", "current-earnings"],
+    queryFn: () => api.get("/accounts/current-earnings").then((r) => r.data as {
+      name: string; revenue: number; other_income: number; cogs: number;
+      expense: number; other_expense: number; net_income: number;
+    }),
+  });
+  const t = useT();
 
   const types = useQuery({
     queryKey: ["account-types"],
@@ -108,6 +120,17 @@ export default function ChartOfAccountsPage() {
     for (const a of arr) if (!seen.has(a.account_no)) out.push(a);
     return out;
   }, [accounts.data]);
+
+  // The profit line sits at the end of equity, when equity is on screen.
+  const earningsAfter = useMemo(() => {
+    if (!earnings.data || suspended === "suspended") return null;
+    if (type !== "All" && type !== "Equity") return null;
+    const term = debounced.trim().toLowerCase();
+    if (term && !earnings.data.name.toLowerCase().includes(term)
+        && !"laba rugi profit earnings".includes(term)) return null;
+    const eq = rows.filter((r) => r.account_type === "Equity");
+    return eq.length ? eq[eq.length - 1].account_no : (term || type === "Equity" ? "" : null);
+  }, [earnings.data, rows, type, suspended, debounced]);
 
   function exportCsv() {
     const header = "Account No,Name,Account Type,Parent,Balance,Tax,Suspended\n";
@@ -263,12 +286,13 @@ export default function ChartOfAccountsPage() {
               </tr>
             </thead>
             <tbody>
+              {earningsAfter === "" && <EarningsRow e={earnings.data!} t={t} />}
               {rows.map((a) => {
                 const indent = a.level ? a.level * 24 : 0;
                 const neg = Number(a.balance) < 0;
                 return (
+                  <Fragment key={a.id}>
                   <tr
-                    key={a.id}
                     className={clsx(
                       "border-t border-ink-100 transition-colors",
                       a.is_parent ? "bg-ink-100/70 font-semibold" : "hover:bg-ink-50",
@@ -347,9 +371,11 @@ export default function ChartOfAccountsPage() {
                       )}
                     </td>
                   </tr>
+                  {earningsAfter === a.account_no && <EarningsRow e={earnings.data!} t={t} />}
+                  </Fragment>
                 );
               })}
-              {!rows.length && (
+              {!rows.length && earningsAfter !== "" && (
                 <tr>
                   <td colSpan={5} className="td text-center muted py-12">
                     {accounts.isLoading ? T("Loading…")
@@ -390,6 +416,41 @@ export default function ChartOfAccountsPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+/** The live profit line: revenue less costs and expenses, worked out from
+ *  the balances each time — nothing is posted to it. */
+function EarningsRow({ e, t }: {
+  e: { name: string; revenue: number; other_income: number; cogs: number;
+       expense: number; other_expense: number; net_income: number };
+  t: (en: string, id: string) => string;
+}) {
+  const income = e.revenue + e.other_income;
+  const costs = e.cogs + e.expense + e.other_expense;
+  return (
+    <tr className="border-t border-ink-100 bg-brand-50/40">
+      <td className="td font-mono text-xs">
+        <Link to="/finance/reports" className="text-brand-700 hover:underline"
+          title={t("Open the profit & loss", "Buka laba rugi")}>—</Link>
+      </td>
+      <td className="td" style={{ paddingLeft: 16 + 24 }}>
+        <span className="font-medium text-ink-800">{e.name}</span>
+        <span className="ml-2 chip bg-brand-50 text-brand-700">{t("Computed", "Dihitung")}</span>
+        <span className="block text-[11px] muted">
+          {t("Revenue", "Pendapatan")} {fmtIDR(income)} − {t("costs & expenses", "beban & HPP")}{" "}
+          {fmtIDR(costs)} · {t("worked out from the balances, not posted", "dihitung dari saldo, tidak diposting")}
+        </span>
+      </td>
+      <td className="td">
+        <span className="chip bg-ink-100 text-ink-700">Equity</span>
+      </td>
+      <td className={clsx("td text-right tabular-nums font-semibold",
+        e.net_income < 0 && "text-red-600")}>
+        {fmtIDR(e.net_income)}
+      </td>
+      <td className="td no-print"></td>
+    </tr>
   );
 }
 

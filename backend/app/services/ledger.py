@@ -90,6 +90,60 @@ def compute_amounts(q: Quotation) -> dict:
     }
 
 
+def posting_amounts(q: Quotation) -> dict:
+    """What a won quotation does to each account, in the account's own sign.
+
+    Penjualan is credited the full price before discount and Diskon Penjualan
+    — a revenue account that is read as a reduction of it — is debited the
+    discount, so the two net to what the customer was charged. It used to
+    credit Penjualan the net figure *and* credit Diskon Penjualan the
+    discount, which counted the discount as extra revenue and put the
+    balance sheet out by every discount ever given.
+    """
+    a = compute_amounts(q)
+    return {
+        "receivable": a["receivable"],
+        "revenue": round(a["revenue"] + a["discount"], 2),
+        "discount": -a["discount"],
+        "tax": a["tax"],
+    }
+
+
+async def fix_posted_discounts(db: AsyncSession) -> dict:
+    """Quotations posted the old way: credit Penjualan the discount and take
+    twice it off Diskon Penjualan, so each reads as posting_amounts says —
+    and rewrite the posting's record, so reversing it later undoes the
+    right figures. Run once."""
+    rows = (await db.scalars(select(Quotation).where(Quotation.is_posted.is_(True)))).all()
+    fixed = 0
+    for q in rows:
+        snap = dict(q.posted_snapshot or {})
+        moves = [dict(m) for m in snap.get("movements", [])]
+        disc = next((m for m in moves if m.get("role") == "discount"), None)
+        rev = next((m for m in moves if m.get("role") == "revenue"), None)
+        if not disc or float(disc.get("delta") or 0) <= 0.005:
+            continue                     # no discount, or already a reduction
+        d = float(disc["delta"])
+        for m, delta, what in ((rev, d, "revenue"), (disc, -2 * d, "discount")):
+            if m is None:
+                continue
+            b = await _bump(db, m.get("account_no"), delta)
+            if b:
+                await journal_post(
+                    db, entry_date=datetime.now(UTC).date(), account_no=b["account_no"],
+                    account_type=b["account_type"], account_name=b["name"],
+                    amount=delta, source_type="quotation", source_id=q.id,
+                    source_ref=q.number,
+                    memo=f"Quotation {q.number}: discount booked as a reduction ({what})",
+                    customer_id=q.customer_id, sales_pic_id=q.sales_pic_id)
+                m["delta"] = float(m["delta"]) + delta
+        snap["movements"] = moves
+        q.posted_snapshot = snap
+        fixed += 1
+    await db.flush()
+    return {"quotations": fixed}
+
+
 async def _bump(db: AsyncSession, account_no: str | None, delta: float) -> dict | None:
     if not account_no:
         return None
@@ -113,11 +167,16 @@ async def post_quotation(db: AsyncSession, q: Quotation) -> dict:
         return {"already_posted": True, "snapshot": q.posted_snapshot}
 
     _ensure_defaults(q)
-    amounts = compute_amounts(q)
+    amounts = posting_amounts(q)
     entry_date = datetime.now(UTC).date()
 
     movements = []
     for key in ("receivable", "revenue", "discount", "tax"):
+        # Nothing to write for a figure that is nothing: a quotation with no
+        # discount used to put a Rp 0 "posted (discount)" line on Diskon
+        # Penjualan for every deal won — hundreds of rows saying nothing.
+        if abs(float(amounts[key] or 0)) < 0.005:
+            continue
         m = await _bump(db, getattr(q, f"account_{key}_no"), amounts[key])
         if m:
             movements.append({**m, "role": key})
@@ -149,6 +208,8 @@ async def reverse_quotation(db: AsyncSession, q: Quotation) -> dict:
     snapshot = q.posted_snapshot or {}
     entry_date = datetime.now(UTC).date()
     for m in snapshot.get("movements", []):
+        if abs(float(m.get("delta") or 0)) < 0.005:
+            continue            # a zero line has nothing to take back
         rev = await _bump(db, m.get("account_no"), -float(m.get("delta") or 0))
         if rev:
             movements.append({**rev, "role": m.get("role"), "reversed": True})
@@ -312,22 +373,37 @@ async def post_goods_receipt(
     return moves
 
 
-# ─── Beban Pokok Penjualan: booked when a purchasing PO is approved ──────────
+# ─── Beban Pokok Penjualan: booked when the customer has paid ───────────────
 #
-# An interim rule, chosen to have the cost on the books now and the finer
-# points later: the cost of the goods is booked when the order is approved,
-# not when they are sold. HPP up, Persediaan down, by the order's value in
-# rupiah. Receiving puts Persediaan back up (and Utang Usaha up), so once the
-# goods are in, the order sits as cost in HPP and as debt in Utang Usaha, with
-# Persediaan back where it started — nothing counted twice. Between approval
-# and receipt, Persediaan reads low by what is on order.
+# The cost of the goods is booked when the job they were bought for has been
+# invoiced and paid in full — not when the PO is approved. Until then the
+# goods sit in Persediaan, where receiving put them (Persediaan up, Utang
+# Usaha up). When every invoice on the project is paid, what was received on
+# each of its purchasing POs moves from Persediaan to 5101: HPP up,
+# Persediaan down, by the received value in rupiah.
 #
-# The amount booked is kept on the order (`cogs_posted`) and kept equal to the
-# order's value: a price or rate correction books the difference, cancelling
-# takes it all back. An order of unknown worth — foreign currency, no rate yet
-# — books nothing until the rate is set.
+# The amount booked is kept on the order (`cogs_posted`) and kept equal to
+# what the rule says now: a receipt after payment books the difference; a
+# payment reversed (the job no longer fully paid) or the order cancelled takes
+# it back. A PO serving several jobs is booked once all of them are paid.
 COGS_ACCOUNT = "5101"            # Beban Pokok Penjualan
 _PO_NOT_LIVE = ("pending_approval", "cancelled", "rejected")
+# Invoices that are issued — the ones a customer is asked to pay.
+_BILLED = ("approved", "issued", "partial", "overdue", "paid")
+
+
+async def project_fully_paid(db: AsyncSession, project_id) -> bool:
+    """Every invoice issued on the job is paid (and there is at least one)."""
+    from app.models.finance import Invoice
+    statuses = (await db.scalars(select(Invoice.status).where(
+        Invoice.project_id == project_id, Invoice.status.in_(_BILLED)))).all()
+    return bool(statuses) and all(st == "paid" for st in statuses)
+
+
+def _po_project_ids(po) -> set:
+    ids = {str(po.project_id)} if po.project_id else set()
+    ids.update(str(x) for x in (po.project_ids or []) if x)
+    return ids
 
 
 async def _cogs_account(db: AsyncSession) -> str | None:
@@ -355,29 +431,26 @@ def po_value_idr(po) -> float | None:
 
 
 async def sync_po_cogs(
-    db: AsyncSession, po, *, start: bool = False, created_by: UUID | None = None,
+    db: AsyncSession, po, *, created_by: UUID | None = None, **_ignored,
 ) -> list[dict]:
-    """Bring the HPP booked for `po` in line with what the order is worth now.
-
-    `start` is passed where an order is approved: it begins tracking an order
-    nothing was booked for. Elsewhere an untracked order (approved before this
-    rule) is left alone, so editing an old order doesn't suddenly book its
-    whole value today.
-    """
-    if po.cogs_posted is None:
-        if not start:
-            return []
-        po.cogs_posted = 0
+    """Bring the HPP booked for `po` in line with the rule: what was received
+    on it, once every job it serves is fully paid; nothing otherwise."""
+    from uuid import UUID as _U
     booked = float(po.cogs_posted or 0)
-    if po.status in _PO_NOT_LIVE:
-        target = 0.0
-    else:
-        value = po_value_idr(po)
-        if value is None:
-            return []                    # wait for the rate
-        target = value
+    target = 0.0
+    projects = _po_project_ids(po)
+    if po.status not in _PO_NOT_LIVE and projects:
+        paid = True
+        for pid in projects:
+            if not await project_fully_paid(db, _U(pid)):
+                paid = False
+                break
+        if paid:
+            target = round(float(po.payable_amount or 0), 2)
     delta = round(target - booked, 2)
     if abs(delta) < 0.005:
+        if po.cogs_posted is None:
+            po.cogs_posted = 0
         return []
     # Both sides or neither: a chart missing either account must not leave
     # half an entry on the books.
@@ -390,8 +463,9 @@ async def sync_po_cogs(
 
     from app.core.config import settings
     today = datetime.now(ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")).date()
-    why = ("approved" if booked == 0 and delta > 0
-           else "cancelled" if target == 0 else "value changed")
+    why = ("job paid" if booked == 0 and delta > 0
+           else "taken back — the job is no longer fully paid" if target == 0
+           else "received value changed")
     moves: list[dict] = []
     for acc_no, sign, role in ((cogs_no, 1, "cogs"), (INVENTORY_ACCOUNT, -1, "inventory")):
         m = await _bump(db, acc_no, sign * delta)
@@ -402,12 +476,40 @@ async def sync_po_cogs(
             account_type=m["account_type"], account_name=m["name"],
             amount=m["delta"], source_type="supplier_po_cogs", source_id=po.id,
             source_ref=po.number,
-            memo=f"Cost of goods on {po.number} — order {why} ({role})",
+            memo=f"Cost of goods on {po.number} — {why} ({role})",
             created_by=created_by,
         )
         moves.append({**m, "role": role})
     po.cogs_posted = target
     return moves
+
+
+async def sync_project_cogs(db: AsyncSession, project_id, *,
+                            created_by: UUID | None = None) -> int:
+    """Re-check HPP for every purchasing PO serving this job — after a
+    payment lands or is reversed. Returns how many orders moved."""
+    from sqlalchemy import or_
+
+    from app.models.purchasing import SupplierPO
+    if not project_id:
+        return 0
+    pos = (await db.scalars(select(SupplierPO).where(or_(
+        SupplierPO.project_id == project_id,
+        SupplierPO.project_ids.contains([str(project_id)]))))).all()
+    n = 0
+    for po in pos:
+        n += bool(await sync_po_cogs(db, po, created_by=created_by))
+    return n
+
+
+async def resync_all_cogs(db: AsyncSession) -> dict:
+    """Every PO to the rule — run once when the rule changed."""
+    from app.models.purchasing import SupplierPO
+    moved = 0
+    for po in (await db.scalars(select(SupplierPO))).all():
+        moved += bool(await sync_po_cogs(db, po))
+    await db.flush()
+    return {"orders_moved": moved}
 
 
 # Where the gap between a foreign order's booked rate and the rate the bank

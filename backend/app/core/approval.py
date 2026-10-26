@@ -540,7 +540,7 @@ async def apply_to_target(
                 po.status = "received"
                 applied["new_status"] = po.status
                 from app.services.ledger import sync_po_cogs
-                await sync_po_cogs(db, po, start=True, created_by=req.decided_by)
+                await sync_po_cogs(db, po, created_by=req.decided_by)
                 applied["note"] = "goods were already received against this order"
                 if po.project_id:
                     from app.models.operation import Project, advance_project_status
@@ -559,10 +559,10 @@ async def apply_to_target(
             if action == "create":
                 po.status = "open" if approve else "cancelled"
                 applied["new_status"] = po.status
-                # Approved: the cost of the goods is booked now (for the time
-                # being — see ledger.sync_po_cogs).
+                # The cost of the goods reaches 5101 once the job is paid
+                # (ledger.sync_po_cogs); this keeps the order in step.
                 from app.services.ledger import sync_po_cogs
-                await sync_po_cogs(db, po, start=approve, created_by=req.decided_by)
+                await sync_po_cogs(db, po, created_by=req.decided_by)
                 # Releasing the PO registers its parts in the catalogue; the
                 # goods enter stock when they are received, not here.
                 if approve:
@@ -591,6 +591,9 @@ async def apply_to_target(
                 has_project = "project_id" in changes
                 new_project_id = changes.pop("project_id", None)
                 was_status = po.status
+                if changes.get("number") and changes["number"] != po.number:
+                    from app.services.stock_sync import rename_po_references
+                    await rename_po_references(db, po.number, changes["number"])
                 for k, v in changes.items():
                     if k == "po_date":
                         po.po_date = None if v in (None, "") else date_t.fromisoformat(v)
@@ -626,11 +629,9 @@ async def apply_to_target(
                     # approved "received" receives what nobody recorded.
                     from app.services.receiving import po_status_changed
                     await po_status_changed(db, po, was_status, None)
-                # A new price, rate or a cancellation moves the cost booked;
-                # an order taken off pending_approval this way is approved.
+                # A cancellation takes back any cost booked for it.
                 from app.services.ledger import sync_po_cogs
-                await sync_po_cogs(db, po, created_by=req.decided_by,
-                                   start=was_status == "pending_approval")
+                await sync_po_cogs(db, po, created_by=req.decided_by)
     elif req.target_type == "delivery_order":
         # Finance's release of a delivery order, taken from the inbox
         # instead of the project page. Approving it is the same act as the

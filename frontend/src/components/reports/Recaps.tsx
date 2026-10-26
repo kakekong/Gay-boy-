@@ -115,6 +115,77 @@ function GroupedTable<G, R>({ groups, groupKey, groupCols, rows, rowCols, empty 
   );
 }
 
+/** A whole-history recap, month by month, newest first — each month's bar
+ *  against the biggest month. */
+export interface MonthTotal { period: string; count: number; total: number }
+function ByMonth({ months, countLabel }: { months: MonthTotal[]; countLabel: string }) {
+  const t = useT();
+  if (!months.length) return null;
+  const max = Math.max(...months.map((m) => Math.abs(m.total)), 1);
+  const name = (p: string) => {
+    const [y, m] = p.split("-").map(Number);
+    return y && m ? new Date(y, m - 1, 1).toLocaleDateString(locale(), { month: "long", year: "numeric" }) : p;
+  };
+  return (
+    <div className="table-shell overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <th className="th">{t("Month", "Bulan")}</th>
+            <th className="th text-right">{countLabel}</th>
+            <th className="th text-right">{t("Total (Rp)", "Total (Rp)")}</th>
+            <th className="th w-[35%] hidden sm:table-cell" />
+          </tr>
+        </thead>
+        <tbody>
+          {months.map((m) => (
+            <tr key={m.period} className="border-t border-ink-100">
+              <td className="td whitespace-nowrap">{name(m.period)}</td>
+              <td className="td text-right tabular-nums">{m.count}</td>
+              <td className="td text-right tabular-nums whitespace-nowrap">{idr(m.total)}</td>
+              <td className="td hidden sm:table-cell">
+                <div className="h-2 rounded-full bg-brand-500/70"
+                  style={{ width: `${Math.max(2, (Math.abs(m.total) / max) * 100)}%` }} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Each payment on a document, in the whole-history recaps. */
+function Payments({ items }: { items: { date: string | null; amount: number; bank?: string | null;
+                                         reference?: string | null }[] }) {
+  if (!items.length) return <span className="muted">—</span>;
+  return (
+    <span className="block space-y-0.5">
+      {items.map((p, i) => (
+        <span key={i} className="block">
+          <span className="whitespace-nowrap">
+            {day(p.date)} · <span className="tabular-nums">{idr(p.amount)}</span>
+          </span>
+          {(p.bank || p.reference) && (
+            <span className="block muted text-[10px] max-w-[14rem] truncate"
+              title={[p.bank, p.reference].filter(Boolean).join(" · ")}>
+              {[p.bank, p.reference].filter(Boolean).join(" · ")}
+            </span>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** What is still owed on a document, or that it is settled. */
+const Owed = ({ owed }: { owed: number }) => {
+  const t = useT();
+  return owed > 0.004
+    ? <span className="text-amber-700 font-medium">{idr(owed)}</span>
+    : <span className="chip bg-emerald-50 text-emerald-700">{t("Settled", "Lunas")}</span>;
+};
+
 const DocLink = ({ to, children }: { to: string; children: ReactNode }) => (
   <Link to={to} className="font-mono text-brand-700 hover:underline"
     onClick={(e) => e.stopPropagation()}>{children}</Link>
@@ -129,6 +200,7 @@ interface PurchaseRow {
 }
 export interface PurchaseRecapData {
   period: string; count: number; total_idr: number; without_rate: number;
+  all?: boolean; months?: MonthTotal[];
   groups: { supplier: string; count: number; total_idr: number; rows: PurchaseRow[] }[];
 }
 
@@ -137,10 +209,12 @@ export function PurchaseRecap({ d }: { d: PurchaseRecapData }) {
   return (
     <div className="space-y-3">
       <Figures items={[
+        ...(d.all ? [[t("Period", "Periode"), t("All time", "Sepanjang waktu")] as [string, string]] : []),
         [t("Purchase orders", "PO"), d.count],
         [t("Suppliers", "Pemasok"), d.groups.length],
         [t("Total (Rp)", "Total (Rp)"), idr(d.total_idr), "bg-brand-50"],
       ]} />
+      {d.all && <ByMonth months={d.months ?? []} countLabel="PO" />}
       {d.without_rate > 0 && (
         <div className="chip bg-amber-50 text-amber-800">
           <AlertCircle size={11} />
@@ -150,7 +224,8 @@ export function PurchaseRecap({ d }: { d: PurchaseRecapData }) {
       )}
       <GroupedTable
         groups={d.groups} groupKey={(g) => g.supplier}
-        empty={t("No approved purchase orders this month.", "Tidak ada PO yang disetujui bulan ini.")}
+        empty={d.all ? t("No approved purchase orders yet.", "Belum ada PO yang disetujui.")
+          : t("No approved purchase orders this month.", "Tidak ada PO yang disetujui bulan ini.")}
         groupCols={[
           { head: t("Supplier", "Pemasok"), cell: (g) => g.supplier },
           { head: "PO", cell: (g) => g.count, right: true },
@@ -181,6 +256,7 @@ interface SalesRow {
 }
 export interface SalesRecapData {
   period: string; count: number; amount: number; tax: number; total: number; paid: number;
+  all?: boolean; months?: MonthTotal[];
   groups: { customer: string; count: number; amount: number; tax: number; total: number;
             paid: number; rows: SalesRow[] }[];
 }
@@ -195,9 +271,11 @@ export function SalesRecap({ d }: { d: SalesRecapData }) {
         ["PPN", idr(d.tax)],
         [t("Total", "Total"), idr(d.total), "bg-brand-50"],
       ]} />
+      {d.all && <ByMonth months={d.months ?? []} countLabel={t("Invoices", "Faktur")} />}
       <GroupedTable
         groups={d.groups} groupKey={(g) => g.customer}
-        empty={t("No invoices issued this month.", "Tidak ada faktur terbit bulan ini.")}
+        empty={d.all ? t("No invoices issued yet.", "Belum ada faktur terbit.")
+          : t("No invoices issued this month.", "Tidak ada faktur terbit bulan ini.")}
         groupCols={[
           { head: t("Customer", "Pelanggan"), cell: (g) => g.customer },
           { head: t("Invoices", "Faktur"), cell: (g) => g.count, right: true },
@@ -229,14 +307,18 @@ interface PayableRow {
   po_id: string; number: string; po_date: string | null; received_idr: number;
   paid: number; outstanding: number; last_received_at: string | null;
   days_owed: number | null;
+  payments?: { date: string | null; amount: number; bank?: string | null; reference?: string | null }[];
 }
 export interface PayablesRecapData {
   as_of: string; outstanding: number; count: number;
-  groups: { supplier: string; count: number; outstanding: number; rows: PayableRow[] }[];
+  all?: boolean; received?: number; paid?: number;
+  groups: { supplier: string; count: number; outstanding: number;
+            received?: number; paid?: number; rows: PayableRow[] }[];
 }
 
 export function PayablesRecap({ d }: { d: PayablesRecapData }) {
   const t = useT();
+  if (d.all) return <PayablesHistory d={d} />;
   return (
     <div className="space-y-3">
       <Figures items={[
@@ -267,6 +349,40 @@ export function PayablesRecap({ d }: { d: PayablesRecapData }) {
   );
 }
 
+/** Every purchasing PO there has been, settled ones too, with each payment. */
+function PayablesHistory({ d }: { d: PayablesRecapData }) {
+  const t = useT();
+  return (
+    <div className="space-y-3">
+      <Figures items={[
+        [t("Orders", "PO"), d.count],
+        [t("Received (Rp)", "Diterima (Rp)"), idr(d.received)],
+        [t("Paid (Rp)", "Dibayar (Rp)"), idr(d.paid), "bg-emerald-50"],
+        [t("Still owed (Rp)", "Sisa hutang (Rp)"), idr(d.outstanding), "bg-amber-50"],
+      ]} />
+      <GroupedTable
+        groups={d.groups} groupKey={(g) => g.supplier}
+        empty={t("No purchasing POs yet.", "Belum ada PO pembelian.")}
+        groupCols={[
+          { head: t("Supplier", "Pemasok"), cell: (g) => g.supplier },
+          { head: "PO", cell: (g) => g.count, right: true },
+          { head: t("Received (Rp)", "Diterima (Rp)"), cell: (g) => idr(g.received), right: true },
+          { head: t("Paid", "Dibayar"), cell: (g) => idr(g.paid), right: true },
+          { head: t("Owed (Rp)", "Hutang (Rp)"), cell: (g) => idr(g.outstanding), right: true },
+        ]}
+        rows={(g) => g.rows}
+        rowCols={[
+          { head: t("PO no.", "No. PO"), nowrap: true, cell: (r) => <DocLink to={`/purchase-orders/${r.po_id}`}>{r.number}</DocLink> },
+          { head: t("Date", "Tanggal"), cell: (r) => day(r.po_date), nowrap: true },
+          { head: t("Received (Rp)", "Diterima (Rp)"), cell: (r) => idr(r.received_idr), right: true },
+          { head: t("Payments", "Pembayaran"), cell: (r) => <Payments items={r.payments ?? []} /> },
+          { head: t("Owed", "Sisa"), cell: (r) => <Owed owed={r.outstanding} />, right: true },
+        ]}
+      />
+    </div>
+  );
+}
+
 /* --------------------------------------------------------- Rekap Piutang */
 
 const BUCKETS: [string, string, string][] = [
@@ -280,16 +396,19 @@ const BUCKETS: [string, string, string][] = [
 interface ReceivableRow {
   invoice_id: string; number: string; date: string | null; due_date: string | null;
   project: string | null; total: number; paid: number; outstanding: number;
-  days_overdue: number; bucket: string;
+  days_overdue: number; bucket: string | null;
+  payments?: { date: string | null; amount: number; reference?: string | null }[];
 }
 export interface ReceivablesRecapData {
   as_of: string; outstanding: number; count: number; buckets: Record<string, number>;
-  groups: { customer: string; count: number; outstanding: number;
+  all?: boolean; total?: number; paid?: number;
+  groups: { customer: string; count: number; outstanding: number; total?: number; paid?: number;
             buckets: Record<string, number>; rows: ReceivableRow[] }[];
 }
 
 export function ReceivablesRecap({ d }: { d: ReceivablesRecapData }) {
   const t = useT();
+  if (d.all) return <ReceivablesHistory d={d} />;
   return (
     <div className="space-y-3">
       <Figures items={[
@@ -331,6 +450,41 @@ export function ReceivablesRecap({ d }: { d: ReceivablesRecapData }) {
           { head: t("Total", "Total"), cell: (r) => idr(r.total), right: true },
           { head: t("Paid", "Dibayar"), cell: (r) => idr(r.paid), right: true },
           { head: t("Owed", "Sisa"), cell: (r) => idr(r.outstanding), right: true },
+        ]}
+      />
+    </div>
+  );
+}
+
+/** Every invoice issued, paid ones too, with each payment received. */
+function ReceivablesHistory({ d }: { d: ReceivablesRecapData }) {
+  const t = useT();
+  return (
+    <div className="space-y-3">
+      <Figures items={[
+        [t("Invoices", "Faktur"), d.count],
+        [t("Billed (Rp)", "Ditagih (Rp)"), idr(d.total)],
+        [t("Paid (Rp)", "Dibayar (Rp)"), idr(d.paid), "bg-emerald-50"],
+        [t("Still owed (Rp)", "Sisa piutang (Rp)"), idr(d.outstanding), "bg-brand-50"],
+      ]} />
+      <GroupedTable
+        groups={d.groups} groupKey={(g) => g.customer}
+        empty={t("No invoices issued yet.", "Belum ada faktur terbit.")}
+        groupCols={[
+          { head: t("Customer", "Pelanggan"), cell: (g) => g.customer },
+          { head: t("Invoices", "Faktur"), cell: (g) => g.count, right: true },
+          { head: t("Billed", "Ditagih"), cell: (g) => idr(g.total), right: true },
+          { head: t("Paid", "Dibayar"), cell: (g) => idr(g.paid), right: true },
+          { head: t("Owed", "Sisa"), cell: (g) => idr(g.outstanding), right: true },
+        ]}
+        rows={(g) => g.rows}
+        rowCols={[
+          { head: t("Invoice", "Faktur"), nowrap: true, cell: (r) => <DocLink to={`/invoices/${r.invoice_id}`}>{r.number}</DocLink> },
+          { head: t("Date", "Tanggal"), cell: (r) => day(r.date), nowrap: true },
+          { head: t("Due", "Jatuh tempo"), cell: (r) => day(r.due_date), nowrap: true },
+          { head: t("Total", "Total"), cell: (r) => idr(r.total), right: true },
+          { head: t("Payments", "Pembayaran"), cell: (r) => <Payments items={r.payments ?? []} /> },
+          { head: t("Owed", "Sisa"), cell: (r) => <Owed owed={r.outstanding} />, right: true },
         ]}
       />
     </div>

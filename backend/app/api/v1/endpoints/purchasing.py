@@ -1145,9 +1145,11 @@ async def create_po(
     await db.flush()
 
     if is_director:
-        # The director's own order is approved as it is made: book its cost.
+        # The director's own order is approved as it is made. Its cost
+        # reaches 5101 when the job is paid (ledger.sync_po_cogs) — nothing
+        # to book yet unless it already is.
         from app.services.ledger import sync_po_cogs
-        await sync_po_cogs(db, po, start=True, created_by=user.id)
+        await sync_po_cogs(db, po, created_by=user.id)
     else:
         await request_approval(
             db,
@@ -1797,6 +1799,10 @@ async def update_po(
     # Director path: apply immediately.
     status_before = po.status
     if "number" in data:
+        # The order's stock movements carry its number; keep them with it,
+        # or a renamed order's stock is counted twice.
+        from app.services.stock_sync import rename_po_references
+        await rename_po_references(db, po.number, data["number"])
         po.number = data["number"]
     if "po_date" in data:
         raw = data["po_date"]
@@ -1837,12 +1843,10 @@ async def update_po(
         from app.services.po_project import assign_po_project
         await assign_po_project(db, po, new_project)
 
-    # A new total, rate or currency books the difference; cancelling takes
-    # the whole cost back. Moving it off pending_approval on this page is the
-    # director approving it, the same as from the inbox: book its cost.
+    # Cancelling takes back any cost booked for it; the rest of the rule
+    # (cost booked once the job is paid) is ledger.sync_po_cogs.
     from app.services.ledger import sync_po_cogs
-    await sync_po_cogs(db, po, created_by=user.id,
-                       start=status_before == "pending_approval")
+    await sync_po_cogs(db, po, created_by=user.id)
     await db.flush()
     return {
         "id": str(po.id), "number": po.number, "status": po.status,

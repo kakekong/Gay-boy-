@@ -1855,6 +1855,11 @@ async def post_to_ledger(
     user: User = Depends(_ledger_viewer),
 ):
     q = await _scoped_quote(q_id, db, user)
+    # A quotation reaches the books when the deal is won — not before.
+    if q.status != "won":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{q.number} isn't won — a quotation is posted when the deal is won.")
     await ledger.post_quotation(db, q)
     return await _load(q.id, db)
 

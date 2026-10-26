@@ -79,7 +79,7 @@ async def pnl(
     from app.models.purchasing import SupplierPO
     booked: set = set()
     for po in (await db.scalars(select(SupplierPO).where(
-            SupplierPO.cogs_posted.is_not(None)))).all():
+            SupplierPO.cogs_posted > 0))).all():
         if po.project_id:
             booked.add(po.project_id)
         booked.update(str(x) for x in (po.project_ids or []))

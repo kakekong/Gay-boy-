@@ -20,7 +20,7 @@ import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen, Loader2, AlertCircle, CheckCircle2, TrendingUp, Scale, Waves,
-  ClipboardList, Library,
+  ClipboardList, Library, History,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -34,6 +34,8 @@ import {
 interface CatalogueEntry {
   key: string; group: string; name: string; name_en: string;
   path: string; params: string[]; about: string;
+  /** The recap also has a whole-history view (`all=true`). */
+  history?: boolean;
 }
 interface ColumnPnl {
   basis: string; year: number;
@@ -114,6 +116,8 @@ export default function ReportCataloguePage() {
   const [chosen, setChosen] = useState<CatalogueEntry | null>(null);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
+  const [allTime, setAllTime] = useState(false);
+  const whole = !!chosen?.history && allTime;
 
   const cat = useQuery({
     queryKey: ["report-catalogue"],
@@ -181,8 +185,19 @@ export default function ReportCataloguePage() {
                   <h2 className="text-base font-semibold">{chosen.name}</h2>
                   <p className="text-xs muted">{chosen.about}</p>
                 </div>
-                <div className="ml-auto flex gap-2">
-                  {chosen.params.includes("year") && (
+                <div className="ml-auto flex gap-2 items-end">
+                  {chosen.history && (
+                    <button
+                      className={clsx(whole ? "btn-primary" : "btn-ghost", "text-xs")}
+                      aria-pressed={whole}
+                      onClick={() => setAllTime((v) => !v)}>
+                      <History size={14} />
+                      {whole
+                        ? t("Whole history — on", "Seluruh riwayat — aktif")
+                        : t("Whole history", "Seluruh riwayat")}
+                    </button>
+                  )}
+                  {chosen.params.includes("year") && !whole && (
                     <label className="block">
                       <span className="label">{t("Year", "Tahun")}</span>
                       <input className="input w-24" type="number" value={year}
@@ -190,7 +205,7 @@ export default function ReportCataloguePage() {
                         onChange={(e) => setYear(Number(e.target.value))} />
                     </label>
                   )}
-                  {chosen.params.includes("month") && (
+                  {chosen.params.includes("month") && !whole && (
                     <label className="block">
                       <span className="label">{t("Month", "Bulan")}</span>
                       <input className="input w-20" type="number" min="1" max="12"
@@ -200,7 +215,7 @@ export default function ReportCataloguePage() {
                   )}
                 </div>
               </div>
-              <ReportBody entry={chosen} year={year} month={month} />
+              <ReportBody entry={chosen} year={year} month={month} all={whole} />
             </>
           )}
         </section>
@@ -209,15 +224,19 @@ export default function ReportCataloguePage() {
   );
 }
 
-function ReportBody({ entry, year, month }: {
-  entry: CatalogueEntry; year: number; month: number;
+function ReportBody({ entry, year, month, all }: {
+  entry: CatalogueEntry; year: number; month: number; all: boolean;
 }) {
   const t = useT();
   const [path, qs] = entry.path.split("?");
   const base = Object.fromEntries(new URLSearchParams(qs ?? ""));
   const params: Record<string, any> = { ...base };
-  if (entry.params.includes("year")) params.year = year;
-  if (entry.params.includes("month")) params.month = month;
+  if (all) {
+    params.all = true;
+  } else {
+    if (entry.params.includes("year")) params.year = year;
+    if (entry.params.includes("month")) params.month = month;
+  }
   if (entry.key === "balance-sheet-at") {
     params.on = `${year}-${String(month).padStart(2, "0")}-28`;
   }
@@ -492,7 +511,7 @@ function BalanceTable({ d }: { d: BalanceAt }) {
             {block(t("Liabilities", "Kewajiban"), d.liabilities)}
             {block(t("Equity", "Ekuitas"), d.equity)}
             <tr className="border-t border-ink-200">
-              <td className="td">{t("Current earnings", "Laba berjalan")}</td>
+              <td className="td">{t("Current-year profit / loss", "Laba/Rugi Tahun Berjalan")}</td>
               {d.equity.current_earnings.map((v, i) => (
                 <td key={i} className="td text-right tabular-nums whitespace-nowrap">{idr(v)}</td>
               ))}
@@ -524,7 +543,7 @@ function StandardBalance({ d }: { d: any }) {
             [t("Total assets", "Total aset"), d.assets?.total],
             [t("Total liabilities", "Total kewajiban"), d.liabilities?.total],
             [t("Equity", "Ekuitas"), d.equity?.total],
-            [t("Current earnings", "Laba berjalan"), d.equity?.current_earnings],
+            [t("Current-year profit / loss", "Laba/Rugi Tahun Berjalan"), d.equity?.current_earnings],
           ].map(([label, value]) => (
             <tr key={String(label)} className="border-t border-ink-100">
               <td className="td">{label}</td>

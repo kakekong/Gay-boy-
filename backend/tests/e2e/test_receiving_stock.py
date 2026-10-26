@@ -93,7 +93,9 @@ async def main():
     check("a supplier order is raised", bool(po.get("id")), str(po)[:160])
 
     async def stock(name_part):
-        rows = J(await c.get("/inventory", headers=d, params={"limit": 400}))
+        # Searched by name: the shared test database holds more items than
+        # one page, and a new one need not be on the first.
+        rows = J(await c.get("/inventory", headers=d, params={"q": name_part, "limit": 50}))
         rows = rows if isinstance(rows, list) else rows.get("items", [])
         it = next((x for x in rows if name_part in (x.get("name") or "")), None)
         return float(it.get("current_stock") or 0) if it else None

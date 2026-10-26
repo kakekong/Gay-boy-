@@ -12,13 +12,14 @@
  */
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BookOpen, Loader2, AlertCircle, ChevronLeft, ChevronRight,
+  ArrowLeft, BookOpen, Loader2, AlertCircle, ChevronLeft, ChevronRight, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT, T, locale } from "@/store/lang";
+import { useAuthStore } from "@/store/auth";
 
 interface Row {
   /** journal: a journal entry · auto: posted by the app (a receipt, a
@@ -80,6 +81,8 @@ export default function AccountLedgerPage() {
   const [period, setPeriod] = useState(
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
   const [allTime, setAllTime] = useState(false);
+  const isDirector = useAuthStore((s) => s.user?.role) === "director";
+  const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ["account-ledger", accountNo, allTime ? "all" : period],
@@ -87,6 +90,18 @@ export default function AccountLedgerPage() {
       params: allTime ? {} : { period },
     }).then((r) => r.data as Ledger),
     enabled: !!accountNo,
+  });
+
+  // The director takes out what nothing on record explains: the balance
+  // drops by exactly the "No record" amount, and the row goes.
+  const clear = useMutation({
+    mutationFn: () => api.post(`/accounts/${accountNo}/clear-unrecorded`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account-ledger", accountNo] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    onError: (e: any) => alert(e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail ?? t("Couldn't remove it", "Gagal menghapus")),
   });
 
   if (q.isLoading) {
@@ -253,6 +268,21 @@ export default function AccountLedgerPage() {
                         <span className="block text-[11px] muted">
                           {t("by", "oleh")} {r.by}
                         </span>
+                      )}
+                      {r.kind === "unrecorded" && isDirector && (
+                        <button className="btn-ghost text-xs text-rose-600 mt-1 px-2 py-1"
+                          disabled={clear.isPending}
+                          onClick={() => {
+                            if (confirm(t(
+                              `Remove ${idr(r.debit || r.credit)} from ${d.account.account_no}? The balance drops by this amount; nothing on record changes.`,
+                              `Hapus ${idr(r.debit || r.credit)} dari ${d.account.account_no}? Saldo turun sebesar ini; catatan lain tidak berubah.`,
+                            ))) clear.mutate();
+                          }}>
+                          {clear.isPending
+                            ? <Loader2 size={12} className="animate-spin" />
+                            : <Trash2 size={12} />}
+                          {t("Remove", "Hapus")}
+                        </button>
                       )}
                     </td>
                     <td className="td text-right tabular-nums">

@@ -285,7 +285,6 @@ export const ID_STATIC: Record<string, string> = {
   "Create, rename, and recolor employee tags. Deleting a tag removes it from everyone.": "Buat, ganti nama, dan ubah warna label karyawan. Menghapus label akan menghapusnya dari semua orang.",
   "Created": "Dibuat",
   "Current": "Belum jatuh tempo",
-  "Current earnings": "Pendapatan saat ini",
   "Custom role": "Peran khusus",
   "Custom roles": "Peran khusus",
   "Currency": "Mata uang",

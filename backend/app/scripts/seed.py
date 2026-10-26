@@ -684,6 +684,9 @@ COLUMN_MIGRATIONS: list[str] = [
 
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
+    # ── Rp 0 quotation lines (a deal with no discount) said nothing ─────
+    """DELETE FROM ledger_entries
+        WHERE source_type = 'quotation' AND amount = 0""",
     # ── The order a project lists its price-request lines in ───────────
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS item_order JSONB",
     # ── Why a quotation was lost: its own fields, not a line in the notes ──
@@ -877,6 +880,41 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('receive_orders_marked_received')"))
             await db.commit()
             print(f"Orders marked received synced: {res}")
+        # Stock moved under a PO's old number after it was renamed was never
+        # taken back — the goods counted twice. Match those movements back to
+        # their order, then re-base every order's stock on its receipts.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'stock_renamed_po_refs'")):
+            from app.services.stock_sync import (
+                rebase_to_receipts, repair_renamed_po_references,
+            )
+            fixed = await repair_renamed_po_references(db)
+            res = await rebase_to_receipts(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('stock_renamed_po_refs')"))
+            await db.commit()
+            print(f"Renamed-PO stock repaired: {len(fixed['repaired'])} refs, {res}")
+        # A won quotation's discount was credited to Diskon Penjualan as if it
+        # were more revenue. Re-book each as a reduction of revenue.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'quotation_discount_contra'")):
+            from app.services.ledger import fix_posted_discounts
+            res = await fix_posted_discounts(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('quotation_discount_contra')"))
+            await db.commit()
+            print(f"Quotation discounts re-booked as a reduction: {res}")
+        # Beban Pokok Penjualan moved from "booked at PO approval" to "booked
+        # when the job is paid in full": take back what unpaid jobs had
+        # booked, and book the paid ones (older ones included).
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'hpp_on_paid_projects'")):
+            from app.services.ledger import resync_all_cogs
+            res = await resync_all_cogs(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('hpp_on_paid_projects')"))
+            await db.commit()
+            print(f"HPP re-based on paid jobs: {res}")
         # Delivery orders whose goods never came off the shelf.
         if not await db.scalar(text(
                 "SELECT 1 FROM data_fixes WHERE key = 'delivery_orders_stock_out'")):

@@ -223,10 +223,9 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # in rupiah. Grows with each goods receipt (value of what arrived), and is
     # what finance pays down with SupplierPayment rows.
     payable_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
-    # Beban Pokok Penjualan booked for this order, in rupiah. For now the cost
-    # of goods is booked when the order is approved (ledger.sync_po_cogs) and
-    # kept equal to its value as it changes. None: the order was approved
-    # before that rule, and nothing was booked for it.
+    # Beban Pokok Penjualan booked for this order, in rupiah: what was
+    # received on it, once every job it serves is invoiced and paid in full
+    # (ledger.sync_po_cogs); 0 until then.
     cogs_posted: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     # Notes for the vendor — delivery instructions, packing, terms — printed
     # under the lines on the PO they receive (PDF and spreadsheet). Internal

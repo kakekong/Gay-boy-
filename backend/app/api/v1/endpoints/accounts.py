@@ -128,11 +128,28 @@ def _idr(n) -> str:
 
 async def _coa_sections(db: AsyncSession) -> list[dict]:
     rows = (await db.scalars(select(Account).order_by(Account.account_no.asc()))).all()
+    out = [[r.account_no, r.name, r.account_type, _idr(r.balance)] for r in rows]
+    # The profit line sits at the end of equity, as on the page.
+    earned = (await current_earnings_totals(db))["net_income"]
+    last_eq = max((i for i, r in enumerate(rows) if r.account_type == "Equity"), default=len(out) - 1)
+    out.insert(last_eq + 1, ["—", EARNINGS_NAME + " (computed)", "Equity", _idr(earned)])
     return [{
         "name": "Chart of Accounts",
         "headers": ["Account No", "Name", "Type", "Balance"],
-        "rows": [[r.account_no, r.name, r.account_type, _idr(r.balance)] for r in rows],
+        "rows": out,
     }]
+
+
+EARNINGS_NAME = "Laba/Rugi Tahun Berjalan"
+
+
+async def current_earnings_totals(db: AsyncSession) -> dict:
+    """Every revenue account less every cost and expense account, from the
+    balances as they stand — the profit not yet closed into equity. Computed
+    each time, never posted: the P&L ends on this figure and the balance
+    sheet carries it under equity."""
+    from app.services.financials import pnl_from_balances
+    return (await pnl_from_balances(db))["totals"]
 
 
 @router.get("/export.pdf")
@@ -154,6 +171,12 @@ async def export_coa_xlsx(db: AsyncSession = Depends(get_db),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="chart-of-accounts.xlsx"'},
     )
+
+
+@router.get("/current-earnings")
+async def current_earnings(db: AsyncSession = Depends(get_db),
+                           _user: User = Depends(_coa_viewer)):
+    return {"name": EARNINGS_NAME, **await current_earnings_totals(db)}
 
 
 @router.get("/{account_id}", response_model=AccountOut)
@@ -204,6 +227,13 @@ async def update_account(account_id: UUID,
     if not obj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     data = payload.model_dump(exclude_unset=True)
+    # Setting an account's balance by hand is the director's: it moves the
+    # books with nothing on the other side. It shows in the account's ledger
+    # as "set by hand", with who and when.
+    if ("balance" in data and Role(_user.role) != Role.DIRECTOR
+            and abs(float(data["balance"] or 0) - float(obj.balance or 0)) >= 0.005):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can change an account's balance.")
     if "account_type" in data:
         _validate_type(data["account_type"])
     if "parent_account_no" in data and data["parent_account_no"]:
@@ -218,6 +248,33 @@ async def update_account(account_id: UUID,
     await audit_record(db, actor=_user, action="update", entity="account",
                        entity_id=obj.id, before=before, after=data)
     return obj
+
+
+@router.post("/{account_no}/clear-unrecorded")
+async def clear_unrecorded(account_no: str,
+                           db: AsyncSession = Depends(get_db),
+                           _user: User = Depends(require(Role.DIRECTOR))):
+    """Remove the part of a balance nothing on record explains — the "No
+    record" row on the account's ledger (brought in with the chart, or test
+    figures). The balance drops by exactly that amount, and the row leaves
+    the ledger: nothing that happened is unwritten. The audit log keeps it."""
+    from app.services.account_history import account_events
+
+    acc = await db.scalar(select(Account).where(Account.account_no == account_no))
+    if not acc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")
+    events = (await account_events(db, [acc]))[acc.account_no]
+    rest = next((e["delta"] for e in events if e["kind"] == "unrecorded"), 0.0)
+    if abs(rest) < 0.005:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Everything on this account is on record — nothing to remove.")
+    before = float(acc.balance or 0)
+    acc.balance = round(before - rest, 2)
+    await audit_record(db, actor=_user, action="clear_unrecorded", entity="account",
+                       entity_id=acc.id, before={"balance": before},
+                       after={"balance": float(acc.balance), "removed": rest})
+    await db.flush()
+    return {"ok": True, "removed": rest, "balance": float(acc.balance)}
 
 
 @router.delete("/{account_id}", status_code=204)

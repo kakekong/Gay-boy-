@@ -296,6 +296,10 @@ async def record_manual_payment(
         if project:
             advance_project_status(project, "paid")
             advance_project_status(project, "closed")
+    # A job paid in full books the cost of its goods (Persediaan → 5101).
+    if inv.project_id:
+        from app.services.ledger import sync_project_cogs
+        await sync_project_cogs(db, inv.project_id, created_by=me.id)
 
     await audit_record(
         db, actor=me, action="manual_payment", entity="invoice",
@@ -386,6 +390,9 @@ async def verify_claim(
         if project:
             advance_project_status(project, "paid")
             advance_project_status(project, "closed")
+    if inv and inv.project_id:
+        from app.services.ledger import sync_project_cogs
+        await sync_project_cogs(db, inv.project_id, created_by=me.id)
 
     await audit_record(
         db, actor=me, action="verify_payment", entity="invoice",
@@ -546,6 +553,9 @@ async def reverse_payment_entry(
                 from app.services.project_stage import stage_before_payment
                 project.status = await stage_before_payment(db, project)
             project_status = project.status
+        # No longer paid in full: the cost booked for its goods goes back.
+        from app.services.ledger import sync_project_cogs
+        await sync_project_cogs(db, inv.project_id, created_by=me.id)
 
     # The deposit that started a job is deliberately not unwound here.
     # Reversing it takes the money back off the books, which is what was

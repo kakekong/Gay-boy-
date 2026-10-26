@@ -9,7 +9,7 @@ import clsx from "clsx";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { downloadFile } from "@/lib/download";
-import { T, t } from "@/store/lang";
+import { T, t, t as tr } from "@/store/lang";
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 
@@ -167,7 +167,7 @@ function Row({ label, value, bold, indent }: {
     <div className={clsx("flex items-center justify-between py-1.5 border-b border-ink-50",
       bold && "font-semibold", indent && "pl-4")}>
       <span className={clsx(bold ? "text-ink-900" : "text-ink-600", "text-sm")}>{T(label)}</span>
-      <span className="tabular-nums text-sm">{value}</span>
+      <span className="tabular-nums text-sm whitespace-nowrap pl-3">{value}</span>
     </div>
   );
 }
@@ -189,6 +189,11 @@ function PnL({ d }: { d: any }) {
       <Row label={T("Other expense")} value={idr(t.other_expense)} indent />
       <div className="mt-2">
         <Row label={T("Net income")} value={idr(t.net_income)} bold />
+        {d?.source === "balances" && (
+          <p className="text-[11px] muted mt-1">
+            {tr("The same figure as Laba/Rugi Tahun Berjalan on the chart of accounts and the balance sheet.",
+                "Sama dengan Laba/Rugi Tahun Berjalan di akun perkiraan dan neraca.")}</p>
+        )}
       </div>
     </div>
   );
@@ -230,7 +235,8 @@ function BalanceSheet({ d }: { d: any }) {
             <span>{T("Equity")}</span><span className="tabular-nums">{idr(d?.equity?.total)}</span>
           </div>
           <TypeGroups groups={d?.equity?.by_type} />
-          <Row label={T("Current earnings")} value={idr(d?.equity?.current_earnings)} indent />
+          <Row label="Laba/Rugi Tahun Berjalan"
+            value={idr(d?.equity?.current_earnings)} indent />
         </div>
         <div className={clsx("rounded-lg px-3 py-2 text-sm",
           d?.balanced ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>

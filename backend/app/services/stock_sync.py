@@ -617,3 +617,109 @@ async def backfill_item_currency(db: AsyncSession) -> int:
                 fixed += 1
     await db.flush()
     return fixed
+
+
+# ─── A PO's number changing, and what is on order ────────────────────────────
+#
+# Stock movements name the PO they belong to by its number. A PO renamed
+# after it moved stock (PO-260924-001 → PO-LMJ-260924-001) left its old
+# movements under a number no order has any more — so the old "stock rises
+# when ordered" movement was never taken back when receiving began, and the
+# goods were counted twice (ordered +138, received +138).
+
+async def rename_po_references(db: AsyncSession, old: str | None, new: str | None) -> int:
+    """Keep a renamed PO's stock movements under its new number."""
+    from sqlalchemy import update
+    if not old or not new or old == new:
+        return 0
+    res = await db.execute(update(InventoryMovement)
+                           .where(InventoryMovement.reference == old)
+                           .values(reference=new))
+    return res.rowcount or 0
+
+
+async def repair_renamed_po_references(db: AsyncSession) -> dict:
+    """Movements under a PO number that no order has any more, matched back
+    to the order they belong to: the one whose number ends the same way
+    (PO-260924-001 → PO-LMJ-260924-001) and that orders the same item. Only
+    an unambiguous match is repaired."""
+    from app.models.purchasing import SupplierPO
+
+    numbers = set((await db.scalars(select(SupplierPO.number))).all())
+    orphans = [r for r in (await db.scalars(
+        select(InventoryMovement.reference).distinct()
+        .where(InventoryMovement.reference.like("PO-%")))).all()
+        if r and r not in numbers]
+    pos = (await db.scalars(select(SupplierPO))).all()
+    repaired = []
+    for ref in orphans:
+        tail = ref[3:]
+        cands = [p for p in pos if p.number and p.number != ref
+                 and (p.number.endswith("-" + tail) or p.number.endswith(tail))]
+        if len(cands) > 1:
+            items = {i for i in (await db.scalars(select(InventoryMovement.item_id).where(
+                InventoryMovement.reference == ref))).all()}
+            skus = {it.sku for it in (await db.scalars(select(InventoryItem).where(
+                InventoryItem.id.in_(items)))).all()}
+            cands = [p for p in cands
+                     if skus & {ln.get("sku") for ln in (p.items or [])}]
+        if len(cands) == 1:
+            await rename_po_references(db, ref, cands[0].number)
+            repaired.append((ref, cands[0].number))
+    await db.flush()
+    return {"repaired": repaired}
+
+
+async def on_order(db: AsyncSession, item_ids: list | None = None) -> dict:
+    """What each item has on order and not yet received — per purchasing PO.
+
+    Ordered: the PO's lines for the item. Received: what the PO has put on
+    the shelf (its stock movements, net). An order not fully in is "on order"
+    (partly received, if some came); a closed one with less is "short" — it
+    was finished under what was ordered."""
+    from app.models.purchasing import Supplier, SupplierPO
+
+    pos = (await db.scalars(select(SupplierPO).where(
+        SupplierPO.status.in_(("open", "partial", "received", "closed"))))).all()
+    if not pos:
+        return {}
+    skus = {ln.get("sku") for p in pos for ln in (p.items or []) if ln.get("sku")}
+    q = select(InventoryItem).where(InventoryItem.sku.in_(skus))
+    if item_ids is not None:
+        q = q.where(InventoryItem.id.in_(item_ids))
+    by_sku = {it.sku: it for it in (await db.scalars(q)).all()}
+    if not by_sku:
+        return {}
+    nums = [p.number for p in pos]
+    got: dict = {}
+    for ref, item_id, qty in (await db.execute(
+            select(InventoryMovement.reference, InventoryMovement.item_id,
+                   func.coalesce(func.sum(InventoryMovement.delta), 0))
+            .where(InventoryMovement.reference.in_(nums))
+            .group_by(InventoryMovement.reference, InventoryMovement.item_id))).all():
+        got[(ref, item_id)] = float(qty or 0)
+    sups = {s.id: s.name for s in (await db.scalars(select(Supplier).where(
+        Supplier.id.in_({p.supplier_id for p in pos if p.supplier_id}))))}
+    out: dict = {}
+    for p in pos:
+        ordered: dict = {}
+        for ln in p.items or []:
+            it = by_sku.get(ln.get("sku"))
+            if it is not None:
+                ordered[it.id] = ordered.get(it.id, 0.0) + float(ln.get("qty") or 0)
+        for item_id, qty in ordered.items():
+            received = got.get((p.number, item_id), 0.0)
+            outstanding = round(qty - received, 4)
+            if outstanding <= 1e-9:
+                continue
+            # Receiving marks an order "received" at its first delivery, so
+            # only a closed order is done: what it is still missing is short.
+            # Anything else not fully in is still on order (partly received).
+            state = "short" if p.status == "closed" else "on_order"
+            out.setdefault(item_id, []).append({
+                "po_id": str(p.id), "po_number": p.number, "po_status": p.status,
+                "supplier": sups.get(p.supplier_id), "eta": p.eta,
+                "ordered": qty, "received": round(received, 4),
+                "outstanding": outstanding, "state": state,
+            })
+    return out

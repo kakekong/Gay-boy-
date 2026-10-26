@@ -101,6 +101,9 @@ async def receive_goods(db: AsyncSession, po, received: dict[int, float],
             db, value=payable, entry_date=gr.received_at or date_t.today(),
             po_number=po.number, supplier_name=sup.name if sup else None,
             receipt_id=gr.id, created_by=user.id if user else None)
+        # Goods arriving after the job was paid: their cost goes to HPP too.
+        from app.services.ledger import sync_po_cogs
+        await sync_po_cogs(db, po, created_by=user.id if user else None)
         await db.flush()
     return moved, gr, payable
 

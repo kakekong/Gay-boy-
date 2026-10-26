@@ -31,6 +31,12 @@ interface History {
   movements: Movement[];
   ledger_total: number;
   in_step: boolean;
+  on_order?: OnOrder[];
+}
+interface OnOrder {
+  po_id: string; po_number: string; po_status: string; supplier: string | null;
+  eta: string | null; ordered: number; received: number; outstanding: number;
+  state: "on_order" | "short";
 }
 
 const REASON: Record<string, [string, string]> = {
@@ -122,6 +128,60 @@ export default function InventoryItemPage() {
           </div>
         )}
       </div>
+
+      {/* Ordered and not on the shelf yet. Not stock: it joins the count when
+          it is received. A PO received or closed under what it ordered says
+          how much never came. */}
+      {(q.data.on_order ?? []).length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink-100 font-semibold">
+            {t("On order — not received yet", "Dalam pesanan — belum diterima")}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="th">{t("Purchase order", "PO pembelian")}</th>
+                  <th className="th">{t("Supplier", "Pemasok")}</th>
+                  <th className="th text-right">{t("Ordered", "Dipesan")}</th>
+                  <th className="th text-right">{t("Received", "Diterima")}</th>
+                  <th className="th text-right">{t("Not received", "Belum diterima")}</th>
+                  <th className="th">{t("Status", "Status")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(q.data.on_order ?? []).map((o) => (
+                  <tr key={o.po_id} className="border-t border-ink-100">
+                    <td className="td font-mono text-xs">
+                      <Link to={`/purchase-orders/${o.po_id}`} className="text-brand-700 hover:underline">
+                        {o.po_number}
+                      </Link>
+                    </td>
+                    <td className="td">{o.supplier ?? "—"}</td>
+                    <td className="td text-right tabular-nums">{fmtQty(o.ordered)}</td>
+                    <td className="td text-right tabular-nums">{fmtQty(o.received)}</td>
+                    <td className="td text-right tabular-nums font-semibold">{fmtQty(o.outstanding)}</td>
+                    <td className="td">
+                      {o.state === "on_order" ? (
+                        <span className="chip bg-brand-50 text-brand-700">
+                          {o.received > 0 ? t("Partly received", "Diterima sebagian")
+                                          : t("Not received", "Belum diterima")}
+                          {o.eta && <> · {t("ETA", "Perkiraan")} {new Date(o.eta).toLocaleDateString()}</>}
+                        </span>
+                      ) : (
+                        <span className="chip bg-amber-50 text-amber-800">
+                          {t(`Short — ${fmtQty(o.outstanding)} never arrived`,
+                             `Kurang — ${fmtQty(o.outstanding)} tidak datang`)}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card overflow-hidden">
         <div className="px-5 py-3 border-b border-ink-100 font-semibold">

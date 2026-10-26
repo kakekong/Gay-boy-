@@ -3,7 +3,8 @@ import { ModalCloseX } from "@/components/ModalCloseX";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { api } from "@/api/client";
-import { T } from "@/store/lang";
+import { T, useT } from "@/store/lang";
+import { useAuthStore } from "@/store/auth";
 
 export interface AccountRow {
   id: string;
@@ -32,7 +33,11 @@ const ACCOUNT_NO_RE = /^[A-Za-z0-9\-]+$/;
 
 export function AccountModal({ open, onClose, account, accountTypes, allAccounts }: Props) {
   const qc = useQueryClient();
+  const t = useT();
   const editing = !!account;
+  // Changing a balance moves the books with nothing on the other side —
+  // the director's call. It shows on the account's ledger as set by hand.
+  const canSetBalance = useAuthStore((s) => s.user?.role) === "director";
 
   const [form, setForm] = useState({
     account_no: "",
@@ -206,14 +211,24 @@ export function AccountModal({ open, onClose, account, accountTypes, allAccounts
                 ))}
               </select>
             </Field>
-            <Field label={T("Opening balance")}>
+            <Field label={editing ? T("Balance") : T("Opening balance")}>
               <input
                 type="number"
                 step="any"
                 className="input"
                 value={form.balance}
+                disabled={editing && !canSetBalance}
                 onChange={(e) => setForm({ ...form, balance: parseFloat(e.target.value || "0") })}
               />
+              {editing && (
+                <span className="block text-[11px] muted mt-1">
+                  {canSetBalance
+                    ? t("Changes the account's balance directly. It shows on the ledger as set by hand, with your name.",
+                        "Mengubah saldo akun langsung. Tercatat di buku besar sebagai diisi manual, atas nama Anda.")
+                    : t("Only the director can change a balance.",
+                        "Hanya direktur yang dapat mengubah saldo.")}
+                </span>
+              )}
             </Field>
           </div>
 
