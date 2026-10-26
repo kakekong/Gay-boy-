@@ -23,6 +23,7 @@ import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { NewDeliveryOrderModal } from "@/components/NewDeliveryOrderModal";
 import { InvoiceLinesEditor } from "@/components/InvoiceLines";
 import { QuotedMoney } from "@/components/QuotedMoney";
+import { OrderLines } from "@/components/OrderLines";
 
 const STATUS_CHIP: Record<string, string> = {
   new:              "bg-ink-100 text-ink-700",
@@ -1355,36 +1356,8 @@ export default function ProjectDetailPage() {
           {/* The whole deal, not only request ↔ quotation: the customer's PO
               and the supplier side too, each with its fix. */}
           <div className="px-5 pt-3"><DealCheck where={{ project_id: p.id }} /></div>
-          <table className="w-full text-sm">
-            <thead className="bg-ink-50/60">
-              <tr>
-                <th className="th">#</th>
-                <th className="th">{t("Description", "Deskripsi")}</th>
-                <th className="th text-right">{t("Qty", "Jml")}</th>
-                <th className="th">{t("UoM", "Satuan")}</th>
-                <th className="th">{t("Spec", "Spek")}</th>
-                <th className="th text-right">{t("Cost", "Biaya")}</th>
-                {priceReq.items?.[0] && "sell_price" in priceReq.items[0] && (
-                  <th className="th text-right">{t("Sell", "Jual")}</th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {(priceReq.items ?? []).map((it: any) => (
-                <tr key={it.line_no} className="border-t border-ink-100">
-                  <td className="td muted">{it.line_no}</td>
-                  <td className="td">{it.description}</td>
-                  <td className="td text-right tabular-nums">{it.qty}</td>
-                  <td className="td muted">{it.uom || "—"}</td>
-                  <td className="td muted text-xs">{it.spec || "—"}</td>
-                  <td className="td text-right tabular-nums">{it.cost_price != null ? idr(it.cost_price) : "—"}</td>
-                  {"sell_price" in it && (
-                    <td className="td text-right tabular-nums">{it.sell_price != null ? idr(it.sell_price) : "—"}</td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <OrderLines projectId={p.id} items={priceReq.items ?? []}
+            customOrder={!!priceReq.custom_order} canReorder={canSeeOpsDetails} />
         </div>
       )}
 

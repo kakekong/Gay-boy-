@@ -52,6 +52,11 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     delivery_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Import-document checklist: {key: {collected: bool, attachment_id, note}}
     import_docs:          Mapped[dict]            = mapped_column(JSONB, default=dict, nullable=False)
+    # The order the price request's lines are listed in on this project's
+    # Order card, as their line numbers — set by dragging them. The lines
+    # keep their numbers (the price request, supplier requests and POs refer
+    # to them); only the listing moves. None: the request's own order.
+    item_order:           Mapped[list | None]     = mapped_column(JSONB, nullable=True)
     # A supplier's own delivery mode when it differs from `delivery_mode`:
     # {supplier_id: mode}. One vendor local and one imported is an ordinary
     # job, and each needs its own document set.

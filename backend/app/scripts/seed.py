@@ -684,6 +684,8 @@ COLUMN_MIGRATIONS: list[str] = [
 
     # ── Utang usaha: what we owe suppliers for goods received ───────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS payable_amount NUMERIC(18,2) NOT NULL DEFAULT 0",
+    # ── The order a project lists its price-request lines in ───────────
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS item_order JSONB",
     # ── Why a quotation was lost: its own fields, not a line in the notes ──
     "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS lost_reason TEXT",
     "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS lost_at TIMESTAMPTZ",

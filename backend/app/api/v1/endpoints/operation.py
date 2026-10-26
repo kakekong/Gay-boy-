@@ -409,8 +409,16 @@ async def project_full(project_id: UUID,
                 if show_money:
                     row["sell_price"] = it.get("sell_price")
                 pr_items.append(row)
+            # Listed in the order set on this project, when one was; a line
+            # added to the request since goes at the end, in its own order.
+            order = [int(x) for x in (p.item_order or []) if str(x).lstrip("-").isdigit()]
+            pos = {ln: i for i, ln in enumerate(order)}
+            pr_items = [r for _, r in sorted(
+                enumerate(pr_items),
+                key=lambda ir: (pos.get(ir[1]["line_no"], len(order)), ir[0]))]
             price_request = {"id": str(pr.id), "number": pr.number,
-                             "items": pr_items}
+                             "items": pr_items,
+                             "custom_order": bool(order)}
             # Does the order on this page still say what the deal says?
             #
             # The card reads the request live, so it is right whenever the
@@ -1570,6 +1578,49 @@ class LogisticsPatch(BaseModel):
     # Set the mode for one supplier's shipment only. Without it the mode is
     # the project's, which every supplier without its own follows.
     supplier_id: UUID | None = None
+
+
+class ItemOrderIn(BaseModel):
+    # The line numbers in the order to list them; empty or null puts the
+    # price request's own order back.
+    order: list[int] | None = None
+
+
+@router.put("/projects/{project_id}/item-order")
+async def set_item_order(project_id: UUID, payload: ItemOrderIn,
+                         db: AsyncSession = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """Reorder the lines on the project's Order card — line 9 to the top,
+    say. Only the listing moves: every line keeps its number, which the price
+    request, supplier requests and POs refer to. Anyone who works the
+    project may do it; sales, who don't see the card, may not."""
+    from app.core.audit import record as audit_record
+    from app.models.price_request import PriceRequest
+
+    if Role(user.role) == Role.SALES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not on the sales view")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    pr = await db.get(PriceRequest, p.price_request_id) if p.price_request_id else None
+    if not pr:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This project has no price request lines")
+    before = p.item_order
+    if not payload.order:
+        p.item_order = None
+    else:
+        lines = [it.get("line_no") for it in (pr.items or [])]
+        if sorted(payload.order) != sorted(lines):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "The order has to name every line of the price request once — "
+                "refresh and try again.")
+        p.item_order = list(payload.order)
+    await audit_record(db, actor=user, action="reorder_items", entity="project",
+                       entity_id=p.id, before={"item_order": before},
+                       after={"item_order": p.item_order})
+    await db.flush()
+    return {"ok": True, "item_order": p.item_order}
 
 
 @router.patch("/projects/{project_id}/logistics")
