@@ -4,7 +4,8 @@ The bell (`GET /notifications`) already computes role-routed items per
 user at request time. To reach devices with NO tab open, a background
 task re-runs that aggregation for every internal user on an interval and
 web-pushes any item not yet delivered to that user (dedup via
-PushDelivered). One notification item → at most one push per user, ever.
+PushDelivered). One notification item → at most one push per user, ever —
+and only while it is recent (PUSH_MAX_AGE_DAYS).
 
 VAPID keys are generated once and persisted in the DB, so there is zero
 manual key setup and pushes keep verifying across restarts/rebuilds.
@@ -28,6 +29,20 @@ VAPID_SUBJECT = "mailto:admin@transmisisuplindo.com"
 
 # Only nag devices about things worth waking a phone for.
 _PUSH_SEVERITIES = {"high", "medium"}
+
+# A phone hears about what has just happened. Something that has been open
+# for longer — an approval from months ago — is recorded as delivered without
+# a push: the bell still lists it, but a device subscribing today, or a
+# ledger reset, doesn't wake it with the whole backlog five at a time.
+PUSH_MAX_AGE_DAYS = 3
+
+# The delivery and dismissal ledgers keep one row per notification per user,
+# for as long as the notification can still appear. Only notifications that
+# are new each day by design — the unread-chat count, attendance, the daily
+# roll-up — are cleared once old. Clearing the rest after 30 days is what
+# brought months-old approvals back into the director's bell and onto their
+# phone every month.
+_EPHEMERAL_PREFIXES = ("chat-unread:", "attendance-missing:", "attendance-late:", "team-rollup:")
 # Advisory lock key so only ONE worker/process runs the sweeper.
 _SWEEP_LOCK_KEY = 774_421_001
 # How often the 30-day ledgers get swept, in seconds.
@@ -346,7 +361,13 @@ async def sweep_once(db: AsyncSession) -> int:
         seen = {row[0] for row in (await db.execute(
             select(PushDelivered.item_id).where(PushDelivered.user_id == uid)
         )).all()}
-        fresh = [i for i in items if i["id"] not in seen][:5]  # cap per sweep
+        new = [i for i in items if i["id"] not in seen]
+        old = [i for i in new if _older_than(i.get("at"), PUSH_MAX_AGE_DAYS)]
+        for item in old:
+            db.add(PushDelivered(user_id=uid, item_id=item["id"]))
+        if old:
+            await db.flush()
+        fresh = [i for i in new if i not in old][:5]  # cap per sweep
         for item in fresh:
             db.add(PushDelivered(user_id=uid, item_id=item["id"]))
             await db.flush()
@@ -355,6 +376,45 @@ async def sweep_once(db: AsyncSession) -> int:
                 url=item.get("link") or "/",
             )
     return total
+
+
+def _older_than(at, days: int) -> bool:
+    """Whether a notification's time is more than `days` ago. No time: not."""
+    from datetime import UTC, date, datetime, timedelta
+    if at is None:
+        return False
+    if isinstance(at, str):
+        try:
+            at = datetime.fromisoformat(at)
+        except ValueError:
+            return False
+    if isinstance(at, datetime):
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=UTC)
+        return at < datetime.now(UTC) - timedelta(days=days)
+    if isinstance(at, date):
+        return at < date.today() - timedelta(days=days)
+    return False
+
+
+async def prune_ledgers(db: AsyncSession) -> None:
+    """Clear old rows of the new-each-day notifications only; everything
+    else stays delivered and dismissed for as long as it can still show."""
+    from app.models.push import NotificationDismissed
+    await db.execute(delete(PushDelivered).where(
+        text("sent_at < now() - interval '30 days'"),
+        ephemeral_clause(PushDelivered.item_id),
+    ))
+    await db.execute(delete(NotificationDismissed).where(
+        text("created_at < now() - interval '30 days'"),
+        ephemeral_clause(NotificationDismissed.item_id),
+    ))
+
+
+def ephemeral_clause(column):
+    """SQL: the item id is one of the new-each-day notifications."""
+    from sqlalchemy import or_
+    return or_(*[column.like(p + "%") for p in _EPHEMERAL_PREFIXES])
 
 
 def seconds_until_active(now=None) -> float:
@@ -473,13 +533,7 @@ async def sweeper_loop(interval: int | None = None,
                         # single tick.
                         now = time.monotonic()
                         if last_prune is None or now - last_prune >= _PRUNE_EVERY:
-                            from app.models.push import NotificationDismissed
-                            await db.execute(delete(PushDelivered).where(
-                                text("sent_at < now() - interval '30 days'")
-                            ))
-                            await db.execute(delete(NotificationDismissed).where(
-                                text("created_at < now() - interval '30 days'")
-                            ))
+                            await prune_ledgers(db)
                             await db.commit()
                             last_prune = now
                     finally:

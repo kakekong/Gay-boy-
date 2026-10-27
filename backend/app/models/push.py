@@ -60,7 +60,8 @@ class NotificationDismissed(Base, UUIDPK):
     """Bell items a user swiped away. The bell is computed live, so a
     dismissal is a per-user filter on item ids — the item disappears from
     that user's bell (and future pushes) until it resolves on its own.
-    Rows are pruned after 30 days by the sweeper."""
+    Kept for as long as the item can show; only the new-each-day items are
+    cleared after 30 days (webpush.prune_ledgers)."""
     __tablename__ = "notification_dismissed"
     __table_args__ = (
         UniqueConstraint("user_id", "item_id", name="uq_notif_dismissed"),
