@@ -161,6 +161,61 @@ def _pr_lines(pr: PriceRequest) -> dict[int, dict]:
     } for i, it in enumerate(pr.items or [])}
 
 
+def _merge_split(lines: dict[int, dict]) -> tuple[dict[int, dict], dict[int, int]]:
+    """One item written on several lines — the same part at the same unit and
+    price, split (100 + 30) to suit the customer's own system — is one item to
+    compare: it reads as its first line, carrying the quantity of all of them.
+
+    Returns the merged lines and, for every line number, the line it now reads
+    as (so a reference to the second half still finds the item)."""
+    first: dict[tuple, int] = {}
+    out: dict[int, dict] = {}
+    alias: dict[int, int] = {}
+    for no in sorted(lines):
+        v = lines[no]
+        k = (_key(v["description"]), v["uom"], v["price"])
+        if k[0] and k in first:
+            keep = first[k]
+            out[keep] = {**out[keep], "qty": _num(out[keep]["qty"] + v["qty"]),
+                         "split": out[keep].get("split", [keep]) + [no]}
+            alias[no] = keep
+            continue
+        first[k] = no
+        out[no] = dict(v)
+        alias[no] = no
+    return out, alias
+
+
+def _match_cpo_items(q_lines: dict[int, dict], alias: dict[int, int],
+                     cpo: CustomerPO) -> list[tuple[int | None, dict, int]]:
+    """`_match_cpo` for the report: the customer PO's lines paired with the
+    quotation's items, a split on either side counted as one item."""
+    by_key = {_key(v["description"]): no for no, v in q_lines.items()}
+    got: dict[int, tuple[dict, int]] = {}
+    loose: list[tuple[int | None, dict, int]] = []
+    for idx, it in enumerate(cpo.items or []):
+        row = {"description": _txt(it.get("description")), "qty": _num(it.get("qty")),
+               "uom": _txt(it.get("uom")) or "pcs", "price": _num(it.get("unit_price"))}
+        try:
+            no = int(it.get("line_no")) if it.get("line_no") is not None else None
+        except (TypeError, ValueError):
+            no = None
+        no = alias.get(no) if no is not None else None
+        if no is None or _key(q_lines[no]["description"]) != _key(row["description"]):
+            no = by_key.get(_key(row["description"]), no)
+        if no is None:
+            loose.append((None, row, idx))
+        elif no in got:
+            had, first_idx = got[no]
+            if (had["uom"], had["price"]) == (row["uom"], row["price"]):
+                got[no] = ({**had, "qty": _num(had["qty"] + row["qty"])}, first_idx)
+            else:
+                loose.append((None, row, idx))
+        else:
+            got[no] = (row, idx)
+    return [(no, row, idx) for no, (row, idx) in got.items()] + loose
+
+
 def _compare(a: dict[int, dict], b: dict[int, dict], fields,
              a_only: str, b_only: str) -> list[dict]:
     out = []
@@ -254,8 +309,8 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
     checks: list[dict] = []
 
     if pr is not None and q is not None and _sees_sell(role):
-        lines = _compare(_pr_lines(pr), _q_lines(q), ("description", "qty", "uom", "price"),
-                         "only_left", "only_right")
+        lines = _compare(_merge_split(_pr_lines(pr))[0], _merge_split(_q_lines(q))[0],
+                         ("description", "qty", "uom", "price"), "only_left", "only_right")
         ok_q, why_q, how_q = _quotation_edit_rule(q, user)
         ok_p, why_p = _pr_edit_rule(pr, user)
         checks.append({
@@ -272,9 +327,9 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
         })
 
     if q is not None and _sees_sell(role):
-        ql = _q_lines(q)
+        ql, alias = _merge_split(_q_lines(q))
         for cpo in chain["customer_pos"]:
-            pairs = _match_cpo(ql, cpo)
+            pairs = _match_cpo_items(ql, alias, cpo)
             single = len(chain["customer_pos"]) == 1
             lines = []
             for no, row, idx in pairs:
@@ -327,7 +382,7 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
             })
 
         if chain["supplier_pos"]:
-            need = {no: v for no, v in _pr_lines(pr).items()}
+            need, pr_alias = _merge_split(_pr_lines(pr))
             ordered: dict[int, float] = {}
             for spo in chain["supplier_pos"]:
                 for it in (spo.items or []):
@@ -338,7 +393,8 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
                     no = it.get("source_line_no")
                     if no is None:
                         continue
-                    ordered[int(no)] = ordered.get(int(no), 0) + _num(it.get("qty"))
+                    no = pr_alias.get(int(no), int(no))
+                    ordered[no] = ordered.get(no, 0) + _num(it.get("qty"))
             lines = []
             for no, v in sorted(need.items()):
                 if no in ordered and abs(ordered[no] - v["qty"]) > 1e-6:

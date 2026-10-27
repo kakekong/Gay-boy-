@@ -313,6 +313,93 @@ def _copy_line(pr: PriceRequest, it: dict, line_no: int) -> dict:
     }
 
 
+def _norm(name) -> str:
+    return " ".join(str(name or "").lower().split())
+
+
+def _bind(spr: SupplierPriceRequest, prs: dict[UUID, PriceRequest]) -> tuple[list, set]:
+    """Which customer line each of this request's lines stands for now.
+
+    A line remembers the number its customer line had when it was copied
+    (`source_line_no`). Numbers move — a line deleted off the customer request
+    renumbers the rest, an order is rearranged — and a number alone then points
+    at a different item: the deal check compared a sprocket with a connecting
+    link, and a refresh would have overwritten one with the other. So a line is
+    tied to its customer line by number *and* name, then by name alone, and by
+    number alone only for a line that was reworded.
+
+    An item the customer request carries on several lines (100 + 30 of the same
+    link, split to suit the customer's own system) is one item to the supplier:
+    the extra lines ride on the line already asking for it — `extras` — and
+    their quantity counts with it.
+
+    Returns, per line, `(pr, origin, extras)` or None, and every customer line
+    accounted for."""
+    rows = [it if isinstance(it, dict) else {} for it in (spr.items or [])]
+    claimed: set[tuple[str, int]] = set()
+    bound: list = [None] * len(rows)
+
+    def src(it):
+        sid, sno = it.get("source_pr_id"), it.get("source_line_no")
+        if not sid or sno is None:
+            return None, None
+        try:
+            return prs.get(UUID(str(sid))), int(sno)
+        except (ValueError, TypeError):
+            return None, None
+
+    def take(i, pr, o):
+        bound[i] = (pr, o)
+        claimed.add((str(pr.id), int(o.get("line_no") or 0)))
+
+    for i, it in enumerate(rows):                       # same number, same item
+        pr, no = src(it)
+        o = _pr_line(pr, no) if pr is not None else None
+        if o is not None and _norm(o.get("description")) == _norm(it.get("description")):
+            take(i, pr, o)
+    for i, it in enumerate(rows):                       # the item, wherever it is now
+        pr, no = src(it)
+        if pr is None or bound[i] is not None:
+            continue
+        o = next((x for x in (pr.items or []) if isinstance(x, dict)
+                  and _norm(x.get("description")) == _norm(it.get("description"))
+                  and (str(pr.id), int(x.get("line_no") or 0)) not in claimed), None)
+        if o is not None:
+            take(i, pr, o)
+    for i, it in enumerate(rows):                       # the same line, reworded
+        pr, no = src(it)
+        if pr is None or bound[i] is not None:
+            continue
+        o = _pr_line(pr, no)
+        if o is not None and (str(pr.id), int(o.get("line_no") or 0)) not in claimed:
+            take(i, pr, o)
+
+    out: list = []
+    first_of: dict[tuple[str, str], int] = {}
+    for i, b in enumerate(bound):
+        if b is None:
+            out.append(None)
+            continue
+        pr, o = b
+        first_of.setdefault((str(pr.id), _norm(o.get("description"))), i)
+        out.append((pr, o, []))
+    for pr in prs.values():                             # the same item, split
+        for x in (pr.items or []):
+            if not isinstance(x, dict):
+                continue
+            k = (str(pr.id), int(x.get("line_no") or 0))
+            i = first_of.get((str(pr.id), _norm(x.get("description"))))
+            if k in claimed or i is None:
+                continue
+            out[i][2].append(x)
+            claimed.add(k)
+    return out, claimed
+
+
+def _wanted_qty(origin: dict, extras: list[dict]) -> float:
+    return float(origin.get("qty") or 0) + sum(float(x.get("qty") or 0) for x in extras)
+
+
 def _held(spr: SupplierPriceRequest) -> set[tuple[str, int]]:
     """(customer request id, its line number) for every line this holds."""
     return {(str(i.get("source_pr_id")), int(i.get("source_line_no")))
@@ -392,7 +479,10 @@ def _source_drift(spr: SupplierPriceRequest,
     not a guess.
     """
     out: list[dict] = []
-    for it in (spr.items or []):
+    binding, claimed = _bind(spr, prs)
+    for it, b in zip(spr.items or [], binding):
+        if not isinstance(it, dict):
+            continue
         src_id, src_no = it.get("source_pr_id"), it.get("source_line_no")
         if not src_id or src_no is None:
             continue
@@ -402,16 +492,16 @@ def _source_drift(spr: SupplierPriceRequest,
             continue
         if pr is None:
             continue
-        origin = _pr_line(pr, int(src_no))
-        if origin is None:
+        if b is None:
             out.append({"line_no": it.get("line_no"), "change": "source_gone",
                         "description": it.get("description"),
                         "source_number": it.get("source_pr_number")})
             continue
+        _pr, origin, extras = b
         fields = []
         for k in ("description", "qty", "uom"):
             if k == "qty":
-                was, now = float(it.get(k) or 0), float(origin.get(k) or 0)
+                was, now = float(it.get(k) or 0), _wanted_qty(origin, extras)
             else:
                 was, now = (it.get(k) or ""), (origin.get(k) or "")
             if was != now:
@@ -432,7 +522,9 @@ def _source_drift(spr: SupplierPriceRequest,
     # line is not this vendor's by default, and reporting it here would be
     # wrong. `whole` is decided by `_is_whole`, which the refresh asks too.
     if whole:
-        held = _held(spr)
+        # What each line really stands for, not the number it remembers: a
+        # stale number could otherwise hide a line that is genuinely new.
+        held = claimed
         for pr in prs.values():
             if str(pr.id) not in {str(x) for x in _source_ids(spr)}:
                 continue
@@ -925,31 +1017,36 @@ async def refresh_from_source(
     updated: list[dict] = []
     orphaned: list[dict] = []
     items: list[dict] = []
-    for it in (spr.items or []):
+    binding, claimed = _bind(spr, prs)
+    held = claimed
+    for it, b in zip(spr.items or [], binding):
         row = dict(it)
         src_id, src_no = row.get("source_pr_id"), row.get("source_line_no")
-        origin = None
+        origin = extras = None
         if src_id and src_no is not None:
             try:
                 pr = prs.get(UUID(str(src_id)))
             except (ValueError, TypeError):
                 pr = None
             if pr is not None:
-                origin = _pr_line(pr, int(src_no))
-                if origin is None:
+                if b is None:
                     orphaned.append({"line_no": row.get("line_no"),
                                      "description": row.get("description")})
+                else:
+                    _pr, origin, extras = b
         if origin is not None:
             fields = []
             for k in ("description", "qty", "uom"):
                 if k == "qty":
-                    was, now = float(row.get(k) or 0), float(origin.get(k) or 0)
+                    was, now = float(row.get(k) or 0), _wanted_qty(origin, extras)
                 else:
                     was, now = (row.get(k) or ""), (origin.get(k) or "")
                 if was != now:
                     fields.append({"field": k, "was": was, "now": now})
                 row[k] = now
             row["spec"] = origin.get("spec") or {}
+            # Tied to the line it really stands for, from now on.
+            row["source_line_no"] = origin.get("line_no")
             if fields:
                 updated.append({"line_no": row.get("line_no"),
                                 "description": row.get("description"),
