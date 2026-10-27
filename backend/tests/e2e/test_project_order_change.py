@@ -1,7 +1,7 @@
 """The sales rep arranges a won job's order; the director approves it.
 
-On a project's Order card the customer's sales rep can move lines, change a
-selling price and add items — as one proposal that applies only when the
+On a project's Order card the customer's sales rep can move lines, edit a
+line (item name, quantity, unit, spec, selling price) and add items — as one proposal that applies only when the
 director approves it (from the inbox or the card). The director's own change
 applies at once. An added line named like one already on the order takes its
 cost from it; a genuinely new item goes in without a cost. Lines can't be
@@ -133,6 +133,33 @@ async def main():
     check("the director's change applies at once", J(r).get("status") == "applied"
           and lns(C) == [1, 2, 3, 4, 5] and {i["line_no"]: i for i in C}[5]["sell_price"] == 60_000,
           f"{J(r)} {lns(C)}"[:200])
+
+    print("\n── editing a line ──")
+    order = [{"line_no": n} for n in (2, 3, 4, 5)]
+    r = await c.post(base, headers=s1, json={"lines": [
+        {"line_no": 1, "description": f"Roller Chain RS 80 {TAG}", "qty": 3, "uom": "m",
+         "spec": "riveted"}, *order]})
+    summ = " | ".join(J(r).get("summary", []))
+    check("the rep edits a line's name, quantity, unit and spec — sent to the director",
+          J(r).get("status") == "pending_approval" and "Rename" in summ and "1 → 3" in summ
+          and "pcs → m" in summ and "Spec" in summ, f"{J(r)}"[:250])
+    C = {i["line_no"]: i for i in await card()}
+    check("...nothing changes until approved", C[1]["qty"] == 1 and C[1]["description"] == names[0])
+    req = J(await c.get(base, headers=d))["pending"]["id"]
+    await c.post(f"/approvals/{req}/approve", headers=d)
+    C = {i["line_no"]: i for i in await card()}
+    check("...approved: the line reads as edited, its cost kept",
+          C[1]["description"] == f"Roller Chain RS 80 {TAG}" and C[1]["qty"] == 3
+          and C[1]["uom"] == "m" and C[1]["spec"] == "riveted" and C[1]["cost_price"] == 100_000,
+          str(C[1]))
+    r = await c.post(base, headers=d, json={"lines": [{"line_no": 1, "qty": 5}, *order]})
+    C = {i["line_no"]: i for i in await card()}
+    check("the director's edit applies at once", J(r).get("status") == "applied" and C[1]["qty"] == 5,
+          f"{J(r)}"[:200])
+    r = await c.post(base, headers=s1, json={"lines": [{"line_no": 1, "description": "  "}, *order]})
+    check("a line can't lose its name", r.status_code == 400, str(r.status_code))
+    r = await c.post(base, headers=s1, json={"lines": [{"line_no": 1, "qty": 0}, *order]})
+    check("...or go to zero quantity", r.status_code == 400, str(r.status_code))
 
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

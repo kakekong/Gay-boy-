@@ -80,7 +80,8 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
     mutationFn: () => api.post(`/operation/projects/${projectId}/order-change`, {
       note: note || null,
       lines: draft.map((d) => d.line_no != null
-        ? { line_no: d.line_no, sell_price: d.sell === "" ? null : Number(d.sell) }
+        ? { line_no: d.line_no, description: d.description, qty: Number(d.qty),
+            uom: d.uom, spec: d.spec, sell_price: d.sell === "" ? null : Number(d.sell) }
         : { description: d.description, qty: Number(d.qty), uom: d.uom || null,
             spec: d.spec || null, sell_price: d.sell === "" ? null : Number(d.sell),
             cost_price: isDirector && d.cost !== "" ? Number(d.cost) : null }),
@@ -180,10 +181,10 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
           </button>
           <span className="muted">
             {isDirector
-              ? t("Move lines, change selling prices or add items.",
-                  "Pindahkan baris, ubah harga jual, atau tambah barang.")
-              : t("Move lines, change selling prices or add items — the director approves before it applies.",
-                  "Pindahkan baris, ubah harga jual, atau tambah barang — berlaku setelah disetujui direktur.")}
+              ? t("Move lines, edit them (name, quantity, unit, spec, selling price) or add items.",
+                  "Pindahkan baris, ubah isinya (nama, jumlah, satuan, spesifikasi, harga jual), atau tambah barang.")
+              : t("Move lines, edit them (name, quantity, unit, spec, selling price) or add items — the director approves before it applies.",
+                  "Pindahkan baris, ubah isinya (nama, jumlah, satuan, spesifikasi, harga jual), atau tambah barang — berlaku setelah disetujui direktur.")}
           </span>
         </div>
       )}
@@ -243,6 +244,7 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
                 {draft.map((d, i) => {
                   const isNew = d.line_no == null;
                   const same = isNew ? byName.get(norm(d.description)) : undefined;
+                  const orig = isNew ? undefined : items.find((it) => it.line_no === d.line_no);
                   return (
                     <tr key={d.key}
                       draggable
@@ -287,22 +289,33 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
                                 onChange={(e) => set(i, { cost: e.target.value })} />
                             )}
                           </div>
-                        ) : d.description}
+                        ) : (
+                          <div className="space-y-1">
+                            <input className="input py-1" value={d.description}
+                              aria-label={t("Item name", "Nama barang")}
+                              onChange={(e) => set(i, { description: e.target.value })} />
+                            {orig && d.description.trim() !== orig.description && (
+                              <div className="text-[11px] text-amber-700">
+                                {t(`Was “${orig.description}”`, `Sebelumnya “${orig.description}”`)}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="td text-right">
-                        {isNew ? <input className="input py-1 text-right" inputMode="decimal" value={d.qty}
-                                   onChange={(e) => set(i, { qty: e.target.value })} />
-                          : <span className="tabular-nums">{d.qty}</span>}
+                        <input className="input py-1 text-right" inputMode="decimal" value={d.qty}
+                          aria-label={t("Quantity", "Jumlah")}
+                          onChange={(e) => set(i, { qty: e.target.value })} />
                       </td>
                       <td className="td">
-                        {isNew ? <input className="input py-1" value={d.uom}
-                                   onChange={(e) => set(i, { uom: e.target.value })} />
-                          : <span className="muted">{d.uom || "—"}</span>}
+                        <input className="input py-1" value={d.uom}
+                          aria-label={t("Unit", "Satuan")}
+                          onChange={(e) => set(i, { uom: e.target.value })} />
                       </td>
                       <td className="td">
-                        {isNew ? <input className="input py-1" value={d.spec}
-                                   onChange={(e) => set(i, { spec: e.target.value })} />
-                          : <span className="muted text-xs">{d.spec || "—"}</span>}
+                        <input className="input py-1" value={d.spec}
+                          aria-label={t("Spec", "Spesifikasi")}
+                          onChange={(e) => set(i, { spec: e.target.value })} />
                       </td>
                       <td className="td">
                         <input className="input py-1 text-right tabular-nums" inputMode="decimal"

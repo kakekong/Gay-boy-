@@ -1,8 +1,9 @@
 """A project's order — its price-request lines — arranged and amended.
 
 The customer's sales rep and the director are the ones who arrange a won
-job's order: the sequence its lines are listed in, the selling price of a
-line, and a line added to it. The director's change applies at once; the
+job's order: the sequence its lines are listed in, what a line is (its item
+name, quantity, unit and spec) and its selling price, and a line added to
+it. The director's change applies at once; the
 rep's goes to the director as one proposal (revised, not stacked, if they
 change it again while it waits), and applies only when approved.
 
@@ -105,7 +106,7 @@ def _plan(pr, p: Project, lines: list[OrderLineIn], *, director: bool) -> dict:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Every line already on the order has to stay, once — lines can be "
-            "moved, repriced or added, not removed. Refresh and try again.")
+            "moved, edited or added, not removed. Refresh and try again.")
     by_name = {}
     for it in pr.items or []:
         by_name.setdefault(_key(it.get("description")), it)
@@ -117,6 +118,31 @@ def _plan(pr, p: Project, lines: list[OrderLineIn], *, director: bool) -> dict:
     for ln in lines:
         if ln.line_no is not None:
             it = items[ln.line_no]
+            name = it.get("description")
+            if ln.description is not None:
+                desc = ln.description.strip()
+                if not desc:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                        f"Line “{name}” needs a description")
+                if desc != (name or ""):
+                    it["description"] = desc
+                    summary.append(f"Rename “{name}” → “{desc}”")
+            if ln.qty is not None:
+                if ln.qty <= 0:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                        f"“{it.get('description')}” needs a quantity above zero")
+                old = it.get("qty")
+                if old is None or abs(float(old) - float(ln.qty)) > 1e-9:
+                    it["qty"] = float(ln.qty)
+                    summary.append(f"Quantity of “{it.get('description')}”: "
+                                   f"{_num(old)} → {float(ln.qty):g}")
+            if ln.uom is not None and ln.uom.strip() and ln.uom.strip() != (it.get("uom") or ""):
+                summary.append(f"Unit of “{it.get('description')}”: "
+                               f"{it.get('uom') or '—'} → {ln.uom.strip()}")
+                it["uom"] = ln.uom.strip()
+            if ln.spec is not None and (ln.spec.strip() or None) != (it.get("spec") or None):
+                it["spec"] = ln.spec.strip() or None
+                summary.append(f"Spec of “{it.get('description')}” changed")
             if ln.sell_price is not None:
                 old = it.get("sell_price")
                 new = round(float(ln.sell_price), 2)
@@ -167,6 +193,10 @@ def _plan(pr, p: Project, lines: list[OrderLineIn], *, director: bool) -> dict:
     return {"items": [items[n] for n in sorted(items)], "order": order, "summary": summary}
 
 
+def _num(v) -> str:
+    return "—" if v is None else f"{float(v):g}"
+
+
 def _rp(v) -> str:
     if v is None:
         return "—"
@@ -210,7 +240,7 @@ async def get_order_change(project_id: UUID, db: AsyncSession = Depends(get_db),
 async def change_order(project_id: UUID, payload: OrderChangeIn,
                        db: AsyncSession = Depends(get_db),
                        user: User = Depends(get_current_user)):
-    """Arrange the order: move lines, reprice them, add lines. The director's
+    """Arrange the order: move lines, edit or reprice them, add lines. The director's
     change applies now; the rep's goes to the director."""
     p, pr = await _load(db, project_id)
     if not await _may_arrange(db, user, p):
