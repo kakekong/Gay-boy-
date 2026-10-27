@@ -12,6 +12,10 @@ the order — so a line with the same name as an existing one takes its cost
 from it. A genuinely new item has no cost yet; the director sees that when
 deciding, and can enter one.
 
+What a line costs us is purchasing's (and the director's) to correct, here,
+directly: it is internal, never on the customer's copy, and it follows to the
+quotation's cost estimate the way a cost corrected on the request does.
+
 Only the project's order changes (the price-request lines it reads, and the
 order they are listed in). The customer's PO and the quotation stay as
 signed; the deal check flags any difference so a revision can follow.
@@ -51,6 +55,21 @@ class OrderLineIn(BaseModel):
     sell_price: float | None = None
     # Director only — what a new item costs, when it is known.
     cost_price: float | None = None
+
+
+class CostLineIn(BaseModel):
+    line_no: int
+    cost_price: float
+
+
+class OrderCostsIn(BaseModel):
+    lines: list[CostLineIn]
+    note: str | None = None
+
+
+def _may_cost(user: User) -> bool:
+    """What a line costs is purchasing's — and the director's."""
+    return Role(user.role) in (Role.PURCHASING, Role.DIRECTOR)
 
 
 class OrderChangeIn(BaseModel):
@@ -233,7 +252,47 @@ async def get_order_change(project_id: UUID, db: AsyncSession = Depends(get_db),
                "note": (req.payload or {}).get("note"),
                "lines": (req.payload or {}).get("lines", [])}
     return {"may_arrange": await _may_arrange(db, user, p),
+            "may_cost": _may_cost(user),
             "is_director": Role(user.role) == Role.DIRECTOR, "pending": out}
+
+
+@router.post("/projects/{project_id}/order-costs")
+async def change_order_costs(project_id: UUID, payload: OrderCostsIn,
+                             db: AsyncSession = Depends(get_db),
+                             user: User = Depends(get_current_user)):
+    """Purchasing corrects what lines cost, on the project's order. Applies
+    at once; the quotation's cost estimate follows."""
+    from app.services.quotation_sync import sync_costs
+
+    if not _may_cost(user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "What a line costs is purchasing's and the director's to change.")
+    p, pr = await _load(db, project_id)
+    items = {int(it.get("line_no") or 0): dict(it) for it in (pr.items or [])}
+    summary: list[str] = []
+    for ln in payload.lines:
+        it = items.get(int(ln.line_no))
+        if it is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"There is no line {ln.line_no} on this order — refresh and try again.")
+        new = round(float(ln.cost_price), 2)
+        if new < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "A cost can't be negative")
+        old = it.get("cost_price")
+        if old is None or abs(float(old) - new) >= 0.005 or it.get("cost_basis") not in (None, "unit"):
+            it["cost_price"] = new
+            it["cost_basis"] = "unit"
+            summary.append(f"Cost of “{it.get('description')}”: {_rp(old)} → {_rp(new)}")
+    if not summary:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing changed")
+    before = [dict(it) for it in (pr.items or [])]
+    pr.items = [items[int(it.get("line_no") or 0)] for it in (pr.items or [])]
+    synced = await sync_costs(db, pr)
+    await audit_record(db, actor=user, action="order_costs", entity="project", entity_id=p.id,
+                       before={"items": before},
+                       after={"summary": summary, "note": (payload.note or "").strip() or None})
+    await db.flush()
+    return {"status": "applied", "summary": summary, "quotation_lines": synced}
 
 
 @router.post("/projects/{project_id}/order-change")

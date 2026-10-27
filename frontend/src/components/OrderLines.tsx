@@ -44,11 +44,16 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
   const meta = useQuery({
     queryKey: ["order-change", projectId],
     queryFn: () => api.get(`/operation/projects/${projectId}/order-change`)
-      .then((r) => r.data as { may_arrange: boolean; is_director: boolean; pending: Pending | null }),
+      .then((r) => r.data as { may_arrange: boolean; may_cost?: boolean; is_director: boolean;
+                               pending: Pending | null }),
   });
   const mayArrange = !!meta.data?.may_arrange;
   const isDirector = !!meta.data?.is_director;
   const pending = meta.data?.pending ?? null;
+  // Purchasing (and the director) correct what lines cost, straight away.
+  const mayCost = !!meta.data?.may_cost;
+  const [costing, setCosting] = useState(false);
+  const [costs, setCosts] = useState<Record<number, string>>({});
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Draft[]>([]);
@@ -92,6 +97,19 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
         ? t("Saved — the order is updated.", "Tersimpan — pesanan diperbarui.")
         : t("Sent to the director. It applies once approved.",
             "Dikirim ke direktur. Berlaku setelah disetujui.") });
+    },
+    onError: fail,
+  });
+  const saveCosts = useMutation({
+    mutationFn: () => api.post(`/operation/projects/${projectId}/order-costs`, {
+      lines: items.filter((it) => (costs[it.line_no] ?? "") !== ""
+                                  && Number(costs[it.line_no]) !== (it.cost_price ?? null))
+        .map((it) => ({ line_no: it.line_no, cost_price: Number(costs[it.line_no]) })),
+    }).then((r) => r.data),
+    onSuccess: () => {
+      setCosting(false); refresh();
+      setMsg({ ok: true, text: t("Costs saved — the quotation's cost estimate follows.",
+                                 "Biaya tersimpan — estimasi biaya penawaran ikut diperbarui.") });
     },
     onError: fail,
   });
@@ -171,7 +189,32 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
         </div>
       )}
 
-      {mayArrange && !editing && (
+      {mayCost && !editing && !costing && (
+        <div className="px-5 pt-2 flex items-center gap-3 text-xs">
+          <button className="btn-ghost text-xs" onClick={() => {
+            setCosts(Object.fromEntries(items.map((it) => [it.line_no,
+              it.cost_price != null ? String(it.cost_price) : ""])));
+            setMsg(null); setCosting(true);
+          }}>
+            <Pencil size={13} /> {t("Edit costs", "Ubah biaya")}
+          </button>
+          <span className="muted">
+            {t("What each line costs us — saved straight away; the customer never sees it.",
+               "Biaya tiap baris — langsung tersimpan; tidak terlihat oleh pelanggan.")}
+          </span>
+        </div>
+      )}
+      {costing && (
+        <div className="px-5 pt-2 flex items-center gap-2 text-xs">
+          <button className="btn-primary text-xs" disabled={saveCosts.isPending}
+            onClick={() => saveCosts.mutate()}>
+            {saveCosts.isPending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            {t("Save costs", "Simpan biaya")}
+          </button>
+          <button className="btn-ghost text-xs" onClick={() => setCosting(false)}>{t("Cancel", "Batal")}</button>
+        </div>
+      )}
+      {mayArrange && !editing && !costing && (
         <div className="px-5 py-2 flex items-center gap-3 text-xs">
           <button className="btn-ghost text-xs" onClick={start}>
             <Pencil size={13} />
@@ -217,7 +260,15 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
                   <td className="td text-right tabular-nums">{it.qty}</td>
                   <td className="td muted">{it.uom || "—"}</td>
                   <td className="td muted text-xs">{it.spec || "—"}</td>
-                  {hasCost && <td className="td text-right tabular-nums">{it.cost_price != null ? idr(it.cost_price) : "—"}</td>}
+                  {hasCost && (
+                    <td className="td text-right tabular-nums">
+                      {costing ? (
+                        <input className="input py-1 w-32 text-right tabular-nums ml-auto" inputMode="decimal"
+                          aria-label={t("Cost", "Biaya")} value={costs[it.line_no] ?? ""}
+                          onChange={(e) => setCosts((c) => ({ ...c, [it.line_no]: e.target.value }))} />
+                      ) : it.cost_price != null ? idr(it.cost_price) : "—"}
+                    </td>
+                  )}
                   {hasSell && <td className="td text-right tabular-nums">{it.sell_price != null ? idr(it.sell_price) : "—"}</td>}
                 </tr>
               ))}

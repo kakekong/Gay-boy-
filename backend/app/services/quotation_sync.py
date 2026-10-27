@@ -179,6 +179,33 @@ async def sync_from_price_request(
     return out
 
 
+async def sync_costs(db: AsyncSession, pr: PriceRequest) -> int:
+    """Only the cost: each quotation line built from the request takes the
+    request line's cost as its estimate. What we pay is never on the
+    customer's copy, so this reaches a quotation in any state, quietly —
+    nothing else on it moves. Returns how many lines changed."""
+    quotes = list((await db.scalars(
+        select(Quotation).where(Quotation.price_request_id == pr.id))).all())
+    if pr.quotation_id and not any(q.id == pr.quotation_id for q in quotes):
+        q = await db.get(Quotation, pr.quotation_id)
+        if q:
+            quotes.append(q)
+    cost_by_no = {w["line_no"]: w["cost_estimate"]
+                  for w in (_line_of(it, i) for i, it in enumerate(pr.items or []))}
+    n = 0
+    for q in quotes:
+        if q.status in ("lost", "cancelled", "superseded"):
+            continue
+        for it in q.items:
+            c = cost_by_no.get(int(it.line_no or 0))
+            if c is not None and abs(float(it.cost_estimate or 0) - c) > 0.005:
+                it.cost_estimate = c
+                n += 1
+    if n:
+        await db.flush()
+    return n
+
+
 async def quotation_ids_for(db: AsyncSession, pr_id: UUID) -> list[UUID]:
     return list((await db.scalars(
         select(Quotation.id).where(Quotation.price_request_id == pr_id)

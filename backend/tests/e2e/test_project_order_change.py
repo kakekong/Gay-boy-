@@ -161,6 +161,30 @@ async def main():
     r = await c.post(base, headers=s1, json={"lines": [{"line_no": 1, "qty": 0}, *order]})
     check("...or go to zero quantity", r.status_code == 400, str(r.status_code))
 
+    print("\n── purchasing corrects the cost ──")
+    costs = f"/operation/projects/{pid}/order-costs"
+    m = J(await c.get(base, headers=pur))
+    check("purchasing may change costs (not arrange the order)",
+          m.get("may_cost") is True and m.get("may_arrange") is False, str(m)[:150])
+    r = await c.post(costs, headers=s1, json={"lines": [{"line_no": 2, "cost_price": 90_000}]})
+    check("the rep can't", r.status_code == 403, str(r.status_code))
+    r = await c.post(costs, headers=pur, json={"lines": [{"line_no": 2, "cost_price": -1}]})
+    check("a negative cost is refused", r.status_code == 400, str(r.status_code))
+    r = await c.post(costs, headers=pur, json={"lines": [{"line_no": 99, "cost_price": 1}]})
+    check("...and a line that isn't there", r.status_code == 400, str(r.status_code))
+    r = await c.post(costs, headers=pur, json={"lines": [{"line_no": 2, "cost_price": 90_000}]})
+    C = {i["line_no"]: i for i in await card(pur)}
+    check("purchasing's cost applies at once", J(r).get("status") == "applied"
+          and C[2]["cost_price"] == 90_000 and "90.000" in " ".join(J(r)["summary"]), f"{J(r)}"[:200])
+    qd = J(await c.get(f"/quotations/{q['id']}", headers=d))
+    est = {int(i["line_no"]): float(i.get("cost_estimate") or 0) for i in qd["items"]}
+    check("...and the quotation's cost estimate follows", est.get(2) == 90_000, str(est))
+    D2 = {i["line_no"]: i for i in await card(d)}[2]
+    check("...its selling price untouched (purchasing never sees it)",
+          D2["sell_price"] == 175_000 and "sell_price" not in C[2], str(D2))
+    r = await c.post(costs, headers=pur, json={"lines": [{"line_no": 2, "cost_price": 90_000}]})
+    check("saving the same cost again changes nothing", r.status_code == 400, str(r.status_code))
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
