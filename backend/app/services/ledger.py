@@ -173,13 +173,20 @@ async def post_quotation(db: AsyncSession, q: Quotation) -> dict:
     entry_date = datetime.now(UTC).date()
 
     movements = []
+    legs: list[tuple[str, str | None, float]] = []
+    split = await _by_item_accounts(db, q, amounts)
     for key in ("receivable", "revenue", "discount", "tax"):
+        if key in split:
+            legs += [(key, no, amt) for no, amt in split[key]]
+        else:
+            legs.append((key, getattr(q, f"account_{key}_no"), amounts[key]))
+    for key, acc_no, amount in legs:
         # Nothing to write for a figure that is nothing: a quotation with no
         # discount used to put a Rp 0 "posted (discount)" line on Diskon
         # Penjualan for every deal won — hundreds of rows saying nothing.
-        if abs(float(amounts[key] or 0)) < 0.005:
+        if abs(float(amount or 0)) < 0.005:
             continue
-        m = await _bump(db, getattr(q, f"account_{key}_no"), amounts[key])
+        m = await _bump(db, acc_no, amount)
         if m:
             movements.append({**m, "role": key})
             await journal_post(
@@ -199,6 +206,46 @@ async def post_quotation(db: AsyncSession, q: Quotation) -> dict:
     }
     await db.flush()
     return q.posted_snapshot
+
+
+async def _by_item_accounts(db: AsyncSession, q: Quotation, amounts: dict) -> dict:
+    """Penjualan and Diskon Penjualan split by each line's item's own
+    accounts (Akun Penjualan, Akun Disk. Penjualan) — where the quotation
+    posts to the standard accounts; one set on the quotation by hand wins.
+    The discount is shared out by line value. Returns {role: [(account,
+    amount)]} for the roles it splits; amounts add up to the whole exactly."""
+    from app.models.quotation import QuotationItem
+    from app.services import item_accounts as ia
+
+    roles = [r for r, f in (("revenue", "acc_sales"), ("discount", "acc_sales_discount"))
+             if getattr(q, f"account_{r}_no") in (None, DEFAULTS[r])
+             and abs(float(amounts.get(r) or 0)) >= 0.005]
+    if not roles:
+        return {}
+    lines = (await db.scalars(select(QuotationItem).where(
+        QuotationItem.quotation_id == q.id))).all()
+    values = [(it, float(it.qty or 0) * float(it.unit_price or 0)) for it in lines]
+    whole = sum(v for _, v in values)
+    if whole <= 0:
+        return {}
+    dflt = await ia.defaults(db)
+    weights: dict[str, dict[str, float]] = {r: {} for r in roles}
+    for it, v in values:
+        acc = ia.resolved(await ia.item_for_line(db, sku=it.sku, name=it.description), dflt)
+        for r in roles:
+            no = acc["acc_sales" if r == "revenue" else "acc_sales_discount"]
+            no = await _usable(db, no, DEFAULTS[r])
+            weights[r][no] = weights[r].get(no, 0.0) + v
+    out = {}
+    for r in roles:
+        total = round(float(amounts[r]), 2)
+        parts = sorted(weights[r].items(), key=lambda kv: -kv[1])
+        shares = [(no, round(total * w / whole, 2)) for no, w in parts]
+        # Rounding goes to the biggest share, so the parts are the whole.
+        drift = round(total - sum(a for _, a in shares), 2)
+        shares[0] = (shares[0][0], round(shares[0][1] + drift, 2))
+        out[r] = shares
+    return out
 
 
 async def reverse_quotation(db: AsyncSession, q: Quotation) -> dict:
@@ -346,21 +393,29 @@ INVENTORY_ACCOUNT = "110401"     # Persediaan
 PAYABLE_ACCOUNT = "210101"       # Utang Usaha IDR
 
 
+UNBILLED_ACCOUNT = "2102-03"      # Hutang Pembelian Belum Ditagih
+
+
 async def post_goods_receipt(
     db: AsyncSession, *, value: float, entry_date: date, po_number: str,
     supplier_name: str | None = None, receipt_id: UUID | None = None,
-    created_by: UUID | None = None,
+    created_by: UUID | None = None, inventory_account: str = INVENTORY_ACCOUNT,
+    credits: list[tuple[str, float, str]] | None = None,
 ) -> list[dict]:
-    """Goods received: Persediaan up, Utang Usaha up, by `value` (rupiah).
-
-    A negative value (a receipt corrected downward) reverses the difference.
+    """Goods received: the stock account up by `value` (rupiah), and the
+    other side on `credits` — [(account, amount, role)], by default all of it
+    on Utang Usaha. A negative value (a receipt corrected downward) reverses.
     """
     if abs(value) < 0.005:
         return []
+    legs = [(inventory_account, value, "inventory")] + (
+        credits if credits is not None else [(PAYABLE_ACCOUNT, value, "payable")])
     moves: list[dict] = []
     who = f" — {supplier_name}" if supplier_name else ""
-    for acc_no, role in ((INVENTORY_ACCOUNT, "inventory"), (PAYABLE_ACCOUNT, "payable")):
-        m = await _bump(db, acc_no, value)
+    for acc_no, amount, role in legs:
+        if abs(amount) < 0.005:
+            continue
+        m = await _bump(db, acc_no, amount)
         if not m:
             continue
         await journal_post(
@@ -373,6 +428,118 @@ async def post_goods_receipt(
         )
         moves.append({**m, "role": role})
     return moves
+
+
+async def _usable(db: AsyncSession, no: str | None, fallback: str | None) -> str | None:
+    """`no` if it is an account that takes postings, else `fallback`."""
+    if no:
+        acc = await db.scalar(select(Account).where(Account.account_no == no))
+        if acc is not None and not acc.is_parent:
+            return no
+        if acc is not None and no == COGS_ACCOUNT:
+            return await _cogs_account(db)
+    return fallback
+
+
+async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
+                               entry_date: date, receipt_id: UUID | None,
+                               supplier_name: str | None, created_by: UUID | None) -> float:
+    """A receipt on the books the Accurate way: each line's value to its
+    item's Persediaan, against its item's Belum Tertagih (Hutang Pembelian
+    Belum Ditagih) until the supplier's invoice is recorded
+    (`record_supplier_invoice`). Keeps on the order what sits unbilled per
+    account, and what was received per stock/HPP account for the HPP later.
+    A downward correction takes back from what is still unbilled first, and
+    the rest off Utang Usaha. Returns the receipt's value in rupiah."""
+    from app.services import item_accounts as ia
+
+    rate = 1.0
+    if (po.currency or "IDR").upper() != "IDR":
+        rate = float(po.fx_rate or 0) or 1.0
+    lines = list(po.items or [])
+    dflt = await ia.defaults(db)
+    parts: dict[tuple[str, str, str], float] = {}
+    for m in moved:
+        idx = int(m.get("line_no") or 0) - 1
+        if not (0 <= idx < len(lines)):
+            continue
+        unit = float(lines[idx].get("unit_price") or lines[idx].get("unit_cost") or 0)
+        value = float(m.get("delta") or 0) * unit * rate
+        if abs(value) < 1e-9:
+            continue
+        item = await ia.item_for_line(db, sku=m.get("sku"), name=m.get("name"))
+        acc = ia.resolved(item, dflt)
+        key = (acc["acc_inventory"], acc["acc_unbilled"], acc["acc_cogs"])
+        parts[key] = parts.get(key, 0.0) + value
+
+    unbilled = {k: float(v) for k, v in (po.unbilled or {}).items()}
+    received_by = {k: float(v) for k, v in (po.received_by or {}).items()}
+    total = 0.0
+    for (inv, unb, cogs), value in parts.items():
+        value = round(value, 2)
+        if abs(value) < 0.005:
+            continue
+        inv = await _usable(db, inv, INVENTORY_ACCOUNT)
+        unb = await _usable(db, unb, PAYABLE_ACCOUNT)
+        cogs = await _usable(db, cogs, None) or await _cogs_account(db) or COGS_ACCOUNT
+        if value > 0 or unb == PAYABLE_ACCOUNT:
+            credits = [(unb, value, "not yet invoiced" if unb != PAYABLE_ACCOUNT else "payable")]
+            if unb != PAYABLE_ACCOUNT:
+                unbilled[unb] = round(unbilled.get(unb, 0.0) + value, 2)
+        else:
+            back = min(-value, max(unbilled.get(unb, 0.0), 0.0))
+            credits = [(unb, -back, "not yet invoiced"), (PAYABLE_ACCOUNT, value + back, "payable")]
+            unbilled[unb] = round(unbilled.get(unb, 0.0) - back, 2)
+        await post_goods_receipt(
+            db, value=value, entry_date=entry_date, po_number=po.number,
+            supplier_name=supplier_name, receipt_id=receipt_id, created_by=created_by,
+            inventory_account=inv, credits=credits)
+        k = f"{inv}|{cogs}"
+        received_by[k] = round(received_by.get(k, 0.0) + value, 2)
+        total += value
+    po.unbilled = {k: v for k, v in unbilled.items() if abs(v) >= 0.005}
+    po.received_by = {k: v for k, v in received_by.items() if abs(v) >= 0.005}
+    return round(total, 2)
+
+
+async def record_supplier_invoice(db: AsyncSession, po, *, number: str, on: date,
+                                  user=None, note: str | None = None) -> dict:
+    """The supplier's invoice (Faktur Pembelian) has come: what was received
+    and sat on Hutang Pembelian Belum Ditagih moves to Utang Usaha, where the
+    payment then takes it off."""
+    moved = 0.0
+    moves: list[dict] = []
+    for acc_no, amount in (po.unbilled or {}).items():
+        amount = round(float(amount or 0), 2)
+        if abs(amount) < 0.005:
+            continue
+        for no, delta, role in ((acc_no, -amount, "not yet invoiced"),
+                                (PAYABLE_ACCOUNT, amount, "payable")):
+            m = await _bump(db, no, delta)
+            if not m:
+                continue
+            await journal_post(
+                db, entry_date=on, account_no=m["account_no"],
+                account_type=m["account_type"], account_name=m["name"],
+                amount=m["delta"], source_type="supplier_invoice", source_id=po.id,
+                source_ref=po.number,
+                memo=f"Supplier invoice {number} on {po.number} ({role})",
+                created_by=getattr(user, "id", None))
+            moves.append({**m, "role": role})
+        moved += amount
+    po.unbilled = {}
+    invoices = list(po.supplier_invoices or [])
+    same = next((i for i in invoices if i.get("number") == number), None)
+    if same is not None:
+        same = dict(same)
+        same["amount"] = round(float(same.get("amount") or 0) + moved, 2)
+        invoices = [same if i.get("number") == number else i for i in invoices]
+    else:
+        invoices.append({"number": number, "date": on.isoformat(), "amount": round(moved, 2),
+                         "note": note, "by": getattr(user, "full_name", None),
+                         "at": datetime.now(UTC).isoformat()})
+    po.supplier_invoices = invoices
+    return {"moved": round(moved, 2), "moves": moves}
 
 
 # ─── Beban Pokok Penjualan: booked when the customer has paid ───────────────
@@ -436,10 +603,18 @@ async def sync_po_cogs(
     db: AsyncSession, po, *, created_by: UUID | None = None, **_ignored,
 ) -> list[dict]:
     """Bring the HPP booked for `po` in line with the rule: what was received
-    on it, once every job it serves is fully paid; nothing otherwise."""
+    on it, once every job it serves is fully paid; nothing otherwise.
+
+    Kept per stock/HPP account pair (`received_by`), so each item's cost
+    leaves its own Persediaan for its own HPP account. What was received
+    before the order kept that record counts on the default pair."""
     from uuid import UUID as _U
-    booked = float(po.cogs_posted or 0)
-    target = 0.0
+    default_key = f"{INVENTORY_ACCOUNT}|{await _cogs_account(db) or COGS_ACCOUNT}"
+    received = {k: float(v) for k, v in (po.received_by or {}).items()}
+    older = round(float(po.payable_amount or 0) - sum(received.values()), 2)
+    if abs(older) >= 0.005:
+        received[default_key] = round(received.get(default_key, 0.0) + older, 2)
+    paid = False
     projects = _po_project_ids(po)
     if po.status not in _PO_NOT_LIVE and projects:
         paid = True
@@ -447,42 +622,44 @@ async def sync_po_cogs(
             if not await project_fully_paid(db, _U(pid)):
                 paid = False
                 break
-        if paid:
-            target = round(float(po.payable_amount or 0), 2)
-    delta = round(target - booked, 2)
-    if abs(delta) < 0.005:
-        if po.cogs_posted is None:
-            po.cogs_posted = 0
-        return []
-    # Both sides or neither: a chart missing either account must not leave
-    # half an entry on the books.
-    cogs_no = await _cogs_account(db)
-    stock = await db.scalar(select(Account.account_no).where(
-        Account.account_no == INVENTORY_ACCOUNT))
-    if not cogs_no or not stock:
-        return []
+    target = received if paid else {}
+    booked = ({k: float(v) for k, v in po.cogs_by.items()} if po.cogs_by is not None
+              else ({default_key: float(po.cogs_posted)} if po.cogs_posted else {}))
     from zoneinfo import ZoneInfo
 
     from app.core.config import settings
     today = datetime.now(ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")).date()
-    why = ("job paid" if booked == 0 and delta > 0
-           else "taken back — the job is no longer fully paid" if target == 0
-           else "received value changed")
     moves: list[dict] = []
-    for acc_no, sign, role in ((cogs_no, 1, "cogs"), (INVENTORY_ACCOUNT, -1, "inventory")):
-        m = await _bump(db, acc_no, sign * delta)
-        if not m:
+    for key in sorted(set(target) | set(booked)):
+        delta = round(target.get(key, 0.0) - booked.get(key, 0.0), 2)
+        if abs(delta) < 0.005:
             continue
-        await journal_post(
-            db, entry_date=today, account_no=m["account_no"],
-            account_type=m["account_type"], account_name=m["name"],
-            amount=m["delta"], source_type="supplier_po_cogs", source_id=po.id,
-            source_ref=po.number,
-            memo=f"Cost of goods on {po.number} — {why} ({role})",
-            created_by=created_by,
-        )
-        moves.append({**m, "role": role})
-    po.cogs_posted = target
+        inv_no, _, cogs_no = key.partition("|")
+        # Both sides or neither: a chart missing either account must not
+        # leave half an entry on the books.
+        inv_no = await _usable(db, inv_no, None)
+        cogs_no = await _usable(db, cogs_no, None)
+        if not inv_no or not cogs_no:
+            target[key] = booked.get(key, 0.0)
+            continue
+        why = ("job paid" if booked.get(key, 0.0) == 0 and delta > 0
+               else "taken back — the job is no longer fully paid" if not paid
+               else "received value changed")
+        for acc_no, sign, role in ((cogs_no, 1, "cogs"), (inv_no, -1, "inventory")):
+            m = await _bump(db, acc_no, sign * delta)
+            if not m:
+                continue
+            await journal_post(
+                db, entry_date=today, account_no=m["account_no"],
+                account_type=m["account_type"], account_name=m["name"],
+                amount=m["delta"], source_type="supplier_po_cogs", source_id=po.id,
+                source_ref=po.number,
+                memo=f"Cost of goods on {po.number} — {why} ({role})",
+                created_by=created_by,
+            )
+            moves.append({**m, "role": role})
+    po.cogs_by = {k: round(v, 2) for k, v in target.items() if abs(v) >= 0.005}
+    po.cogs_posted = round(sum(po.cogs_by.values()), 2)
     return moves
 
 

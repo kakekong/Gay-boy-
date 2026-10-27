@@ -88,19 +88,21 @@ async def receive_goods(db: AsyncSession, po, received: dict[int, float],
         po.status = "received"
     await db.flush()
 
-    # Received goods are owed for: utang usaha, for the value of what arrived
-    # (the quantity that moved × the line's price, in rupiah). It lands in
-    # finance's payables list and the ledger — Persediaan up, Utang Usaha up.
+    # Received goods are owed for, for the value of what arrived (the
+    # quantity that moved × the line's price, in rupiah). It lands in
+    # finance's payables list and the ledger the Accurate way: each item's
+    # Persediaan up, its Hutang Pembelian Belum Ditagih up — until finance
+    # records the supplier's invoice, which moves it to Utang Usaha.
     payable = receipt_value(po, moved)
     if abs(payable) >= 0.005:
         from app.models.purchasing import Supplier
-        from app.services.ledger import post_goods_receipt
+        from app.services.ledger import post_receipt_by_item
         sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
         po.payable_amount = round(float(po.payable_amount or 0) + payable, 2)
-        await post_goods_receipt(
-            db, value=payable, entry_date=gr.received_at or date_t.today(),
-            po_number=po.number, supplier_name=sup.name if sup else None,
-            receipt_id=gr.id, created_by=user.id if user else None)
+        await post_receipt_by_item(
+            db, po, moved, entry_date=gr.received_at or date_t.today(),
+            receipt_id=gr.id, supplier_name=sup.name if sup else None,
+            created_by=user.id if user else None)
         # Goods arriving after the job was paid: their cost goes to HPP too.
         from app.services.ledger import sync_po_cogs
         await sync_po_cogs(db, po, created_by=user.id if user else None)

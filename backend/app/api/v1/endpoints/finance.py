@@ -1075,6 +1075,10 @@ async def list_payables(
             "last_received_at": last_rcv.get(p.id),
             "status": state,
             "payments": pays_by_po.get(p.id, []),
+            # Received and the supplier hasn't invoiced it yet: on Hutang
+            # Pembelian Belum Ditagih until finance records their invoice.
+            "uninvoiced": round(sum(float(v or 0) for v in (p.unbilled or {}).values()), 2),
+            "supplier_invoices": list(p.supplier_invoices or []),
         }
         if show == "owed" and out <= 0.004:
             continue
@@ -1091,6 +1095,58 @@ async def list_payables(
     items.sort(key=lambda r: rank.get(r["status"], 9))
     return {"items": items, "total_outstanding": round(total_out, 2),
             "total_ordered": round(total_ordered, 2)}
+
+
+class SupplierInvoiceIn(BaseModel):
+    number: str
+    date: str | None = None
+    note: str | None = None
+
+
+@router.post("/payables/{po_id}/supplier-invoice", status_code=201)
+async def record_supplier_invoice(
+    po_id: UUID, payload: SupplierInvoiceIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The supplier's invoice (Faktur Pembelian) for goods received on this
+    order: what sat on Hutang Pembelian Belum Ditagih moves to Utang Usaha.
+    Goods received after it go to Belum Ditagih again until their invoice is
+    recorded — the same number again adds to it."""
+    from datetime import date as date_t
+
+    from app.core.audit import record as audit_record
+    from app.models.purchasing import SupplierPO
+    from app.services.ledger import record_supplier_invoice as post_invoice
+
+    if Role(user.role) not in (Role.FINANCE, Role.DIRECTOR):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Recording a supplier's invoice is finance's.")
+    po = await db.get(SupplierPO, po_id)
+    if po is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
+    number = payload.number.strip()
+    if not number:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Give the supplier's invoice number.")
+    try:
+        on = date_t.fromisoformat(payload.date) if payload.date else date_t.today()
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The date isn't a date.")
+    pending = round(sum(float(v or 0) for v in (po.unbilled or {}).values()), 2)
+    if abs(pending) < 0.005 and any(i.get("number") == number
+                                    for i in (po.supplier_invoices or [])):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Invoice {number} is already recorded, and nothing has been "
+                            "received since.")
+    res = await post_invoice(db, po, number=number, on=on, user=user,
+                             note=(payload.note or "").strip() or None)
+    await audit_record(db, actor=user, action="supplier_invoice", entity="supplier_po",
+                       entity_id=po.id, after={"number": number, "moved": res["moved"]})
+    await db.flush()
+    return {"ok": True, "moved": res["moved"], "supplier_invoices": po.supplier_invoices,
+            "message": (f"Rp {res['moved']:,.0f} moved to Utang Usaha.".replace(",", ".")
+                        if res["moved"] else
+                        "Recorded. Nothing received is waiting for an invoice.")}
 
 
 class SupplierPaymentIn(BaseModel):

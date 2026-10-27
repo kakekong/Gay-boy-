@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   Banknote, BarChart3, CheckCircle, FileText, Loader2, XCircle,
-  Download, ReceiptText, Trash2,
+  Download, ReceiptText, Trash2, FileCheck2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -67,6 +67,9 @@ function Payables() {
   const [err, setErr] = useState<string | null>(null);
   const [show, setShow] = useState<"all" | "owed" | "open" | "paid">("open");
   const [paying, setPaying] = useState<string | null>(null);
+  // The supplier's invoice being recorded: Belum Ditagih → Utang Usaha.
+  const [invoicing, setInvoicing] = useState<string | null>(null);
+  const [invForm, setInvForm] = useState({ number: "", date: "" });
   const [form, setForm] = useState({
     amount: "", paid_at: "", method: "Transfer", reference: "",
     // A foreign order: how much of the supplier's currency, at the rate the
@@ -103,6 +106,8 @@ function Payables() {
           currency: string | null; currency_amount: number | null; fx_rate: number | null;
           bank_amount: number; fx_difference: number;
         }>;
+        uninvoiced?: number;
+        supplier_invoices?: Array<{ number: string; date: string; amount: number }>;
       }>;
       total_outstanding: number; total_ordered: number;
     }),
@@ -125,6 +130,19 @@ function Payables() {
     onError: (e: any) => setErr(
       e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
       ?? t("The payment could not be recorded.", "Pembayaran tidak bisa dicatat."),
+    ),
+  });
+  const invoice = useMutation({
+    mutationFn: (poId: string) => api.post(`/finance/payables/${poId}/supplier-invoice`, {
+      number: invForm.number, date: invForm.date || null,
+    }),
+    onSuccess: () => {
+      setErr(null); setInvoicing(null);
+      qc.invalidateQueries({ queryKey: ["payables"] });
+    },
+    onError: (e: any) => setErr(
+      e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+      ?? t("The supplier's invoice could not be recorded.", "Faktur pemasok tidak bisa dicatat."),
     ),
   });
   const rows = list.data?.items ?? [];
@@ -201,6 +219,18 @@ function Payables() {
                       <td className="td text-right tabular-nums">
                         {idr(r.received_value)}
                         {r.last_received_at && <div className="text-[10px] muted">{r.last_received_at}</div>}
+                        {/* Received and the supplier hasn't invoiced it: on
+                            Hutang Pembelian Belum Ditagih until recorded. */}
+                        {(r.uninvoiced ?? 0) > 0.5 && (
+                          <div className="text-[10px] text-amber-700 leading-snug">
+                            {idr(r.uninvoiced ?? 0)} {t("not invoiced yet", "belum ditagih")}
+                          </div>
+                        )}
+                        {(r.supplier_invoices ?? []).map((v) => (
+                          <div key={v.number} className="text-[10px] muted leading-snug">
+                            {t("Invoice", "Faktur")} {v.number} · {v.date}
+                          </div>
+                        ))}
                       </td>
                       <td className="td text-right tabular-nums">
                         {idr(r.paid)}
@@ -221,7 +251,19 @@ function Payables() {
                       </td>
                       <td className="td text-right tabular-nums font-semibold">{idr(r.outstanding)}</td>
                       <td className="td"><span className={clsx("chip", chip[2])}>{t(chip[0], chip[1])}</span></td>
-                      <td className="td text-right">
+                      <td className="td text-right whitespace-nowrap">
+                        {(r.uninvoiced ?? 0) > 0.5 && (
+                          <button className="btn-ghost text-xs"
+                            title={t("Moves what was received from Hutang Pembelian Belum Ditagih to Utang Usaha",
+                                     "Memindahkan yang sudah diterima dari Hutang Pembelian Belum Ditagih ke Utang Usaha")}
+                            onClick={() => {
+                              setInvoicing(invoicing === r.po_id ? null : r.po_id);
+                              setPaying(null);
+                              setInvForm({ number: "", date: "" });
+                            }}>
+                            <FileCheck2 size={13} /> {t("Supplier invoiced", "Faktur pemasok")}
+                          </button>
+                        )}
                         {r.status !== "paid" && left > 0.5 && (
                           <button className="btn-ghost text-xs"
                             onClick={() => {
@@ -239,6 +281,29 @@ function Payables() {
                         )}
                       </td>
                     </tr>
+                    {invoicing === r.po_id && (
+                      <tr className="bg-amber-50/40">
+                        <td className="td" colSpan={8}>
+                          <div className="flex flex-wrap items-end gap-2">
+                            <label className="text-[11px]">{t("Supplier's invoice no.", "No. faktur pemasok")}
+                              <input className="input text-sm w-48" value={invForm.number} autoFocus
+                                onChange={(e) => setInvForm({ ...invForm, number: e.target.value })} /></label>
+                            <label className="text-[11px]">{t("Invoice date", "Tanggal faktur")}
+                              <input className="input text-sm" type="date" value={invForm.date}
+                                onChange={(e) => setInvForm({ ...invForm, date: e.target.value })} /></label>
+                            <button className="btn-primary text-sm" disabled={invoice.isPending || !invForm.number.trim()}
+                              onClick={() => invoice.mutate(r.po_id)}>
+                              {invoice.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                              {t("Record invoice", "Catat faktur")}
+                            </button>
+                            <span className="text-[11px] muted">
+                              {t(`${idr(r.uninvoiced ?? 0)} moves from Hutang Pembelian Belum Ditagih to Utang Usaha.`,
+                                 `${idr(r.uninvoiced ?? 0)} pindah dari Hutang Pembelian Belum Ditagih ke Utang Usaha.`)}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {paying === r.po_id && (() => {
                       // A foreign order is paid in its own currency at the
                       // bank's real rate; the debt was booked at the order's.

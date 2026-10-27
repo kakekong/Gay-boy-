@@ -49,6 +49,28 @@ class ItemIn(BaseModel):
     supplier_hint: str | None = None
     notes: str | None = None
     is_active: bool = True
+    # The item's accounts (Akun-Akun); empty takes the company default.
+    acc_inventory: str | None = None
+    acc_sales: str | None = None
+    acc_sales_return: str | None = None
+    acc_sales_discount: str | None = None
+    acc_cogs: str | None = None
+    acc_purchase_return: str | None = None
+    acc_unbilled: str | None = None
+
+
+class ItemAccountsIn(BaseModel):
+    acc_inventory: str | None = None
+    acc_sales: str | None = None
+    acc_sales_return: str | None = None
+    acc_sales_discount: str | None = None
+    acc_cogs: str | None = None
+    acc_purchase_return: str | None = None
+    acc_unbilled: str | None = None
+
+
+# Who sets the accounts an item posts to: the books are finance's.
+_accounts_editor = require(Role.FINANCE, Role.DIRECTOR)
 
 
 class BulkItemsIn(BaseModel):
@@ -475,7 +497,75 @@ async def get_item(item_id: UUID,
         "link": r.link,
         "notes": r.notes, "is_active": r.is_active,
         "stock_status": _status(r),
+        **({"accounts": await _accounts_out(db, r)} if _may_see_cost(_u) else {}),
     }
+
+
+async def _accounts_out(db: AsyncSession, r: InventoryItem | None) -> dict:
+    """The item's accounts as the Akun-Akun tab shows them: each one's
+    number and name, and whether it is the item's own or the default."""
+    from app.models.account import Account
+    from app.services import item_accounts as ia
+    dflt = await ia.defaults(db)
+    eff = ia.resolved(r, dflt)
+    names = {a.account_no: a.name for a in (await db.scalars(
+        select(Account).where(Account.account_no.in_(set(eff.values()) | set(dflt.values()))))).all()}
+    return {"fields": [
+        {"field": f, "label": lbl, "account_no": eff[f], "account_name": names.get(eff[f]),
+         "own": bool(r is not None and getattr(r, f, None)),
+         "default_no": dflt[f], "default_name": names.get(dflt[f]),
+         "types": list(ia.TYPES[f])}
+        for f, lbl, _ in ia.FIELDS]}
+
+
+@router.get("/item-accounts/defaults")
+async def get_item_account_defaults(db: AsyncSession = Depends(get_db),
+                                    _u: User = Depends(get_current_user)):
+    """The accounts a new item takes (Accurate's "Set sbg Default")."""
+    return await _accounts_out(db, None)
+
+
+@router.put("/item-accounts/defaults")
+async def set_item_account_defaults(payload: ItemAccountsIn,
+                                    db: AsyncSession = Depends(get_db),
+                                    u: User = Depends(_accounts_editor)):
+    from app.core.audit import record as audit_record
+    from app.services import item_accounts as ia
+    try:
+        merged = await ia.set_defaults(db, payload.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    await audit_record(db, actor=u, action="update", entity="item_account_defaults",
+                       entity_id=None, after=merged)
+    return await _accounts_out(db, None)
+
+
+@router.put("/{item_id}/accounts")
+async def set_item_accounts(item_id: UUID, payload: ItemAccountsIn,
+                            db: AsyncSession = Depends(get_db),
+                            u: User = Depends(_accounts_editor)):
+    """Set an item's accounts. One equal to the default is kept as "the
+    default", so the item follows the default if that changes later."""
+    from app.core.audit import record as audit_record
+    from app.services import item_accounts as ia
+    r = await db.get(InventoryItem, item_id)
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    data = payload.model_dump()
+    try:
+        await ia.validate(db, data)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    dflt = await ia.defaults(db)
+    before = {f: getattr(r, f) for f in ia.NAMES}
+    for f in ia.NAMES:
+        v = (data.get(f) or "").strip() or None
+        setattr(r, f, None if v == dflt[f] else v)
+    await audit_record(db, actor=u, action="update_accounts", entity="inventory_item",
+                       entity_id=r.id, before=before,
+                       after={f: getattr(r, f) for f in ia.NAMES})
+    await db.flush()
+    return await _accounts_out(db, r)
 
 
 @router.get("/{item_id}/movements")
@@ -577,6 +667,11 @@ async def create_item(payload: ItemIn,
     existing = await db.scalar(select(InventoryItem).where(InventoryItem.sku == payload.sku))
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "SKU already exists.")
+    from app.services import item_accounts as ia
+    try:
+        await ia.validate(db, payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     r = InventoryItem(**payload.model_dump())
     db.add(r)
     await db.flush()

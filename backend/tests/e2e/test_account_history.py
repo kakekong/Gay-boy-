@@ -47,7 +47,7 @@ async def main():
     def closes(L):
         return abs(L["closing_balance"] - L["account"]["balance"]) < 0.01
 
-    print("\n── Utang Usaha: goods receipts show ──")
+    print("\n── Belum Ditagih: goods receipts show ──")
     sup = J(await c.post("/purchasing/suppliers", headers=pur, json={"name": f"PT Riwayat {TAG}"}))["id"]
     po = J(await c.post("/purchasing/po", headers=d, json={
         "supplier_id": sup, "po_date": "2026-10-18",
@@ -55,9 +55,11 @@ async def main():
                    "unit_price": 150_000, "amount": 450_000}], "total": 450_000}))
     await c.post(f"/purchasing/po/{po['id']}/gr", headers=pur, json={
         "items": [{"description": f"ROLLER {TAG}", "qty": 3}]})
-    L = await ledger("210101")
+    # Received and not yet invoiced: Hutang Pembelian Belum Ditagih, until
+    # the supplier's invoice moves it to Utang Usaha.
+    L = await ledger("2102-03")
     mine = [i for i in L["items"] if i.get("source_ref") == po["number"]]
-    check("the goods receipt is a line on Utang Usaha",
+    check("the goods receipt is a line on Hutang Pembelian Belum Ditagih",
           len(mine) == 1 and mine[0]["kind"] == "auto" and mine[0]["credit"] == 450_000
           and mine[0]["label"] == "Goods received", str(mine)[:300])
     check("...linked to the PO it was received on",

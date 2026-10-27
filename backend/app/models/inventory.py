@@ -151,6 +151,18 @@ class InventoryItem(Base, UUIDPK, TimestampMixin):
     # line typed later from an old label or an old spelling still has to land
     # here rather than bring the duplicate back (see stock_sync.item_index).
     aliases: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # The item's accounts — Accurate's Akun-Akun tab. Empty means the company
+    # default (services/item_accounts). Receiving books the goods to
+    # `acc_inventory` against `acc_unbilled` until the supplier invoices;
+    # the job paid moves them to `acc_cogs`; a won quotation credits
+    # `acc_sales` and debits `acc_sales_discount`.
+    acc_inventory: Mapped[str | None] = mapped_column(String(40))
+    acc_sales: Mapped[str | None] = mapped_column(String(40))
+    acc_sales_return: Mapped[str | None] = mapped_column(String(40))
+    acc_sales_discount: Mapped[str | None] = mapped_column(String(40))
+    acc_cogs: Mapped[str | None] = mapped_column(String(40))
+    acc_purchase_return: Mapped[str | None] = mapped_column(String(40))
+    acc_unbilled: Mapped[str | None] = mapped_column(String(40))
 
 
 class InventoryMovement(Base, UUIDPK, TimestampMixin):

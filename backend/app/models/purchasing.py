@@ -227,6 +227,17 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # received on it, once every job it serves is invoiced and paid in full
     # (ledger.sync_po_cogs); 0 until then.
     cogs_posted: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # Received and not yet invoiced by the supplier, in rupiah, by the
+    # account it sits on (Hutang Pembelian Belum Ditagih, or an item's own):
+    # {"2102-03": 1500000}. Recording the supplier's invoice moves it to
+    # Utang Usaha and empties it.
+    unbilled: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # The supplier's invoices: [{"number", "date", "amount", "by", "at"}].
+    supplier_invoices: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # What was received, by "stock account|HPP account" — where its cost goes
+    # once the job is paid — and the HPP booked so far the same way.
+    received_by: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    cogs_by: Mapped[dict | None] = mapped_column(JSONB)
     # Notes for the vendor — delivery instructions, packing, terms — printed
     # under the lines on the PO they receive (PDF and spreadsheet). Internal
     # talk belongs in the PO's discussion thread, which never leaves.

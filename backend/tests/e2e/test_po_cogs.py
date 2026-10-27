@@ -5,7 +5,8 @@ invoiced and the customer has paid every invoice — not when the purchasing PO
 is approved. Until then the goods sit in Persediaan, where receiving put them.
 
 * Approving the PO books nothing.
-* Receiving: Persediaan up, Utang Usaha up — HPP still nothing.
+* Receiving: Persediaan up, Hutang Pembelian Belum Ditagih up (Utang Usaha
+  once the supplier invoices) — HPP still nothing.
 * The job paid in full: what was received moves from Persediaan to 5101.
 * The payment reversed (no longer paid in full): taken back.
 * Goods received after the job was paid: their cost follows them to 5101.
@@ -26,7 +27,7 @@ def J(r):
     try: return r.json()
     except Exception: return {"_": r.text[:200]}
 
-HPP, STOCK, AP = "5101", "110401", "210101"
+HPP, STOCK, AP, UNBILLED = "5101", "110401", "210101", "2102-03"
 
 
 async def main():
@@ -47,7 +48,7 @@ async def main():
     async def bal():
         async with SessionLocal() as s:
             rows = (await s.scalars(select(Account).where(
-                Account.account_no.in_([HPP, STOCK, AP])))).all()
+                Account.account_no.in_([HPP, STOCK, AP, UNBILLED])))).all()
             return {a.account_no: float(a.balance or 0) for a in rows}
 
     def moved(a, b, acc):
@@ -92,9 +93,10 @@ async def main():
     r = await c.post(f"/purchasing/po/{po['id']}/gr", headers=pur, json={
         "items": [{"description": f"CHAIN {TAG}", "qty": 10}]})
     b2 = await bal()
-    check("receiving puts it in Persediaan and Utang Usaha",
-          r.status_code == 201 and moved(b1, b2, STOCK) == 1_000_000 and moved(b1, b2, AP) == 1_000_000,
-          f"{r.status_code} {moved(b1, b2, STOCK)}")
+    check("receiving puts it in Persediaan, owed on Hutang Pembelian Belum Ditagih",
+          r.status_code == 201 and moved(b1, b2, STOCK) == 1_000_000
+          and moved(b1, b2, UNBILLED) == 1_000_000 and moved(b1, b2, AP) == 0,
+          f"{r.status_code} {moved(b1, b2, STOCK)} {moved(b1, b2, UNBILLED)} {moved(b1, b2, AP)}")
     check("...still no cost in 5101 — the customer hasn't paid", moved(b1, b2, HPP) == 0)
 
     print("\n── the customer pays ──")

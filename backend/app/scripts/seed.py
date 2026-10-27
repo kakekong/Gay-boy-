@@ -804,6 +804,22 @@ COLUMN_MIGRATIONS: list[str] = [
                        WHERE i.project_id = p.id AND i.type <> 'dp'
                          AND i.status IN ('approved', 'partial', 'issued',
                                           'overdue', 'paid'))""",
+    # ── Each item's own accounts, as Accurate's Akun-Akun tab (null = the
+    # company default) ───────────────────────────────────────────────────
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_inventory VARCHAR(40)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_sales VARCHAR(40)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_sales_return VARCHAR(40)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_sales_discount VARCHAR(40)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_cogs VARCHAR(40)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_purchase_return VARCHAR(40)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS acc_unbilled VARCHAR(40)",
+    # ── Received and not yet invoiced by the supplier, per account; the
+    # supplier's invoices recorded; what was received per stock/HPP account
+    # and the HPP booked per account ───────────────────────────────────────
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS unbilled JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS supplier_invoices JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS received_by JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS cogs_by JSONB",
 ]
 
 

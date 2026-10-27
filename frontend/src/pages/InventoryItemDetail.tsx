@@ -13,6 +13,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT, locale } from "@/store/lang";
 import { money } from "@/lib/money";
+import { ItemAccounts } from "@/components/ItemAccounts";
 
 interface Movement {
   id: string; at: string; delta: number; balance: number; reason: string;
@@ -128,6 +129,8 @@ export default function InventoryItemPage() {
           </div>
         )}
       </div>
+
+      {id && <ItemAccounts itemId={id} />}
 
       {/* Ordered and not on the shelf yet. Not stock: it joins the count when
           it is received. A PO received or closed under what it ordered says
