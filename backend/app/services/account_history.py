@@ -35,7 +35,22 @@ AUTO_LABEL = {
     "quotation": "Quotation won",
     "payment": "Customer payment",
     "salary": "Payroll",
+    "supplier_invoice": "Supplier invoice",
 }
+
+# What an automatic posting's source_id points at, per source_type — to link
+# the line to its page, and to tell when that record is gone.
+SOURCES = {
+    "quotation": ("app.models.quotation", "Quotation", None, "/quotations/"),
+    "supplier_po_cogs": ("app.models.purchasing", "SupplierPO", None, "/purchase-orders/"),
+    "supplier_invoice": ("app.models.purchasing", "SupplierPO", None, "/purchase-orders/"),
+    "goods_receipt": ("app.models.purchasing", "GoodsReceipt", "po_id", "/purchase-orders/"),
+    "supplier_payment": ("app.models.purchasing", "SupplierPayment", "po_id", "/purchase-orders/"),
+    "payment": ("app.models.finance", "Payment", "invoice_id", "/invoices/"),
+}
+ORPHAN_LABEL = "Record deleted"
+ORPHAN_MEMO = ("The record this was posted from has been deleted (data clean-up), "
+               "but the posting stayed on the books.")
 
 NO_RECORD_MEMO = ("No record of where this came from — it was on the account "
                   "before changes were recorded (brought in with the chart of "
@@ -50,33 +65,30 @@ def debit_credit(account_type: str, delta: float) -> tuple[float, float]:
     return (delta, 0.0) if up else (0.0, -delta)
 
 
-async def _auto_links(db: AsyncSession, rows) -> dict:
-    """Where each automatic posting came from, as a page to open."""
-    from app.models.finance import Payment
-    from app.models.purchasing import GoodsReceipt, SupplierPayment
+async def _auto_links(db: AsyncSession, rows) -> tuple[dict, set]:
+    """Where each automatic posting came from, as a page to open — and which
+    postings point at a record that no longer exists (deleted in a data
+    clean-up while its posting stayed on the books)."""
+    import importlib
 
     out: dict = {}
-    for r in rows:
-        if not r.source_id:
-            continue
-        if r.source_type == "quotation":
-            out[r.id] = f"/quotations/{r.source_id}"
-        elif r.source_type == "supplier_po_cogs":
-            out[r.id] = f"/purchase-orders/{r.source_id}"
-    for model, kind, fk, path in (
-        (GoodsReceipt, "goods_receipt", "po_id", "/purchase-orders/"),
-        (SupplierPayment, "supplier_payment", "po_id", "/purchase-orders/"),
-        (Payment, "payment", "invoice_id", "/invoices/"),
-    ):
+    gone: set = set()
+    for kind, (mod, cls, fk, path) in SOURCES.items():
         keys = {r.source_id for r in rows if r.source_type == kind and r.source_id}
         if not keys:
             continue
-        found = {x.id: getattr(x, fk) for x in (await db.scalars(
-            select(model).where(model.id.in_(keys)))).all()}
+        model = getattr(importlib.import_module(mod), cls)
+        col = getattr(model, fk) if fk else model.id
+        found = dict((await db.execute(
+            select(model.id, col).where(model.id.in_(keys)))).all())
         for r in rows:
-            if r.source_type == kind and found.get(r.source_id):
+            if r.source_type != kind or not r.source_id:
+                continue
+            if r.source_id in found:
                 out[r.id] = f"{path}{found[r.source_id]}"
-    return out
+            else:
+                gone.add(r.id)
+    return out, gone
 
 
 def _num(v) -> float:
@@ -133,19 +145,26 @@ async def account_events(db: AsyncSession, accounts: list[Account]) -> dict[str,
                 LedgerEntry.source_id.not_in(select(JournalEntry.id))),
         )
     )).all()
-    links = await _auto_links(db, auto)
+    links, gone = await _auto_links(db, auto)
     for r in auto:
         acc = by_no[r.account_no]
         delta = float(r.amount or 0)
         debit, credit = debit_credit(acc.account_type, delta)
+        orphan = r.id in gone
         events[r.account_no].append({
             "kind": "auto", "journal_id": None,
             "number": r.source_ref or AUTO_LABEL.get(r.source_type, r.source_type),
             "entry_date": r.entry_date, "_at": r.created_at,
-            "memo": r.memo, "source_type": r.source_type, "source_ref": r.source_ref,
-            "label": AUTO_LABEL.get(r.source_type, r.source_type.replace("_", " ")),
+            "memo": (f"{r.memo} — {ORPHAN_MEMO}" if orphan and r.memo else
+                     ORPHAN_MEMO if orphan else r.memo),
+            "source_type": r.source_type, "source_ref": r.source_ref,
+            "label": (ORPHAN_LABEL if orphan
+                      else AUTO_LABEL.get(r.source_type, r.source_type.replace("_", " "))),
             "debit": debit, "credit": credit, "delta": delta,
             "link": links.get(r.id), "by": None,
+            # The posting's own id, so the director can take a leftover off.
+            "orphan": orphan, "entry_id": str(r.id) if orphan else None,
+            "source_id": str(r.source_id) if orphan else None,
         })
 
     # 3. Balances set by hand — typed in when the account was made, or

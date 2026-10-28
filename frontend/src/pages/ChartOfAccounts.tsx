@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus, RefreshCw, Filter, Download, Share2, Printer, Settings2, Search,
-  Receipt, MoreHorizontal, EyeOff, Eye, Pencil, Trash2, ArchiveRestore,
+  Receipt, MoreHorizontal, EyeOff, Eye, Pencil, Trash2, ArchiveRestore, Eraser,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -12,6 +12,7 @@ import { AccountModal, type AccountRow } from "@/components/forms/AccountModal";
 import { T, useT } from "@/store/lang";
 import { useAuthStore } from "@/store/auth";
 import { DeletedAccounts } from "@/components/DeletedAccounts";
+import { LeftoverPostings } from "@/components/LeftoverPostings";
 
 const SUSPEND_OPTS = [
   { value: "all",       label: "All" },
@@ -70,6 +71,13 @@ export default function ChartOfAccountsPage() {
   const t = useT();
   const isDirector = useAuthStore((s) => s.user?.role) === "director";
   const [showDeleted, setShowDeleted] = useState(false);
+  const [showLeftovers, setShowLeftovers] = useState(false);
+  // How many postings are left behind by deleted records — the button says.
+  const leftovers = useQuery({
+    queryKey: ["account-leftovers"],
+    queryFn: () => api.get("/accounts/leftovers").then((r) => r.data as unknown[]),
+    enabled: isDirector,
+  });
 
   const types = useQuery({
     queryKey: ["account-types"],
@@ -267,6 +275,13 @@ export default function ChartOfAccountsPage() {
             <ArchiveRestore size={15} /> {t("Recently deleted", "Baru dihapus")}
           </button>
         )}
+        {isDirector && (leftovers.data?.length ?? 0) > 0 && (
+          <button className={clsx("btn-ghost text-xs", showLeftovers ? "text-brand-700" : "text-rose-700")}
+            aria-pressed={showLeftovers}
+            onClick={() => setShowLeftovers((v) => !v)}>
+            <Eraser size={15} /> {t("Left behind", "Sisa terhapus")} ({leftovers.data?.length})
+          </button>
+        )}
 
         <div className="ml-auto text-xs font-semibold text-ink-500">
           {rows.length}
@@ -274,6 +289,7 @@ export default function ChartOfAccountsPage() {
       </div>
 
       {isDirector && showDeleted && <DeletedAccounts />}
+      {isDirector && showLeftovers && <LeftoverPostings />}
 
       {/* Table */}
       <div className="card overflow-hidden">

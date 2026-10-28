@@ -194,6 +194,39 @@ async def current_earnings(db: AsyncSession = Depends(get_db),
             **await current_earnings_totals(db)}
 
 
+# ─── Postings left behind by deleted records ─────────────────────────────────
+
+class LeftoverIn(BaseModel):
+    source_type: str
+    source_id: UUID
+
+
+@router.get("/leftovers")
+async def list_leftovers(db: AsyncSession = Depends(get_db),
+                         _user: User = Depends(require(Role.DIRECTOR))):
+    """Postings whose record was deleted (services/leftovers)."""
+    from app.services import leftovers
+    return await leftovers.find(db)
+
+
+@router.post("/leftovers/remove")
+async def remove_leftover(payload: LeftoverIn, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(require(Role.DIRECTOR))):
+    """Take one left-over posting off the books, both sides."""
+    from app.services import leftovers
+    try:
+        res = await leftovers.remove(db, source_type=payload.source_type,
+                                     source_id=payload.source_id)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    await audit_record(db, actor=user, action="remove_leftover", entity="ledger",
+                       entity_id=payload.source_id,
+                       after={"source_type": payload.source_type, **res})
+    return {"ok": True, **res}
+
+
 # ─── Deleted accounts ────────────────────────────────────────────────────────
 # Deleting writes the account and its lines to a file in the document store
 # (Cloudflare R2) — see services/account_archive. Kept here for a week, then

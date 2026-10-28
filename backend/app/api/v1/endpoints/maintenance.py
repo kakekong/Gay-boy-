@@ -168,7 +168,7 @@ async def _build_plan(db: AsyncSession, keep_ids: set[UUID]) -> dict:
     approvals = await _ids(db, select(ApprovalRequest.id).where(
         ApprovalRequest.target_id.in_(doomed_ids)))
     ledger = await _ids(db, select(LedgerEntry.id).where(
-        LedgerEntry.source_id.in_(doomed_ids)))
+        LedgerEntry.source_id.in_(doomed_ids | await _posted_from(db, invoices, spos))))
 
     return {
         "keep_customers": keep_customers,
@@ -301,6 +301,36 @@ async def purge_execute(payload: PurgeIn, db: AsyncSession = Depends(get_db),
     return {"deleted": plan["counts"], "files_cleared": len(files)}
 
 
+async def _posted_from(db: AsyncSession, invoices: set, spos: set) -> set:
+    """The records under these invoices and supplier POs that the books name
+    as a posting's source: a customer payment, a goods receipt, a supplier
+    payment. They go with their invoice or PO (the keys cascade), so their
+    postings have to go too — left behind, a deleted test invoice's payment
+    went on crediting Piutang, and the next invoice given the freed number
+    seemed to have been paid it."""
+    from app.models.purchasing import GoodsReceipt, SupplierPayment
+    out: set = set()
+    if invoices:
+        out |= await _ids(db, select(Payment.id).where(Payment.invoice_id.in_(invoices)))
+    if spos:
+        out |= await _ids(db, select(GoodsReceipt.id).where(GoodsReceipt.po_id.in_(spos)))
+        out |= await _ids(db, select(SupplierPayment.id).where(SupplierPayment.po_id.in_(spos)))
+    return out
+
+
+async def _unpost(db: AsyncSession, ledger_ids: set) -> None:
+    """Move each account back by what the postings being deleted had moved
+    it. Deleting the lines alone left their amounts in the balances, to show
+    up later as "No record"."""
+    if not ledger_ids:
+        return
+    moved = dict((await db.execute(
+        select(LedgerEntry.account_no, func.sum(LedgerEntry.amount))
+        .where(LedgerEntry.id.in_(ledger_ids)).group_by(LedgerEntry.account_no))).all())
+    for acc in (await db.scalars(select(Account).where(Account.account_no.in_(list(moved))))).all():
+        acc.balance = round(float(acc.balance or 0) - float(moved[acc.account_no] or 0), 2)
+
+
 async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
     """Delete everything the plan names, in the order the keys allow.
 
@@ -341,6 +371,7 @@ async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
     await detach(Project, Project.price_request_id, plan["prs"])
     await detach(SupplierPO, SupplierPO.price_request_id, plan["prs"])
 
+    await _unpost(db, plan["ledger"])
     await wipe(LedgerEntry, LedgerEntry.id, plan["ledger"])
     await wipe(Attachment, Attachment.id, plan["attachments"])
     await wipe(EntityComment, EntityComment.id, plan["comments"])   # mentions cascade
@@ -540,7 +571,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     approvals = await _ids(db, select(ApprovalRequest.id).where(
         ApprovalRequest.target_id.in_(doomed_ids)))
     ledger = await _ids(db, select(LedgerEntry.id).where(or_(
-        LedgerEntry.source_id.in_(doomed_ids),
+        LedgerEntry.source_id.in_(doomed_ids | await _posted_from(db, invoices, spos)),
         # A ledger entry names its customer in its own column as well as its
         # source document; a customer deleted here must not stay named in the
         # books by a row nothing else points at.

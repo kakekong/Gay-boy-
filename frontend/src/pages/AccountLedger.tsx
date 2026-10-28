@@ -38,6 +38,9 @@ interface Row {
   debit: number;
   credit: number;
   balance: number;
+  /** Posted from a record that has since been deleted. */
+  orphan?: boolean;
+  source_id?: string | null;
 }
 interface Ledger {
   account: { account_no: string; name: string; account_type: string; balance: number };
@@ -61,6 +64,8 @@ const LABEL_ID: Record<string, string> = {
   "Payroll": "Penggajian",
   "Set by hand": "Diisi manual",
   "No record": "Tanpa catatan",
+  "Record deleted": "Catatan dihapus",
+  "Supplier invoice": "Faktur pemasok",
 };
 
 const idr = (n: number) => {
@@ -101,6 +106,19 @@ export default function AccountLedgerPage() {
     mutationFn: () => api.post(`/accounts/${accountNo}/clear-unrecorded`).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["account-ledger", accountNo] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    onError: (e: any) => alert(e?.response?.data?.errors?.[0]?.message
+      ?? e?.response?.data?.detail ?? t("Couldn't remove it", "Gagal menghapus")),
+  });
+
+  // A posting whose record was deleted: the director takes it off the
+  // books — every line of it, on every account it touched.
+  const dropLeftover = useMutation({
+    mutationFn: (r: Row) => api.post("/accounts/leftovers/remove",
+      { source_type: r.source_type, source_id: r.source_id }).then((x) => x.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account-ledger"] });
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: any) => alert(e?.response?.data?.errors?.[0]?.message
@@ -281,7 +299,7 @@ export default function AccountLedgerPage() {
                 {d.items.map((r, i) => (
                   <tr key={`${r.kind}-${r.journal_id ?? r.number}-${i}`}
                     className={clsx("border-t border-ink-100",
-                      r.kind === "unrecorded" && "bg-amber-50/50")}>
+                      (r.kind === "unrecorded" || r.orphan) && "bg-amber-50/50")}>
                     <td className="td whitespace-nowrap">
                       {new Date(r.entry_date).toLocaleDateString(locale())}
                     </td>
@@ -300,6 +318,7 @@ export default function AccountLedgerPage() {
                       )}
                       <span className={clsx("block chip mt-1 text-[10px] font-sans w-fit whitespace-nowrap",
                         r.kind === "unrecorded" ? "bg-amber-100 text-amber-800"
+                          : r.orphan ? "bg-rose-100 text-rose-800"
                           : r.kind === "by_hand" ? "bg-violet-50 text-violet-700"
                           : r.kind === "auto" ? "bg-emerald-50 text-emerald-700"
                           : r.source_type === "manual" ? "bg-brand-50 text-brand-700"
@@ -318,6 +337,21 @@ export default function AccountLedgerPage() {
                         <span className="block text-[11px] muted">
                           {t("by", "oleh")} {r.by}
                         </span>
+                      )}
+                      {r.orphan && isDirector && r.source_id && (
+                        <button className="btn-ghost text-xs text-rose-600 mt-1 px-2 py-1"
+                          disabled={dropLeftover.isPending}
+                          onClick={() => {
+                            if (confirm(t(
+                              `Take ${r.number} off the books? Its record was deleted. This removes the whole posting — this line and its other side (the bank, for a payment) — and moves those balances back.`,
+                              `Hapus ${r.number} dari pembukuan? Catatannya sudah dihapus. Seluruh jurnalnya ikut terhapus — baris ini dan pasangannya (bank, untuk pembayaran) — dan saldonya dikembalikan.`,
+                            ))) dropLeftover.mutate(r);
+                          }}>
+                          {dropLeftover.isPending
+                            ? <Loader2 size={12} className="animate-spin" />
+                            : <Trash2 size={12} />}
+                          {t("Take off the books", "Hapus dari pembukuan")}
+                        </button>
                       )}
                       {r.kind === "unrecorded" && isDirector && (
                         <button className="btn-ghost text-xs text-rose-600 mt-1 px-2 py-1"

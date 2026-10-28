@@ -205,6 +205,23 @@ class ManualPaymentIn(BaseModel):
     attachment_id: UUID | None = None
 
 
+async def _refuse_overpayment(db: AsyncSession, inv: Invoice, amount: float) -> None:
+    """A payment can't be more than the invoice still owes. With no ceiling,
+    Rp 9.990.000.000 was recorded against an invoice of Rp 4.267.728 — the
+    invoice read "paid" and Piutang went billions below zero."""
+    paid = float(await db.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id == inv.id)) or 0)
+    left = round(float(inv.total or 0) - paid, 2)
+    if float(amount) > left + 1:
+        owed = f"{left:,.0f}".replace(",", ".")
+        given = f"{float(amount):,.0f}".replace(",", ".")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{inv.number} only has Rp {owed} left to pay — Rp {given} is more than "
+            "that. Check the amount (an extra zero?).")
+
+
 @router.post("/manual", status_code=201)
 async def record_manual_payment(
     payload: ManualPaymentIn,
@@ -232,6 +249,7 @@ async def record_manual_payment(
             f"Invoice is '{inv.status}' — payments can only be recorded on "
             "an issued/approved invoice that isn't fully paid yet.",
         )
+    await _refuse_overpayment(db, inv, payload.amount)
 
     now = datetime.now(UTC)
     c = PaymentClaim(
@@ -333,6 +351,8 @@ async def verify_claim(
             f"Invoice is '{_inv.status}' — payments can only be verified on an "
             "approved, unpaid invoice.",
         )
+    if _inv is not None:
+        await _refuse_overpayment(db, _inv, c.amount)
     # Create a real Payment row
     payment = Payment(
         invoice_id=c.invoice_id,
