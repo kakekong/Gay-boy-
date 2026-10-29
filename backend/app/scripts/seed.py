@@ -820,6 +820,15 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS supplier_invoices JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS received_by JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS cogs_by JSONB",
+    # ── Who made each supplier PO; older ones from the approval request a
+    # non-director's PO always files (it names who asked) ──────────────────
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS created_by UUID",
+    """UPDATE supplier_pos sp
+          SET created_by = ar.requested_by
+         FROM approval_requests ar
+        WHERE sp.created_by IS NULL
+          AND ar.target_type = 'supplier_po' AND ar.target_id = sp.id
+          AND ar.payload->>'action' = 'create'""",
 ]
 
 

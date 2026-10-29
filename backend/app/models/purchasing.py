@@ -238,6 +238,9 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     # once the job is paid — and the HPP booked so far the same way.
     received_by: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     cogs_by: Mapped[dict | None] = mapped_column(JSONB)
+    # Who made the order. Before it was kept, a PO made from a purchasing
+    # account and one made by the director looked the same on the page.
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     # Notes for the vendor — delivery instructions, packing, terms — printed
     # under the lines on the PO they receive (PDF and spreadsheet). Internal
     # talk belongs in the PO's discussion thread, which never leaves.

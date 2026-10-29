@@ -1140,6 +1140,7 @@ async def create_po(
         total=payload.total,
         items=items,
         status="open" if is_director else "pending_approval",
+        created_by=user.id,
     )
     db.add(po)
     await db.flush()
@@ -1245,11 +1246,29 @@ async def get_po(
         owed = float(po.payable_amount or 0)
         payable = {"received_value": owed, "paid": paid,
                    "outstanding": max(round(owed - paid, 2), 0.0)}
+    # Who made it, and how it was approved: the request a non-director's PO
+    # files says who asked and who decided; a PO with none was made from a
+    # director account and approved as it was made.
+    from app.models.approval import ApprovalRequest
+    req = await db.scalar(select(ApprovalRequest).where(
+        ApprovalRequest.target_type == "supplier_po", ApprovalRequest.target_id == po.id,
+        ApprovalRequest.payload["action"].astext == "create",
+    ).order_by(ApprovalRequest.created_at.asc()).limit(1))
+    maker_id = po.created_by or (req.requested_by if req else None)
+    maker = await db.get(User, maker_id) if maker_id else None
+    decider = await db.get(User, req.decided_by) if req and req.decided_by else None
+    approval = ({"status": req.status, "requested_at": req.created_at,
+                 "decided_by": decider.full_name if decider else None,
+                 "decided_at": req.decided_at, "notes": req.decision_notes}
+                if req else None)
     return {
         "id": str(po.id),
         "number": po.number,
         "status": po.status,
         "payable": payable,
+        "created_by": ({"id": str(maker.id), "name": maker.full_name, "role": maker.role}
+                       if maker else None),
+        "approval": approval,
         "supplier_id": str(po.supplier_id),
         "supplier_name": supplier.name if supplier else None,
         "supplier_category": supplier.category if supplier else None,

@@ -37,6 +37,10 @@ interface PO {
   supplier_category: string | null;
   sales_pic_id: string | null;
   sales_pic_name: string | null;
+  /** Who made the order, and how it was approved. */
+  created_by?: { id: string; name: string; role: string } | null;
+  approval?: { status: string; requested_at: string; decided_by: string | null;
+               decided_at: string | null; notes: string | null } | null;
   price_request_id: string | null;
   price_request_number: string | null;
   project_id: string | null;
@@ -525,7 +529,49 @@ export default function PurchaseOrderDetailPage() {
               </span>
             )}
           </Meta>
-          <Meta label={T("Sales in charge")}>
+          {/* Who made it and how it was approved — before, the page only
+              named the customer's sales rep, so a PO made from a purchasing
+              account looked like the salesperson's. */}
+          <Meta label={tt("Made by", "Dibuat oleh")}>
+            {p.created_by ? (
+              <>
+                <UserLink id={p.created_by.id} name={p.created_by.name} />
+                <span className="block text-[11px] muted capitalize">{T(p.created_by.role)}</span>
+              </>
+            ) : (
+              <span className="text-[11px] muted">
+                {tt("Not recorded — made before this was kept", "Tidak tercatat — dibuat sebelum ini disimpan")}
+              </span>
+            )}
+          </Meta>
+          <Meta label={tt("Director's approval", "Persetujuan direktur")}>
+            {p.approval ? (
+              p.approval.status === "pending" ? (
+                <span className="chip bg-amber-50 text-amber-800">
+                  {tt("Waiting in the director's Approvals", "Menunggu di Persetujuan direktur")}
+                </span>
+              ) : (
+                <span className="text-sm">
+                  {p.approval.status === "approved" ? tt("Approved", "Disetujui")
+                    : p.approval.status === "rejected" ? tt("Declined", "Ditolak")
+                    : p.approval.status}
+                  {p.approval.decided_by && <> · {p.approval.decided_by}</>}
+                  {p.approval.decided_at && (
+                    <span className="block text-[11px] muted">
+                      {new Date(p.approval.decided_at).toLocaleString(locale())}
+                    </span>
+                  )}
+                  {p.approval.notes && <span className="block text-[11px] muted">{p.approval.notes}</span>}
+                </span>
+              )
+            ) : (
+              <span className="text-[11px] muted">
+                {tt("None needed — made from a director account, approved as it was made",
+                    "Tidak perlu — dibuat dari akun direktur, langsung disetujui")}
+              </span>
+            )}
+          </Meta>
+          <Meta label={tt("Customer's sales rep", "Sales pelanggan")}>
             {p.sales_pic_name ? <UserLink id={p.sales_pic_id} name={p.sales_pic_name} /> : "—"}
           </Meta>
           {p.price_request_number && (

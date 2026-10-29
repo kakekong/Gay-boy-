@@ -828,7 +828,6 @@ export const ID_STATIC: Record<string, string> = {
   "Sales": "Penjualan",
   "Sales Targets": "Target Penjualan",
   "Sales by salesperson": "Penjualan per sales",
-  "Sales in charge": "Sales penanggung jawab",
   "Sales rep": "Sales",
   "Salesperson": "Sales",
   "Save": "Simpan",
