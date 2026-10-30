@@ -42,10 +42,13 @@ async def pos_for_project(db: AsyncSession, project_id: UUID) -> list:
 
 
 def receipt_value(po, moved: list[dict]) -> float:
-    """Rupiah value of what this receipt changed: Σ delta × unit price × rate."""
-    rate = 1.0
-    if (po.currency or "IDR").upper() != "IDR":
-        rate = float(po.fx_rate or 0) or 1.0
+    """Rupiah value of what this receipt changed: Σ delta × unit price × rate.
+    Nothing on a foreign order with no rate yet — it is booked when the rate
+    is set (ledger.revalue_receipts)."""
+    from app.services.ledger import po_rate
+    rate = po_rate(po)
+    if rate is None:
+        return 0.0
     lines = list(po.items or [])
     total = 0.0
     for m in moved:

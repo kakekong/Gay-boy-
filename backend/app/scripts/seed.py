@@ -968,6 +968,25 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('overtime_director_entered')"))
             await db.commit()
             print(f"Clock-out overtime moved to director entries: {res}")
+        # Foreign orders received before they had a rate were booked at 1
+        # rupiah per unit (¥5.000 as Rp 5.000): bring each to its rate.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'foreign_receipts_at_rate'")):
+            from sqlalchemy import select as _select
+
+            from app.models.purchasing import SupplierPO
+            from app.services.ledger import revalue_receipts, sync_po_cogs
+            moved = {}
+            for po in (await db.scalars(_select(SupplierPO).where(
+                    SupplierPO.currency != "IDR"))).all():
+                diff = await revalue_receipts(db, po)
+                if diff:
+                    moved[po.number] = diff
+                    await sync_po_cogs(db, po)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('foreign_receipts_at_rate')"))
+            await db.commit()
+            print(f"Foreign receipts brought to their PO's rate: {moved}")
 
 
 async def main() -> None:

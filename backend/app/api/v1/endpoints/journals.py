@@ -238,6 +238,7 @@ async def account_ledger(
         from datetime import timedelta
         end = end + timedelta(days=1)
 
+    from app.services.account_guide import guide_for
     from app.services.financials import EARNINGS_ACCOUNT, pnl_from_balances
     if acc.account_no == EARNINGS_ACCOUNT:
         # Laba/Rugi Tahun Berjalan has no lines: it is worked out from the
@@ -248,14 +249,18 @@ async def account_ledger(
                         "account_type": acc.account_type,
                         "balance": round(totals["net_income"], 2)},
             "computed": totals,
+            "guide": await guide_for(db, acc, round(totals["net_income"], 2)),
             "opening_balance": 0.0, "closing_balance": round(totals["net_income"], 2),
             "total_debit": 0.0, "total_credit": 0.0, "items": [],
         }
     events = (await account_events(db, [acc]))[acc.account_no]
+    from app.services.account_guide import guide_for
     return {
         "account": {"account_no": acc.account_no, "name": acc.name,
                     "account_type": acc.account_type,
                     "balance": float(acc.balance or 0)},
+        # How this account works: what it is, what moves it, what's healthy.
+        "guide": await guide_for(db, acc, float(acc.balance or 0)),
         **walk(events, start, end, min(limit, 2000)),
     }
 

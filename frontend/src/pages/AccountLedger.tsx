@@ -20,6 +20,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { useT, T, locale } from "@/store/lang";
 import { useAuthStore } from "@/store/auth";
+import { AccountGuide, type Guide } from "@/components/AccountGuide";
 
 interface Row {
   /** journal: a journal entry · auto: posted by the app (a receipt, a
@@ -49,6 +50,8 @@ interface Ledger {
   total_debit: number;
   total_credit: number;
   items: Row[];
+  /** How this account works — what moves it, what's healthy. */
+  guide?: Guide;
   /** Laba/Rugi Tahun Berjalan: no lines — worked out from these. */
   computed?: { revenue: number; other_income: number; cogs: number; expense: number;
                other_expense: number; net_income: number };
@@ -194,6 +197,7 @@ export default function AccountLedgerPage() {
             {t("Open the profit & loss", "Buka laporan laba rugi")}
           </Link>
         </div>
+        {d.guide && <AccountGuide guide={d.guide} />}
       </div>
     );
   }
@@ -264,6 +268,8 @@ export default function AccountLedgerPage() {
           ))}
         </div>
       </div>
+
+      {d.guide && <AccountGuide guide={d.guide} />}
 
       <div className="card overflow-hidden">
         {!d.items.length ? (

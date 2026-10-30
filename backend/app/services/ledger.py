@@ -400,7 +400,7 @@ async def post_goods_receipt(
     db: AsyncSession, *, value: float, entry_date: date, po_number: str,
     supplier_name: str | None = None, receipt_id: UUID | None = None,
     created_by: UUID | None = None, inventory_account: str = INVENTORY_ACCOUNT,
-    credits: list[tuple[str, float, str]] | None = None,
+    credits: list[tuple[str, float, str]] | None = None, why: str | None = None,
 ) -> list[dict]:
     """Goods received: the stock account up by `value` (rupiah), and the
     other side on `credits` — [(account, amount, role)], by default all of it
@@ -423,7 +423,8 @@ async def post_goods_receipt(
             account_type=m["account_type"], account_name=m["name"],
             amount=m["delta"], source_type="goods_receipt", source_id=receipt_id,
             source_ref=po_number,
-            memo=f"Goods received on {po_number}{who} ({role})",
+            memo=(f"{why} — {po_number}{who} ({role})" if why
+                  else f"Goods received on {po_number}{who} ({role})"),
             created_by=created_by,
         )
         moves.append({**m, "role": role})
@@ -441,21 +442,36 @@ async def _usable(db: AsyncSession, no: str | None, fallback: str | None) -> str
     return fallback
 
 
+def po_rate(po) -> float | None:
+    """Rupiah per unit of the order's currency: 1 on a rupiah order, None on
+    a foreign one whose rate hasn't been set. Never guessed — a yuan order
+    read at 1 puts ¥5.000 on the books as Rp 5.000."""
+    if (po.currency or "IDR").upper() == "IDR":
+        return 1.0
+    return float(po.fx_rate) if po.fx_rate else None
+
+
 async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
                                entry_date: date, receipt_id: UUID | None,
-                               supplier_name: str | None, created_by: UUID | None) -> float:
+                               supplier_name: str | None, created_by: UUID | None,
+                               why: str | None = None, billed: bool = False) -> float:
     """A receipt on the books the Accurate way: each line's value to its
     item's Persediaan, against its item's Belum Tertagih (Hutang Pembelian
     Belum Ditagih) until the supplier's invoice is recorded
     (`record_supplier_invoice`). Keeps on the order what sits unbilled per
     account, and what was received per stock/HPP account for the HPP later.
     A downward correction takes back from what is still unbilled first, and
-    the rest off Utang Usaha. Returns the receipt's value in rupiah."""
+    the rest off Utang Usaha. Returns the receipt's value in rupiah.
+
+    A foreign order with no rate yet books nothing: its receipts go on the
+    books when the rate is set (`revalue_receipts`). A row of `moved` may
+    carry its rupiah `value` outright; `billed` (the supplier has invoiced)
+    sends the credit straight to Utang Usaha."""
     from app.services import item_accounts as ia
 
-    rate = 1.0
-    if (po.currency or "IDR").upper() != "IDR":
-        rate = float(po.fx_rate or 0) or 1.0
+    rate = po_rate(po)
+    if rate is None:
+        return 0.0
     lines = list(po.items or [])
     dflt = await ia.defaults(db)
     parts: dict[tuple[str, str, str], float] = {}
@@ -464,7 +480,8 @@ async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
         if not (0 <= idx < len(lines)):
             continue
         unit = float(lines[idx].get("unit_price") or lines[idx].get("unit_cost") or 0)
-        value = float(m.get("delta") or 0) * unit * rate
+        value = (float(m["value"]) if "value" in m
+                 else float(m.get("delta") or 0) * unit * rate)
         if abs(value) < 1e-9:
             continue
         item = await ia.item_for_line(db, sku=m.get("sku"), name=m.get("name"))
@@ -480,7 +497,7 @@ async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
         if abs(value) < 0.005:
             continue
         inv = await _usable(db, inv, INVENTORY_ACCOUNT)
-        unb = await _usable(db, unb, PAYABLE_ACCOUNT)
+        unb = PAYABLE_ACCOUNT if billed else await _usable(db, unb, PAYABLE_ACCOUNT)
         cogs = await _usable(db, cogs, None) or await _cogs_account(db) or COGS_ACCOUNT
         if value > 0 or unb == PAYABLE_ACCOUNT:
             credits = [(unb, value, "not yet invoiced" if unb != PAYABLE_ACCOUNT else "payable")]
@@ -493,13 +510,73 @@ async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
         await post_goods_receipt(
             db, value=value, entry_date=entry_date, po_number=po.number,
             supplier_name=supplier_name, receipt_id=receipt_id, created_by=created_by,
-            inventory_account=inv, credits=credits)
+            inventory_account=inv, credits=credits, why=why)
         k = f"{inv}|{cogs}"
         received_by[k] = round(received_by.get(k, 0.0) + value, 2)
         total += value
     po.unbilled = {k: v for k, v in unbilled.items() if abs(v) >= 0.005}
     po.received_by = {k: v for k, v in received_by.items() if abs(v) >= 0.005}
     return round(total, 2)
+
+
+async def revalue_receipts(db: AsyncSession, po, *,
+                           created_by: UUID | None = None) -> float:
+    """What a foreign order's receipts are on the books for, brought to its
+    rate: Persediaan and Belum Ditagih (Utang Usaha once the supplier has
+    invoiced) by the difference. Receipts booked before the order had a rate
+    — at 1 rupiah per yuan, as receiving used to — or before the rate was
+    changed come right the moment it is set. What has already been paid
+    stays at the rate it was paid against, so a payment's settlement and its
+    exchange difference stand. Returns the rupiah moved."""
+    from app.models.purchasing import GoodsReceipt, Supplier, SupplierPayment
+    from app.services.stock_reconcile import _receipted_quantities
+
+    if (po.currency or "IDR").upper() == "IDR" or po.status in _PO_NOT_LIVE:
+        return 0.0
+    rate = po_rate(po)
+    if rate is None:
+        return 0.0
+    lines = list(po.items or [])
+    foreign: dict[int, float] = {}
+    for no, qty in (await _receipted_quantities(db, po)).items():
+        if 1 <= no <= len(lines):
+            ln = lines[no - 1]
+            v = qty * float(ln.get("unit_price") or ln.get("unit_cost") or 0)
+            if abs(v) >= 1e-9:
+                foreign[no] = v
+    got = sum(foreign.values())
+    if got <= 0:
+        return 0.0
+    paid_cur = paid_idr = 0.0
+    for amount, cur_amount in (await db.execute(
+            select(SupplierPayment.amount, SupplierPayment.currency_amount)
+            .where(SupplierPayment.po_id == po.id))).all():
+        if cur_amount:
+            paid_cur += float(cur_amount)
+            paid_idr += float(amount or 0)
+    settled = min(paid_cur, got)
+    target = (paid_idr * settled / paid_cur if paid_cur else 0.0) + (got - settled) * rate
+    diff = round(target - float(po.payable_amount or 0), 2)
+    if abs(diff) < 0.5:
+        return 0.0
+    last = await db.scalar(select(GoodsReceipt).where(GoodsReceipt.po_id == po.id)
+                           .order_by(GoodsReceipt.created_at.desc()).limit(1))
+    sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import settings
+    today = datetime.now(ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")).date()
+    moved = [{"line_no": no, "sku": lines[no - 1].get("sku"),
+              "name": lines[no - 1].get("description") or lines[no - 1].get("name"),
+              "value": diff * v / got} for no, v in foreign.items()]
+    rate_txt = f"{rate:,.2f}".rstrip("0").rstrip(".")
+    posted = await post_receipt_by_item(
+        db, po, moved, entry_date=today, receipt_id=last.id if last else None,
+        supplier_name=sup.name if sup else None, created_by=created_by,
+        why=f"Received goods at Rp {rate_txt} per {po.currency.upper()}",
+        billed=bool(po.supplier_invoices) and not po.unbilled)
+    po.payable_amount = round(float(po.payable_amount or 0) + posted, 2)
+    return posted
 
 
 async def record_supplier_invoice(db: AsyncSession, po, *, number: str, on: date,
@@ -607,8 +684,12 @@ async def sync_po_cogs(
 
     Kept per stock/HPP account pair (`received_by`), so each item's cost
     leaves its own Persediaan for its own HPP account. What was received
-    before the order kept that record counts on the default pair."""
+    before the order kept that record counts on the default pair.
+
+    A foreign order's receipts are first brought to its rate — every path
+    that sets or changes the rate comes through here."""
     from uuid import UUID as _U
+    await revalue_receipts(db, po, created_by=created_by)
     default_key = f"{INVENTORY_ACCOUNT}|{await _cogs_account(db) or COGS_ACCOUNT}"
     received = {k: float(v) for k, v in (po.received_by or {}).items()}
     older = round(float(po.payable_amount or 0) - sum(received.values()), 2)
