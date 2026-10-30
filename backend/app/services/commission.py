@@ -23,8 +23,12 @@ from app.models.finance import Invoice, Payment
 async def collected_for_projects(
     db: AsyncSession, project_ids: list[UUID],
 ) -> dict[UUID, dict]:
-    """Per project: what has been invoiced, what has been paid, and whether
-    the customer has settled it in full.
+    """Per project: what has been invoiced, what has been paid, whether the
+    customer has settled it in full, and the commission `basis`.
+
+    The basis is what was billed before tax: each invoice's subtotal less its
+    discount (the invoice's own amount, SUB BRUTO), never the PPN — the tax is
+    the state's money passing through, not the sale.
 
     "In full" deliberately means *every* invoice on the job, deposit included.
     A deposit paid on a job still being built is money in the bank, but it is
@@ -34,12 +38,14 @@ async def collected_for_projects(
     if not project_ids:
         return {}
     rows = (await db.execute(
-        select(Invoice.project_id, Invoice.id, Invoice.total, Invoice.status)
+        select(Invoice.project_id, Invoice.id, Invoice.total, Invoice.status,
+               Invoice.amount)
         .where(Invoice.project_id.in_(project_ids))
     )).all()
     if not rows:
         return {pid: {"invoiced": 0.0, "collected": 0.0, "outstanding": 0.0,
-                      "paid_in_full": False, "invoices": 0} for pid in project_ids}
+                      "basis": 0.0, "paid_in_full": False, "invoices": 0}
+                for pid in project_ids}
 
     # Rejected invoices are not a bill anybody owes, so they count for
     # neither side of the sum — including one would leave a fully-settled
@@ -57,19 +63,21 @@ async def collected_for_projects(
 
     out: dict[UUID, dict] = {
         pid: {"invoiced": 0.0, "collected": 0.0, "outstanding": 0.0,
-              "paid_in_full": False, "invoices": 0}
+              "basis": 0.0, "paid_in_full": False, "invoices": 0}
         for pid in project_ids
     }
-    for project_id, invoice_id, total, _status in live:
+    for project_id, invoice_id, total, _status, amount in live:
         e = out.setdefault(project_id, {"invoiced": 0.0, "collected": 0.0,
-                                        "outstanding": 0.0, "paid_in_full": False,
-                                        "invoices": 0})
+                                        "outstanding": 0.0, "basis": 0.0,
+                                        "paid_in_full": False, "invoices": 0})
         e["invoiced"] += float(total or 0)
+        e["basis"] += float(amount or 0)
         e["collected"] += paid_by_inv.get(invoice_id, 0.0)
         e["invoices"] += 1
     for e in out.values():
         e["invoiced"] = round(e["invoiced"], 2)
         e["collected"] = round(e["collected"], 2)
+        e["basis"] = round(e["basis"], 2)
         e["outstanding"] = round(max(0.0, e["invoiced"] - e["collected"]), 2)
         e["paid_in_full"] = e["invoiced"] > 0 and e["collected"] >= e["invoiced"] - 0.01
     return out

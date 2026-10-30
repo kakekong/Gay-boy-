@@ -610,7 +610,7 @@ const ROLES: RoleSection[] = [
         effect: "Build your own role: name + base tier + which pages it sees",
         effect_id: "Buat peran sendiri: nama + tingkat dasar + halaman yang bisa dilihat" },
       { page: "Employee page (commission)", page_id: "Halaman karyawan (komisi)", button: "Approve / Refuse a claim", button_id: "Setujui / Tolak klaim",
-        effect: "Agree the rep's share, or refuse it with a reason. You can settle at a rate other than the baseline 2% — the amount recomputes from the money that was collected when the claim was filed.",
+        effect: "Agree the rep's share, or refuse it with a reason. You can settle at a rate other than the baseline 2% — the amount is worked out on the job before tax: subtotal less discount, without PPN.",
         effect_id: "Setujui bagian sales, atau tolak dengan alasan. Anda boleh memakai persentase selain baseline 2% — jumlahnya dihitung ulang dari uang yang sudah masuk saat klaim diajukan." },
     ],
     rules: [

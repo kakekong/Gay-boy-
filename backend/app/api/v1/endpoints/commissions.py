@@ -165,15 +165,17 @@ async def commission_summary(
         m = money.get(pid) or {}
         if not m.get("paid_in_full") or live.get(pid) is not None:
             continue
-        collected = float(m.get("collected") or 0)
+        basis = float(m.get("basis") or 0)
         claimable.append({
             "project_id": str(pid),
             "project_code": project.code,
             "customer_name": customer.company_name,
-            "collected": collected,
+            "collected": float(m.get("collected") or 0),
+            # Before PPN: subtotal less discount.
+            "basis": basis,
             "invoices": m.get("invoices", 0),
             "rate_pct": DEFAULT_RATE_PCT,
-            "amount": round(collected * DEFAULT_RATE_PCT / 100.0, 2),
+            "amount": round(basis * DEFAULT_RATE_PCT / 100.0, 2),
         })
     claimable.sort(key=lambda r: r["amount"], reverse=True)
 
@@ -293,7 +295,8 @@ async def file_claim(
             .replace(",", "."),
         )
 
-    basis = float(money.get("collected") or 0)
+    # Commission is on the sale, not the tax: subtotal less discount.
+    basis = float(money.get("basis") or 0)
     rate = DEFAULT_RATE_PCT
     claim = CommissionClaim(
         project_id=project.id,
@@ -344,6 +347,9 @@ async def approve_claim(
             "first; the claim can be approved once the money is in again.",
         )
 
+    # Claims filed while commission was still worked out on the money
+    # collected — PPN included — are agreed on the figure before tax.
+    c.basis_amount = float(money.get("basis") or 0)
     if payload.rate_pct is not None:
         if payload.rate_pct <= 0 or payload.rate_pct > 100:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,

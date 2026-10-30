@@ -23,6 +23,7 @@ sys.path.insert(0, "/home/user/Gay-boy-/backend")
 import httpx, logging; logging.disable(logging.INFO)
 TAG = uuid.uuid4().hex[:6]
 PASS, FAIL = [], []
+NET: dict = {}   # each invoice's amount before PPN — what commission is on
 def check(n, c, d=""):
     (PASS if c else FAIL).append(n); print(("  PASS " if c else "  FAIL ")+n+(f"  [{d}]" if d and not c else ""))
 def J(r):
@@ -87,6 +88,7 @@ async def main():
             row = await db.scalar(_sel(_Inv).where(_Inv.project_id == proj)
                                   .order_by(_Inv.created_at.desc()))
             iid, total = str(row.id), float(row.total or 0)
+            NET[iid] = float(row.amount or 0)   # before PPN, after discount
         await c.post(f"/finance/invoices/{iid}/approve", headers=fin,
                      data={"faktur_pajak_no": f"FP-KOM-{tag}"})
         if pay:
@@ -131,17 +133,22 @@ async def main():
           str(com)[:200])
     check("...the baseline rate is 2%", float(com.get("rate_pct") or 0) == 2.0,
           str(com.get("rate_pct")))
-    check("...and the figure it would come to is 2% of what was collected",
-          abs(float(com.get("amount") or 0) - round(total * 0.02, 2)) < 0.01,
-          f"{com.get('amount')} vs {round(total * 0.02, 2)}")
+    net = NET[inv_id]
+    check("...the commission basis is the job before PPN, not what was collected",
+          abs(float(com.get("basis") or 0) - net) < 0.01 and net < total,
+          f"{com.get('basis')} vs {net} (collected {total})")
+    check("...and the figure it would come to is 2% of that",
+          abs(float(com.get("amount") or 0) - round(net * 0.02, 2)) < 0.01,
+          f"{com.get('amount')} vs {round(net * 0.02, 2)}")
     check("...it is claimable", com.get("may_claim") is True, str(com.get("may_claim")))
 
     r = await c.post("/commissions", headers=s1, json={
         "project_id": paid, "notes": "closed it in March"})
     check("the rep files the claim", r.status_code == 201, f"{r.status_code} {why(r)}")
     claim = J(r)
-    check("...for 2% of the collected amount",
-          abs(float(claim.get("amount") or 0) - round(total * 0.02, 2)) < 0.01,
+    check("...for 2% of the job before PPN",
+          abs(float(claim.get("amount") or 0) - round(net * 0.02, 2)) < 0.01
+          and abs(float(claim.get("basis_amount") or 0) - net) < 0.01,
           str(claim.get("amount")))
     check("...pending the director", claim.get("status") == "pending",
           str(claim.get("status")))
@@ -184,9 +191,9 @@ async def main():
     check("the director approves, at a rate of their choosing",
           r.status_code == 200, f"{r.status_code} {why(r)}")
     got = J(r)
-    check("...and the amount follows the rate, on the basis frozen at claim time",
-          abs(float(got.get("amount") or 0) - round(total * 0.03, 2)) < 0.01,
-          f"{got.get('amount')} vs {round(total * 0.03, 2)}")
+    check("...and the amount follows the rate, on the job before PPN",
+          abs(float(got.get("amount") or 0) - round(net * 0.03, 2)) < 0.01,
+          f"{got.get('amount')} vs {round(net * 0.03, 2)}")
     check("...marked approved", got.get("status") == "approved", str(got.get("status")))
 
     r = await c.post(f"/commissions/{claim['id']}/mark-paid", headers=fin, json={})

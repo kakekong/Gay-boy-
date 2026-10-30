@@ -39,6 +39,8 @@ interface Claimable {
   project_code: string | null;
   customer_name: string | null;
   collected: number;
+  /** What commission is worked out on: billed before PPN, after discount. */
+  basis: number;
   invoices: number;
   rate_pct: number;
   amount: number;
@@ -162,8 +164,8 @@ export default function MyCommissionPage() {
           </h1>
           <p className="mt-2 text-sm text-ink-600 leading-relaxed max-w-2xl">
             {t(
-              `${pct(s.rate_pct)} of what your customers have actually paid. A job becomes claimable the day finance receives the last of its invoice — not when the deal is won, and not when the goods ship.`,
-              `${pct(s.rate_pct)} dari uang yang benar-benar dibayar pelanggan. Sebuah pekerjaan bisa diklaim pada hari keuangan menerima sisa terakhir fakturnya — bukan saat deal menang, bukan saat barang dikirim.`)}
+              `${pct(s.rate_pct)} of the job before tax — subtotal less any discount, without PPN. A job becomes claimable the day finance receives the last of its invoice — not when the deal is won, and not when the goods ship.`,
+              `${pct(s.rate_pct)} dari nilai pekerjaan sebelum pajak — subtotal dikurangi diskon, tanpa PPN. Sebuah pekerjaan bisa diklaim pada hari keuangan menerima sisa terakhir fakturnya — bukan saat deal menang, bukan saat barang dikirim.`)}
           </p>
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
@@ -262,7 +264,10 @@ export default function MyCommissionPage() {
               <thead>
                 <tr>
                   <th className="th">{t("Job", "Pekerjaan")}</th>
-                  <th className="th text-right">{t("Customer paid", "Dibayar pelanggan")}</th>
+                  <th className="th text-right"
+                    title={t("Subtotal less discount, before PPN", "Subtotal dikurangi diskon, sebelum PPN")}>
+                    {t("Before tax", "Sebelum pajak")}
+                  </th>
                   <th className="th text-right">{t("Rate", "Persentase")}</th>
                   <th className="th text-right">{t("Your share", "Bagian Anda")}</th>
                   <th className="th text-right"><span className="sr-only">{t("Action", "Aksi")}</span></th>
@@ -278,7 +283,7 @@ export default function MyCommissionPage() {
                       </a>
                       <div className="text-sm text-ink-800 mt-0.5">{row.customer_name}</div>
                     </td>
-                    <td className="td text-right tabular-nums">{idr(row.collected)}</td>
+                    <td className="td text-right tabular-nums">{idr(row.basis)}</td>
                     <td className="td text-right tabular-nums text-ink-500">{pct(row.rate_pct)}</td>
                     <td className="td text-right tabular-nums font-semibold text-ink-900">
                       {idr(row.amount)}
@@ -310,8 +315,8 @@ export default function MyCommissionPage() {
               <span className="chip bg-ink-100 text-ink-600">{s.filed.length}</span>
             </div>
             <div className="text-xs muted">
-              {t("The figure is frozen at what had been collected the day you claimed.",
-                 "Angkanya dibekukan sebesar uang yang sudah masuk pada hari Anda mengklaim.")}
+              {t("Worked out on what was billed before tax — subtotal less discount, without PPN.",
+                 "Dihitung dari nilai tagihan sebelum pajak — subtotal dikurangi diskon, tanpa PPN.")}
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -414,7 +419,10 @@ export default function MyCommissionPage() {
           <div className="space-y-4">
             <div className="border border-ink-200 rounded-lg overflow-hidden">
               <Line label={t("The customer has paid", "Pelanggan sudah membayar")}
-                    value={idr(claiming.collected)} strong />
+                    value={idr(claiming.collected)} />
+              <Line label={t("Commission is on (subtotal − discount, before PPN)",
+                             "Komisi dihitung dari (subtotal − diskon, sebelum PPN)")}
+                    value={idr(claiming.basis)} strong />
               <Line label={t("Across", "Tersebar di")}
                     value={t(`${claiming.invoices} invoice(s)`,
                              `${claiming.invoices} faktur`)} />
@@ -449,8 +457,8 @@ export default function MyCommissionPage() {
             </div>
 
             <p className="text-xs text-ink-500 leading-relaxed">
-              {t("This goes to the director to agree — it is not a payment yet. The figure is fixed at what has been collected today, so re-pricing the order later will not change it.",
-                 "Ini dikirim ke direktur untuk disetujui — belum berupa pembayaran. Angkanya dikunci pada uang yang sudah masuk hari ini, jadi perubahan harga pesanan nanti tidak mengubahnya.")}
+              {t("This goes to the director to agree — it is not a payment yet. Commission is on the sale, not the tax: what was billed less any discount, without PPN.",
+                 "Ini dikirim ke direktur untuk disetujui — belum berupa pembayaran. Komisi dihitung dari penjualan, bukan pajaknya: nilai tagihan dikurangi diskon, tanpa PPN.")}
             </p>
 
             {err && (
@@ -574,8 +582,8 @@ function FiledRows({ c, again, t, onClaimAgain }: {
                 className="btn mt-2.5 border border-brand-200 text-brand-700 hover:bg-brand-50 text-xs"
                 onClick={() => onClaimAgain(again)}
               >
-                {t(`Claim again on ${idr(again.collected)}`,
-                   `Klaim ulang atas ${idr(again.collected)}`)}
+                {t(`Claim again on ${idr(again.basis)}`,
+                   `Klaim ulang atas ${idr(again.basis)}`)}
               </button>
             )}
           </td>

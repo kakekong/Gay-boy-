@@ -439,10 +439,11 @@ async def employee_projects(
         paid_in_full = bool(m.get("paid_in_full"))
         rate = float(claim.rate_pct) if claim is not None else DEFAULT_RATE_PCT
         basis = (float(claim.basis_amount) if claim is not None
-                 else float(m.get("collected") or 0))
+                 else float(m.get("basis") or 0))
         return {
             "invoiced": m.get("invoiced", 0.0),
             "collected": m.get("collected", 0.0),
+            "basis": m.get("basis", 0.0),
             "outstanding": m.get("outstanding", 0.0),
             "paid_in_full": paid_in_full,
             "rate_pct": rate,

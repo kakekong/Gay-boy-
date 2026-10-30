@@ -653,8 +653,8 @@ export default function EmployeeDetailPage() {
                           onClaim={() => {
                             const amt = idr(p.commission?.amount ?? 0);
                             if (window.confirm(t(
-                              `Claim ${amt} on ${p.code}? That is ${p.commission?.rate_pct ?? 2}% of the ${idr(p.commission?.collected ?? 0)} the customer has paid. It goes to the director to approve.`,
-                              `Klaim ${amt} untuk ${p.code}? Itu ${p.commission?.rate_pct ?? 2}% dari ${idr(p.commission?.collected ?? 0)} yang sudah dibayar pelanggan. Akan dikirim ke direktur untuk disetujui.`)))
+                              `Claim ${amt} on ${p.code}? That is ${p.commission?.rate_pct ?? 2}% of ${idr(p.commission?.basis ?? 0)} — the job before PPN, after discount. It goes to the director to approve.`,
+                              `Klaim ${amt} untuk ${p.code}? Itu ${p.commission?.rate_pct ?? 2}% dari ${idr(p.commission?.basis ?? 0)} — nilai pekerjaan sebelum PPN, sesudah diskon. Akan dikirim ke direktur untuk disetujui.`)))
                               claimCommission.mutate(p.id);
                           }} />
                       </td>

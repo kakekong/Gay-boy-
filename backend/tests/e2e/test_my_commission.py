@@ -25,6 +25,7 @@ sys.path.insert(0, "/home/user/Gay-boy-/backend")
 import httpx, logging; logging.disable(logging.INFO)
 TAG = uuid.uuid4().hex[:6]
 PASS, FAIL = [], []
+NET: dict = {}   # each invoice's amount before PPN — what commission is on
 def check(n, c, d=""):
     (PASS if c else FAIL).append(n); print(("  PASS " if c else "  FAIL ")+n+(f"  [{d}]" if d and not c else ""))
 def J(r):
@@ -89,6 +90,7 @@ async def main():
             row = await db.scalar(_sel(_Inv).where(_Inv.project_id == proj)
                                   .order_by(_Inv.created_at.desc()))
             iid, total = str(row.id), float(row.total or 0)
+            NET[iid] = float(row.amount or 0)   # before PPN, after discount
         await c.post(f"/finance/invoices/{iid}/approve", headers=fin,
                      data={"faktur_pajak_no": f"FP-MINE-{tag}"})
         if pay:
@@ -143,8 +145,12 @@ async def main():
     check("...and what the customer actually paid",
           abs(float(offer["collected"]) - paid_total) < 1,
           f"{offer['collected']} vs {paid_total}")
+    net = NET[paid_inv]
+    check("...and the job before PPN, which commission is on",
+          abs(float(offer["basis"]) - net) < 1 and net < paid_total,
+          f"{offer['basis']} vs {net}")
     check("...and the 2% that follows from it, so the button can say the figure",
-          abs(float(offer["amount"]) - round(paid_total * 0.02, 2)) < 1,
+          abs(float(offer["amount"]) - round(net * 0.02, 2)) < 1,
           str(offer.get("amount")))
     check("the claimable total is the sum of what is on offer",
           abs(float(s["totals"]["claimable"])
