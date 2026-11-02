@@ -474,10 +474,9 @@ async def project_full(project_id: UUID,
             "drawing_skip_pending": await _skip_pending(db, p.id),
         },
         "price_request": price_request,
-        # Null for anyone outside procurement, which is how the page knows to
-        # drop the card rather than render a read-only customs pack at a role
-        # that never chases one.
-        "logistics": (await _logistics(db, p)) if _role in _LOGISTICS_ROLES else None,
+        # Null for anyone outside procurement, finance and admin, which is how
+        # the page knows to drop the card. Finance and admin get it read-only.
+        "logistics": (await _logistics(db, p)) if _role in _LOGISTICS_VIEW_ROLES else None,
         "invoices": [] if not show_customer_docs else [
             {
                 "id": str(inv.id), "number": inv.number, "status": inv.status,
@@ -827,6 +826,10 @@ REQUIRED_DOCS = {
 # signs it off. It used to be open to admin and manager as well, which put a
 # customs pack on the screen of the two roles that never chase one.
 _LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR}
+# Finance and admin read the card and open the documents — finance books the
+# import duties and freight against the customs pack, admin ships and
+# invoices against it — but neither collects, uploads or approves anything.
+_LOGISTICS_VIEW_ROLES = _LOGISTICS_ROLES | {Role.FINANCE, Role.ADMIN}
 DOCS_DUE_WINDOW_DAYS = 14
 
 # ── Drawings, and who they belong to ─────────────────────────────────────────

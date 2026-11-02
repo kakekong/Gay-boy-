@@ -529,6 +529,17 @@ async def add_link(
     return await _to_out(db, a)
 
 
+async def _finance_import_doc(db: AsyncSession, me: User, a: Attachment) -> bool:
+    """Finance opens a project's import documents (read-only, from the
+    Logistics card) — and no other file on the project's shelf."""
+    if Role(me.role) != Role.FINANCE or a.owner_type != "project":
+        return False
+    from app.models.operation import Project
+    p = await db.get(Project, a.owner_id)
+    return any(str((e or {}).get("attachment_id") or "") == str(a.id)
+               for e in ((p.import_docs or {}) if p else {}).values())
+
+
 @router.get("/{attachment_id}/download")
 async def download_attachment(
     attachment_id: UUID,
@@ -539,7 +550,8 @@ async def download_attachment(
     a = await db.get(Attachment, attachment_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if not _attachment_visible_to(a.owner_type, Role(me.role)):
+    if (not _attachment_visible_to(a.owner_type, Role(me.role))
+            and not await _finance_import_doc(db, me, a)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
     if a.owner_type == "daily_log" and not await _daily_log_read_ok(db, me, a.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")

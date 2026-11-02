@@ -233,8 +233,9 @@ export default function ProjectDetailPage() {
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const userId = useAuthStore((s) => s.user?.id) ?? "";
   // Import paperwork is procurement's file — purchasing collects it, the
-  // director signs it off. The backend sends `logistics: null` to everyone
-  // else, so the card drops out rather than rendering read-only.
+  // director signs it off. Finance and admin get the card read-only (and may
+  // open the documents); the backend sends `logistics: null` to everyone
+  // else, so the card drops out for them.
   const canLogistics = ["purchasing", "director"].includes(role);
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
@@ -1589,7 +1590,8 @@ export default function ProjectDetailPage() {
       {/* Logistics & import documents — only meaningful once the drawing
           has been approved. Hidden before that so the project page stays
           focused on what's actually happening at the current stage.
-          Also hidden from sales — this is purchasing's card. */}
+          Also hidden from sales — this is purchasing's card, which
+          finance and admin read. */}
       {canSeeOpsDetails && logistics && PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("drawing_approved") && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
@@ -1761,8 +1763,9 @@ export default function ProjectDetailPage() {
                       </>
                     )}
 
-                    {/* Director approve / reject */}
-                    {canApproveDrawing && d.status === "pending" && (
+                    {/* Director approve / reject — the director's alone;
+                        admin reads this card but signs nothing on it. */}
+                    {role === "director" && d.status === "pending" && (
                       <span className="inline-flex gap-1.5 ml-auto">
                         <button className="btn-primary py-0.5 px-2 text-xs"
                           disabled={decideDoc.isPending}

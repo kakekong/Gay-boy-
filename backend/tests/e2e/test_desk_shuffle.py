@@ -95,19 +95,22 @@ async def main():
     await c.post(f"/operation/drawings/{cust_drw['id']}/decide", headers=d,
                  json={"decision": "approve"})
 
-    # ══ 1. the customs pack is procurement's card ════════════════════════════
+    # ══ 1. the customs pack is procurement's card; finance and admin read it ═
     print("\n── who opens the import documents ──")
     for who, label, allowed in ((pur, "purchasing", True), (d, "the director", True),
-                                (adm, "admin", False), (mgr, "the manager", False),
-                                (s1, "sales", False)):
+                                (adm, "admin", True), (fin, "finance", True),
+                                (mgr, "the manager", False), (s1, "sales", False)):
         got = (await full(who)).get("logistics")
         check(f"{label} {'sees' if allowed else 'does not see'} the card",
               (got is not None) == allowed, str(got)[:80])
 
     r = await c.patch(f"/operation/projects/{proj}/logistics", headers=adm,
                       json={"delivery_mode": "agent"})
-    check("admin cannot set the delivery mode either", r.status_code == 403,
+    check("admin reads it but cannot set the delivery mode", r.status_code == 403,
           str(r.status_code))
+    r = await c.patch(f"/operation/projects/{proj}/logistics", headers=fin,
+                      json={"delivery_mode": "agent"})
+    check("...nor can finance", r.status_code == 403, str(r.status_code))
     r = await c.patch(f"/operation/projects/{proj}/logistics", headers=pur,
                       json={"delivery_mode": "agent"})
     check("purchasing can", r.status_code == 200, f"{r.status_code} {J(r)}"[:120])
@@ -195,10 +198,28 @@ async def main():
     r = await c.post(f"/operation/projects/{proj}/import-docs/packing_list/upload",
                      headers=pur, data={"note": "neither"})
     check("...with neither, refused", r.status_code == 400, str(r.status_code))
-    r = await c.post(f"/operation/projects/{proj}/import-docs/invoice/decide",
-                     headers=adm, json={"decision": "approve"})
-    check("admin cannot sign off a document they cannot see", r.status_code == 403,
-          str(r.status_code))
+    r = await c.post(f"/operation/projects/{proj}/import-docs/packing_list/upload",
+                     headers=pur, data={"note": f"packing list {tag}"},
+                     files={"file": ("packing.pdf", io.BytesIO(b"%PDF-1.4\n"),
+                                     "application/pdf")})
+    check("purchasing uploads the packing list", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+    pl = next((x for x in J(r).get("required_docs", []) if x["key"] == "packing_list"), {})
+    for who, label in ((fin, "finance"), (adm, "admin")):
+        rr = await c.get(f"/attachments/{pl.get('attachment_id')}/download", headers=who)
+        check(f"{label} opens it", rr.status_code == 200, str(rr.status_code))
+    if uploaded and uploaded.get("attachment_id"):
+        rr = await c.get(f"/attachments/{uploaded['attachment_id']}/download", headers=fin)
+        check("...but finance can't open the job's other files (a supplier drawing)",
+              rr.status_code == 403, str(rr.status_code))
+    r = await c.post(f"/operation/projects/{proj}/import-docs/invoice/upload",
+                     headers=fin, data={"link_url": url})
+    check("finance can't file a document", r.status_code == 403, str(r.status_code))
+    for who, label in ((adm, "admin"), (fin, "finance")):
+        r = await c.post(f"/operation/projects/{proj}/import-docs/invoice/decide",
+                         headers=who, json={"decision": "approve"})
+        check(f"{label} sees it but can't sign it off", r.status_code == 403,
+              str(r.status_code))
     r = await c.post(f"/operation/projects/{proj}/import-docs/invoice/decide",
                      headers=d, json={"decision": "approve"})
     check("the director can", r.status_code == 200, f"{r.status_code} {J(r)}"[:120])
