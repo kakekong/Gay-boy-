@@ -180,6 +180,34 @@ async def main():
           J(await c.post(f"/operation/projects/{p2}/skip-drawing", headers=d,
                          json={})).get("drawing_skipped") is True)
 
+    stage = await proj(p2)
+    check("skipping the drawing stage shows the supplier drawing skipped too",
+          stage.get("supplier_drawing_skipped") is True
+          and stage.get("supplier_drawing_skip_via_stage") is True
+          and stage.get("supplier_drawing_skip_reason") == "standard chain, no drawing",
+          str({k: v for k, v in stage.items() if "supplier_drawing" in k}))
+
+    # ══ the supplier drawing on its own ══════════════════════════════════
+    print("\n── the director can skip just the supplier drawing ──")
+    p4 = await a_project("Supplier")
+    r = await c.post(f"/operation/projects/{p4}/skip-supplier-drawing", headers=pur,
+                     json={"reason": "catalogue"})
+    check("purchasing can't skip it", r.status_code == 403, str(r.status_code))
+    r = await c.post(f"/operation/projects/{p4}/skip-supplier-drawing", headers=d,
+                     json={"reason": "vendor's catalogue part"})
+    check("the director can", r.status_code == 200 and J(r).get("supplier_drawing_skipped") is True
+          and J(r).get("supplier_drawing_skip_via_stage") is False, f"{r.status_code} {J(r)}"[:200])
+    own = await proj(p4)
+    check("...the customer drawing stage is untouched",
+          own.get("drawing_skipped") is False and own.get("status") != "drawing_approved",
+          f"{own.get('drawing_skipped')} {own.get('status')}")
+    check("...and the reason is on the record",
+          own.get("supplier_drawing_skip_reason") == "vendor's catalogue part")
+    r = await c.post(f"/operation/projects/{p4}/unskip-supplier-drawing", headers=d)
+    back4 = await proj(p4)
+    check("the director can put it back", r.status_code == 200
+          and back4.get("supplier_drawing_skipped") is False, str(back4.get("supplier_drawing_skipped")))
+
     # ══ undoing it ═══════════════════════════════════════════════════════
     print("\n── and can take it back, while that still means something ──")
     r = await c.post(f"/operation/projects/{p2}/unskip-drawing", headers=pur)

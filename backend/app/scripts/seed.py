@@ -352,6 +352,9 @@ COLUMN_MIGRATIONS: list[str] = [
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_skipped_at TIMESTAMPTZ',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_skipped_by UUID',
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_skip_reason TEXT',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS supplier_drawing_skipped_at TIMESTAMPTZ',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS supplier_drawing_skipped_by UUID',
+    'ALTER TABLE projects ADD COLUMN IF NOT EXISTS supplier_drawing_skip_reason TEXT',
 
     # Operations QC + customer handover.
     'ALTER TABLE projects ADD COLUMN IF NOT EXISTS qc_decision VARCHAR(20)',

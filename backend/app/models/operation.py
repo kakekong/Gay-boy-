@@ -76,6 +76,11 @@ class Project(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     drawing_skipped_at:   Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     drawing_skipped_by:   Mapped[UUID | None]     = mapped_column(PG_UUID(as_uuid=True))
     drawing_skip_reason:  Mapped[str | None]      = mapped_column(Text)
+    # The vendor's own sheet, skipped on its own — the director's call too.
+    # Skipping the drawing stage covers it as well (see _skip_payload).
+    supplier_drawing_skipped_at:  Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    supplier_drawing_skipped_by:  Mapped[UUID | None]     = mapped_column(PG_UUID(as_uuid=True))
+    supplier_drawing_skip_reason: Mapped[str | None]      = mapped_column(Text)
     # ── Operations QC + customer handover ──────────────────────────────────
     # Operations runs a final check; passing QC hands the project to admin to
     # issue the delivery order + invoice. Failing parks it with findings.

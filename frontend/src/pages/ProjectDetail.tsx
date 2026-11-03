@@ -539,6 +539,14 @@ export default function ProjectDetailPage() {
     onError: onErr,
   });
 
+  // The supplier's own drawing, skipped on its own — the director's call.
+  const skipSupplierDrawing = useMutation({
+    mutationFn: (b: { skip: boolean; reason?: string }) =>
+      api.post(`/operation/projects/${id}/${b.skip ? "skip" : "unskip"}-supplier-drawing`,
+               b.skip ? { reason: b.reason } : undefined),
+    onSuccess: refresh, onError: onErr,
+  });
+
   // Post-drawing logistics (purchasing)
   const setLogistics = useMutation({
     mutationFn: (body: Record<string, any>) =>
@@ -852,9 +860,9 @@ export default function ProjectDetailPage() {
             </div>
           </div>
 
-          {/* Not every job has a drawing. Only on the customer card: the
-              supplier's sheet is an internal reference and nothing gates on
-              it, so there is nothing to skip there. */}
+          {/* Not every job has a drawing. The customer card skips the whole
+              drawing stage (both drawings); the supplier card can skip just
+              the vendor's sheet, which nothing waits on. */}
           {kind === "customer" && <SkipDrawingRow
             project={p}
             canAsk={canAskSkipDrawing}
@@ -866,6 +874,14 @@ export default function ProjectDetailPage() {
             onUnskip={() => unskipDrawing.mutate()}
             onDecide={(reqId, approve, notes) => decideSkip.mutate({ reqId, approve, notes })}
             busy={skipDrawing.isPending || unskipDrawing.isPending || decideSkip.isPending}
+          />}
+          {kind === "supplier" && <SkipSupplierDrawingRow
+            project={p}
+            isDirector={isDirector}
+            hasApproved={supplierDrawings.some((x: any) => x.status === "approved")}
+            onSkip={(reason) => skipSupplierDrawing.mutate({ skip: true, reason })}
+            onUnskip={() => skipSupplierDrawing.mutate({ skip: false })}
+            busy={skipSupplierDrawing.isPending}
           />}
 
           {mayUpload[kind] && (
@@ -3351,7 +3367,8 @@ function SkipDrawingRow({
       ) : skipped ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="chip bg-amber-50 text-amber-800">
-            {t("Drawing skipped", "Gambar dilewati")}
+            {t("Drawing stage skipped — customer and supplier drawings",
+               "Tahap gambar dilewati — gambar pelanggan dan supplier")}
           </span>
           <span className="muted">
             {project.drawing_skip_reason
@@ -3408,6 +3425,74 @@ function SkipDrawingRow({
             {isDirector
               ? t("Skip the drawing stage", "Lewati tahap gambar")
               : t("Ask the director to skip it", "Minta direktur melewatinya")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The supplier drawing's own skip line. Skipping the drawing stage covers it
+ * too — then it says so, with the stage's reason, rather than looking like a
+ * drawing still missing. Otherwise the director can skip just the vendor's
+ * sheet (a standard part, or one made to the customer's drawing); nothing
+ * waits on it, so this only records the decision.
+ */
+function SkipSupplierDrawingRow({ project, isDirector, hasApproved, onSkip, onUnskip, busy }: {
+  project: any; isDirector: boolean; hasApproved: boolean;
+  onSkip: (reason: string) => void; onUnskip: () => void; busy: boolean;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const skipped = !!project?.supplier_drawing_skipped;
+  const viaStage = !!project?.supplier_drawing_skip_via_stage;
+  if (!skipped && (!isDirector || hasApproved)) return null;
+  return (
+    <div className="px-5 py-3 border-b border-ink-100 bg-ink-50/40 text-xs">
+      {skipped ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="chip bg-amber-50 text-amber-800">
+            {viaStage
+              ? t("Skipped with the drawing stage", "Dilewati bersama tahap gambar")
+              : t("Supplier drawing skipped", "Gambar supplier dilewati")}
+          </span>
+          <span className="muted">
+            {project.supplier_drawing_skip_reason || t("No reason recorded", "Tanpa alasan tercatat")}
+          </span>
+          {isDirector && !viaStage && (
+            <button type="button" disabled={busy} onClick={onUnskip}
+              className="text-brand-700 hover:underline disabled:opacity-50">
+              {t("Put the supplier drawing back", "Kembalikan gambar supplier")}
+            </button>
+          )}
+        </div>
+      ) : open ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[220px]">
+            <label className="block text-[11px] uppercase muted mb-1">
+              {t("Why is there no supplier drawing?", "Kenapa tanpa gambar supplier?")}
+            </label>
+            <input className="input" value={reason} autoFocus
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={t("Standard part from the vendor's catalogue",
+                             "Barang standar dari katalog vendor")} />
+          </div>
+          <button type="button" disabled={busy} className="btn-primary text-xs"
+            onClick={() => { onSkip(reason.trim()); setOpen(false); setReason(""); }}>
+            {t("Skip the supplier drawing", "Lewati gambar supplier")}
+          </button>
+          <button type="button" className="btn-ghost text-xs" onClick={() => setOpen(false)}>
+            {t("Cancel", "Batal")}
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="muted">{t("No supplier drawing on this job?",
+                                     "Tidak ada gambar supplier di proyek ini?")}</span>
+          <button type="button" className="text-brand-700 hover:underline" onClick={() => setOpen(true)}>
+            {t("Skip the supplier drawing", "Lewati gambar supplier")}
           </button>
         </div>
       )}

@@ -1252,11 +1252,21 @@ async def _skip_pending(db: AsyncSession, project_id) -> dict | None:
 
 
 def _skip_payload(p: Project) -> dict:
+    stage = p.drawing_skipped_at is not None
+    own = p.supplier_drawing_skipped_at is not None
     return {
-        "drawing_skipped": p.drawing_skipped_at is not None,
+        "drawing_skipped": stage,
         "drawing_skipped_at": p.drawing_skipped_at,
         "drawing_skipped_by": str(p.drawing_skipped_by) if p.drawing_skipped_by else None,
         "drawing_skip_reason": p.drawing_skip_reason,
+        # The supplier's drawing: skipped on its own, or with the whole
+        # drawing stage — which leaves nothing to draw on either side.
+        "supplier_drawing_skipped": own or stage,
+        "supplier_drawing_skip_via_stage": stage and not own,
+        "supplier_drawing_skipped_at": p.supplier_drawing_skipped_at or (
+            p.drawing_skipped_at if stage else None),
+        "supplier_drawing_skip_reason": (p.supplier_drawing_skip_reason if own
+                                         else p.drawing_skip_reason if stage else None),
     }
 
 
@@ -1477,6 +1487,66 @@ async def unskip_drawing(
         f"[withdrawn by {user.full_name}] {p.drawing_skip_reason}"
         if p.drawing_skip_reason else None
     )
+    await db.flush()
+    return {"ok": True, **_skip_payload(p)}
+
+
+@router.post("/projects/{project_id}/skip-supplier-drawing")
+async def skip_supplier_drawing(
+    project_id: UUID,
+    payload: SkipDrawingIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The director decides this job has no supplier drawing — the vendor
+    sells a standard part, or makes it to our customer's drawing. Nothing
+    waits on the supplier drawing, so this records the decision and its
+    reason rather than moving the job."""
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can skip the supplier drawing")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if p.supplier_drawing_skipped_at is not None:
+        return {"ok": True, "already": True, **_skip_payload(p)}
+    approved = await db.scalar(select(Drawing).where(
+        Drawing.project_id == project_id, Drawing.status == "approved",
+        Drawing.kind == "supplier").limit(1))
+    if approved is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This job already has an approved supplier drawing — there is nothing to skip.")
+    p.supplier_drawing_skipped_at = datetime.now(UTC)
+    p.supplier_drawing_skipped_by = user.id
+    p.supplier_drawing_skip_reason = (payload.reason or "").strip() or None
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="skip_supplier_drawing", entity="project",
+                       entity_id=p.id, after={"reason": p.supplier_drawing_skip_reason})
+    await db.flush()
+    return {"ok": True, **_skip_payload(p)}
+
+
+@router.post("/projects/{project_id}/unskip-supplier-drawing")
+async def unskip_supplier_drawing(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Put the supplier drawing back — the reason is kept, marked withdrawn."""
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can undo a skipped supplier drawing")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if p.supplier_drawing_skipped_at is None:
+        return {"ok": True, "already": True, **_skip_payload(p)}
+    p.supplier_drawing_skipped_at = None
+    p.supplier_drawing_skipped_by = None
+    p.supplier_drawing_skip_reason = (
+        f"[withdrawn by {user.full_name}] {p.supplier_drawing_skip_reason}"
+        if p.supplier_drawing_skip_reason else None)
     await db.flush()
     return {"ok": True, **_skip_payload(p)}
 
