@@ -536,8 +536,12 @@ async def _finance_import_doc(db: AsyncSession, me: User, a: Attachment) -> bool
         return False
     from app.models.operation import Project
     p = await db.get(Project, a.owner_id)
-    return any(str((e or {}).get("attachment_id") or "") == str(a.id)
-               for e in ((p.import_docs or {}) if p else {}).values())
+    for e in ((p.import_docs or {}) if p else {}).values():
+        if str((e or {}).get("attachment_id") or "") == str(a.id):
+            return True
+        if any(str(f.get("attachment_id")) == str(a.id) for f in (e or {}).get("files") or []):
+            return True             # one of "Others"
+    return False
 
 
 @router.get("/{attachment_id}/download")

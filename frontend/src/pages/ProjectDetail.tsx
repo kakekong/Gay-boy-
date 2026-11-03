@@ -556,6 +556,14 @@ export default function ProjectDetailPage() {
     },
     onSuccess: refresh, onError: onErr,
   });
+  // A file under "Others" filed by mistake comes off again.
+  const removeOther = useMutation({
+    mutationFn: (body: { attachmentId: string; supplierId?: string | null }) =>
+      api.delete(`/operation/projects/${id}/import-docs/other/${body.attachmentId}`, {
+        params: body.supplierId ? { supplier_id: body.supplierId } : {},
+      }),
+    onSuccess: refresh, onError: onErr,
+  });
   const decideDoc = useMutation({
     mutationFn: (body: { key: string; decision: string; note?: string; supplierId?: string | null }) =>
       api.post(`/operation/projects/${id}/import-docs/${body.key}/decide`, {
@@ -1783,6 +1791,71 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
                 ))}
+
+                {/* Others — anything else that came with the shipment, in
+                    every delivery mode. As many files as needed, no sign-off,
+                    and never what holds a delivery up. */}
+                <div className="flex items-start gap-3 flex-wrap text-sm pb-2">
+                  <span className="w-32 shrink-0 font-medium">
+                    {t("Others", "Lainnya")}
+                    <span className="block text-[10px] font-normal muted">{t("optional", "opsional")}</span>
+                  </span>
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    {(g.other_docs ?? []).length === 0 && (
+                      <span className="text-xs muted">{t("Nothing else filed.", "Belum ada file lain.")}</span>
+                    )}
+                    {(g.other_docs ?? []).map((f: any) => (
+                      <span key={f.attachment_id} className="inline-flex items-center gap-2 text-xs">
+                        {f.external_url ? (
+                          <a href={f.external_url} target="_blank" rel="noreferrer"
+                            className="text-brand-700 hover:underline inline-flex items-center gap-1">
+                            <Link2 size={11} /> {f.filename || t("Open link", "Buka tautan")}
+                          </a>
+                        ) : (
+                          <button type="button" className="text-brand-700 hover:underline"
+                            onClick={() => openPreview(f.attachment_id, f.filename)}>
+                            {f.filename || t("View", "Lihat")}
+                          </button>
+                        )}
+                        {canLogistics && (
+                          <button type="button" className="text-red-600 hover:underline"
+                            disabled={removeOther.isPending}
+                            title={t("Remove this file", "Hapus file ini")}
+                            onClick={() => {
+                              if (window.confirm(tt(`Remove ${f.filename || "this file"} from Others?`,
+                                                    `Hapus ${f.filename || "file ini"} dari Lainnya?`)))
+                                removeOther.mutate({ attachmentId: f.attachment_id, supplierId: g.supplier_id });
+                            }}>
+                            <XCircle size={12} />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  {canLogistics && (
+                    <span className="inline-flex items-center gap-3">
+                      <label className="text-xs text-brand-700 hover:underline cursor-pointer">
+                        {t("Add file", "Tambah file")}
+                        <input type="file" className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) uploadDoc.mutate({ key: "other", file: f, supplierId: g.supplier_id });
+                            e.target.value = "";
+                          }} />
+                      </label>
+                      <button type="button"
+                        className="text-xs text-brand-700 hover:underline inline-flex items-center gap-1"
+                        disabled={uploadDoc.isPending}
+                        onClick={() => {
+                          const u = window.prompt(tt("Paste the link", "Tempel tautannya"));
+                          if (u && u.trim()) uploadDoc.mutate({
+                            key: "other", linkUrl: u.trim(), supplierId: g.supplier_id });
+                        }}>
+                        <Link2 size={11} /> {t("Use a link", "Pakai tautan")}
+                      </button>
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             ))}

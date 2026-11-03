@@ -220,6 +220,41 @@ async def main():
                          headers=who, json={"decision": "approve"})
         check(f"{label} sees it but can't sign it off", r.status_code == 403,
               str(r.status_code))
+
+    print("\n── Others: anything else, in every mode, never in the way ──")
+    before = (await full(pur)).get("logistics") or {}
+    r = await c.post(f"/operation/projects/{proj}/import-docs/other/upload",
+                     headers=pur, data={"note": "mill certificate"},
+                     files={"file": ("mill-cert.pdf", io.BytesIO(b"%PDF-1.4\n"),
+                                     "application/pdf")})
+    check("purchasing files a file under Others", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:140])
+    r = await c.post(f"/operation/projects/{proj}/import-docs/other/upload",
+                     headers=pur, data={"link_url": url})
+    lg = J(r)
+    others = (lg.get("suppliers") or [{}])[0].get("other_docs") or []
+    check("...and a link — both kept, side by side", r.status_code == 200 and len(others) >= 2
+          and any(o.get("filename") == "mill-cert.pdf" for o in others)
+          and any(o.get("external_url") == url for o in others), str(others)[:200])
+    check("...not a required document: the checklist and its approval are unchanged",
+          [d["key"] for d in lg.get("required_docs", [])]
+          == [d["key"] for d in before.get("required_docs", [])]
+          and lg.get("docs_approved") == before.get("docs_approved"),
+          f"{lg.get('docs_approved')} vs {before.get('docs_approved')}")
+    cert = next(o for o in others if o.get("filename") == "mill-cert.pdf")
+    rr = await c.get(f"/attachments/{cert['attachment_id']}/download", headers=fin)
+    check("finance opens it", rr.status_code == 200, str(rr.status_code))
+    r = await c.post(f"/operation/projects/{proj}/import-docs/other/upload",
+                     headers=fin, data={"link_url": url})
+    check("...but can't add to it", r.status_code == 403, str(r.status_code))
+    r = await c.delete(f"/operation/projects/{proj}/import-docs/other/{cert['attachment_id']}",
+                       headers=fin)
+    check("...or take anything off", r.status_code == 403, str(r.status_code))
+    r = await c.delete(f"/operation/projects/{proj}/import-docs/other/{cert['attachment_id']}",
+                       headers=pur)
+    left = ((J(r).get("suppliers") or [{}])[0].get("other_docs") or [])
+    check("purchasing takes one off", r.status_code == 200
+          and not any(o.get("attachment_id") == cert["attachment_id"] for o in left), str(left)[:160])
     r = await c.post(f"/operation/projects/{proj}/import-docs/invoice/decide",
                      headers=d, json={"decision": "approve"})
     check("the director can", r.status_code == 200, f"{r.status_code} {J(r)}"[:120])

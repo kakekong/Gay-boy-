@@ -812,6 +812,10 @@ DOC_LABELS = {
     "bill_of_lading": "Bill of Lading",
     "agent": "Agent details",
 }
+# Anything else that came with the shipment — a certificate, a photo, the
+# freight agent's email — in every delivery mode. Optional: it holds as many
+# files as are filed, needs no approval, and never blocks the delivery.
+OTHER_DOCS = "other"
 REQUIRED_DOCS = {
     # Goods bought locally, or bought abroad through an agent, only ever come
     # with the two commercial documents. The customs paperwork — Form E, the
@@ -991,8 +995,10 @@ def _logistics_payload(p: Project, groups: list[dict] | None = None) -> dict:
                 "status": d.get("status"),      # None | pending | approved | rejected
                 "decided_at": d.get("decided_at"),
             })
+        others = (docs.get(_doc_slot(docs, OTHER_DOCS, sid, lead)) or {}).get("files") or []
         out_groups.append({
             **g, "delivery_mode": mode,
+            "other_docs": others,
             "mode_overridden": bool(sid and overrides.get(sid)),
             "required_docs": g_rows,
             "docs_complete": all(r["collected"] for r in g_rows) if g_rows else True,
@@ -1729,7 +1735,7 @@ async def upload_import_doc(
     p = await db.get(Project, project_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if key not in DOC_LABELS:
+    if key not in DOC_LABELS and key != OTHER_DOCS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown document '{key}'")
 
     # Uploading again REPLACES the entry and resets it to pending, which is
@@ -1747,9 +1753,11 @@ async def upload_import_doc(
     lead = groups[0]["supplier_id"] if groups else None
     slot = _doc_slot(p.import_docs or {}, key, sid, lead)
     who = next((g["supplier_name"] for g in groups if g["supplier_id"] == sid), None)
-    label = DOC_LABELS.get(key, key) + (f" — {who}" if who and len(groups) > 1 else "")
+    label = (DOC_LABELS.get(key) or "Other document") + (
+        f" — {who}" if who and len(groups) > 1 else "")
     existing = (p.import_docs or {}).get(slot) or {}
-    if existing.get("status") == "approved" and Role(user.role) != Role.DIRECTOR:
+    if key != OTHER_DOCS and existing.get("status") == "approved" \
+            and Role(user.role) != Role.DIRECTOR:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"The {label} is already approved — the "
@@ -1790,6 +1798,17 @@ async def upload_import_doc(
                             "Attach a file or paste a link")
 
     docs = dict(p.import_docs or {})
+    if key == OTHER_DOCS:
+        # Added to, never replaced: each file is its own.
+        files = list((docs.get(slot) or {}).get("files") or [])
+        files.append({"attachment_id": str(a.id), "filename": safe,
+                      "external_url": a.external_url, "note": note,
+                      "uploaded_by": str(user.id),
+                      "uploaded_at": datetime.now(UTC).isoformat()})
+        docs[slot] = {"files": files}
+        p.import_docs = docs
+        await db.flush()
+        return _logistics_payload(p, groups)
     docs[slot] = {
         "collected": True,
         "attachment_id": str(a.id),
@@ -1804,6 +1823,39 @@ async def upload_import_doc(
         "decided_at": None,
     }
     p.import_docs = docs
+    await db.flush()
+    return _logistics_payload(p, groups)
+
+
+@router.delete("/projects/{project_id}/import-docs/other/{attachment_id}")
+async def remove_other_doc(project_id: UUID, attachment_id: UUID,
+                           supplier_id: str | None = None,
+                           db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """Take a file off a supplier's "Others" — filed by mistake, or the wrong
+    one. Purchasing and the director, who file them."""
+    if Role(user.role) not in _LOGISTICS_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/director only")
+    p = await db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    groups = await _logistics_groups(db, p)
+    sid = _resolve_supplier(groups, supplier_id)
+    docs = dict(p.import_docs or {})
+    slot = _doc_slot(docs, OTHER_DOCS, sid, groups[0]["supplier_id"] if groups else None)
+    files = list((docs.get(slot) or {}).get("files") or [])
+    keep = [f for f in files if str(f.get("attachment_id")) != str(attachment_id)]
+    if len(keep) == len(files):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That file isn't under Others here")
+    docs[slot] = {"files": keep}
+    p.import_docs = docs
+    a = await db.get(Attachment, attachment_id)
+    if a is not None:
+        await db.delete(a)
+    from app.core.audit import record as audit_record
+    await audit_record(db, actor=user, action="remove_other_doc", entity="project",
+                       entity_id=p.id, after={"attachment_id": str(attachment_id),
+                                              "filename": a.filename if a else None})
     await db.flush()
     return _logistics_payload(p, groups)
 
