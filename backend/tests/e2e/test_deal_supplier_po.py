@@ -152,6 +152,34 @@ async def main():
     r = await c.get("/consistency", headers=s1, params={"project_id": pid})
     check("sales still can't run it", r.status_code == 403, str(r.status_code))
 
+    print("\n── and purchasing makes the order's cost follow the PO ──")
+    so = spo_check(J(await c.get("/consistency", headers=pur, params={"project_id": pid})))
+    act = next((a for a in (so or {}).get("actions", []) if a["id"] == "use_right"), None)
+    check("the check offers purchasing the supplier PO's cost", act is not None and act["allowed"],
+          str((so or {}).get("actions")))
+    r = await c.post("/consistency/fix", headers=pur, json={
+        "project_id": pid, "check": "supplier_po_qty", "action": "use_left"})
+    check("...the other way round is refused — a placed order is changed with the supplier",
+          r.status_code == 409, f"{r.status_code} {J(r)}"[:160])
+    r = await c.post("/consistency/fix", headers=pur, json={
+        "project_id": pid, "check": "supplier_po_qty", "action": "use_right"})
+    check("purchasing applies it", r.status_code == 200, f"{r.status_code} {J(r)}"[:200])
+    prd = J(await c.get(f"/price-requests/{pr}", headers=d))
+    line1 = next((it for it in prd.get("items", []) if int(it.get("line_no") or 0) == 1), {})
+    check("...the order's chain line now costs Rp 833.333,33 a meter",
+          abs(float(line1.get("cost_price") or 0) - 833_333.33) < 0.01, str(line1.get("cost_price")))
+    line2 = next((it for it in prd.get("items", []) if int(it.get("line_no") or 0) == 2), {})
+    check("...the belt, already matching, is untouched", float(line2.get("cost_price") or 0) == 100_000,
+          str(line2.get("cost_price")))
+    so = spo_check(await rep(project_id=pid))
+    ch = {ln["description"]: ln for ln in (so or {}).get("lines", [])}.get(chain_name, {})
+    check("...and the check no longer flags the cost",
+          not any(f["field"] == "cost" for f in ch.get("fields", [])) and not (so or {}).get("actions"),
+          str(ch))
+    r = await c.post("/consistency/fix", headers=pur, json={
+        "project_id": pid, "check": "supplier_po_qty", "action": "use_right"})
+    check("...pressing it again is refused, nothing to change", r.status_code == 409, str(r.status_code))
+
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         print("FAILED: " + "; ".join(FAIL)); sys.exit(1)

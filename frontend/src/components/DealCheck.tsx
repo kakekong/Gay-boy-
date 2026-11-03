@@ -142,11 +142,14 @@ function Mismatch({ c, onFix, busy }: {
         `${kindName(c.left.kind)} dan ${lower(kindName(c.right.kind))} tidak sama`);
 
   const button = (side: "left" | "right") => {
-    if (c.info_only) return null;
     const a = act(side);
-    if (!a) return <div className="h-9" />;
+    // The supplier PO check is report-only, but for its cost: the order can
+    // take the cost the PO really pays.
+    if (!a) return c.info_only ? null : <div className="h-9" />;
     const label = c.key.startsWith("supplier_request")
       ? t("Update the supplier request to this", "Samakan permintaan supplier dengan ini")
+      : c.key === "supplier_po_qty"
+      ? t("Use this cost on the order", "Pakai biaya ini di pesanan")
       : t("This one is right", "Ini yang benar");
     return (
       <div className="pt-2">
@@ -203,8 +206,11 @@ function Mismatch({ c, onFix, busy }: {
       {picked && (
         <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3 text-sm flex items-center gap-3 flex-wrap">
           <span className="flex-1 min-w-[240px]">
-            {t(`${kindName(changes(picked).kind)} ${changes(picked).number} will be changed to match ${lower(kindName(keeps(picked).kind))} ${keeps(picked).number}.`,
-               `${kindName(changes(picked).kind)} ${changes(picked).number} akan diubah mengikuti ${lower(kindName(keeps(picked).kind))} ${keeps(picked).number}.`)}
+            {c.key === "supplier_po_qty"
+              ? t("The order's cost per unit will be set to what the supplier PO pays, on each line where it differs. Quantity and unit stay as they are.",
+                  "Biaya per satuan di pesanan akan disamakan dengan yang dibayar di PO supplier, pada baris yang berbeda. Jumlah dan satuan tetap.")
+              : t(`${kindName(changes(picked).kind)} ${changes(picked).number} will be changed to match ${lower(kindName(keeps(picked).kind))} ${keeps(picked).number}.`,
+                  `${kindName(changes(picked).kind)} ${changes(picked).number} akan diubah mengikuti ${lower(kindName(keeps(picked).kind))} ${keeps(picked).number}.`)}
           </span>
           <button className="btn-primary" disabled={busy}
             onClick={() => { onFix(c.key, picked.id); setPicked(null); }}>

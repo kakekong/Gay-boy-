@@ -323,6 +323,73 @@ def _pr_edit_rule(pr: PriceRequest, user: User) -> tuple[bool, str | None]:
     return False, "Only sales, a manager or the director can update the price request."
 
 
+def _supplier_po_lines(pr: PriceRequest, spos) -> tuple[list[dict], dict[int, float]]:
+    """The supplier POs against what each request line needs: the lines that
+    differ (quantity, unit, cost per unit in rupiah, or not ordered), and for
+    each line whose cost differs, what the POs really pay per unit."""
+    from app.services.ledger import po_rate
+    need, pr_alias = _merge_split(_pr_lines(pr))
+    by_key = {_key(v["description"]): no for no, v in need.items()}
+    ordered: dict[int, float] = {}
+    units: dict[int, set] = {}
+    # What the orders pay for each line, in rupiah — None once any of them
+    # is a foreign order with no rate yet.
+    paid: dict[int, float | None] = {}
+    for spo in spos:
+        rate = po_rate(spo)
+        shared = len({str(x) for x in (spo.project_ids or []) if x}) > 1
+        for it in (spo.items or []):
+            src = str(it.get("source_pr_id") or "")
+            if src and src != str(pr.id):
+                continue            # another job's line on a shared order
+            no = it.get("source_line_no")
+            if src or spo.price_request_id == pr.id:
+                if no is None:
+                    no = by_key.get(_key(it.get("description") or ""))
+            elif not shared:
+                # Typed on the PO page: the job's item it names.
+                no = by_key.get(_key(it.get("description") or ""))
+            else:
+                no = None
+            if no is None:
+                continue
+            no = pr_alias.get(int(no), int(no))
+            if no not in need:
+                continue
+            ordered[no] = ordered.get(no, 0) + _num(it.get("qty"))
+            units.setdefault(no, set()).add(_txt(it.get("uom")) or "pcs")
+            unit = it.get("unit_price") if it.get("unit_price") is not None else it.get("unit_cost")
+            if rate is None or unit is None or paid.get(no, 0) is None:
+                paid[no] = None
+            else:
+                paid[no] = paid.get(no, 0) + _num(it.get("qty")) * float(unit) * rate
+    lines: list[dict] = []
+    cost_to: dict[int, float] = {}
+    for no, v in sorted(need.items()):
+        if no not in ordered:
+            lines.append({"line_no": no, "change": "only_left", "description": v["description"]})
+            continue
+        fields = []
+        if abs(ordered[no] - v["qty"]) > 1e-6:
+            fields.append({"field": "qty", "left": v["qty"], "right": ordered[no]})
+        other = sorted(u for u in units.get(no, set()) if u.lower() != v["uom"].lower())
+        if other:
+            fields.append({"field": "uom", "left": v["uom"], "right": ", ".join(other)})
+        # The cost the order card carries against what the supplier PO
+        # really pays per unit. Seen by purchasing and management only —
+        # this check is never built for anyone else.
+        if v.get("cost") is not None and paid.get(no) is not None and ordered[no] > 0:
+            per_unit = round(paid[no] / ordered[no], 2)
+            if abs(per_unit - v["cost"]) >= 1:
+                fields.append({"field": "cost", "left": v["cost"], "right": per_unit})
+                for each in v.get("split", [no]):
+                    cost_to[each] = per_unit
+        if fields:
+            lines.append({"line_no": no, "change": "differs",
+                          "description": v["description"], "fields": fields})
+    return lines, cost_to
+
+
 # ── The report ───────────────────────────────────────────────────────────────
 
 async def report(db: AsyncSession, chain: dict, user: User) -> dict:
@@ -404,70 +471,23 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
             })
 
         if chain["supplier_pos"]:
-            need, pr_alias = _merge_split(_pr_lines(pr))
-            by_key = {_key(v["description"]): no for no, v in need.items()}
-            ordered: dict[int, float] = {}
-            units: dict[int, set] = {}
-            # What the orders pay for each line, in rupiah — None once any
-            # of them is a foreign order with no rate yet.
-            paid: dict[int, float | None] = {}
-            from app.services.ledger import po_rate
-            for spo in chain["supplier_pos"]:
-                rate = po_rate(spo)
-                shared = len({str(x) for x in (spo.project_ids or []) if x}) > 1
-                for it in (spo.items or []):
-                    src = str(it.get("source_pr_id") or "")
-                    if src and src != str(pr.id):
-                        continue            # another job's line on a shared order
-                    no = it.get("source_line_no")
-                    if src or spo.price_request_id == pr.id:
-                        if no is None:
-                            no = by_key.get(_key(it.get("description") or ""))
-                    elif not shared:
-                        # Typed on the PO page: the job's item it names.
-                        no = by_key.get(_key(it.get("description") or ""))
-                    else:
-                        no = None
-                    if no is None:
-                        continue
-                    no = pr_alias.get(int(no), int(no))
-                    if no not in need:
-                        continue
-                    ordered[no] = ordered.get(no, 0) + _num(it.get("qty"))
-                    units.setdefault(no, set()).add(_txt(it.get("uom")) or "pcs")
-                    unit = it.get("unit_price") if it.get("unit_price") is not None else it.get("unit_cost")
-                    if rate is None or unit is None or paid.get(no, 0) is None:
-                        paid[no] = None
-                    else:
-                        paid[no] = paid.get(no, 0) + _num(it.get("qty")) * float(unit) * rate
-            lines = []
-            for no, v in sorted(need.items()):
-                if no not in ordered:
-                    lines.append({"line_no": no, "change": "only_left",
-                                  "description": v["description"]})
-                    continue
-                fields = []
-                if abs(ordered[no] - v["qty"]) > 1e-6:
-                    fields.append({"field": "qty", "left": v["qty"], "right": ordered[no]})
-                other = sorted(u for u in units.get(no, set()) if u.lower() != v["uom"].lower())
-                if other:
-                    fields.append({"field": "uom", "left": v["uom"], "right": ", ".join(other)})
-                # The cost the order card carries against what the supplier
-                # PO really pays per unit. Seen by purchasing and management
-                # only — this check is never built for anyone else.
-                if v.get("cost") is not None and paid.get(no) is not None and ordered[no] > 0:
-                    per_unit = round(paid[no] / ordered[no], 2)
-                    if abs(per_unit - v["cost"]) >= 1:
-                        fields.append({"field": "cost", "left": v["cost"], "right": per_unit})
-                if fields:
-                    lines.append({"line_no": no, "change": "differs",
-                                  "description": v["description"], "fields": fields})
+            lines, cost_to = _supplier_po_lines(pr, chain["supplier_pos"])
+            may_cost = role in (Role.PURCHASING, Role.DIRECTOR)
             checks.append({
                 "key": "supplier_po_qty", "left": _doc("price_request", pr),
                 "right": {"kind": "supplier_pos", "id": None,
                           "number": ", ".join(s.number for s in chain["supplier_pos"]),
                           "docs": [_doc("supplier_po", s) for s in chain["supplier_pos"]]},
-                "lines": lines, "info_only": True, "actions": [],
+                "lines": lines, "info_only": True,
+                # The one thing settled from here: the order's cost following
+                # what the supplier PO really pays. Quantity and unit are
+                # changed with the supplier, on the PO page.
+                "actions": [] if not cost_to else [
+                    {"id": "use_right", "label": "Use the supplier PO's cost on the order",
+                     "label_id": "Pakai biaya PO supplier di pesanan",
+                     "allowed": may_cost,
+                     "reason": None if may_cost else "What a line costs is purchasing's and the director's to change.",
+                     "how": "direct"}],
             })
 
     return {
@@ -533,6 +553,42 @@ async def fix(db: AsyncSession, chain: dict, user: User, check_key: str, action:
     from app.core.audit import record as audit_record
     role = Role(user.role)
     pr, q = chain["price_request"], chain["quotation"]
+
+    if check_key == "supplier_po_qty":
+        # The order's cost follows what the supplier POs really pay per
+        # unit — the same change as "Edit costs" on the order, so the
+        # quotation's cost estimate follows too.
+        if action != "use_right":
+            raise FixRefused("A placed order is changed with the supplier, on the PO page.")
+        if role not in (Role.PURCHASING, Role.DIRECTOR):
+            raise FixRefused("What a line costs is purchasing's and the director's to change.")
+        if pr is None or not chain["supplier_pos"]:
+            raise FixRefused("No supplier PO on this order.")
+        _lines, cost_to = _supplier_po_lines(pr, chain["supplier_pos"])
+        if not cost_to:
+            raise FixRefused("The order's cost already matches the supplier POs.")
+        from app.services.quotation_sync import sync_costs
+        before = [dict(it) for it in (pr.items or [])]
+        items, changed = [], []
+        for i, it in enumerate(pr.items or []):
+            it = dict(it)
+            no = int(it.get("line_no") or (i + 1))
+            if no in cost_to:
+                changed.append(f"“{it.get('description')}”: {it.get('cost_price')} → {cost_to[no]}")
+                it["cost_price"] = cost_to[no]
+                it["cost_basis"] = "unit"
+            items.append(it)
+        pr.items = items
+        await sync_costs(db, pr)
+        await audit_record(db, actor=user, action="order_costs", entity="price_request",
+                           entity_id=pr.id, before={"items": before},
+                           after={"from_supplier_pos": [s.number for s in chain["supplier_pos"]],
+                                  "changed": changed})
+        await db.flush()
+        n = len(changed)
+        return {"queued": False,
+                "message": f"The order's cost now follows the supplier PO{'s' if len(chain['supplier_pos']) > 1 else ''}"
+                           f" — {n} line{'s' if n != 1 else ''} changed."}
 
     if check_key == "pr_quotation":
         if pr is None or q is None or not _sees_sell(role):
