@@ -27,9 +27,12 @@ The checks, and the direction each fix can go:
 * ``supplier_request:<id>`` — request → a supplier price request built from
   it (description, qty, unit). One direction only: refresh the supplier
   request (the vendor's prices per unit are kept).
-* ``supplier_po_qty``   — how much is on live supplier POs against what each
-  request line needs. Reported only: a placed order is changed with the
-  supplier, on the PO page.
+* ``supplier_po_qty``   — the live supplier POs against what each request
+  line needs: the quantity ordered, the unit, and any item no supplier PO
+  carries. The POs are the ones whose lines come from the request and the
+  ones raised on the job itself (a line with no source is matched by its
+  wording). Reported only: a placed order is changed with the supplier, on
+  the PO page.
 """
 from __future__ import annotations
 
@@ -136,9 +139,26 @@ async def resolve_chain(db: AsyncSession, *, price_request_id=None, quotation_id
         # Lines carry their source request even on a PO raised from elsewhere.
         more = list((await db.scalars(select(SupplierPO).where(
             SupplierPO.items.contains([{"source_pr_id": str(pr.id)}])))).all())
-        seen = {x.id for x in spo_rows}
-        spos = [x for x in spo_rows + [m for m in more if m.id not in seen]
-                if (x.status or "") not in _DEAD_SPO]
+        # And the POs raised on the job itself, whose lines may carry no
+        # source at all — typed on the PO page rather than built from the
+        # request.
+        from app.models.operation import Project
+        from app.services.receiving import pos_for_project
+        jobs = {c.project_id for c in cpos if getattr(c, "project_id", None)}
+        if project_id:
+            jobs.add(project_id if isinstance(project_id, UUID) else UUID(str(project_id)))
+        jobs |= set((await db.scalars(select(Project.id).where(
+            Project.price_request_id == pr.id))).all())
+        on_job = []
+        for j in jobs:
+            on_job += await pos_for_project(db, j)
+        seen: set = set()
+        spos = []
+        for x in spo_rows + more + on_job:
+            if x.id in seen or (x.status or "") in _DEAD_SPO:
+                continue
+            seen.add(x.id)
+            spos.append(x)
     return {"price_request": pr, "quotation": q, "customer_pos": cpos,
             "supplier_requests": sprs, "supplier_pos": spos}
 
@@ -383,25 +403,46 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
 
         if chain["supplier_pos"]:
             need, pr_alias = _merge_split(_pr_lines(pr))
+            by_key = {_key(v["description"]): no for no, v in need.items()}
             ordered: dict[int, float] = {}
+            units: dict[int, set] = {}
             for spo in chain["supplier_pos"]:
+                shared = len({str(x) for x in (spo.project_ids or []) if x}) > 1
                 for it in (spo.items or []):
-                    from_here = (str(it.get("source_pr_id") or "") == str(pr.id)
-                                 or spo.price_request_id == pr.id)
-                    if not from_here:
-                        continue
+                    src = str(it.get("source_pr_id") or "")
+                    if src and src != str(pr.id):
+                        continue            # another job's line on a shared order
                     no = it.get("source_line_no")
+                    if src or spo.price_request_id == pr.id:
+                        if no is None:
+                            no = by_key.get(_key(it.get("description") or ""))
+                    elif not shared:
+                        # Typed on the PO page: the job's item it names.
+                        no = by_key.get(_key(it.get("description") or ""))
+                    else:
+                        no = None
                     if no is None:
                         continue
                     no = pr_alias.get(int(no), int(no))
+                    if no not in need:
+                        continue
                     ordered[no] = ordered.get(no, 0) + _num(it.get("qty"))
+                    units.setdefault(no, set()).add(_txt(it.get("uom")) or "pcs")
             lines = []
             for no, v in sorted(need.items()):
-                if no in ordered and abs(ordered[no] - v["qty"]) > 1e-6:
+                if no not in ordered:
+                    lines.append({"line_no": no, "change": "only_left",
+                                  "description": v["description"]})
+                    continue
+                fields = []
+                if abs(ordered[no] - v["qty"]) > 1e-6:
+                    fields.append({"field": "qty", "left": v["qty"], "right": ordered[no]})
+                other = sorted(u for u in units.get(no, set()) if u.lower() != v["uom"].lower())
+                if other:
+                    fields.append({"field": "uom", "left": v["uom"], "right": ", ".join(other)})
+                if fields:
                     lines.append({"line_no": no, "change": "differs",
-                                  "description": v["description"],
-                                  "fields": [{"field": "qty", "left": v["qty"],
-                                              "right": ordered[no]}]})
+                                  "description": v["description"], "fields": fields})
             checks.append({
                 "key": "supplier_po_qty", "left": _doc("price_request", pr),
                 "right": {"kind": "supplier_pos", "id": None,

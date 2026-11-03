@@ -208,10 +208,13 @@ async def main():
         "total": 1_250_000}))
     code, r = await rep(price_request_id=pr)
     so = chk(r, "supplier_po_qty")
+    by_no = {ln["line_no"]: ln for ln in (so or {}).get("lines", [])}
     check("ordering 5 of a line the job needs 6 of is pointed out",
-          so and so.get("info_only") and so["lines"]
-          and so["lines"][0]["fields"][0] == {"field": "qty", "left": 6.0, "right": 5.0},
+          so and so.get("info_only") and 2 in by_no
+          and by_no[2].get("fields", [{}])[0] == {"field": "qty", "left": 6.0, "right": 5.0},
           f"{str(po)[:120]} {str(so)[:250]}")
+    check("...and an item no supplier PO carries is named",
+          1 in by_no and by_no[1]["change"] == "only_left", str(by_no.get(1)))
 
     print("\n── scope ──")
     code, _ = await rep(who=s2, quotation_id=q)

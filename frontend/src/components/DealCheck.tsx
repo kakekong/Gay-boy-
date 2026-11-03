@@ -132,7 +132,7 @@ function Mismatch({ c, onFix, busy }: {
   );
 
   const title = c.info_only
-    ? t("Supplier order quantity differs from what the job needs", "Jumlah pesanan ke supplier beda dengan kebutuhan")
+    ? t("The supplier POs don't match what the job needs", "PO supplier tidak sama dengan kebutuhan pekerjaan")
     : c.key.startsWith("supplier_request")
     ? t("The supplier was asked for an older version of this order", "Supplier diminta versi lama pesanan ini")
     : t(`${kindName(c.left.kind)} and ${lower(kindName(c.right.kind))} don't match`,
@@ -187,8 +187,8 @@ function Mismatch({ c, onFix, busy }: {
 
       {c.info_only && (
         <div className="text-xs muted">
-          {t("A placed order is changed with the supplier — open the supplier PO to adjust it.",
-             "Pesanan yang sudah dikirim diubah bersama supplier — buka PO supplier untuk menyesuaikan.")}
+          {t("A placed order is changed with the supplier — open the supplier PO to adjust it. An item taken from stock needs no PO.",
+             "Pesanan yang sudah dikirim diubah bersama supplier — buka PO supplier untuk menyesuaikan. Barang dari stok tidak perlu PO.")}
         </div>
       )}
       {c.partial && (
@@ -242,6 +242,7 @@ export function DealCheck({ where }: { where: Where }) {
   const problems = r.checks.filter((c) => c.lines.length > 0);
   const docs = r.documents ?? {};
   const count = [docs.price_request, docs.quotation, ...(docs.customer_pos ?? [])].filter(Boolean).length;
+  const supplierPos = (docs.supplier_pos ?? []).length > 0;
 
   if (!problems.length) {
     if (count < 2 && !msg) return null;
@@ -249,8 +250,11 @@ export function DealCheck({ where }: { where: Where }) {
       <div className="flex items-center gap-1.5 text-xs text-emerald-700">
         <CheckCircle2 size={13} className="shrink-0" />
         {msg?.ok ? msg.text + " " : ""}
-        {t("Price request, quotation and customer PO all match.",
-           "Permintaan harga, penawaran dan PO pelanggan sudah sama.")}
+        {supplierPos
+          ? t("Price request, quotation, customer PO and supplier PO all match.",
+              "Permintaan harga, penawaran, PO pelanggan dan PO supplier sudah sama.")
+          : t("Price request, quotation and customer PO all match.",
+              "Permintaan harga, penawaran dan PO pelanggan sudah sama.")}
       </div>
     );
   }
