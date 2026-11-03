@@ -1856,6 +1856,8 @@ async def update_po(
         await po_status_changed(db, po, was_status, user)
     if "items" in data and data["items"] is not None:
         po.items = data["items"]
+        from app.services.po_project import refresh_project_ids
+        refresh_project_ids(po)
     # After the lines, so a change that sends both new lines and a new job
     # stamps the new lines with it.
     if "project_id" in data:

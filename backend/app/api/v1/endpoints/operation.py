@@ -361,10 +361,14 @@ async def project_full(project_id: UUID,
         .order_by(PurchaseRequest.created_at.desc())
     )).all()
     from app.models.purchasing import Supplier, SupplierPO
-    supplier_pos = (await db.scalars(
-        select(SupplierPO).where(SupplierPO.project_id == project_id)
-        .order_by(SupplierPO.created_at.desc())
-    )).all()
+    # Every order serving the job — its own, and one shared with other jobs
+    # (named in `project_ids`). Only its own used to show, so a job covered by
+    # a shared order read as having no supplier PO at all, while receiving
+    # and payables counted it.
+    from app.services.receiving import pos_for_project
+    supplier_pos = sorted(await pos_for_project(db, project_id),
+                          key=lambda x: x.created_at or datetime.min.replace(tzinfo=UTC),
+                          reverse=True)
     supplier_name_by_id: dict[UUID, str] = {}
     if supplier_pos:
         sup_ids = {p.supplier_id for p in supplier_pos if p.supplier_id}
@@ -577,6 +581,8 @@ async def project_full(project_id: UUID,
                 "id": str(p.id), "number": p.number, "status": p.status,
                 "supplier_id": str(p.supplier_id) if p.supplier_id else None,
                 "supplier_name": supplier_name_by_id.get(p.supplier_id),
+                # One order for several jobs: its total is all of them.
+                "shared": len({str(x) for x in (p.project_ids or []) if x}) > 1,
                 "po_date": p.po_date,
                 "quoted_lead_days": p.quoted_lead_days,
                 "total": float(p.total or 0) if show_money else None,

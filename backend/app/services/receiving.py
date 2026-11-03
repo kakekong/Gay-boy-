@@ -38,7 +38,16 @@ async def pos_for_project(db: AsyncSession, project_id: UUID) -> list:
             SupplierPO.project_ids.contains([str(project_id)])
         )
     )).all()
-    return list(rows) + [p for p in shared if p.id not in seen]
+    out = list(rows) + [p for p in shared if p.id not in seen]
+    seen |= {p.id for p in shared}
+    # And one whose lines name the job though its list doesn't — an older
+    # order, or one edited before the list was kept up to date.
+    by_line = (await db.scalars(
+        select(SupplierPO).where(
+            SupplierPO.items.contains([{"project_id": str(project_id)}])
+        )
+    )).all()
+    return out + [p for p in by_line if p.id not in seen]
 
 
 def receipt_value(po, moved: list[dict]) -> float:

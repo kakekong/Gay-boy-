@@ -42,6 +42,57 @@ async def resolve_project(db: AsyncSession, project_id):
     return project
 
 
+def refresh_project_ids(po) -> bool:
+    """Bring `project_ids` up to date with the lines: every job a line names,
+    plus the PO's own. Nothing already listed is dropped. Returns whether it
+    changed — run after the lines are edited."""
+    ids = {str(x) for x in (po.project_ids or []) if x}
+    ids |= {str(i.get("project_id")) for i in (po.items or [])
+            if isinstance(i, dict) and i.get("project_id")}
+    if po.project_id:
+        ids.add(str(po.project_id))
+    new = sorted(ids)
+    if new != sorted(str(x) for x in (po.project_ids or []) if x):
+        po.project_ids = new
+        return True
+    return False
+
+
+async def backfill_project_ids(db: AsyncSession) -> dict:
+    """Run once: orders made before `project_ids` existed, or whose lines were
+    edited without it being recomputed, list only some of the jobs they
+    serve — so the other jobs' pages showed no supplier PO. Each order takes
+    every job its lines name, directly or through the price request a line
+    came from."""
+    from sqlalchemy import select
+
+    from app.models.operation import Project
+    from app.models.purchasing import SupplierPO
+    job_of_pr = {str(pr): str(pid) for pid, pr in (await db.execute(
+        select(Project.id, Project.price_request_id)
+        .where(Project.price_request_id.is_not(None)))).all()}
+    fixed = 0
+    for po in (await db.scalars(select(SupplierPO))).all():
+        ids = {str(x) for x in (po.project_ids or []) if x}
+        for it in (po.items or []):
+            if not isinstance(it, dict):
+                continue
+            if it.get("project_id"):
+                ids.add(str(it["project_id"]))
+            elif it.get("source_pr_id") and str(it["source_pr_id"]) in job_of_pr:
+                ids.add(job_of_pr[str(it["source_pr_id"])])
+        if po.price_request_id and str(po.price_request_id) in job_of_pr:
+            ids.add(job_of_pr[str(po.price_request_id)])
+        if po.project_id:
+            ids.add(str(po.project_id))
+        new = sorted(ids)
+        if new != sorted(str(x) for x in (po.project_ids or []) if x):
+            po.project_ids = new
+            fixed += 1
+    await db.flush()
+    return {"orders": fixed}
+
+
 async def assign_po_project(db: AsyncSession, po, project) -> dict:
     """Point `po` at `project` (or at nothing) and carry the consequences.
 

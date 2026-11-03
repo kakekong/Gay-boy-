@@ -2866,6 +2866,13 @@ export default function ProjectDetailPage() {
                     <Link to={`/purchase-orders/${po.id}`} className="text-brand-700 hover:underline">
                       {po.number}
                     </Link>
+                    {po.shared && (
+                      <span className="chip bg-brand-50 text-brand-700 text-[10px] ml-1.5 font-sans"
+                        title={t("One order covering several jobs — the total is for all of them",
+                                 "Satu order untuk beberapa pekerjaan — totalnya untuk semuanya")}>
+                        {t("shared", "bersama")}
+                      </span>
+                    )}
                   </td>
                   <td className="td">{po.supplier_name ?? "—"}</td>
                   <td className="td muted">{po.po_date ? new Date(po.po_date).toLocaleDateString(locale()) : "—"}</td>

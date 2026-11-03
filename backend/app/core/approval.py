@@ -599,6 +599,9 @@ async def apply_to_target(
                         po.po_date = None if v in (None, "") else date_t.fromisoformat(v)
                     elif hasattr(po, k):
                         setattr(po, k, v)
+                if "items" in changes:
+                    from app.services.po_project import refresh_project_ids
+                    refresh_project_ids(po)
                 # Same rule the direct path applies: a rate belongs to the
                 # currency it was quoted against, so switching the currency
                 # drops a rate that came from the old one. A change that

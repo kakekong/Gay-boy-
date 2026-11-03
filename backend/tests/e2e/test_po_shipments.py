@@ -181,6 +181,38 @@ async def main():
             check("...carrying only that job's line",
                   len(mine[0]["items"]) == 1, str(mine[0]["items"]))
 
+    # The project page's own "Supplier purchase orders" card listed only the
+    # job an order was raised on, so the other job read as having none.
+    for job_key in (a, b):
+        page = J(await c.get(f"/operation/projects/{job_key['project_id']}/full", headers=d))
+        page = page.get("data", page)
+        rows = [x for x in (page.get("supplier_pos") or []) if x["number"] == combined["number"]]
+        check(f"...and on {job_key['pr']['number']}'s Supplier POs card, marked shared",
+              len(rows) == 1 and rows[0].get("shared") is True,
+              str([x["number"] for x in (page.get("supplier_pos") or [])])[:200])
+
+    # An order made a while ago: its list of jobs held only the one it was
+    # raised on, though its lines name both.
+    from app.core.db import SessionLocal
+    from app.models.purchasing import SupplierPO
+    from app.services.po_project import backfill_project_ids
+    async with SessionLocal() as sess:
+        old = await sess.get(SupplierPO, uuid.UUID(combined["id"]))
+        old.project_ids = [str(a["project_id"])]
+        await sess.commit()
+    page = J(await c.get(f"/operation/projects/{b['project_id']}/full", headers=d))
+    page = page.get("data", page)
+    check("an older order whose job list missed this job still shows, found by its lines",
+          any(x["number"] == combined["number"] for x in (page.get("supplier_pos") or [])),
+          str([x["number"] for x in (page.get("supplier_pos") or [])])[:200])
+    async with SessionLocal() as sess:
+        res = await backfill_project_ids(sess)
+        await sess.commit()
+        old = await sess.get(SupplierPO, uuid.UUID(combined["id"]))
+        ids = sorted(old.project_ids or [])
+    check("...and the one-time fix gives it both jobs back",
+          ids == sorted([str(a["project_id"]), str(b["project_id"])]), f"{ids} {res}")
+
     got_a = J(await c.get(f"/purchasing/po/for-project/{a['project_id']}", headers=pur))
     mine = next(s for s in got_a["shipments"] if s["number"] == combined["number"])
     check("...and only that job's share of the money",

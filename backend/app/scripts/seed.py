@@ -997,6 +997,16 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('supplier_rate_to_cost')"))
             await db.commit()
             print(f"Supplier rate differences moved onto the goods' cost: {res}")
+        # Supplier POs serving several jobs list them all, so each job's page
+        # shows the order — older ones listed only the job they were raised on.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'po_project_ids_from_lines'")):
+            from app.services.po_project import backfill_project_ids
+            res = await backfill_project_ids(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('po_project_ids_from_lines')"))
+            await db.commit()
+            print(f"Supplier POs listing every job they serve: {res}")
 
 
 async def main() -> None:
