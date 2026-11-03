@@ -191,6 +191,23 @@ async def main():
               len(rows) == 1 and rows[0].get("shared") is True,
               str([x["number"] for x in (page.get("supplier_pos") or [])])[:200])
 
+    # From the Purchasing PO screens: the list names both jobs, filtering by
+    # the second job finds it, and the PO page names the other job.
+    lst = J(await c.get("/purchasing/po", headers=pur))
+    lst = lst if isinstance(lst, list) else lst.get("items", lst.get("data", []))
+    row = next((x for x in lst if x["number"] == combined["number"]), {})
+    check("the PO list names both jobs it serves, its own first",
+          [j["id"] for j in row.get("projects", [])] == [str(a["project_id"]), str(b["project_id"])],
+          str(row.get("projects")))
+    lst_b = J(await c.get("/purchasing/po", headers=pur, params={"project_id": b["project_id"]}))
+    lst_b = lst_b if isinstance(lst_b, list) else lst_b.get("items", lst_b.get("data", []))
+    check("...filtering by the second job finds it",
+          any(x["number"] == combined["number"] for x in lst_b), str([x["number"] for x in lst_b])[:200])
+    det = J(await c.get(f"/purchasing/po/{combined['id']}", headers=pur))
+    check("...and the PO page names the other job",
+          [j["id"] for j in det.get("other_projects", [])] == [str(b["project_id"])],
+          str(det.get("other_projects")))
+
     # An order made a while ago: its list of jobs held only the one it was
     # raised on, though its lines name both.
     from app.core.db import SessionLocal

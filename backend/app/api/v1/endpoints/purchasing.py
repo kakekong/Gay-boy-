@@ -887,7 +887,12 @@ async def list_pos(
     if supplier_id:
         stmt = stmt.where(SupplierPO.supplier_id == supplier_id)
     if project_id:
-        stmt = stmt.where(SupplierPO.project_id == project_id)
+        # Its own orders and the shared ones serving it too.
+        from sqlalchemy import or_
+        stmt = stmt.where(or_(
+            SupplierPO.project_id == project_id,
+            SupplierPO.project_ids.contains([str(project_id)]),
+            SupplierPO.items.contains([{"project_id": str(project_id)}])))
     if customer_id:
         # Join via project to filter by customer.
         stmt = (
@@ -933,6 +938,7 @@ async def list_pos(
     # deliberately hidden from them (they see the project code as the order
     # reference instead).
     hide_customer = Role(_u.role) == Role.PURCHASING
+    codes = await _job_codes(db, {j for r in rows for j in _job_ids(r)})
     out = []
     for r in rows:
         proj = projects.get(r.project_id) if r.project_id else None
@@ -945,6 +951,9 @@ async def list_pos(
             "supplier_name": sup.name if sup else None,
             "project_id": str(r.project_id) if r.project_id else None,
             "project_code": proj.code if proj else None,
+            # Every job it serves, its own first — a shared order names all.
+            "projects": [{"id": j, "code": codes.get(j)} for j in _job_ids(r)
+                         if codes.get(j)],
             "customer_id": None if hide_customer else (str(cust.id) if cust else None),
             "customer_name": (
                 (proj.code if proj else "—") if hide_customer
@@ -1203,6 +1212,26 @@ async def create_po(
     }
 
 
+def _job_ids(po) -> list[str]:
+    """Every job the order serves — its own first, then any other its job
+    list or its lines name."""
+    out = [str(po.project_id)] if po.project_id else []
+    for x in list(po.project_ids or []) + [i.get("project_id") for i in (po.items or [])
+                                           if isinstance(i, dict)]:
+        if x and str(x) not in out:
+            out.append(str(x))
+    return out
+
+
+async def _job_codes(db: AsyncSession, ids) -> dict[str, str]:
+    from app.models.operation import Project
+    ids = {UUID(str(x)) for x in ids if x}
+    if not ids:
+        return {}
+    return {str(p.id): p.code for p in (await db.scalars(
+        select(Project).where(Project.id.in_(ids)))).all()}
+
+
 @router.get("/po/{po_id}")
 async def get_po(
     po_id: UUID,
@@ -1279,6 +1308,10 @@ async def get_po(
         "project_id": str(po.project_id) if po.project_id else None,
         "project_code": project.code if project else None,
         "project_status": project.status if project else None,
+        # The other jobs a shared order serves, beside its own.
+        "other_projects": [{"id": j, "code": c} for j, c in
+                           (await _job_codes(db, _job_ids(po)[1:] if po.project_id
+                                             else _job_ids(po))).items()],
         "project_target_delivery": project.target_delivery if project else None,
         "project_actual_delivery": project.actual_delivery if project else None,
         "po_date": po.po_date,

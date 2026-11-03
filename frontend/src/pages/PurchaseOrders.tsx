@@ -26,6 +26,8 @@ interface PO {
   supplier_name: string | null;
   project_id: string | null;
   project_code: string | null;
+  /** Every job it serves, its own first — more than one on a shared order. */
+  projects?: { id: string; code: string }[];
   customer_id: string | null;
   customer_name: string | null;
   sales_pic_id: string | null;
@@ -313,7 +315,20 @@ export default function PurchaseOrdersPage() {
                     </td>
                     <td className="td muted"><UserLink id={p.sales_pic_id} name={p.sales_pic_name} /></td>
                     <td className="td font-mono text-xs">
-                      {p.project_id
+                      {(p.projects ?? []).length ? (
+                        <span className="flex flex-col gap-0.5">
+                          {(p.projects ?? []).map((j) => (
+                            <Link key={j.id} to={`/projects/${j.id}`} onClick={(e) => e.stopPropagation()}
+                              className="text-brand-700 hover:underline">{j.code}</Link>
+                          ))}
+                          {(p.projects ?? []).length > 1 && (
+                            <span className="chip bg-brand-50 text-brand-700 text-[10px] font-sans w-fit"
+                              title={tt("One order covering several jobs", "Satu order untuk beberapa pekerjaan")}>
+                              {tt("shared", "bersama")}
+                            </span>
+                          )}
+                        </span>
+                      ) : p.project_id
                         ? (p.project_code ?? p.project_id.slice(0, 8))
                         : <span className="chip bg-amber-50 text-amber-800 font-sans">{T("unassigned")}</span>}
                     </td>

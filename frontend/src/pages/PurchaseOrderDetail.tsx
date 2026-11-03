@@ -46,6 +46,7 @@ interface PO {
   project_id: string | null;
   project_code: string | null;
   project_status: string | null;
+  other_projects?: { id: string; code: string }[];
   project_target_delivery: string | null;
   project_actual_delivery: string | null;
   po_date: string | null;
@@ -526,6 +527,18 @@ export default function PurchaseOrderDetailPage() {
             {p.project_status && (
               <span className="block text-[11px] muted capitalize">
                 {T(p.project_status.replace(/_/g, " "))}
+              </span>
+            )}
+            {/* A shared order: the other jobs it serves. */}
+            {(p.other_projects ?? []).length > 0 && (
+              <span className="block text-[11px] mt-1">
+                <span className="muted">{tt("Also for", "Juga untuk")} </span>
+                {(p.other_projects ?? []).map((j: any, i: number) => (
+                  <span key={j.id}>
+                    {i > 0 && ", "}
+                    <Link to={`/projects/${j.id}`} className="text-brand-700 hover:underline font-mono">{j.code}</Link>
+                  </span>
+                ))}
               </span>
             )}
           </Meta>
