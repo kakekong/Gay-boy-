@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -47,7 +47,23 @@ async def pos_for_project(db: AsyncSession, project_id: UUID) -> list:
             SupplierPO.items.contains([{"project_id": str(project_id)}])
         )
     )).all()
-    return out + [p for p in by_line if p.id not in seen]
+    out += [p for p in by_line if p.id not in seen]
+    seen |= {p.id for p in by_line}
+    # And one raised from the job's price request without the project chosen:
+    # it names the request — on the order or on its lines — and the request
+    # is this job's. Only an order no other job has claimed.
+    from app.models.operation import Project
+    pr_id = await db.scalar(select(Project.price_request_id).where(Project.id == project_id))
+    if pr_id:
+        by_pr = (await db.scalars(
+            select(SupplierPO).where(or_(
+                SupplierPO.price_request_id == pr_id,
+                SupplierPO.items.contains([{"source_pr_id": str(pr_id)}]),
+            ))
+        )).all()
+        out += [p for p in by_pr if p.id not in seen
+                and not p.project_id and not (p.project_ids or [])]
+    return out
 
 
 def receipt_value(po, moved: list[dict]) -> float:

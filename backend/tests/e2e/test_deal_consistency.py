@@ -187,8 +187,11 @@ async def main():
              for it in prd["items"]]
     items[1]["qty"] = 6
     await c.patch(f"/price-requests/{pr}", headers=d, json={"items": items})
-    code, _ = await rep(who=pur, price_request_id=pr)
-    check("purchasing can't open the deal check either", code == 403, str(code))
+    code, pr_view = await rep(who=pur, price_request_id=pr)
+    check("purchasing opens the deal check — the supplier side only",
+          code == 200 and not any(x["key"].startswith(("pr_quotation", "quotation_cpo"))
+                                  for x in pr_view.get("checks", [])),
+          f"{code} {[x['key'] for x in pr_view.get('checks', [])]}")
     code, r = await rep(price_request_id=pr)
     sc = chk(r, "supplier_request:")
     check("...with the quantity the vendor was asked for flagged",

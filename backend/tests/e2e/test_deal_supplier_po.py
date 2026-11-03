@@ -103,6 +103,55 @@ async def main():
     check("...and the belt no supplier PO carries is named",
           by_desc.get(belt, {}).get("change") == "only_left", str(by_desc.get(belt)))
 
+    print("\n── a PO raised from the job's price request, no project chosen ──")
+    po2 = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup, "price_request_id": pr, "po_date": date.today().isoformat(),
+        "items": [{"description": belt, "qty": 4, "uom": "pcs",
+                   "unit_price": 100_000, "amount": 400_000}],
+        "total": 400_000}))
+    check("the PO is raised with no project", po2.get("id") and not po2.get("project_id"),
+          str(po2)[:200])
+    for who, label in ((d, "the director"), (pur, "purchasing")):
+        page = J(await c.get(f"/operation/projects/{pid}/full", headers=who))
+        page = page.get("data", page)
+        check(f"...and the project page shows it to {label}",
+              any(x["number"] == po2.get("number") for x in (page.get("supplier_pos") or [])),
+              str([x["number"] for x in (page.get("supplier_pos") or [])])[:200])
+    so = spo_check(await rep(project_id=pid))
+    by_desc = {ln["description"]: ln for ln in (so or {}).get("lines", [])}
+    check("...and the deal check counts its belt as ordered",
+          belt not in by_desc, str(by_desc.get(belt)))
+
+    print("\n── the order card's cost against what the supplier PO pays ──")
+    # The case from the floor: 6 meter on the order at Rp 1.000.000 cost, the
+    # supplier PO paying Rp 5.000.000 for the 6 — Rp 833.333 a meter.
+    await c.patch(f"/purchasing/po/{po1['id']}", headers=d, json={"items": [
+        {"description": chain_name, "qty": 6, "uom": "meter",
+         "unit_price": 833_333.33, "amount": 5_000_000}], "total": 5_000_000})
+    so = spo_check(await rep(project_id=pid))
+    ch = {ln["description"]: ln for ln in (so or {}).get("lines", [])}.get(chain_name, {})
+    f = {x["field"]: x for x in ch.get("fields", [])}
+    check("a supplier PO paying Rp 833.333 where the order costs Rp 1.000.000 is pointed out",
+          f.get("cost", {}).get("left") == 1_000_000 and abs(f["cost"]["right"] - 833_333.33) < 1
+          and "qty" not in f and "uom" not in f, str(ch))
+
+    print("\n── purchasing sees the supplier side ──")
+    r = await c.get("/consistency", headers=pur, params={"project_id": pid})
+    pr_rep = J(r)
+    keys = [x["key"] for x in pr_rep.get("checks", [])]
+    check("purchasing may run the check on the job", r.status_code == 200, f"{r.status_code} {pr_rep}"[:200])
+    check("...and sees the supplier POs against the order, cost included",
+          "supplier_po_qty" in keys and any(
+              x["field"] == "cost" for ln in next(c_ for c_ in pr_rep["checks"]
+                                                  if c_["key"] == "supplier_po_qty")["lines"]
+              for x in ln.get("fields", [])), str(keys))
+    check("...but nothing on the customer side",
+          not any(k.startswith(("pr_quotation", "quotation_cpo")) for k in keys)
+          and not pr_rep["documents"].get("quotation") and not pr_rep["documents"].get("customer_pos"),
+          f"{keys} {pr_rep.get('documents')}"[:200])
+    r = await c.get("/consistency", headers=s1, params={"project_id": pid})
+    check("sales still can't run it", r.status_code == 403, str(r.status_code))
+
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         print("FAILED: " + "; ".join(FAIL)); sys.exit(1)

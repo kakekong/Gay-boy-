@@ -1150,6 +1150,15 @@ export default function ProjectDetailPage() {
                     </span>
                   )
                 )}
+                {/* The supplier POs serving the job, beside the customer's
+                    documents — sent only to roles that may open them. */}
+                {supplierPOs.filter((x: any) => !["cancelled", "rejected"].includes(x.status)).map((x: any) => (
+                  <Link key={x.id} to={`/purchase-orders/${x.id}`}
+                    className="inline-flex items-center gap-1.5 text-ink-600 hover:text-brand-700"
+                    title={t("Supplier PO for this project", "PO supplier untuk proyek ini")}>
+                    <Truck size={13} /> {t("Supplier PO", "PO supplier")}{" "}{x.number}
+                  </Link>
+                ))}
                 {salesPicName && (
                   <span className="inline-flex items-center gap-1.5 text-ink-600">
                     <UserIcon size={13} /> <UserLink id={salesPicId} name={salesPicName} />

@@ -120,7 +120,9 @@ export default function PurchaseOrdersPage() {
 
   const rows = useMemo(() => {
     let list = pos.data ?? [];
-    if (statusFilter) list = list.filter((p) => p.status === statusFilter);
+    // "Shared" is not a status of its own — an order covering several jobs.
+    if (statusFilter === "shared") list = list.filter((p) => (p.projects ?? []).length > 1);
+    else if (statusFilter) list = list.filter((p) => p.status === statusFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((p) =>
@@ -199,6 +201,7 @@ export default function PurchaseOrdersPage() {
           <option value="received">{T("Received")}</option>
           <option value="closed">{T("Closed")}</option>
           <option value="cancelled">{T("Cancelled")}</option>
+          <option value="shared">{tt("Shared (several jobs)", "Bersama (beberapa pekerjaan)")}</option>
         </select>
         <div className="text-xs muted">
           <Filter size={12} className="inline mr-1" />
@@ -340,6 +343,13 @@ export default function PurchaseOrdersPage() {
                       )}>
                         {T(p.status.replace(/_/g, " "))}
                       </span>
+                      {(p.projects ?? []).length > 1 && (
+                        <span className="chip bg-brand-50 text-brand-700 ml-1"
+                          title={tt(`Shared by ${(p.projects ?? []).length} jobs`,
+                                    `Dipakai bersama ${(p.projects ?? []).length} pekerjaan`)}>
+                          {tt("Shared", "Bersama")}
+                        </span>
+                      )}
                     </td>
                     <td className="td text-right tabular-nums">{money(p.total ?? 0, p.currency)}</td>
                     <td className="td text-right">

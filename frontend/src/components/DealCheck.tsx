@@ -18,8 +18,10 @@ import { useT, t as tt } from "@/store/lang";
  * both columns, with "This one is right" under each. Picking one changes the
  * other to match, after a confirm that names exactly what will change.
  *
- * Director only — the server refuses everyone else, and the card is not
- * rendered for them. Ordinary edits still sync on their own.
+ * The director's, and purchasing's for the supplier side only: the server
+ * builds purchasing no customer-side checks, so they see the supplier POs
+ * against the order — quantity, unit and cost. Ordinary edits still sync on
+ * their own.
  */
 
 type Where = {
@@ -45,6 +47,7 @@ const KIND: Record<string, [string, string]> = {
 const FIELD: Record<string, [string, string]> = {
   description: ["Wording", "Deskripsi"], qty: ["Quantity", "Jumlah"],
   uom: ["Unit", "Satuan"], price: ["Price", "Harga"],
+  cost: ["Cost per unit", "Biaya per satuan"],
 };
 
 function linkOf(d: DocRef): string | null {
@@ -63,7 +66,7 @@ const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 function val(field: string, v: any): string {
   if (v == null || v === "") return "—";
-  if (field === "price") return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(Number(v)));
+  if (field === "price" || field === "cost") return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(Number(v)));
   if (field === "qty") return new Intl.NumberFormat("id-ID").format(Number(v));
   return String(v);
 }
@@ -217,13 +220,15 @@ function Mismatch({ c, onFix, busy }: {
 export function DealCheck({ where }: { where: Where }) {
   const t = useT();
   const qc = useQueryClient();
-  const isDirector = useAuthStore((s) => s.user?.role) === "director";
+  const role = useAuthStore((s) => s.user?.role);
+  const isDirector = role === "director";
+  const mayCheck = isDirector || role === "purchasing";
   const [open, setOpen] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const rep = useQuery({
     queryKey: ["consistency", where],
     queryFn: () => api.get("/consistency", { params: where }).then((r) => r.data as Report),
-    enabled: isDirector,
+    enabled: mayCheck,
     retry: false,
   });
   const fix = useMutation({
@@ -238,11 +243,12 @@ export function DealCheck({ where }: { where: Where }) {
   });
 
   const r = rep.data;
-  if (!isDirector || !r) return null;
+  if (!mayCheck || !r) return null;
   const problems = r.checks.filter((c) => c.lines.length > 0);
   const docs = r.documents ?? {};
-  const count = [docs.price_request, docs.quotation, ...(docs.customer_pos ?? [])].filter(Boolean).length;
   const supplierPos = (docs.supplier_pos ?? []).length > 0;
+  const count = [docs.price_request, docs.quotation, ...(docs.customer_pos ?? [])].filter(Boolean).length
+    + (supplierPos ? 1 : 0);
 
   if (!problems.length) {
     if (count < 2 && !msg) return null;
@@ -250,7 +256,10 @@ export function DealCheck({ where }: { where: Where }) {
       <div className="flex items-center gap-1.5 text-xs text-emerald-700">
         <CheckCircle2 size={13} className="shrink-0" />
         {msg?.ok ? msg.text + " " : ""}
-        {supplierPos
+        {!isDirector
+          ? t("The supplier POs match the order — quantity, unit and cost.",
+              "PO supplier sudah sesuai pesanan — jumlah, satuan dan biaya.")
+          : supplierPos
           ? t("Price request, quotation, customer PO and supplier PO all match.",
               "Permintaan harga, penawaran, PO pelanggan dan PO supplier sudah sama.")
           : t("Price request, quotation and customer PO all match.",

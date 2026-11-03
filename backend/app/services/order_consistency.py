@@ -28,7 +28,8 @@ The checks, and the direction each fix can go:
   it (description, qty, unit). One direction only: refresh the supplier
   request (the vendor's prices per unit are kept).
 * ``supplier_po_qty``   — the live supplier POs against what each request
-  line needs: the quantity ordered, the unit, and any item no supplier PO
+  line needs: the quantity ordered, the unit, what the PO pays per unit
+  against the line's cost (in rupiah), and any item no supplier PO
   carries. The POs are the ones whose lines come from the request and the
   ones raised on the job itself (a line with no source is matched by its
   wording). Reported only: a placed order is changed with the supplier, on
@@ -178,6 +179,7 @@ def _pr_lines(pr: PriceRequest) -> dict[int, dict]:
         "line_no": int(it.get("line_no") or (i + 1)), "description": _txt(it.get("description")),
         "qty": _num(it.get("qty")), "uom": _txt(it.get("uom")) or "pcs",
         "price": _num(it.get("sell_price")),
+        "cost": _num(it.get("cost_price")) if it.get("cost_price") is not None else None,
     } for i, it in enumerate(pr.items or [])}
 
 
@@ -406,7 +408,12 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
             by_key = {_key(v["description"]): no for no, v in need.items()}
             ordered: dict[int, float] = {}
             units: dict[int, set] = {}
+            # What the orders pay for each line, in rupiah — None once any
+            # of them is a foreign order with no rate yet.
+            paid: dict[int, float | None] = {}
+            from app.services.ledger import po_rate
             for spo in chain["supplier_pos"]:
+                rate = po_rate(spo)
                 shared = len({str(x) for x in (spo.project_ids or []) if x}) > 1
                 for it in (spo.items or []):
                     src = str(it.get("source_pr_id") or "")
@@ -428,6 +435,11 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
                         continue
                     ordered[no] = ordered.get(no, 0) + _num(it.get("qty"))
                     units.setdefault(no, set()).add(_txt(it.get("uom")) or "pcs")
+                    unit = it.get("unit_price") if it.get("unit_price") is not None else it.get("unit_cost")
+                    if rate is None or unit is None or paid.get(no, 0) is None:
+                        paid[no] = None
+                    else:
+                        paid[no] = paid.get(no, 0) + _num(it.get("qty")) * float(unit) * rate
             lines = []
             for no, v in sorted(need.items()):
                 if no not in ordered:
@@ -440,6 +452,13 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
                 other = sorted(u for u in units.get(no, set()) if u.lower() != v["uom"].lower())
                 if other:
                     fields.append({"field": "uom", "left": v["uom"], "right": ", ".join(other)})
+                # The cost the order card carries against what the supplier
+                # PO really pays per unit. Seen by purchasing and management
+                # only — this check is never built for anyone else.
+                if v.get("cost") is not None and paid.get(no) is not None and ordered[no] > 0:
+                    per_unit = round(paid[no] / ordered[no], 2)
+                    if abs(per_unit - v["cost"]) >= 1:
+                        fields.append({"field": "cost", "left": v["cost"], "right": per_unit})
                 if fields:
                     lines.append({"line_no": no, "change": "differs",
                                   "description": v["description"], "fields": fields})

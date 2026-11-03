@@ -22,7 +22,9 @@ router = APIRouter()
 # The director's panel. Everyone else's edits still sync the way they always
 # did (`quotation_sync` / `price_request_sync`); deciding which copy of a deal
 # is right, and changing the other to match, is the director's call.
-_ROLES = (Role.DIRECTOR,)
+# Purchasing sees the supplier side only — `report` builds the customer-side
+# checks for those who see selling prices, which purchasing does not.
+_ROLES = (Role.DIRECTOR, Role.PURCHASING)
 
 
 class Where(BaseModel):
