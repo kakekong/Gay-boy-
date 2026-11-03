@@ -2,12 +2,12 @@
 
 * **Which bank.** The payment leaves the account finance picks — BNI, Kas
   Besar — not BCA whatever was used.
-* **The real rate.** A foreign order is printed and booked at an estimated
-  rate; the bank converts at the real one. Finance gives the amount in the
-  supplier's currency and the rate it went at. The debt is settled at the
-  booked rate, the bank drops by what really left it, and the gap goes to
-  Laba/Rugi Terealisasi — a loss raises it, a gain lowers it — so the entry
-  balances.
+* **The real rate is the cost.** A foreign PO's rate is an estimate; the bank
+  converts at the real one. Finance gives the amount in the supplier's
+  currency and the rate it went at. The payment settles the debt by what
+  left the bank, and the difference from the estimate goes onto the goods'
+  cost (Persediaan, or HPP once the job is paid) — not to Laba/Rugi
+  Terealisasi, which no longer moves.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -23,7 +23,7 @@ def J(r):
     try: return r.json()
     except Exception: return {"_": r.text[:200]}
 
-BNI, BCA, KAS, FX, AP = "1101-02", "1101-01", "1102-02", "7200-04", "210101"
+BNI, BCA, KAS, FX, AP, STOCK, UNB = "1101-02", "1101-01", "1102-02", "7200-04", "210101", "110401", "2102-03"
 
 
 async def main():
@@ -44,7 +44,7 @@ async def main():
     async def balances():
         async with SessionLocal() as s:
             rows = (await s.scalars(select(Account).where(
-                Account.account_no.in_([BNI, BCA, KAS, FX, AP])))).all()
+                Account.account_no.in_([BNI, BCA, KAS, FX, AP, STOCK, UNB])))).all()
             return {a.account_no: float(a.balance or 0) for a in rows}
 
     def moved(before, after, acc):
@@ -56,33 +56,39 @@ async def main():
         "items": [{"description": f"CHAIN {TAG}", "qty": 10, "uom": "pcs",
                    "unit_price": 100, "amount": 1000}], "total": 1000}))["id"]
 
-    print("\n── a CNY order booked at 3,000, paid at 3,100 from BNI ──")
+    print("\n── a CNY order estimated at 3,000, paid ¥400 at 3,100 from BNI ──")
     b0 = await balances()
     r = await c.post(f"/finance/payables/{po}/pay", headers=fin, json={
         "currency_amount": 400, "fx_rate": 3100, "bank_account_no": BNI,
         "method": "Transfer", "reference": f"TT-{TAG}"})
     out = J(r)
     check("finance pays CNY 400 at the real rate", r.status_code == 201, f"{r.status_code} {out}"[:200])
-    check("...which settles Rp 1.200.000 of the debt (at the PO's 3,000)",
-          out.get("paid") == 1_200_000, str(out.get("paid")))
-    check("...while Rp 1.240.000 left the bank", out.get("bank_amount") == 1_240_000,
-          str(out.get("bank_amount")))
+    check("...which settles Rp 1.240.000 of the debt — what left the bank",
+          out.get("paid") == 1_240_000 and out.get("bank_amount") == 1_240_000,
+          f"{out.get('paid')} {out.get('bank_amount')}")
+    check("...Rp 40.000 more than the PO's estimate", out.get("fx_difference") == 40_000,
+          str(out.get("fx_difference")))
     check("...from BNI, as chosen", out.get("bank_account_no") == BNI and "Bni" in (out.get("bank_name") or ""),
           str(out.get("bank_name")))
     b1 = await balances()
     check("BNI drops by what really left it", moved(b0, b1, BNI) == -1_240_000, str(moved(b0, b1, BNI)))
     check("...BCA is untouched", moved(b0, b1, BCA) == 0, str(moved(b0, b1, BCA)))
-    check("the debt drops by what it settles", moved(b0, b1, AP) == -1_200_000, str(moved(b0, b1, AP)))
-    check("the Rp 40.000 difference is a realised loss", moved(b0, b1, FX) == 40_000, str(moved(b0, b1, FX)))
-    # Money out of the bank = the debt paid down + the loss on the rate.
-    check("...so the entry balances",
-          round(-moved(b0, b1, BNI) - (-moved(b0, b1, AP)) - moved(b0, b1, FX), 2) == 0)
+    check("the debt drops by the same", moved(b0, b1, AP) == -1_240_000, str(moved(b0, b1, AP)))
+    check("nothing goes to Laba/Rugi Terealisasi", moved(b0, b1, FX) == 0, str(moved(b0, b1, FX)))
 
-    print("\n── the rest at 2,950: a gain ──")
+    print("\n── the goods arrive: the paid part at the rate paid ──")
+    await c.post(f"/purchasing/po/{po}/gr", headers=pur, json={
+        "items": [{"description": f"CHAIN {TAG}", "qty": 10}]})
+    b2 = await balances()
+    check("Persediaan: ¥400 at 3,100 + ¥600 at the 3,000 estimate = Rp 3.040.000",
+          moved(b1, b2, STOCK) == 3_040_000, str(moved(b1, b2, STOCK)))
+    check("...and still nothing on Laba/Rugi Terealisasi", moved(b1, b2, FX) == 0)
+
+    print("\n── the rest at 2,950: the goods cost less ──")
     r = await c.post(f"/finance/payables/{po}/pay", headers=fin, json={
         "currency_amount": 700, "fx_rate": 2950})
-    check("paying more than is left is refused, in the supplier's currency too",
-          r.status_code == 409 and "CNY" in str(J(r)), f"{r.status_code} {J(r)}"[:200])
+    check("paying more than is left is refused, in the supplier's currency",
+          r.status_code == 409 and "CNY 600" in str(J(r)), f"{r.status_code} {J(r)}"[:200])
     r = await c.post(f"/finance/payables/{po}/pay", headers=fin, json={"currency_amount": 600})
     check("a foreign payment without the rate is refused", r.status_code == 400
           and "rate" in str(J(r)).lower(), f"{r.status_code} {J(r)}"[:200])
@@ -90,14 +96,19 @@ async def main():
         "currency_amount": 600, "fx_rate": 2950, "bank_account_no": "210101"})
     check("only our own cash or bank accounts can be paid from", r.status_code == 400,
           f"{r.status_code} {J(r)}"[:200])
-    b2 = await balances()
     r = await c.post(f"/finance/payables/{po}/pay", headers=fin, json={
         "currency_amount": 600, "fx_rate": 2950})
     b3 = await balances()
     check("the rest is paid — from BCA when nothing is chosen", r.status_code == 201
           and moved(b2, b3, BCA) == -1_770_000, f"{r.status_code} {moved(b2, b3, BCA)}")
-    check("...a Rp 30.000 gain lowers Laba/Rugi Terealisasi", moved(b2, b3, FX) == -30_000,
-          str(moved(b2, b3, FX)))
+    check("...Persediaan drops Rp 30.000: the goods cost Rp 3.010.000 in all",
+          moved(b2, b3, STOCK) == -30_000, str(moved(b2, b3, STOCK)))
+    # Received goods wait on Belum Ditagih until the supplier invoices; paid,
+    # that and Utang Usaha together come to nothing owed.
+    check("...the debt is settled exactly (Utang Usaha + Belum Ditagih)",
+          round(moved(b0, b3, AP) + moved(b0, b3, UNB), 2) == 0,
+          f"{moved(b0, b3, AP)} + {moved(b0, b3, UNB)}")
+    check("...and Laba/Rugi Terealisasi never moved", moved(b0, b3, FX) == 0, str(moved(b0, b3, FX)))
 
     rows = J(await c.get("/finance/payables", headers=fin, params={"show": "all"}))["items"]
     row = next(x for x in rows if x["po_id"] == po)

@@ -1053,7 +1053,15 @@ async def list_payables(
         done = float(paid.get(p.id) or 0)
         out = round(owed - done, 2)
         order_idr = _po_total_idr(p)
-        if order_idr and done >= order_idr - 0.01:
+        # A foreign order is paid at the bank's rates, so it is paid in full
+        # when its currency is, whatever the rupiah came to.
+        pays = pays_by_po.get(p.id, [])
+        foreign_paid = (sum(x["currency_amount"] or 0 for x in pays)
+                        if (p.currency or "IDR").upper() != "IDR"
+                        and pays and all(x["currency_amount"] for x in pays) else None)
+        if foreign_paid is not None and foreign_paid >= _po_total(p) - 0.01:
+            state = "paid"
+        elif order_idr and done >= order_idr - 0.01:
             state = "paid"
         elif owed <= 0.004:
             state = "prepaid" if done > 0 else "not_received"
@@ -1164,6 +1172,21 @@ class SupplierPaymentIn(BaseModel):
     notes: str | None = None
 
 
+async def _left_in_currency(db: AsyncSession, po) -> float:
+    """What is still to pay on a foreign order, in its own currency. A
+    payment given in rupiah counts at the order's rate."""
+    from app.models.purchasing import SupplierPayment
+    paid = 0.0
+    for amount, cur_amount in (await db.execute(
+            select(SupplierPayment.amount, SupplierPayment.currency_amount)
+            .where(SupplierPayment.po_id == po.id))).all():
+        if cur_amount:
+            paid += float(cur_amount)
+        elif po.fx_rate:
+            paid += float(amount or 0) / float(po.fx_rate)
+    return round(_po_total(po) - paid, 2)
+
+
 @router.post("/payables/{po_id}/pay", status_code=201)
 async def pay_supplier(
     po_id: UUID,
@@ -1173,11 +1196,13 @@ async def pay_supplier(
 ):
     """Finance records paying the supplier: Utang Usaha down, the bank down.
 
-    On a foreign order the debt was booked at the order's estimated rate and
-    the bank converts at the real one, so finance gives what went in the
-    supplier's currency and the rate it went at. The payment settles that
-    amount of the debt at the booked rate, the bank drops by what it really
-    paid, and the gap is a realised exchange gain or loss.
+    On a foreign order the PO's rate is an estimate; the bank's is what the
+    goods really cost. Finance gives what went in the supplier's currency
+    and the rate it went at, and that part of the order is then on the books
+    at the real rate: the payment settles the debt by what left the bank,
+    and the difference from the estimate goes onto the goods' cost —
+    Persediaan, or HPP once the job is paid (ledger.revalue_receipts) — not
+    to Laba/Rugi Terealisasi.
     """
     from app.models.account import Account
     from app.models.purchasing import Supplier, SupplierPayment, SupplierPO
@@ -1202,12 +1227,12 @@ async def pay_supplier(
         if rate <= 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 f"Give the rate the bank paid at — rupiah per {cur}.")
-        # The rate the debt was booked at. An order that never had one is
-        # booked at this payment's rate, so there is no difference to post.
-        booked = float(po.fx_rate) if po.fx_rate else rate
-        settles = round(cur_amount * booked, 2)
-        bank_out = round(cur_amount * rate, 2)
+        # The PO's estimate, kept only to show the difference. What the
+        # payment settles is what really left the bank.
+        estimate = round(cur_amount * (float(po.fx_rate) if po.fx_rate else rate), 2)
+        bank_out = settles = round(cur_amount * rate, 2)
     else:
+        estimate = None
         settles = bank_out = round(float(payload.amount or 0), 2)
     if settles <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The amount must be above zero.")
@@ -1226,6 +1251,19 @@ async def pay_supplier(
     order_idr = _po_total_idr(po)
     ceiling = max(order_idr or 0.0, float(po.payable_amount or 0))
     left = round(ceiling - paid, 2)
+    if cur_amount is not None:
+        # Paid at its own rates, a foreign order is paid in full when its
+        # currency is — the rupiah it took depends on the bank, not the PO.
+        left_cur = await _left_in_currency(db, po)
+        if left_cur <= 0.004:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"{po.number} is already paid in full.")
+        if cur_amount > left_cur + 0.01:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"That is more than {po.number} is worth — "
+                f"{cur} {left_cur:,.2f} is left to pay on the order.")
+        left = max(left, settles)
     if left <= 0:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -1254,7 +1292,9 @@ async def pay_supplier(
                           currency_amount=cur_amount,
                           fx_rate=rate,
                           bank_amount=bank_out,
-                          fx_difference=round(bank_out - settles, 2))
+                          # Against the PO's estimate — on the goods' cost.
+                          fx_difference=(round(bank_out - estimate, 2)
+                                         if estimate is not None else 0.0))
     db.add(pay)
     await db.flush()
     sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
@@ -1263,17 +1303,21 @@ async def pay_supplier(
                                 po_number=po.number,
                                 supplier_name=sup.name if sup else None,
                                 payment_id=pay.id, created_by=user.id)
+    # The part paid is now on the books at the rate it was paid at.
+    from app.services.ledger import sync_po_cogs
+    await sync_po_cogs(db, po, created_by=user.id)
     from app.core.audit import record as audit_record
     await audit_record(db, actor=user, action="pay_supplier", entity="supplier_po",
                        entity_id=po.id, after={
                            "amount": settles, "paid_at": when.isoformat(),
                            "bank_account_no": bank.account_no, "bank_amount": bank_out,
                            "currency_amount": cur_amount, "fx_rate": rate,
-                           "fx_difference": round(bank_out - settles, 2)})
+                           "fx_difference": pay.fx_difference})
     await db.flush()
     return {"ok": True, "id": str(pay.id), "po_number": po.number,
             "paid": round(paid + settles, 2),
             "outstanding": max(round(outstanding - settles, 2), 0.0),
             "left_on_order": round(left - settles, 2),
             "bank_account_no": bank.account_no, "bank_name": bank.name,
-            "bank_amount": bank_out, "fx_difference": round(bank_out - settles, 2)}
+            "bank_amount": bank_out, "fx_difference": float(pay.fx_difference or 0),
+            "payable": float(po.payable_amount or 0)}

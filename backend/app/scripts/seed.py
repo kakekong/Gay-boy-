@@ -987,6 +987,16 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('foreign_receipts_at_rate')"))
             await db.commit()
             print(f"Foreign receipts brought to their PO's rate: {moved}")
+        # A supplier paid at another rate than the PO's estimate: the
+        # difference is the goods' cost, not Laba/Rugi Terealisasi.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'supplier_rate_to_cost'")):
+            from app.services.ledger import cost_from_paid_rates
+            res = await cost_from_paid_rates(db)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('supplier_rate_to_cost')"))
+            await db.commit()
+            print(f"Supplier rate differences moved onto the goods' cost: {res}")
 
 
 async def main() -> None:

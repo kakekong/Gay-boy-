@@ -470,8 +470,6 @@ async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
     from app.services import item_accounts as ia
 
     rate = po_rate(po)
-    if rate is None:
-        return 0.0
     lines = list(po.items or [])
     dflt = await ia.defaults(db)
     parts: dict[tuple[str, str, str], float] = {}
@@ -480,6 +478,8 @@ async def post_receipt_by_item(db: AsyncSession, po, moved: list[dict], *,
         if not (0 <= idx < len(lines)):
             continue
         unit = float(lines[idx].get("unit_price") or lines[idx].get("unit_cost") or 0)
+        if "value" not in m and rate is None:
+            continue
         value = (float(m["value"]) if "value" in m
                  else float(m.get("delta") or 0) * unit * rate)
         if abs(value) < 1e-9:
@@ -525,17 +525,16 @@ async def revalue_receipts(db: AsyncSession, po, *,
     rate: Persediaan and Belum Ditagih (Utang Usaha once the supplier has
     invoiced) by the difference. Receipts booked before the order had a rate
     — at 1 rupiah per yuan, as receiving used to — or before the rate was
-    changed come right the moment it is set. What has already been paid
-    stays at the rate it was paid against, so a payment's settlement and its
-    exchange difference stand. Returns the rupiah moved."""
+    changed come right the moment it is set. What has been paid is on the
+    books at the rate the bank paid — the PO's rate is only an estimate, and
+    the difference is the goods' cost, not an exchange gain or loss. Returns
+    the rupiah moved."""
     from app.models.purchasing import GoodsReceipt, Supplier, SupplierPayment
     from app.services.stock_reconcile import _receipted_quantities
 
     if (po.currency or "IDR").upper() == "IDR" or po.status in _PO_NOT_LIVE:
         return 0.0
     rate = po_rate(po)
-    if rate is None:
-        return 0.0
     lines = list(po.items or [])
     foreign: dict[int, float] = {}
     for no, qty in (await _receipted_quantities(db, po)).items():
@@ -555,7 +554,11 @@ async def revalue_receipts(db: AsyncSession, po, *,
             paid_cur += float(cur_amount)
             paid_idr += float(amount or 0)
     settled = min(paid_cur, got)
-    target = (paid_idr * settled / paid_cur if paid_cur else 0.0) + (got - settled) * rate
+    if rate is None and settled <= 0:
+        return 0.0                 # no rate, nothing paid: no rupiah figure yet
+    # Without a rate only the part paid has one — the rest waits for it.
+    target = ((paid_idr * settled / paid_cur if paid_cur else 0.0)
+              + (got - settled) * (rate if rate is not None else 0.0))
     diff = round(target - float(po.payable_amount or 0), 2)
     if abs(diff) < 0.5:
         return 0.0
@@ -569,11 +572,16 @@ async def revalue_receipts(db: AsyncSession, po, *,
     moved = [{"line_no": no, "sku": lines[no - 1].get("sku"),
               "name": lines[no - 1].get("description") or lines[no - 1].get("name"),
               "value": diff * v / got} for no, v in foreign.items()]
-    rate_txt = f"{rate:,.2f}".rstrip("0").rstrip(".")
+    def fmt(x: float) -> str:
+        return f"{x:,.2f}".rstrip("0").rstrip(".")
+    cur = po.currency.upper()
+    parts = ([f"the rate paid (Rp {fmt(paid_idr / paid_cur)} per {cur})"] if settled > 0 else []) \
+        + ([f"the PO's rate (Rp {fmt(rate)} per {cur})"]
+           if rate is not None and got > settled else [])
     posted = await post_receipt_by_item(
         db, po, moved, entry_date=today, receipt_id=last.id if last else None,
         supplier_name=sup.name if sup else None, created_by=created_by,
-        why=f"Received goods at Rp {rate_txt} per {po.currency.upper()}",
+        why="Goods received, valued at " + " and ".join(parts),
         billed=bool(po.supplier_invoices) and not po.unbilled)
     po.payable_amount = round(float(po.payable_amount or 0) + posted, 2)
     return posted
@@ -772,10 +780,10 @@ async def resync_all_cogs(db: AsyncSession) -> dict:
     return {"orders_moved": moved}
 
 
-# Where the gap between a foreign order's booked rate and the rate the bank
-# really paid at goes: Laba/Rugi Terealisasi (under Beban Diluar Usaha). A
-# loss raises it, a gain lowers it. It used to be 720101, which is now the
-# computed Laba/Rugi Tahun Berjalan.
+# Laba/Rugi Terealisasi (under Beban Diluar Usaha). The gap between a foreign
+# PO's estimated rate and the rate the bank paid used to land here; it is the
+# goods' cost now (revalue_receipts), and `cost_from_paid_rates` moved what
+# had landed here once. Kept for anything posted to it by hand.
 FX_REALISED_ACCOUNT = "7200-04"
 
 
@@ -813,6 +821,49 @@ async def post_supplier_payment(
         )
         moves.append({**m, "role": role})
     return moves
+
+
+async def cost_from_paid_rates(db: AsyncSession) -> dict:
+    """Run once: supplier payments that posted an exchange difference to
+    Laba/Rugi Terealisasi settle the debt by what left the bank instead, and
+    the difference goes onto the goods' cost (Persediaan, or HPP if the job
+    is paid) through revalue_receipts. The balance sheet comes out the same;
+    the P&L moves the difference from 7200-04 to the goods."""
+    from app.models.purchasing import SupplierPayment, SupplierPO
+    pays = (await db.scalars(select(SupplierPayment).where(
+        SupplierPayment.currency_amount.is_not(None),
+        SupplierPayment.bank_amount.is_not(None)))).all()
+    moved = 0.0
+    count = 0
+    pos = set()
+    for p in pays:
+        bank_out = round(float(p.bank_amount or 0), 2)
+        diff = round(bank_out - float(p.amount or 0), 2)
+        if abs(diff) < 0.005:
+            continue
+        lines = (await db.scalars(select(LedgerEntry).where(
+            LedgerEntry.source_type == "supplier_payment",
+            LedgerEntry.source_id == p.id))).all()
+        for ln in lines:
+            if ln.account_no == FX_REALISED_ACCOUNT:
+                await _bump(db, FX_REALISED_ACCOUNT, -float(ln.amount or 0))
+                await db.delete(ln)
+            elif ln.account_no == PAYABLE_ACCOUNT:
+                await _bump(db, PAYABLE_ACCOUNT, -diff)
+                ln.amount = round(float(ln.amount or 0) - diff, 2)
+                ln.memo = (ln.memo or "").replace("(payable)", "(payable, at the rate paid)")
+        p.amount = bank_out
+        moved += diff
+        count += 1
+        pos.add(p.po_id)
+    await db.flush()
+    for po_id in pos:
+        po = await db.get(SupplierPO, po_id)
+        if po is not None:
+            await sync_po_cogs(db, po)
+    await db.flush()
+    return {"payments": count, "orders": len(pos),
+            "moved_to_cost": round(moved, 2)}
 
 
 async def free_earnings_account(db: AsyncSession) -> dict:

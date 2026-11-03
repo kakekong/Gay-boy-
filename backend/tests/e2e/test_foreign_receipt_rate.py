@@ -9,8 +9,8 @@ afterwards changed nothing. Now:
 * **Rate set, booked.** Setting the rate books what was received at it.
 * **Rate changed, re-booked.** Changing it moves the books by the difference
   — onto Utang Usaha once the supplier has invoiced.
-* **Paid stays paid.** What was already paid stays at the rate it was paid
-  against.
+* **Paid at the bank's rate.** What was paid is on the books at the rate the
+  bank paid; the difference from the PO's estimate is the goods' cost.
 * **Old orders.** One booked at 1 comes right on the next sync (the data fix
   runs it once over every foreign order).
 """
@@ -108,20 +108,22 @@ async def main():
           and moved(b4, b5, UNBILLED) == 0,
           f"{moved(b4, b5, AP)} {moved(b4, b5, STOCK)} {moved(b4, b5, UNBILLED)}")
 
-    print("\n── paid half, then the rate changes again ──")
+    print("\n── paid half at the bank's rate, then the rate changes again ──")
+    b5b = await bal()
     r = await c.post(f"/finance/payables/{po}/pay", headers=fin, json={
         "currency_amount": 2500, "fx_rate": 2450})
-    check("¥2.500 paid, settling Rp 6.000.000 at 2.400", r.status_code == 201
-          and J(r).get("paid") == 6_000_000, f"{r.status_code} {J(r)}"[:200])
     b6 = await bal()
+    check("¥2.500 paid at 2.450 settles Rp 6.125.000 — what left the bank", r.status_code == 201
+          and J(r).get("paid") == 6_125_000, f"{r.status_code} {J(r)}"[:200])
+    check("...the Rp 125.000 above the 2.400 estimate goes on the goods' cost, not Laba/Rugi Terealisasi",
+          moved(b5b, b6, STOCK) == 125_000, str(moved(b5b, b6, STOCK)))
     await c.patch(f"/purchasing/po/{po}", headers=fin, json={"fx_rate": 2500})
     b7 = await bal()
     check("rate to 2.500 re-books only the unpaid ¥2.500: Rp 250.000",
           moved(b6, b7, AP) == 250_000 and moved(b6, b7, STOCK) == 250_000,
           f"{moved(b6, b7, AP)} {moved(b6, b7, STOCK)}")
-    check("...so the ¥2.500 left is owed at Rp 6.250.000",
-          round(b7[AP] - b6[AP] + 6_000_000, 2) == 6_250_000 and await payable(po) == 12_250_000,
-          str(await payable(po)))
+    check("...the order is on the books at Rp 6.125.000 paid + Rp 6.250.000 owed",
+          await payable(po) == 12_375_000, str(await payable(po)))
 
     print("\n── an order booked at 1 before this fix ──")
     po2 = J(await new_po(f"SHAFT {TAG}", rate=2300))["id"]
@@ -150,6 +152,40 @@ async def main():
         p = await s.get(SupplierPO, uuid.UUID(po2))
         again = await revalue_receipts(s, p)
     check("...and running it again moves nothing", again == 0, str(again))
+
+    print("\n── a payment booked the old way: its exchange difference becomes cost ──")
+    FX = "7200-04"
+    po4 = J(await new_po(f"BUSH {TAG}", rate=2300))["id"]
+    await c.post(f"/purchasing/po/{po4}/gr", headers=pur, json={
+        "items": [{"description": f"BUSH {TAG}", "qty": 50}]})
+    from app.models.purchasing import SupplierPayment
+    from app.services.ledger import post_supplier_payment, cost_from_paid_rates
+    from app.services import financials as fin
+    async with SessionLocal() as s:          # ¥5.000 paid at 2.400 against a 2.300 PO, as it used to post
+        sp = SupplierPayment(po_id=uuid.UUID(po4), paid_at=date.today(), amount=11_500_000,
+                             currency="CNY", currency_amount=5000, fx_rate=2400,
+                             bank_amount=12_000_000, fx_difference=500_000, bank_account_no="1101-01")
+        s.add(sp); await s.flush()
+        await post_supplier_payment(s, amount=11_500_000, cash_amount=12_000_000,
+                                    entry_date=date.today(), po_number="old", payment_id=sp.id)
+        await s.commit()
+    async def fx_bal():
+        async with SessionLocal() as s:
+            return float((await s.scalar(select(Account).where(Account.account_no == FX))).balance or 0)
+    f0, b12 = await fx_bal(), await bal()
+    async with SessionLocal() as s:
+        res = await cost_from_paid_rates(s)
+        await s.commit()
+        bs = await fin.balance_sheet(s)
+    f1, b13 = await fx_bal(), await bal()
+    check("the fix takes the Rp 500.000 loss off Laba/Rugi Terealisasi",
+          round(f1 - f0, 2) == -500_000, f"{f0} → {f1} {res}")
+    check("...and puts it on the goods' cost (Persediaan)", moved(b12, b13, STOCK) == 500_000,
+          str(moved(b12, b13, STOCK)))
+    check("...the books still balance", bs["balanced"] is True)
+    async with SessionLocal() as s:
+        again = await cost_from_paid_rates(s)
+    check("...and it runs once", again["payments"] == 0, str(again))
 
     print("\n── a rupiah order is untouched ──")
     po3 = J(await c.post("/purchasing/po", headers=d, json={

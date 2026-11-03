@@ -242,8 +242,9 @@ function Payables() {
                               <> · {money(p.currency_amount, p.currency ?? r.currency)} @ {new Intl.NumberFormat("id-ID").format(p.fx_rate)}</>
                             )}
                             {Math.abs(p.fx_difference) >= 1 && (
-                              <span className={p.fx_difference > 0 ? "text-red-700" : "text-emerald-700"}>
-                                {" "}· {p.fx_difference > 0 ? t("loss", "rugi") : t("gain", "laba")} {idr(Math.abs(p.fx_difference))}
+                              <span title={t("Against the PO's estimated rate — on the goods' cost",
+                                             "Terhadap kurs perkiraan PO — masuk biaya barang")}>
+                                {" "}· {p.fx_difference > 0 ? "+" : "−"}{idr(Math.abs(p.fx_difference))} {t("vs estimate", "vs perkiraan")}
                               </span>
                             )}
                           </div>
@@ -375,20 +376,20 @@ function Payables() {
                                 <div className="muted">{money(qty, r.currency)} × {new Intl.NumberFormat("id-ID").format(rate)}</div>
                               </div>
                               <div className="rounded-lg bg-white border border-ink-100 px-3 py-2">
-                                <div className="text-[10px] uppercase tracking-wider muted">{t("Settles of the debt", "Melunasi utang")}</div>
+                                <div className="text-[10px] uppercase tracking-wider muted">{t("At the PO's estimate", "Dengan kurs perkiraan PO")}</div>
                                 <div className="font-semibold tabular-nums">{idr(settles)}</div>
-                                <div className="muted">{t("at the PO's rate", "dengan kurs PO")} {new Intl.NumberFormat("id-ID").format(booked)}</div>
+                                <div className="muted">{money(qty, r.currency)} × {new Intl.NumberFormat("id-ID").format(booked)}</div>
                               </div>
-                              <div className={clsx("rounded-lg border px-3 py-2",
-                                Math.abs(diff) < 1 ? "bg-white border-ink-100"
-                                : diff > 0 ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200")}>
-                                <div className="text-[10px] uppercase tracking-wider muted">{t("Exchange difference", "Selisih kurs")}</div>
-                                <div className={clsx("font-semibold tabular-nums",
-                                  Math.abs(diff) < 1 ? "" : diff > 0 ? "text-red-700" : "text-emerald-700")}>
+                              <div className="rounded-lg bg-white border border-ink-100 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider muted">{t("Difference", "Selisih")}</div>
+                                <div className="font-semibold tabular-nums">
                                   {Math.abs(diff) < 1 ? t("none", "tidak ada")
-                                    : `${diff > 0 ? t("loss", "rugi") : t("gain", "laba")} ${idr(Math.abs(diff))}`}
+                                    : `${diff > 0 ? "+" : "−"}${idr(Math.abs(diff))}`}
                                 </div>
-                                <div className="muted">{t("booked to Laba/Rugi Terealisasi", "dicatat ke Laba/Rugi Terealisasi")}</div>
+                                <div className="muted">
+                                  {t("on the goods' cost (Persediaan, or HPP once the job is paid) — not Laba/Rugi Terealisasi",
+                                     "masuk biaya barang (Persediaan, atau HPP bila job lunas) — bukan Laba/Rugi Terealisasi")}
+                                </div>
                               </div>
                             </div>
                           )}
