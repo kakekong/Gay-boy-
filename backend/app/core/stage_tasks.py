@@ -21,6 +21,39 @@ def stage_task_kind(stage: str, task_key: str) -> str:
     return f"stage:{stage}:{task_key}"
 
 
+# A to-do the sales rep adds to the checklist themselves: kind
+# `stage:<stage>:custom-<hex>`, its title the first line of `message` and any
+# note the rest. Same reminder as a playbook task, so a date puts it on the
+# calendar and in the reminders exactly the same way. It is the rep's own, so
+# it is never closed for them when the deal moves on — an open one moves with
+# the deal onto the new stage's checklist until it is ticked off.
+CUSTOM_PREFIX = "custom-"
+
+
+def is_custom_key(task_key: str) -> bool:
+    return (task_key or "").startswith(CUSTOM_PREFIX)
+
+
+def split_custom_message(message: str | None) -> tuple[str, str | None]:
+    """(title, note) of a to-do the rep added."""
+    text = (message or "").strip()
+    title, _, note = text.partition("\n")
+    return title.strip(), (note.strip() or None)
+
+
+def custom_row(r: Reminder, stage: str) -> dict:
+    parsed = parse_stage_task_kind(r.kind) or (stage, "")
+    title, note = split_custom_message(r.message)
+    return {
+        "stage": parsed[0], "key": parsed[1], "title": title or "To-do", "hint": None,
+        "due_after_days": None, "reminder_id": str(r.id), "status": r.status,
+        "due_at": r.due_at, "note": note, "custom": True,
+        # Carried over from a stage the deal has left.
+        "from_stage": parsed[0] if parsed[0] != stage else None,
+        "completed_at": r.updated_at if r.status == "done" else None,
+    }
+
+
 def parse_stage_task_kind(kind: str) -> tuple[str, str] | None:
     """Return (stage, task_key) if this kind is a stage task, else None."""
     if not kind.startswith("stage:"):
@@ -65,6 +98,12 @@ async def close_superseded_stage_tasks(
             continue
         task_stage, _key = parsed
         idx = stage_index(task_stage)
+        if is_custom_key(_key):
+            # The rep's own to-do is theirs to tick off: it moves on with the
+            # deal, still open, onto the new stage's checklist.
+            if 0 <= idx < here:
+                r.kind = stage_task_kind(stage, _key)
+            continue
         if 0 <= idx < here:
             r.status = "done"
             closed += 1
@@ -133,8 +172,18 @@ async def stage_tasks_for(
     """
     stage = stage or customer.stage
     tasks = playbook_for(stage)
+    # The rep's own to-dos: this stage's, and any still open from an earlier
+    # stage — they are carried, not closed, when the deal moves on.
+    own = (await db.scalars(
+        select(Reminder).where(
+            Reminder.customer_id == customer.id,
+            Reminder.kind.like(f"stage:%:{CUSTOM_PREFIX}%"),
+        ).order_by(Reminder.created_at.asc())
+    )).all()
+    extra = [custom_row(r, stage) for r in own
+             if (parse_stage_task_kind(r.kind) or ("",))[0] == stage or r.status == "pending"]
     if not tasks:
-        return []
+        return extra
 
     kinds = [stage_task_kind(stage, t["key"]) for t in tasks]
     rows = (await db.scalars(
@@ -168,7 +217,7 @@ async def stage_tasks_for(
                 r.updated_at if r and r.status == "done" else None
             ),
         })
-    return out
+    return out + extra
 
 
 def overdue_stage_reminders_stmt(user_id, now: datetime | None = None):

@@ -91,7 +91,9 @@ async def list_events(
                 owner_roles = set((item.get("roles") if item else None) or ["sales"])
                 if role.value not in owner_roles:
                     continue
-            task_title = item["title"] if item else (r.message or task_key)
+            # A to-do the rep added: its title is the first line.
+            task_title = item["title"] if item else (
+                (r.message or "").strip().splitlines()[0] if (r.message or "").strip() else task_key)
             cust_label = "—" if blind else (c.company_name if c else "—")
             title = f"{stg.replace('_', ' ').title()} · {task_title} · {cust_label}"
             subtype = f"stage:{stg}"

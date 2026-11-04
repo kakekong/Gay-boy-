@@ -1010,6 +1010,90 @@ async def list_stage_tasks(
     return {"stage": stage or c.stage, "items": rows}
 
 
+async def _task_reminder(db: AsyncSession, c: Customer, task_key: str) -> Reminder | None:
+    """The reminder behind a checklist row: a playbook task of the current
+    stage, or one of the rep's own to-dos — those may come from an earlier
+    stage, so they are found by their key alone."""
+    from app.core.stage_tasks import is_custom_key
+    if is_custom_key(task_key):
+        return await db.scalar(select(Reminder).where(
+            Reminder.customer_id == c.id,
+            Reminder.kind.like(f"stage:%:{task_key}")))
+    return await db.scalar(select(Reminder).where(
+        Reminder.customer_id == c.id,
+        Reminder.kind == stage_task_kind(c.stage, task_key)))
+
+
+class StageTaskNew(BaseModel):
+    title: str
+    note: str | None = None
+    due_at: datetime | None = None
+
+
+@router.post("/{customer_id}/stage-tasks", status_code=201)
+async def add_stage_task(
+    customer_id: UUID,
+    payload: StageTaskNew,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Add a to-do of your own to the customer's checklist. With a date it
+    goes on the calendar and into the reminders, like any checklist task."""
+    import secrets
+
+    from app.core.stage_tasks import CUSTOM_PREFIX, custom_row
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    title = (payload.title or "").strip().splitlines()[0][:200] if (payload.title or "").strip() else ""
+    if not title:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Say what needs doing")
+    note = (payload.note or "").strip()
+    r = Reminder(
+        customer_id=c.id,
+        # Whose to-do it is: the customer's rep, so it reaches their calendar
+        # and bell — management adding one is adding it for the rep.
+        user_id=c.sales_pic_id or user.id,
+        kind=stage_task_kind(c.stage, CUSTOM_PREFIX + secrets.token_hex(4)),
+        due_at=payload.due_at, status="pending", channel="in_app",
+        message=title + (f"\n{note}" if note else ""),
+    )
+    db.add(r)
+    await db.flush()
+    await audit_record(db, actor=user, action="create", entity="stage_task",
+                       entity_id=r.id, after={"title": title, "due_at": str(payload.due_at or "")})
+    return custom_row(r, c.stage)
+
+
+@router.delete("/{customer_id}/stage-tasks/{task_key}", status_code=204)
+async def delete_stage_task(
+    customer_id: UUID,
+    task_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a to-do you added. The stage's own tasks stay — they are the
+    playbook's, and are ticked off rather than removed."""
+    from app.core.stage_tasks import is_custom_key
+    c = await db.get(Customer, customer_id)
+    if not c or c.is_deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN)
+    if not is_custom_key(task_key):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Only a to-do you added can be removed — tick this one off instead.")
+    r = await _task_reminder(db, c, task_key)
+    if not r:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
+    await audit_record(db, actor=user, action="delete", entity="stage_task",
+                       entity_id=r.id, before={"message": r.message})
+    await db.delete(r)
+    return None
+
+
 @router.post("/{customer_id}/stage-tasks/{task_key}/complete")
 async def complete_stage_task(
     customer_id: UUID,
@@ -1022,15 +1106,10 @@ async def complete_stage_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
-    k = stage_task_kind(c.stage, task_key)
-    r = await db.scalar(
-        select(Reminder).where(
-            Reminder.customer_id == c.id,
-            Reminder.kind == k,
-        )
-    )
+    r = await _task_reminder(db, c, task_key)
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
+    k = r.kind
     r.status = "done"
     await audit_record(db, actor=user, action="complete", entity="stage_task",
                        entity_id=r.id, before={"status": "pending"},
@@ -1057,16 +1136,16 @@ async def patch_stage_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
-    k = stage_task_kind(c.stage, task_key)
-    r = await db.scalar(
-        select(Reminder).where(
-            Reminder.customer_id == c.id,
-            Reminder.kind == k,
-        )
-    )
+    r = await _task_reminder(db, c, task_key)
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
-    if payload.note is not None:
+    k = r.kind
+    from app.core.stage_tasks import is_custom_key, split_custom_message
+    if payload.note is not None and is_custom_key(task_key):
+        # The rep's own to-do: the title stays the first line.
+        title, _old = split_custom_message(r.message)
+        r.message = title + (f"\n{payload.note.strip()}" if payload.note.strip() else "")
+    elif payload.note is not None:
         # Keep the title visible on the calendar when the user clears the note
         from app.core.stage_playbook import playbook_for
         item = next((t for t in playbook_for(c.stage) if t["key"] == task_key), None)
@@ -1096,15 +1175,10 @@ async def reopen_stage_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if Role(user.role) == Role.SALES and c.sales_pic_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
-    k = stage_task_kind(c.stage, task_key)
-    r = await db.scalar(
-        select(Reminder).where(
-            Reminder.customer_id == c.id,
-            Reminder.kind == k,
-        )
-    )
+    r = await _task_reminder(db, c, task_key)
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage task not found")
+    k = r.kind
     r.status = "pending"
     return {"id": str(r.id), "status": r.status, "kind": k}
 

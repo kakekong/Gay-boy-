@@ -7,7 +7,7 @@ import {
   FileText, Plus, Download, Wallet, TrendingUp, Briefcase, AlertCircle, Receipt,
   Clock, ListChecks, CheckCircle2, Circle, RotateCcw, ChevronRight, Truck,
   ShoppingCart, Banknote, Building, CalendarDays, Tag, Pencil, UserCog,
-  UserX, UserCheck,
+  UserX, UserCheck, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/api/client";
@@ -169,6 +169,24 @@ export default function CustomerDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
       qc.invalidateQueries({ queryKey: ["calendar-events"] });
+    },
+  });
+  // The rep's own to-dos on the checklist — a date puts one on the calendar.
+  const addTask = useMutation({
+    mutationFn: (body: { title: string; note?: string; due_at?: string }) =>
+      api.post(`/customers/${id}/stage-tasks`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+  const deleteTask = useMutation({
+    mutationFn: (key: string) => api.delete(`/customers/${id}/stage-tasks/${key}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer-stage-tasks", id] });
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
     },
   });
   const [stageFlash, setStageFlash] = useState<{ kind: "ok" | "wait" | "err"; text: string } | null>(null);
@@ -795,7 +813,10 @@ export default function CustomerDetailPage() {
         onComplete={(k) => completeTask.mutate(k)}
         onReopen={(k) => reopenTask.mutate(k)}
         onPatch={(key, body) => patchTask.mutate({ key, body })}
-        busy={completeTask.isPending || reopenTask.isPending || patchTask.isPending}
+        onAdd={(body) => addTask.mutateAsync(body)}
+        onDelete={(key) => deleteTask.mutate(key)}
+        busy={completeTask.isPending || reopenTask.isPending || patchTask.isPending
+              || addTask.isPending || deleteTask.isPending}
       />
 
       {/* Invoices */}
@@ -1082,8 +1103,11 @@ function Kpi({ label, value, Icon, tone }: {
 interface StageTaskItem {
   key: string;
   title: string;
-  hint: string;
-  due_after_days: number;
+  hint: string | null;
+  due_after_days: number | null;
+  /** A to-do the rep added — removable; `from_stage` when carried over. */
+  custom?: boolean;
+  from_stage?: string | null;
   status: "pending" | "done" | "missing";
   due_at: string | null;
   note: string | null;
@@ -1091,7 +1115,7 @@ interface StageTaskItem {
 }
 
 function StageChecklist({
-  loading, stage, items, onComplete, onReopen, onPatch, busy,
+  loading, stage, items, onComplete, onReopen, onPatch, onAdd, onDelete, busy,
 }: {
   loading: boolean;
   stage: string;
@@ -1099,9 +1123,32 @@ function StageChecklist({
   onComplete: (key: string) => void;
   onReopen: (key: string) => void;
   onPatch: (key: string, body: Record<string, any>) => void;
+  onAdd: (body: { title: string; note?: string; due_at?: string }) => Promise<unknown>;
+  onDelete: (key: string) => void;
   busy: boolean;
 }) {
   const t = useT();
+  const [adding, setAdding] = useState(false);
+  const [title, setTitle] = useState("");
+  const [note, setNote] = useState("");
+  const [day, setDay] = useState("");
+  const [time, setTime] = useState("09:00");
+  const [addErr, setAddErr] = useState<string | null>(null);
+  async function add() {
+    if (!title.trim()) return;
+    setAddErr(null);
+    try {
+      await onAdd({
+        title: title.trim(),
+        note: note.trim() || undefined,
+        due_at: day ? new Date(`${day}T${time || "09:00"}:00`).toISOString() : undefined,
+      });
+      setTitle(""); setNote(""); setDay(""); setTime("09:00"); setAdding(false);
+    } catch (e: any) {
+      setAddErr(e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+                ?? t("Couldn't add it", "Gagal menambahkan"));
+    }
+  }
   const sl = (k: string) => keyLabel(t, k);
   const now = Date.now();
   const done = items.filter((i) => i.status === "done").length;
@@ -1163,9 +1210,48 @@ function StageChecklist({
                 onComplete={onComplete}
                 onReopen={onReopen}
                 onPatch={onPatch}
+                onDelete={onDelete}
               />
             ))}
           </ul>
+        )}
+
+        {/* Your own to-dos: anything else this deal needs. A date puts it on
+            the calendar and in the reminders, like the stage's own tasks. */}
+        {adding ? (
+          <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50/30 p-3 space-y-2">
+            <input className="input" value={title} autoFocus maxLength={200}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") add(); }}
+              placeholder={t("What needs doing? e.g. Call to confirm the spec",
+                             "Apa yang perlu dilakukan? mis. Telepon untuk konfirmasi spesifikasi")} />
+            <textarea className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder={t("Note (optional)", "Catatan (opsional)")} />
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-[11px] muted">{t("Date:", "Tanggal:")}</label>
+              <input type="date" className="input max-w-[160px]" value={day}
+                onChange={(e) => setDay(e.target.value)} />
+              <input type="time" className="input max-w-[110px]" value={time} disabled={!day}
+                onChange={(e) => setTime(e.target.value)} />
+              <span className="text-[11px] muted">
+                {day ? t("Goes on the calendar", "Masuk ke kalender")
+                     : t("No date — on this checklist only", "Tanpa tanggal — hanya di daftar ini")}
+              </span>
+              <span className="flex-1" />
+              <button className="btn-primary text-xs" onClick={add} disabled={busy || !title.trim()}>
+                <Plus size={12} /> {t("Add", "Tambah")}
+              </button>
+              <button className="btn-ghost text-xs" onClick={() => { setAdding(false); setAddErr(null); }}>
+                {t("Cancel", "Batal")}
+              </button>
+            </div>
+            {addErr && <div className="text-xs text-red-700">{addErr}</div>}
+          </div>
+        ) : (
+          <button type="button" className="mt-3 text-sm text-brand-700 hover:underline inline-flex items-center gap-1"
+            onClick={() => setAdding(true)}>
+            <Plus size={14} /> {t("Add a to-do", "Tambah tugas")}
+          </button>
         )}
       </div>
     </div>
@@ -1179,13 +1265,14 @@ const STAGE_ORDER = [
 ] as const;
 
 function StageChecklistRow({
-  item, busy, onComplete, onReopen, onPatch,
+  item, busy, onComplete, onReopen, onPatch, onDelete,
 }: {
   item: StageTaskItem;
   busy: boolean;
   onComplete: (key: string) => void;
   onReopen: (key: string) => void;
   onPatch: (key: string, body: Record<string, any>) => void;
+  onDelete: (key: string) => void;
 }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
@@ -1243,8 +1330,19 @@ function StageChecklistRow({
           )}
         >
           {item.title}
+          {item.custom && (
+            <span className="chip bg-brand-50 text-brand-700 text-[10px] ml-2 font-normal align-middle">
+              {t("your to-do", "tugas Anda")}
+            </span>
+          )}
+          {item.from_stage && (
+            <span className="chip bg-ink-100 text-ink-600 text-[10px] ml-1 font-normal align-middle"
+              title={t("Added at an earlier stage, still open", "Ditambahkan di tahap sebelumnya, masih terbuka")}>
+              {t("from", "dari")} {keyLabel(t, item.from_stage)}
+            </span>
+          )}
         </div>
-        <div className="text-xs muted mt-0.5">{T(item.hint)}</div>
+        {item.hint && <div className="text-xs muted mt-0.5">{T(item.hint)}</div>}
         {item.note && !editing && (
           <div className="text-xs mt-1 rounded-md bg-white border border-ink-200 px-2 py-1">
             <span className="muted">{t("Note: ", "Catatan: ")}</span>{item.note}
@@ -1306,6 +1404,16 @@ function StageChecklistRow({
               {dueMs || item.note
                 ? t("Edit note / due", "Ubah catatan / tenggat")
                 : t("+ Set deadline / note", "+ Atur tenggat / catatan")}
+            </button>
+          )}
+          {item.custom && !editing && (
+            <button type="button" disabled={busy}
+              className="text-red-600 hover:underline inline-flex items-center gap-1"
+              onClick={() => {
+                if (window.confirm(tt(`Remove “${item.title}”?`, `Hapus “${item.title}”?`)))
+                  onDelete(item.key);
+              }}>
+              <Trash2 size={11} /> {t("Remove", "Hapus")}
             </button>
           )}
           {dueMs !== null && (
