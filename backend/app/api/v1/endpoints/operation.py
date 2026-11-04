@@ -478,8 +478,8 @@ async def project_full(project_id: UUID,
             "drawing_skip_pending": await _skip_pending(db, p.id),
         },
         "price_request": price_request,
-        # Null for anyone outside procurement, finance and admin, which is how
-        # the page knows to drop the card. Finance and admin get it read-only.
+        # Null for anyone outside procurement and finance, which is how the
+        # page knows to drop the card. Finance gets it read-only.
         "logistics": (await _logistics(db, p)) if _role in _LOGISTICS_VIEW_ROLES else None,
         "invoices": [] if not show_customer_docs else [
             {
@@ -836,10 +836,13 @@ REQUIRED_DOCS = {
 # signs it off. It used to be open to admin and manager as well, which put a
 # customs pack on the screen of the two roles that never chase one.
 _LOGISTICS_ROLES = {Role.PURCHASING, Role.DIRECTOR}
-# Finance and admin read the card and open the documents — finance books the
-# import duties and freight against the customs pack, admin ships and
-# invoices against it — but neither collects, uploads or approves anything.
-_LOGISTICS_VIEW_ROLES = _LOGISTICS_ROLES | {Role.FINANCE, Role.ADMIN}
+# Finance reads the card and opens the documents — the import duties and
+# freight it books are against the customs pack — but collects, uploads and
+# approves nothing. Admin does not see it.
+_LOGISTICS_VIEW_ROLES = _LOGISTICS_ROLES | {Role.FINANCE}
+# Who adds to and takes off "Others": finance as well — it is where the
+# freight invoice and the duty slip they pay against go.
+_OTHER_DOCS_ROLES = _LOGISTICS_ROLES | {Role.FINANCE}
 DOCS_DUE_WINDOW_DAYS = 14
 
 # ── Drawings, and who they belong to ─────────────────────────────────────────
@@ -1806,7 +1809,9 @@ async def upload_import_doc(
     folder, and linking it beats re-uploading a pack that a Space rebuild
     would wipe anyway.
     """
-    if Role(user.role) not in _LOGISTICS_ROLES:
+    # "Others" is open to finance too — the freight invoice, the duty slip
+    # they pay against; the required documents stay purchasing's to file.
+    if Role(user.role) not in (_OTHER_DOCS_ROLES if key == OTHER_DOCS else _LOGISTICS_ROLES):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/director only")
     p = await db.get(Project, project_id)
     if not p:
@@ -1909,8 +1914,8 @@ async def remove_other_doc(project_id: UUID, attachment_id: UUID,
                            db: AsyncSession = Depends(get_db),
                            user: User = Depends(get_current_user)):
     """Take a file off a supplier's "Others" — filed by mistake, or the wrong
-    one. Purchasing and the director, who file them."""
-    if Role(user.role) not in _LOGISTICS_ROLES:
+    one. Purchasing, finance and the director, who file them."""
+    if Role(user.role) not in _OTHER_DOCS_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Purchasing/director only")
     p = await db.get(Project, project_id)
     if not p:

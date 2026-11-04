@@ -233,10 +233,12 @@ export default function ProjectDetailPage() {
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const userId = useAuthStore((s) => s.user?.id) ?? "";
   // Import paperwork is procurement's file — purchasing collects it, the
-  // director signs it off. Finance and admin get the card read-only (and may
-  // open the documents); the backend sends `logistics: null` to everyone
-  // else, so the card drops out for them.
+  // director signs it off. Finance gets the card read-only (and may open the
+  // documents); the backend sends `logistics: null` to everyone else, admin
+  // included, so the card drops out for them.
   const canLogistics = ["purchasing", "director"].includes(role);
+  // "Others" takes finance's files too — the freight invoice, the duty slip.
+  const canOthers = canLogistics || role === "finance";
   const isOps = ["manager", "director", "admin"].includes(role);
   const isAdmin = ["admin", "director"].includes(role);
   // Admin specifically — `isAdmin` above also admits the director, who has
@@ -1624,7 +1626,7 @@ export default function ProjectDetailPage() {
           has been approved. Hidden before that so the project page stays
           focused on what's actually happening at the current stage.
           Also hidden from sales — this is purchasing's card, which
-          finance and admin read. */}
+          finance reads. */}
       {canSeeOpsDetails && logistics && PIPELINE_STAGES.indexOf(p.status) >= PIPELINE_STAGES.indexOf("drawing_approved") && (
         <div className="card overflow-hidden">
           <div className="px-5 py-3 border-b border-ink-100 flex items-center justify-between gap-3 flex-wrap">
@@ -1797,7 +1799,7 @@ export default function ProjectDetailPage() {
                     )}
 
                     {/* Director approve / reject — the director's alone;
-                        admin reads this card but signs nothing on it. */}
+                        finance reads this card but signs nothing on it. */}
                     {role === "director" && d.status === "pending" && (
                       <span className="inline-flex gap-1.5 ml-auto">
                         <button className="btn-primary py-0.5 px-2 text-xs"
@@ -1842,7 +1844,7 @@ export default function ProjectDetailPage() {
                             {f.filename || t("View", "Lihat")}
                           </button>
                         )}
-                        {canLogistics && (
+                        {canOthers && (
                           <button type="button" className="text-red-600 hover:underline"
                             disabled={removeOther.isPending}
                             title={t("Remove this file", "Hapus file ini")}
@@ -1857,7 +1859,7 @@ export default function ProjectDetailPage() {
                       </span>
                     ))}
                   </div>
-                  {canLogistics && (
+                  {canOthers && (
                     <span className="inline-flex items-center gap-3">
                       <label className="text-xs text-brand-700 hover:underline cursor-pointer">
                         {t("Add file", "Tambah file")}

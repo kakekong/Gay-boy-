@@ -95,10 +95,10 @@ async def main():
     await c.post(f"/operation/drawings/{cust_drw['id']}/decide", headers=d,
                  json={"decision": "approve"})
 
-    # ══ 1. the customs pack is procurement's card; finance and admin read it ═
+    # ══ 1. the customs pack is procurement's card; finance reads it ════════
     print("\n── who opens the import documents ──")
     for who, label, allowed in ((pur, "purchasing", True), (d, "the director", True),
-                                (adm, "admin", True), (fin, "finance", True),
+                                (adm, "admin", False), (fin, "finance", True),
                                 (mgr, "the manager", False), (s1, "sales", False)):
         got = (await full(who)).get("logistics")
         check(f"{label} {'sees' if allowed else 'does not see'} the card",
@@ -106,7 +106,7 @@ async def main():
 
     r = await c.patch(f"/operation/projects/{proj}/logistics", headers=adm,
                       json={"delivery_mode": "agent"})
-    check("admin reads it but cannot set the delivery mode", r.status_code == 403,
+    check("admin cannot set the delivery mode either", r.status_code == 403,
           str(r.status_code))
     r = await c.patch(f"/operation/projects/{proj}/logistics", headers=fin,
                       json={"delivery_mode": "agent"})
@@ -205,9 +205,11 @@ async def main():
     check("purchasing uploads the packing list", r.status_code == 200,
           f"{r.status_code} {J(r)}"[:140])
     pl = next((x for x in J(r).get("required_docs", []) if x["key"] == "packing_list"), {})
-    for who, label in ((fin, "finance"), (adm, "admin")):
+    rr = await c.get(f"/attachments/{pl.get('attachment_id')}/download", headers=fin)
+    check("finance opens it", rr.status_code == 200, str(rr.status_code))
+    for who, label in ((adm, "admin"), (mgr, "the manager"), (s1, "sales")):
         rr = await c.get(f"/attachments/{pl.get('attachment_id')}/download", headers=who)
-        check(f"{label} opens it", rr.status_code == 200, str(rr.status_code))
+        check(f"{label} can't open it, even by its link", rr.status_code == 403, str(rr.status_code))
     if uploaded and uploaded.get("attachment_id"):
         rr = await c.get(f"/attachments/{uploaded['attachment_id']}/download", headers=fin)
         check("...but finance can't open the job's other files (a supplier drawing)",
@@ -218,7 +220,7 @@ async def main():
     for who, label in ((adm, "admin"), (fin, "finance")):
         r = await c.post(f"/operation/projects/{proj}/import-docs/invoice/decide",
                          headers=who, json={"decision": "approve"})
-        check(f"{label} sees it but can't sign it off", r.status_code == 403,
+        check(f"{label} can't sign it off", r.status_code == 403,
               str(r.status_code))
 
     print("\n── Others: anything else, in every mode, never in the way ──")
@@ -244,12 +246,22 @@ async def main():
     cert = next(o for o in others if o.get("filename") == "mill-cert.pdf")
     rr = await c.get(f"/attachments/{cert['attachment_id']}/download", headers=fin)
     check("finance opens it", rr.status_code == 200, str(rr.status_code))
+    rr = await c.get(f"/attachments/{cert['attachment_id']}/download", headers=adm)
+    check("...admin can't", rr.status_code == 403, str(rr.status_code))
     r = await c.post(f"/operation/projects/{proj}/import-docs/other/upload",
-                     headers=fin, data={"link_url": url})
-    check("...but can't add to it", r.status_code == 403, str(r.status_code))
-    r = await c.delete(f"/operation/projects/{proj}/import-docs/other/{cert['attachment_id']}",
-                       headers=fin)
-    check("...or take anything off", r.status_code == 403, str(r.status_code))
+                     headers=fin, data={"note": "freight invoice"},
+                     files={"file": ("freight.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")})
+    fin_others = ((J(r).get("suppliers") or [{}])[0].get("other_docs") or [])
+    fin_file = next((o for o in fin_others if o.get("filename") == "freight.pdf"), None)
+    check("finance files the freight invoice under Others", r.status_code == 200 and fin_file is not None,
+          f"{r.status_code} {str(fin_others)[:160]}")
+    if fin_file:
+        r = await c.delete(f"/operation/projects/{proj}/import-docs/other/{fin_file['attachment_id']}",
+                           headers=fin)
+        check("...and can take it off again", r.status_code == 200, str(r.status_code))
+    r = await c.post(f"/operation/projects/{proj}/import-docs/other/upload",
+                     headers=adm, data={"link_url": url})
+    check("admin can't add to Others", r.status_code == 403, str(r.status_code))
     r = await c.delete(f"/operation/projects/{proj}/import-docs/other/{cert['attachment_id']}",
                        headers=pur)
     left = ((J(r).get("suppliers") or [{}])[0].get("other_docs") or [])

@@ -529,10 +529,15 @@ async def add_link(
     return await _to_out(db, a)
 
 
-async def _finance_import_doc(db: AsyncSession, me: User, a: Attachment) -> bool:
-    """Finance opens a project's import documents (read-only, from the
-    Logistics card) — and no other file on the project's shelf."""
-    if Role(me.role) != Role.FINANCE or a.owner_type != "project":
+# Who opens a project's import documents (Others included): the roles the
+# Logistics card shows to — purchasing files them, the director signs them,
+# finance books against them. Nobody else, even with the file's id.
+_IMPORT_DOC_ROLES = {Role.PURCHASING, Role.DIRECTOR, Role.FINANCE}
+
+
+async def _is_import_doc(db: AsyncSession, a: Attachment) -> bool:
+    """Is this file one of its project's import documents?"""
+    if a.owner_type != "project":
         return False
     from app.models.operation import Project
     p = await db.get(Project, a.owner_id)
@@ -555,8 +560,11 @@ async def download_attachment(
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if (not _attachment_visible_to(a.owner_type, Role(me.role))
-            and not await _finance_import_doc(db, me, a)):
+            and not (Role(me.role) == Role.FINANCE and await _is_import_doc(db, a))):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not allowed to view this file")
+    if Role(me.role) not in _IMPORT_DOC_ROLES and await _is_import_doc(db, a):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Import documents are purchasing's, finance's and the director's")
     if a.owner_type == "daily_log" and not await _daily_log_read_ok(db, me, a.owner_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your daily log")
     if not await _external_owns_attachment(db, me, a.owner_type, a.owner_id):
