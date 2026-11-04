@@ -323,10 +323,12 @@ def _pr_edit_rule(pr: PriceRequest, user: User) -> tuple[bool, str | None]:
     return False, "Only sales, a manager or the director can update the price request."
 
 
-def _supplier_po_lines(pr: PriceRequest, spos) -> tuple[list[dict], dict[int, float]]:
+def _supplier_po_lines(pr: PriceRequest, spos) -> tuple[list[dict], dict[int, float], dict[int, float]]:
     """The supplier POs against what each request line needs: the lines that
-    differ (quantity, unit, cost per unit in rupiah, or not ordered), and for
-    each line whose cost differs, what the POs really pay per unit."""
+    differ (quantity, unit, cost per unit in rupiah, or not ordered); for
+    each line whose cost differs, what the POs really pay per unit; and for
+    each whose quantity differs, what they order. A line the order splits in
+    two (100 + 30) is left out of the quantity: which half would change?"""
     from app.services.ledger import po_rate
     need, pr_alias = _merge_split(_pr_lines(pr))
     by_key = {_key(v["description"]): no for no, v in need.items()}
@@ -365,6 +367,7 @@ def _supplier_po_lines(pr: PriceRequest, spos) -> tuple[list[dict], dict[int, fl
                 paid[no] = paid.get(no, 0) + _num(it.get("qty")) * float(unit) * rate
     lines: list[dict] = []
     cost_to: dict[int, float] = {}
+    qty_to: dict[int, float] = {}
     for no, v in sorted(need.items()):
         if no not in ordered:
             lines.append({"line_no": no, "change": "only_left", "description": v["description"]})
@@ -372,6 +375,8 @@ def _supplier_po_lines(pr: PriceRequest, spos) -> tuple[list[dict], dict[int, fl
         fields = []
         if abs(ordered[no] - v["qty"]) > 1e-6:
             fields.append({"field": "qty", "left": v["qty"], "right": ordered[no]})
+            if len(v.get("split", [no])) == 1 and ordered[no] > 0:
+                qty_to[no] = ordered[no]
         other = sorted(u for u in units.get(no, set()) if u.lower() != v["uom"].lower())
         if other:
             fields.append({"field": "uom", "left": v["uom"], "right": ", ".join(other)})
@@ -387,7 +392,7 @@ def _supplier_po_lines(pr: PriceRequest, spos) -> tuple[list[dict], dict[int, fl
         if fields:
             lines.append({"line_no": no, "change": "differs",
                           "description": v["description"], "fields": fields})
-    return lines, cost_to
+    return lines, cost_to, qty_to
 
 
 # ── The report ───────────────────────────────────────────────────────────────
@@ -471,7 +476,7 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
             })
 
         if chain["supplier_pos"]:
-            lines, cost_to = _supplier_po_lines(pr, chain["supplier_pos"])
+            lines, cost_to, qty_to = _supplier_po_lines(pr, chain["supplier_pos"])
             may_cost = role in (Role.PURCHASING, Role.DIRECTOR)
             checks.append({
                 "key": "supplier_po_qty", "left": _doc("price_request", pr),
@@ -479,12 +484,21 @@ async def report(db: AsyncSession, chain: dict, user: User) -> dict:
                           "number": ", ".join(s.number for s in chain["supplier_pos"]),
                           "docs": [_doc("supplier_po", s) for s in chain["supplier_pos"]]},
                 "lines": lines, "info_only": True,
-                # The one thing settled from here: the order's cost following
-                # what the supplier PO really pays. Quantity and unit are
-                # changed with the supplier, on the PO page.
-                "actions": [] if not cost_to else [
-                    {"id": "use_right", "label": "Use the supplier PO's cost on the order",
-                     "label_id": "Pakai biaya PO supplier di pesanan",
+                # Settled from here: the order following the supplier PO —
+                # its cost per unit, and its quantity (the director's, as
+                # arranging the order is). The PO itself is changed with
+                # the supplier, on the PO page.
+                "actions": [] if not (cost_to or qty_to) else [
+                    {"id": "use_right",
+                     "label": ("Use the supplier PO's cost and quantity on the order"
+                               if cost_to and qty_to else
+                               "Use the supplier PO's quantity on the order" if qty_to
+                               else "Use the supplier PO's cost on the order"),
+                     "label_id": ("Pakai biaya dan jumlah PO supplier di pesanan"
+                                  if cost_to and qty_to else
+                                  "Pakai jumlah PO supplier di pesanan" if qty_to
+                                  else "Pakai biaya PO supplier di pesanan"),
+                     "carries": [k for k, v in (("cost", cost_to), ("qty", qty_to)) if v],
                      "allowed": may_cost,
                      "reason": None if may_cost else "What a line costs is purchasing's and the director's to change.",
                      "how": "direct"}],
@@ -549,46 +563,114 @@ async def _write_quotation(db: AsyncSession, q: Quotation, items: list[dict],
     return {"queued": False, "message": f"{q.number} updated."}
 
 
+async def _order_qty_from_pos(db: AsyncSession, pr: PriceRequest, user: User,
+                              qty_to: dict[int, float], pos: str) -> dict:
+    """The order's quantities set to what the supplier POs order — through
+    Arrange order, so its rules hold: the director's applies now and the
+    quotation follows the request; anyone else's goes to the director."""
+    from fastapi import HTTPException
+
+    from app.api.v1.endpoints import project_order as po_mod
+    from app.core.approval import request_approval
+    from app.core.audit import record as audit_record
+    from app.models.approval import ApprovalStatus
+    from app.models.operation import Project
+
+    p = await db.scalar(select(Project).where(Project.price_request_id == pr.id,
+                                              Project.is_deleted.is_(False)).limit(1))
+    if p is None:
+        raise FixRefused("This order has no project to arrange — change the quantity on the price request.")
+    lines = [po_mod.OrderLineIn(line_no=int(it.get("line_no")),
+                                qty=qty_to.get(int(it.get("line_no"))))
+             for it in po_mod._ordered(pr, p)]
+    try:
+        plan = po_mod._plan(pr, p, lines, director=Role(user.role) == Role.DIRECTOR)
+    except HTTPException as e:
+        raise FixRefused(str(e.detail)) from e
+    n = len(qty_to)
+    what = f"the quantity on {n} line{'s' if n != 1 else ''}"
+    if Role(user.role) == Role.DIRECTOR:
+        before = {"items": pr.items, "item_order": p.item_order}
+        po_mod.apply_order(p, pr, plan)
+        # A proposal waiting on this order — purchasing asking the same — is
+        # answered by this, as when the director arranges the order.
+        waiting = await po_mod.pending_for(db, p.id)
+        if waiting:
+            from datetime import UTC, datetime
+            waiting.status = ApprovalStatus.APPROVED.value
+            waiting.decided_by = user.id
+            waiting.decided_at = datetime.now(UTC)
+            waiting.decision_notes = f"Applied from the deal check — the order now matches the {pos}"
+        from app.services.quotation_sync import sync_from_price_request
+        await sync_from_price_request(db, pr, user)
+        await audit_record(db, actor=user, action="order_change", entity="project",
+                           entity_id=p.id, before=before,
+                           after={"summary": plan["summary"], "from": pos})
+        return {"queued": False, "said": what}
+    stored = {"lines": [ln.model_dump() for ln in lines], "summary": plan["summary"],
+              "note": f"Matched to the {pos}", "project_code": p.code}
+    reason = f"Change the order on {p.code}: " + "; ".join(plan["summary"]) + f" — to match the {pos}"
+    req = await po_mod.pending_for(db, p.id)
+    if req and req.status == ApprovalStatus.PENDING.value:
+        req.payload, req.reason, req.requested_by = stored, reason, user.id
+    else:
+        await request_approval(db, target_type=po_mod.TARGET, target_id=p.id,
+                               requested_by=user.id, required_role=Role.DIRECTOR,
+                               reason=reason, payload=stored)
+    return {"queued": True, "said": f"{what} sent to the director to approve"}
+
+
 async def fix(db: AsyncSession, chain: dict, user: User, check_key: str, action: str) -> dict:
     from app.core.audit import record as audit_record
     role = Role(user.role)
     pr, q = chain["price_request"], chain["quotation"]
 
     if check_key == "supplier_po_qty":
-        # The order's cost follows what the supplier POs really pay per
-        # unit — the same change as "Edit costs" on the order, so the
-        # quotation's cost estimate follows too.
+        # The order follows the supplier POs: the cost per unit they really
+        # pay — the same change as "Edit costs", purchasing's or the
+        # director's — and the quantity they order, which changes what the
+        # customer is sold: arranging the order, so the director's own
+        # applies now (and reaches the quotation) and anyone else's goes to
+        # the director.
         if action != "use_right":
             raise FixRefused("A placed order is changed with the supplier, on the PO page.")
         if role not in (Role.PURCHASING, Role.DIRECTOR):
             raise FixRefused("What a line costs is purchasing's and the director's to change.")
         if pr is None or not chain["supplier_pos"]:
             raise FixRefused("No supplier PO on this order.")
-        _lines, cost_to = _supplier_po_lines(pr, chain["supplier_pos"])
-        if not cost_to:
-            raise FixRefused("The order's cost already matches the supplier POs.")
-        from app.services.quotation_sync import sync_costs
-        before = [dict(it) for it in (pr.items or [])]
-        items, changed = [], []
-        for i, it in enumerate(pr.items or []):
-            it = dict(it)
-            no = int(it.get("line_no") or (i + 1))
-            if no in cost_to:
-                changed.append(f"“{it.get('description')}”: {it.get('cost_price')} → {cost_to[no]}")
-                it["cost_price"] = cost_to[no]
-                it["cost_basis"] = "unit"
-            items.append(it)
-        pr.items = items
-        await sync_costs(db, pr)
-        await audit_record(db, actor=user, action="order_costs", entity="price_request",
-                           entity_id=pr.id, before={"items": before},
-                           after={"from_supplier_pos": [s.number for s in chain["supplier_pos"]],
-                                  "changed": changed})
+        _lines, cost_to, qty_to = _supplier_po_lines(pr, chain["supplier_pos"])
+        if not cost_to and not qty_to:
+            raise FixRefused("The order already matches the supplier POs.")
+        pos = f"supplier PO{'s' if len(chain['supplier_pos']) > 1 else ''}"
+        said: list[str] = []
+        queued = False
+        if cost_to:
+            from app.services.quotation_sync import sync_costs
+            before = [dict(it) for it in (pr.items or [])]
+            items, changed = [], []
+            for i, it in enumerate(pr.items or []):
+                it = dict(it)
+                no = int(it.get("line_no") or (i + 1))
+                if no in cost_to:
+                    changed.append(f"“{it.get('description')}”: {it.get('cost_price')} → {cost_to[no]}")
+                    it["cost_price"] = cost_to[no]
+                    it["cost_basis"] = "unit"
+                items.append(it)
+            pr.items = items
+            await sync_costs(db, pr)
+            await audit_record(db, actor=user, action="order_costs", entity="price_request",
+                               entity_id=pr.id, before={"items": before},
+                               after={"from_supplier_pos": [s.number for s in chain["supplier_pos"]],
+                                      "changed": changed})
+            n = len(changed)
+            said.append(f"the cost on {n} line{'s' if n != 1 else ''}")
+        if qty_to:
+            res = await _order_qty_from_pos(db, pr, user, qty_to, pos)
+            queued = res["queued"]
+            said.append(res["said"])
         await db.flush()
-        n = len(changed)
-        return {"queued": False,
-                "message": f"The order's cost now follows the supplier PO{'s' if len(chain['supplier_pos']) > 1 else ''}"
-                           f" — {n} line{'s' if n != 1 else ''} changed."}
+        return {"queued": queued,
+                "message": f"The order now follows the {pos}: " + "; ".join(said) + "."}
 
     if check_key == "pr_quotation":
         if pr is None or q is None or not _sees_sell(role):

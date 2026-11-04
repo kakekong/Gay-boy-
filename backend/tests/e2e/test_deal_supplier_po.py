@@ -180,6 +180,44 @@ async def main():
         "project_id": pid, "check": "supplier_po_qty", "action": "use_right"})
     check("...pressing it again is refused, nothing to change", r.status_code == 409, str(r.status_code))
 
+    print("\n── the quantity follows too ──")
+    # The supplier is sent 7 meter where the order says 6 — a spare.
+    await c.patch(f"/purchasing/po/{po1['id']}", headers=d, json={"items": [
+        {"description": chain_name, "qty": 7, "uom": "meter",
+         "unit_price": 833_333.33, "amount": 5_833_333.31}], "total": 5_833_333.31})
+    so = spo_check(J(await c.get("/consistency", headers=pur, params={"project_id": pid})))
+    act = next((a for a in (so or {}).get("actions", []) if a["id"] == "use_right"), {})
+    check("the check offers the supplier PO's quantity", act.get("carries") == ["qty"]
+          and "quantity" in act.get("label", ""), str(act))
+    async def chain_qty():
+        prd = J(await c.get(f"/price-requests/{pr}", headers=d))
+        return float(next(it for it in prd["items"] if int(it["line_no"]) == 1)["qty"])
+    r = await c.post("/consistency/fix", headers=pur, json={
+        "project_id": pid, "check": "supplier_po_qty", "action": "use_right"})
+    check("from purchasing it goes to the director — it changes what the customer is sold",
+          r.status_code == 200 and J(r).get("queued") is True and await chain_qty() == 6,
+          f"{r.status_code} {J(r)} {await chain_qty()}"[:220])
+    inbox = J(await c.get("/approvals", headers=d, params={"status": "pending"}))
+    inbox = inbox if isinstance(inbox, list) else inbox.get("items", [])
+    check("...which waits in the director's inbox",
+          any(x.get("target_type") == "project_order" and str(x.get("target_id")) == str(pid)
+              for x in inbox), str([x.get("target_type") for x in inbox])[:200])
+    r = await c.post("/consistency/fix", headers=d, json={
+        "project_id": pid, "check": "supplier_po_qty", "action": "use_right"})
+    check("the director's applies at once", r.status_code == 200 and J(r).get("queued") is False
+          and await chain_qty() == 7, f"{r.status_code} {J(r)} {await chain_qty()}"[:220])
+    inbox = J(await c.get("/approvals", headers=d, params={"status": "pending"}))
+    inbox = inbox if isinstance(inbox, list) else inbox.get("items", [])
+    check("...answering purchasing's request, which leaves the inbox",
+          not any(x.get("target_type") == "project_order" and str(x.get("target_id")) == str(pid)
+                  for x in inbox))
+    qd = J(await c.get(f"/quotations/{q['id']}", headers=d))
+    qline = next((it for it in qd.get("items", []) if it.get("description") == chain_name), {})
+    check("...and the quotation follows", float(qline.get("qty") or 0) == 7, str(qline.get("qty")))
+    so = spo_check(await rep(project_id=pid))
+    ch = {ln["description"]: ln for ln in (so or {}).get("lines", [])}.get(chain_name, {})
+    check("...so the supplier PO matches again", not ch.get("fields"), str(ch))
+
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         print("FAILED: " + "; ".join(FAIL)); sys.exit(1)

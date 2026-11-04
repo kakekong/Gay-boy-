@@ -31,7 +31,10 @@ type Where = {
 interface DocRef { kind: string; id: string | null; number: string; docs?: DocRef[] }
 interface Field { field: string; left: any; right: any }
 interface Line { line_no: number | null; change: string; description: string | null; fields?: Field[] }
-interface Action { id: "use_left" | "use_right"; allowed: boolean; reason: string | null; how: string }
+interface Action { id: "use_left" | "use_right"; allowed: boolean; reason: string | null; how: string;
+  label?: string; label_id?: string;
+  /** On the supplier PO check: what the order takes from it — cost, qty. */
+  carries?: ("cost" | "qty")[] }
 interface Check { key: string; left: DocRef; right: DocRef; lines: Line[]; actions: Action[];
   info_only?: boolean; partial?: boolean }
 interface Report { documents: Record<string, any>; checks: Check[]; issues: number }
@@ -119,6 +122,7 @@ function Mismatch({ c, onFix, busy }: {
   c: Check; onFix: (check: string, action: string) => void; busy: boolean;
 }) {
   const t = useT();
+  const isDirector = useAuthStore((s) => s.user?.role) === "director";
   const [picked, setPicked] = useState<Action | null>(null);
   const rows = rowsOf(c);
   const act = (side: "left" | "right") => c.actions.find((a) => a.id === (side === "left" ? "use_left" : "use_right"));
@@ -149,7 +153,7 @@ function Mismatch({ c, onFix, busy }: {
     const label = c.key.startsWith("supplier_request")
       ? t("Update the supplier request to this", "Samakan permintaan supplier dengan ini")
       : c.key === "supplier_po_qty"
-      ? t("Use this cost on the order", "Pakai biaya ini di pesanan")
+      ? t(a.label ?? "Use this on the order", a.label_id ?? "Pakai ini di pesanan")
       : t("This one is right", "Ini yang benar");
     return (
       <div className="pt-2">
@@ -207,8 +211,17 @@ function Mismatch({ c, onFix, busy }: {
         <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3 text-sm flex items-center gap-3 flex-wrap">
           <span className="flex-1 min-w-[240px]">
             {c.key === "supplier_po_qty"
-              ? t("The order's cost per unit will be set to what the supplier PO pays, on each line where it differs. Quantity and unit stay as they are.",
-                  "Biaya per satuan di pesanan akan disamakan dengan yang dibayar di PO supplier, pada baris yang berbeda. Jumlah dan satuan tetap.")
+              ? [
+                  picked.carries?.includes("cost") && t(
+                    "The order's cost per unit will be set to what the supplier PO pays.",
+                    "Biaya per satuan di pesanan disamakan dengan yang dibayar di PO supplier."),
+                  picked.carries?.includes("qty") && (isDirector
+                    ? t("The order's quantities will be set to what the supplier PO orders, and the quotation follows.",
+                        "Jumlah di pesanan disamakan dengan yang dipesan di PO supplier, dan penawaran ikut.")
+                    : t("The quantities go to the director to approve — they change what the customer is sold.",
+                        "Jumlah dikirim ke direktur untuk disetujui — karena mengubah yang dijual ke pelanggan.")),
+                  t("Only the lines that differ change; the unit stays.", "Hanya baris yang berbeda yang berubah; satuan tetap."),
+                ].filter(Boolean).join(" ")
               : t(`${kindName(changes(picked).kind)} ${changes(picked).number} will be changed to match ${lower(kindName(keeps(picked).kind))} ${keeps(picked).number}.`,
                   `${kindName(changes(picked).kind)} ${changes(picked).number} akan diubah mengikuti ${lower(kindName(keeps(picked).kind))} ${keeps(picked).number}.`)}
           </span>
