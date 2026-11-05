@@ -821,6 +821,8 @@ COLUMN_MIGRATIONS: list[str] = [
     # and the HPP booked per account ───────────────────────────────────────
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS unbilled JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS supplier_invoices JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS other_costs JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS other_costs_booked NUMERIC(18,2) NOT NULL DEFAULT 0",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS received_by JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE supplier_pos ADD COLUMN IF NOT EXISTS cogs_by JSONB",
     # ── Who made each supplier PO; older ones from the approval request a

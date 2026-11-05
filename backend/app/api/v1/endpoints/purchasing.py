@@ -1014,6 +1014,12 @@ def _describe_po_changes(po, data: dict, *, project_label: str | None = None,
         if was != now:
             fmt = lambda x: "—" if x is None else f"{x:,.0f}".replace(",", ".")
             bits.append(f"rate {fmt(was)} → {fmt(now)}")
+    if "other_costs" in data:
+        was = sum(float((c or {}).get("amount") or 0) for c in (po.other_costs or []))
+        now = sum(float((c or {}).get("amount") or 0) for c in (data["other_costs"] or []))
+        if abs(was - now) > 0.005 or len(po.other_costs or []) != len(data["other_costs"] or []):
+            names = ", ".join(c["description"] for c in (data["other_costs"] or [])) or "none"
+            bits.append(f"other costs {money(was)} → {money(now)} ({names})")
     if "items" in data:
         old_lines = po.items or []
         new_lines = data["items"] or []
@@ -1321,6 +1327,7 @@ async def get_po(
         "quoted_lead_days": po.quoted_lead_days,
         "total": float(po.total or 0),
         "items": po.items,
+        "other_costs": list(po.other_costs or []),
         "notes": po.notes,
         "project_ids": [str(x) for x in (po.project_ids or [])],
         "created_at": po.created_at,
@@ -1357,6 +1364,43 @@ async def _po_print_bundle(po_id: UUID, db: AsyncSession) -> dict:
     return {"po": po, "supplier": supplier, "project": project, "pic": pic}
 
 
+def _clean_other_costs(raw) -> list[dict]:
+    """[{description, amount}] — a row with neither is dropped; one with an
+    amount needs a description, and no amount is below zero."""
+    out = []
+    for c in (raw or []):
+        if not isinstance(c, dict):
+            continue
+        desc = str(c.get("description") or "").strip()[:200]
+        try:
+            amount = round(float(c.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "An other cost's amount must be a number")
+        if not desc and not amount:
+            continue
+        if not desc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Say what each other cost is for")
+        if amount < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"“{desc}” can't be below zero")
+        out.append({"description": desc, "amount": amount})
+    return out
+
+
+def _lines_total(items) -> float:
+    return sum(float(i.get("amount") if i.get("unit_price") is None and i.get("amount") is not None
+                     else float(i.get("qty") or 0) * float(i.get("unit_price") or 0))
+               for i in (items or []) if isinstance(i, dict))
+
+
+def _print_lines(po) -> list[dict]:
+    """The lines the vendor's copy prints: the items, then each other cost
+    as a line of its own (1 lot at its amount)."""
+    return list(po.items or []) + [
+        {"description": c.get("description"), "qty": 1, "uom": "lot",
+         "unit_price": float(c.get("amount") or 0), "amount": float(c.get("amount") or 0)}
+        for c in (po.other_costs or []) if isinstance(c, dict)]
+
+
 @router.get("/po/{po_id}/export.pdf")
 async def export_po_pdf(
     po_id: UUID,
@@ -1379,7 +1423,7 @@ async def export_po_pdf(
                             or supplier.company_address or "")
 
     rows = []
-    for it in (po.items or []):
+    for it in _print_lines(po):
         qty = float(it.get("qty") or 0)
         unit = float(it.get("unit_price") or 0)
         rows.append({
@@ -1487,7 +1531,7 @@ async def export_po_excel(
         c.fill = head_fill
         c.border = boxed
     row += 1
-    for i, it in enumerate((po.items or []), 1):
+    for i, it in enumerate(_print_lines(po), 1):
         qty = float(it.get("qty") or 0)
         unit = float(it.get("unit_price") or 0)
         values = [i, it.get("description") or "—", qty, it.get("uom") or "",
@@ -1630,6 +1674,9 @@ class POPatch(BaseModel):
     total: float | None = None
     status: str | None = None         # open | received | closed | cancelled
     items: list | None = None
+    # Costs beyond the item lines — packaging, freight: [{description, amount}]
+    # in the order's currency. Part of the total.
+    other_costs: list | None = None
     notes: str | None = None          # printed on the vendor's copy; "" clears
     # Give the PO its job, move it to another, or clear it (send null). Which
     # vendor serves which job is the director's call, so from anyone else
@@ -1682,7 +1729,7 @@ async def update_po(
     # non-director edit here, it does not apply on the spot: it goes to the
     # director's queue below, same as purchasing's own.
     if Role(user.role) == Role.FINANCE:
-        extra = set(data) - {"fx_rate", "items", "total"}
+        extra = set(data) - {"fx_rate", "items", "total", "other_costs"}
         if extra:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -1699,6 +1746,16 @@ async def update_po(
                 )
             # Only the prices move, whatever the form sent.
             data["items"] = _prices_merged(po.items or [], data["items"])
+
+    # Other costs, cleaned; and the total kept equal to the lines plus them,
+    # whichever of the two changed — on the queued copy too.
+    if "other_costs" in data:
+        data["other_costs"] = _clean_other_costs(data["other_costs"])
+    if "items" in data or "other_costs" in data:
+        items_now = data["items"] if data.get("items") is not None else (po.items or [])
+        others_now = data["other_costs"] if "other_costs" in data else (po.other_costs or [])
+        data["total"] = round(_lines_total(items_now) + sum(c["amount"] for c in others_now
+                                                             if isinstance(c, dict)), 2)
 
     # Validate without mutating — same checks regardless of approval path,
     # so we never queue a doomed approval the director can't apply later.
@@ -1891,6 +1948,8 @@ async def update_po(
         po.items = data["items"]
         from app.services.po_project import refresh_project_ids
         refresh_project_ids(po)
+    if "other_costs" in data:
+        po.other_costs = data["other_costs"]
     # After the lines, so a change that sends both new lines and a new job
     # stamps the new lines with it.
     if "project_id" in data:

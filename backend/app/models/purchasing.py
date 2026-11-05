@@ -234,6 +234,12 @@ class SupplierPO(Base, UUIDPK, TimestampMixin):
     unbilled: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     # The supplier's invoices: [{"number", "date", "amount", "by", "at"}].
     supplier_invoices: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # Costs on the order beyond its item lines — packaging, freight, a
+    # handling fee: [{"description", "amount"}], in the order's currency. Part
+    # of the PO total, and of what the goods cost: booked onto them as they
+    # are received (ledger.sync_other_costs), `other_costs_booked` in rupiah.
+    other_costs: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    other_costs_booked: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     # What was received, by "stock account|HPP account" — where its cost goes
     # once the job is paid — and the HPP booked so far the same way.
     received_by: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

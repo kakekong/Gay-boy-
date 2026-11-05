@@ -28,6 +28,8 @@ interface POItem {
   unit_price?: number;
   amount?: number;
 }
+/** A cost on the order beyond its item lines — packaging, freight. */
+interface OtherCost { description: string; amount: number }
 interface PO {
   id: string;
   number: string;
@@ -47,6 +49,8 @@ interface PO {
   project_code: string | null;
   project_status: string | null;
   other_projects?: { id: string; code: string }[];
+  /** Packaging, freight… — part of the total and of the goods' cost. */
+  other_costs?: OtherCost[];
   project_target_delivery: string | null;
   project_actual_delivery: string | null;
   po_date: string | null;
@@ -130,6 +134,7 @@ export default function PurchaseOrderDetailPage() {
   // until Save, and they go up in the same request as the lines.
   const [draftCurrency, setDraftCurrency] = useState("IDR");
   const [draftRate, setDraftRate] = useState<string>("");
+  const [draftOthers, setDraftOthers] = useState<OtherCost[]>([]);
   const itemsRef = useRef<HTMLDivElement | null>(null);
 
   const q = useQuery({
@@ -145,9 +150,10 @@ export default function PurchaseOrderDetailPage() {
   // since moved is worse than nothing.
   const itemsDraft = useFormDraft(
     id ? `po-items:${id}` : null,
-    { draftItems, draftCurrency, draftRate },
+    { draftItems, draftCurrency, draftRate, draftOthers },
     (v) => {
       if (Array.isArray(v.draftItems)) setDraftItems(v.draftItems);
+      if (Array.isArray(v.draftOthers)) setDraftOthers(v.draftOthers);
       if (v.draftCurrency) setDraftCurrency(v.draftCurrency);
       setDraftRate(v.draftRate ?? "");
     },
@@ -258,7 +264,10 @@ export default function PurchaseOrderDetailPage() {
   }
 
   const p = q.data;
-  const draftTotal = draftItems.reduce((s, it) => s + lineAmount(it), 0);
+  const draftLines = draftItems.reduce((s, it) => s + lineAmount(it), 0);
+  const draftOthersSum = draftOthers.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const draftTotal = draftLines + draftOthersSum;
+  const others = p.other_costs ?? [];
   const foreign = (p.currency ?? "IDR").toUpperCase() !== "IDR";
   // While the editor is open every money label below follows the draft, not
   // what is saved — pick a currency and the lines re-label as you look at
@@ -284,6 +293,7 @@ export default function PurchaseOrderDetailPage() {
 
   function startItemsEdit() {
     setDraftItems(p.items.map((i) => ({ ...i })));
+    setDraftOthers((p.other_costs ?? []).map((c) => ({ ...c })));
     setDraftCurrency((p.currency ?? "IDR").toUpperCase());
     setDraftRate(p.fx_rate == null ? "" : String(p.fx_rate));
     setEditingItems(true);
@@ -303,9 +313,14 @@ export default function PurchaseOrderDetailPage() {
     const keep = draftItems
       .filter((it) => (it.description ?? "").trim() || (it.qty ?? 0) > 0)
       .map((it) => ({ ...it, amount: lineAmount(it) }));
+    const otherKeep = draftOthers
+      .filter((c) => (c.description ?? "").trim() || Number(c.amount) > 0)
+      .map((c) => ({ description: (c.description ?? "").trim(), amount: Number(c.amount) || 0 }));
     const body: Record<string, any> = {
       items: keep,
-      total: keep.reduce((s, it) => s + lineAmount(it), 0),
+      other_costs: otherKeep,
+      total: keep.reduce((s, it) => s + lineAmount(it), 0)
+        + otherKeep.reduce((s, c) => s + c.amount, 0),
     };
     // Sent only when actually moved. An unchanged currency in the payload
     // would be a change the server has to police (finance may not touch it)
@@ -798,7 +813,7 @@ export default function PurchaseOrderDetailPage() {
             )}
             <div className="ml-auto text-right">
               <div className="text-[10px] uppercase tracking-wider muted">
-                {T("Lines add up to")}
+                {draftOthersSum > 0 ? tt("Total, with others", "Total, dengan lainnya") : T("Lines add up to")}
               </div>
               <div className="font-semibold tabular-nums">
                 {money(draftTotal, draftCurrency)}
@@ -930,21 +945,62 @@ export default function PurchaseOrderDetailPage() {
                 )}
               </div>
             ))}
+            {isFinance ? (
+              <div className="text-[11px] muted">
+                {T("You can correct a price here. What was ordered — the item, the quantity, the unit — is purchasing's to change.")}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1, unit_price: 0 }])}
+              >
+                <Plus size={13} /> {T("Add line")}</button>
+            )}
+            {/* Others — what the order costs beyond its lines: packaging,
+                freight, a handling fee. Part of the total, and booked onto
+                the goods' cost as they arrive. */}
+            <div className="pt-3 mt-1 border-t border-ink-100 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider muted">
+                {tt("Others — packaging, freight, handling", "Lainnya — kemasan, ongkir, penanganan")}
+              </div>
+              {draftOthers.map((c, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-7">
+                    <input className="input" value={c.description}
+                      aria-label={tt(`Other cost ${i + 1}`, `Biaya lain ${i + 1}`)}
+                      placeholder={tt("e.g. Wooden crate packaging", "mis. Kemasan peti kayu")}
+                      onChange={(e) => setDraftOthers((cur) =>
+                        cur.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} />
+                  </div>
+                  <div className="col-span-4">
+                    <input type="number" min={0} step="any" className="input text-right tabular-nums"
+                      aria-label={tt(`Amount (${draftCurrency})`, `Jumlah (${draftCurrency})`)}
+                      value={c.amount}
+                      onChange={(e) => setDraftOthers((cur) =>
+                        cur.map((x, j) => j === i ? { ...x, amount: Number(e.target.value) } : x))} />
+                  </div>
+                  <button type="button" className="col-span-1 text-red-600 hover:bg-red-50 rounded p-2"
+                    title={T("Remove")}
+                    onClick={() => setDraftOthers((cur) => cur.filter((_, j) => j !== i))}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="btn-ghost"
+                onClick={() => setDraftOthers((cur) => [...cur, { description: "", amount: 0 }])}>
+                <Plus size={13} /> {tt("Add other cost", "Tambah biaya lain")}
+              </button>
+            </div>
             <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
-              {isFinance ? (
-                <span className="text-[11px] muted">
-                  {T("You can correct a price here. What was ordered — the item, the quantity, the unit — is purchasing's to change.")}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => setDraftItems((cur) => [...cur, { description: "", qty: 1, unit_price: 0 }])}
-                >
-                  <Plus size={13} /> {T("Add line")}</button>
-              )}
+              <span />
               <div className="text-sm">
                 <span className="muted">{T("Lines add up to")}{" "}</span>
+                <span className="tabular-nums">{money(draftLines, draftCurrency)}</span>
+                {draftOthersSum > 0 && (
+                  <span className="muted">{" "}+ {tt("others", "lainnya")} {money(draftOthersSum, draftCurrency)}</span>
+                )}
+                <span className="muted">{" "}= </span>
                 <span className="font-semibold tabular-nums">
                   {money(draftTotal, draftCurrency)}
                 </span>
@@ -955,7 +1011,7 @@ export default function PurchaseOrderDetailPage() {
               </div>
             </div>
           </div>
-        ) : !p.items?.length ? (
+        ) : !p.items?.length && !others.length ? (
           <div className="p-8 text-center text-sm muted">
             {T("No items yet. Click \"Edit items\" to add a description and quantity.")}</div>
         ) : (
@@ -992,6 +1048,16 @@ export default function PurchaseOrderDetailPage() {
                   <td className="td text-right tabular-nums">
                     {money(lineAmount(it), p.currency)}
                   </td>
+                </tr>
+              ))}
+              {others.map((c, i) => (
+                <tr key={`o${i}`} className={clsx("border-t border-ink-100", i === 0 && "border-t-ink-200")}>
+                  <td className="td muted text-[11px]">{i === 0 ? tt("Others", "Lainnya") : ""}</td>
+                  <td className="td">{c.description}</td>
+                  {sharedOrder && <td className="td" />}
+                  <td className="td" />
+                  <td className="td" />
+                  <td className="td text-right tabular-nums">{money(c.amount, p.currency)}</td>
                 </tr>
               ))}
             </tbody>

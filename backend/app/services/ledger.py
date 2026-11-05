@@ -559,7 +559,10 @@ async def revalue_receipts(db: AsyncSession, po, *,
     # Without a rate only the part paid has one — the rest waits for it.
     target = ((paid_idr * settled / paid_cur if paid_cur else 0.0)
               + (got - settled) * (rate if rate is not None else 0.0))
-    diff = round(target - float(po.payable_amount or 0), 2)
+    # The order's other costs are booked on their own (sync_other_costs);
+    # what is owed for the goods is the rest.
+    diff = round(target - (float(po.payable_amount or 0)
+                           - float(po.other_costs_booked or 0)), 2)
     if abs(diff) < 0.5:
         return 0.0
     last = await db.scalar(select(GoodsReceipt).where(GoodsReceipt.po_id == po.id)
@@ -583,6 +586,76 @@ async def revalue_receipts(db: AsyncSession, po, *,
         supplier_name=sup.name if sup else None, created_by=created_by,
         why="Goods received, valued at " + " and ".join(parts),
         billed=bool(po.supplier_invoices) and not po.unbilled)
+    po.payable_amount = round(float(po.payable_amount or 0) + posted, 2)
+    return posted
+
+
+def other_costs_total(po) -> float:
+    """The order's other costs — packaging, freight — in its own currency."""
+    return round(sum(float((c or {}).get("amount") or 0) for c in (po.other_costs or [])), 2)
+
+
+async def sync_other_costs(db: AsyncSession, po, *, created_by: UUID | None = None) -> float:
+    """Book the order's other costs onto its goods, in step with how much of
+    the order has arrived: half the goods in, half the packaging on the
+    books. Onto the received items' Persediaan (and HPP after, as the goods
+    go), owed on Belum Ditagih — Utang Usaha once the supplier invoiced —
+    like the goods themselves. A cost changed later moves the books by the
+    difference. Returns the rupiah moved."""
+    from app.models.purchasing import GoodsReceipt, Supplier
+    from app.services.stock_reconcile import _receipted_quantities
+
+    if po.status in _PO_NOT_LIVE:
+        return 0.0
+    rate = po_rate(po)
+    others = other_costs_total(po)
+    booked = float(po.other_costs_booked or 0)
+    if rate is None or (not others and abs(booked) < 0.005):
+        return 0.0
+    lines = list(po.items or [])
+    value = {no: float(ln.get("qty") or 0) * float(ln.get("unit_price") or ln.get("unit_cost") or 0)
+             for no, ln in enumerate(lines, start=1)}
+    whole = sum(value.values())
+    got: dict[int, float] = {}
+    for no, qty in (await _receipted_quantities(db, po)).items():
+        if 1 <= no <= len(lines) and qty:
+            ln = lines[no - 1]
+            got[no] = qty * float(ln.get("unit_price") or ln.get("unit_cost") or 0)
+    arrived = sum(got.values())
+    if not got:
+        share = 0.0
+    elif whole > 0:
+        share = min(arrived / whole, 1.0)
+    else:
+        share = 1.0
+    target = round(others * rate * share, 2)
+    diff = round(target - booked, 2)
+    if abs(diff) < 0.5:
+        return 0.0
+    # Spread over the lines received, by their value — or evenly if none has
+    # a price yet.
+    weights = got if arrived > 0 else {no: 1.0 for no in got} or {1: 1.0}
+    wsum = sum(weights.values())
+    moved = [{"line_no": no, "sku": lines[no - 1].get("sku"),
+              "name": lines[no - 1].get("description") or lines[no - 1].get("name"),
+              "value": diff * w / wsum} for no, w in weights.items() if 1 <= no <= len(lines)]
+    if not moved:
+        return 0.0
+    last = await db.scalar(select(GoodsReceipt).where(GoodsReceipt.po_id == po.id)
+                           .order_by(GoodsReceipt.created_at.desc()).limit(1))
+    sup = await db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import settings
+    today = datetime.now(ZoneInfo(settings.TIMEZONE or "Asia/Jakarta")).date()
+    names = ", ".join(str((c or {}).get("description") or "").strip()
+                      for c in (po.other_costs or []) if (c or {}).get("description")) or "other costs"
+    posted = await post_receipt_by_item(
+        db, po, moved, entry_date=today, receipt_id=last.id if last else None,
+        supplier_name=sup.name if sup else None, created_by=created_by,
+        why=f"Other costs on the order ({names})",
+        billed=bool(po.supplier_invoices) and not po.unbilled)
+    po.other_costs_booked = round(booked + posted, 2)
     po.payable_amount = round(float(po.payable_amount or 0) + posted, 2)
     return posted
 
@@ -698,6 +771,7 @@ async def sync_po_cogs(
     that sets or changes the rate comes through here."""
     from uuid import UUID as _U
     await revalue_receipts(db, po, created_by=created_by)
+    await sync_other_costs(db, po, created_by=created_by)
     default_key = f"{INVENTORY_ACCOUNT}|{await _cogs_account(db) or COGS_ACCOUNT}"
     received = {k: float(v) for k, v in (po.received_by or {}).items()}
     older = round(float(po.payable_amount or 0) - sum(received.values()), 2)
