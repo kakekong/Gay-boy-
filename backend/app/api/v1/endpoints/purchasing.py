@@ -972,7 +972,10 @@ async def list_pos(
 
 async def _project_code(db, po) -> str | None:
     if not po.project_id:
-        return None
+        # Counted on a job through its price request: name that job, so
+        # "take it off" reads as such in the director's queue.
+        j = await _implied(db, po)
+        return f"{j.code} (via its price request)" if j else None
     from app.models.operation import Project
     pj = await db.get(Project, po.project_id)
     return pj.code if pj else None
@@ -1238,6 +1241,11 @@ async def _job_codes(db: AsyncSession, ids) -> dict[str, str]:
         select(Project).where(Project.id.in_(ids)))).all()}
 
 
+async def _implied(db: AsyncSession, po):
+    from app.services.po_project import implied_job
+    return await implied_job(db, po)
+
+
 @router.get("/po/{po_id}")
 async def get_po(
     po_id: UUID,
@@ -1314,6 +1322,9 @@ async def get_po(
         "project_id": str(po.project_id) if po.project_id else None,
         "project_code": project.code if project else None,
         "project_status": project.status if project else None,
+        # No job of its own, but counted on one through its price request.
+        "implied_project": ({"id": str(j.id), "code": j.code}
+                            if (j := await _implied(db, po)) else None),
         # The other jobs a shared order serves, beside its own.
         "other_projects": [{"id": j, "code": c} for j, c in
                            (await _job_codes(db, _job_ids(po)[1:] if po.project_id
@@ -1800,7 +1811,9 @@ async def update_po(
         new_project = await resolve_project(db, data["project_id"])
         # Stored as text: a queued change lives in JSON, which has no UUIDs.
         data["project_id"] = str(new_project.id) if new_project else None
-        if (str(po.project_id) if po.project_id else None) == data["project_id"]:
+        from app.services.po_project import implied_job
+        implied = None if data["project_id"] else await implied_job(db, po)
+        if (str(po.project_id) if po.project_id else None) == data["project_id"] and implied is None:
             data.pop("project_id")            # already on that job; nothing to do
         else:
             project_label = new_project.code if new_project else None

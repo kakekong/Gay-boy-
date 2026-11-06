@@ -99,6 +99,25 @@ async def main():
           not detail.get("project_id") and not detail.get("price_request_id")
           and not any(i.get("source_pr_id") for i in detail.get("items", [])), str(detail)[:200])
 
+    print("\n── one raised from the request with no project: Not assigned yet, yet counted ──")
+    po_c = J(await c.post("/purchasing/po", headers=d, json={
+        "supplier_id": sup_b, "price_request_id": pr,
+        "po_date": date.today().isoformat(), "items": [line], "total": 1_000_000}))
+    detail = J(await c.get(f"/purchasing/po/{po_c['id']}", headers=d))
+    check("it has no project, but the job counts it through its price request",
+          not detail.get("project_id") and po_c["number"] in await job_pos()
+          and (detail.get("implied_project") or {}).get("id") == pid, str(detail.get("implied_project")))
+    r = await c.patch(f"/purchasing/po/{po_c['id']}", headers=pur, json={"project_id": None})
+    check("purchasing taking it off goes to the director, the job still counts it",
+          r.status_code in (200, 202) and po_c["number"] in await job_pos(), f"{r.status_code} {J(r)}"[:160])
+    r = await c.patch(f"/purchasing/po/{po_c['id']}", headers=d, json={"project_id": None})
+    detail = J(await c.get(f"/purchasing/po/{po_c['id']}", headers=d))
+    check("the director takes it off: the job's page no longer counts it",
+          r.status_code == 200 and po_c["number"] not in await job_pos()
+          and not detail.get("implied_project") and not detail.get("price_request_id"),
+          f"{r.status_code} {await job_pos()} {detail.get('implied_project')}")
+    check("...nor its deal check", po_c["number"] not in await deal_pos(), str(await deal_pos()))
+
     print("\n── Clear test data deletes a supplier ──")
     await c.post(f"/purchasing/suppliers/{sup_a}/contacts", headers=pur, json={"name": f"Pak {TAG}"})
     b0 = await bal()

@@ -93,6 +93,29 @@ async def backfill_project_ids(db: AsyncSession) -> dict:
     return {"orders": fixed}
 
 
+async def implied_job(db: AsyncSession, po):
+    """The job that counts this PO only through its price request — the PO
+    has no project of its own, but it (or one of its lines) names the
+    request the job was won from. The job's page and deal check pick such
+    an order up (receiving.pos_for_project), so "Not assigned yet" on the
+    PO is not the whole story. None when the PO has a job or names none."""
+    from sqlalchemy import select
+
+    from app.models.operation import Project
+
+    if po.project_id or (po.project_ids or []):
+        return None
+    prs = {str(po.price_request_id)} if po.price_request_id else set()
+    prs |= {str(i["source_pr_id"]) for i in (po.items or [])
+            if isinstance(i, dict) and i.get("source_pr_id")}
+    if not prs:
+        return None
+    return await db.scalar(select(Project).where(
+        Project.price_request_id.in_([UUID(x) for x in prs]),
+        Project.is_deleted.is_(False),
+    ).order_by(Project.created_at.asc()).limit(1))
+
+
 async def assign_po_project(db: AsyncSession, po, project) -> dict:
     """Point `po` at `project` (or at nothing) and carry the consequences.
 
@@ -110,11 +133,17 @@ async def assign_po_project(db: AsyncSession, po, project) -> dict:
     # keep as stock, say, when another supplier fills the job instead — still
     # named the request it was raised from, so the job's page and its deal
     # check went on counting it. The audit log keeps where it came from.
+    # The same for an order that never had the job set but was counted on it
+    # through the request it was raised from: "No project" lets go of that.
     old_pr = None
     if old and old != new:
         from app.models.operation import Project
         was = await db.get(Project, UUID(old))
         old_pr = str(was.price_request_id) if was and was.price_request_id else None
+    elif not old:
+        was = await implied_job(db, po)
+        if was is not None and str(was.id) != new:
+            old_pr = str(was.price_request_id)
 
     items = []
     moved = 0

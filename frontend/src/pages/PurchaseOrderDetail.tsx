@@ -49,6 +49,7 @@ interface PO {
   project_code: string | null;
   project_status: string | null;
   other_projects?: { id: string; code: string }[];
+  implied_project?: { id: string; code: string } | null;
   /** Packaging, freight… — part of the total and of the goods' cost. */
   other_costs?: OtherCost[];
   project_target_delivery: string | null;
@@ -551,6 +552,24 @@ export default function PurchaseOrderDetailPage() {
                   <button className="btn-ghost text-xs px-2 py-1 border border-brand-200 text-brand-700"
                           onClick={() => { setProjectChoice(""); setAssigning(true); }}>
                     <Briefcase size={12} /> {T("Assign project")}
+                  </button>
+                )}
+              </span>
+            )}
+            {/* No job of its own, yet the job made from its price request
+                counts it. Say so, and let it go — kept as stock, say, when
+                another supplier fills that job. */}
+            {!assigning && !p.project_id && p.implied_project && (
+              <span className="block text-[11px] mt-1.5">
+                <span className="muted">{tt("Still counted on", "Masih dihitung di")} </span>
+                <Link to={`/projects/${p.implied_project.id}`}
+                      className="text-brand-700 hover:underline font-mono">{p.implied_project.code}</Link>
+                <span className="muted"> {tt("through its price request.", "lewat permintaan harganya.")}</span>
+                {canAssignProject && (
+                  <button className="block mt-1 text-[11px] text-ink-500 hover:text-red-700 underline disabled:opacity-50"
+                    disabled={patch.isPending}
+                    onClick={() => patch.mutate({ project_id: null })}>
+                    {tt("Take off this job (keep as stock)", "Lepas dari proyek ini (simpan sebagai stok)")}
                   </button>
                 )}
               </span>
