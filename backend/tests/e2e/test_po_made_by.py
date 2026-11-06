@@ -82,6 +82,23 @@ async def main():
     check("an older PO gets its maker from the approval request it filed",
           str(row.created_by) == me_pur.get("id"), str(row.created_by))
 
+    print("\n── the director changes who made it ──")
+    r = await c.post(f"/purchasing/po/{po2['id']}/made-by", headers=d, json={"user_id": me_pur["id"]})
+    got = J(await c.get(f"/purchasing/po/{po2['id']}", headers=d))
+    check("the director sets purchasing as its maker", r.status_code == 200
+          and (got.get("created_by") or {}).get("name") == me_pur.get("full_name"),
+          f"{r.status_code} {got.get('created_by')}")
+    r = await c.post(f"/purchasing/po/{po2['id']}/made-by", headers=pur, json={"user_id": me_d["id"]})
+    check("...purchasing can't change it", r.status_code == 403, str(r.status_code))
+    cust_user = None
+    async with SessionLocal() as s:
+        from sqlalchemy import select
+        from app.models.user import User
+        cust_user = await s.scalar(select(User).where(User.role.in_(["customer", "supplier"])).limit(1))
+    if cust_user:
+        r = await c.post(f"/purchasing/po/{po2['id']}/made-by", headers=d, json={"user_id": str(cust_user.id)})
+        check("...and a portal account can't be named", r.status_code == 400, str(r.status_code))
+
     await c.aclose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

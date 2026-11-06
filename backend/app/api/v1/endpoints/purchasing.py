@@ -1684,6 +1684,40 @@ class POPatch(BaseModel):
     project_id: UUID | None = None
 
 
+class MadeByIn(BaseModel):
+    user_id: UUID
+
+
+@router.post("/po/{po_id}/made-by")
+async def set_po_made_by(
+    po_id: UUID,
+    payload: MadeByIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The director says who made the order — one made from another account,
+    or for someone, or before this was kept. Applies now; audited."""
+    from app.core.audit import record as audit_record
+    from app.models.purchasing import SupplierPO
+
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the director can change who made a PO")
+    po = await db.get(SupplierPO, po_id)
+    if not po:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "PO not found")
+    maker = await db.get(User, payload.user_id)
+    if not maker or Role(maker.role) in (Role.CUSTOMER, Role.SUPPLIER):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick one of the staff")
+    before = str(po.created_by) if po.created_by else None
+    po.created_by = maker.id
+    await audit_record(db, actor=user, action="update", entity="supplier_po", entity_id=po.id,
+                       before={"created_by": before},
+                       after={"created_by": str(maker.id), "name": maker.full_name})
+    await db.flush()
+    return {"id": str(po.id), "created_by": {"id": str(maker.id), "name": maker.full_name,
+                                             "role": maker.role}}
+
+
 @router.patch("/po/{po_id}")
 async def update_po(
     po_id: UUID,

@@ -161,6 +161,22 @@ export default function PurchaseOrderDetailPage() {
   );
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["po", id] });
+  // The director setting who made the order — staff only, applied at once.
+  const [makerEdit, setMakerEdit] = useState(false);
+  const [makerChoice, setMakerChoice] = useState("");
+  const staff = useQuery({
+    queryKey: ["users-active"],
+    queryFn: () => api.get("/users", { params: { active_only: true } })
+      .then((r) => (r.data as any[]).filter((u) => !["customer", "supplier"].includes(u.role))),
+    enabled: makerEdit,
+  });
+  const setMaker = useMutation({
+    mutationFn: (userId: string) => api.post(`/purchasing/po/${id}/made-by`, { user_id: userId }),
+    onSuccess: () => { refresh(); setMakerEdit(false); },
+    onError: (e: any) => setFlash({ kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+            ?? tt("Couldn't change it", "Gagal mengubah") }),
+  });
   const onErr = (e: any) => {
     // 202 = accepted-but-pending-director-approval. The backend raises
     // HTTPException there, which axios bubbles up as an error; surface
@@ -561,15 +577,44 @@ export default function PurchaseOrderDetailPage() {
               named the customer's sales rep, so a PO made from a purchasing
               account looked like the salesperson's. */}
           <Meta label={tt("Made by", "Dibuat oleh")}>
-            {p.created_by ? (
-              <>
-                <UserLink id={p.created_by.id} name={p.created_by.name} />
-                <span className="block text-[11px] muted capitalize">{T(p.created_by.role)}</span>
-              </>
+            {makerEdit ? (
+              <div className="flex flex-col gap-1.5">
+                <select className="input text-xs" value={makerChoice} autoFocus
+                  aria-label={tt("Who made this PO", "Siapa yang membuat PO ini")}
+                  onChange={(e) => setMakerChoice(e.target.value)}>
+                  <option value="">{staff.isLoading ? tt("Loading…", "Memuat…") : tt("Pick someone", "Pilih orang")}</option>
+                  {(staff.data ?? []).map((u: any) => (
+                    <option key={u.id} value={u.id}>{u.full_name} · {T(u.role)}</option>
+                  ))}
+                </select>
+                <div className="flex gap-1.5">
+                  <button className="btn-primary text-xs px-2.5 py-1"
+                    disabled={!makerChoice || makerChoice === p.created_by?.id || setMaker.isPending}
+                    onClick={() => setMaker.mutate(makerChoice)}>
+                    {setMaker.isPending ? <Loader2 size={12} className="animate-spin" /> : T("Save")}
+                  </button>
+                  <button className="btn-ghost text-xs px-2 py-1" onClick={() => setMakerEdit(false)}>{T("Cancel")}</button>
+                </div>
+              </div>
             ) : (
-              <span className="text-[11px] muted">
-                {tt("Not recorded — made before this was kept", "Tidak tercatat — dibuat sebelum ini disimpan")}
-              </span>
+              <>
+                {p.created_by ? (
+                  <>
+                    <UserLink id={p.created_by.id} name={p.created_by.name} />
+                    <span className="block text-[11px] muted capitalize">{T(p.created_by.role)}</span>
+                  </>
+                ) : (
+                  <span className="text-[11px] muted">
+                    {tt("Not recorded — made before this was kept", "Tidak tercatat — dibuat sebelum ini disimpan")}
+                  </span>
+                )}
+                {isDirector && (
+                  <button className="text-[11px] text-ink-500 hover:text-brand-700 underline"
+                    onClick={() => { setMakerChoice(p.created_by?.id ?? ""); setMakerEdit(true); }}>
+                    {T("Change")}
+                  </button>
+                )}
+              </>
             )}
           </Meta>
           <Meta label={tt("Director's approval", "Persetujuan direktur")}>
