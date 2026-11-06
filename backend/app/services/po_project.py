@@ -106,6 +106,16 @@ async def assign_po_project(db: AsyncSession, po, project) -> dict:
     old = str(po.project_id) if po.project_id else None
     new = str(project.id) if project is not None else None
 
+    # Leaving a job leaves its price request too. A PO taken off a job — to
+    # keep as stock, say, when another supplier fills the job instead — still
+    # named the request it was raised from, so the job's page and its deal
+    # check went on counting it. The audit log keeps where it came from.
+    old_pr = None
+    if old and old != new:
+        from app.models.operation import Project
+        was = await db.get(Project, UUID(old))
+        old_pr = str(was.price_request_id) if was and was.price_request_id else None
+
     items = []
     moved = 0
     for it in (po.items or []):
@@ -115,9 +125,14 @@ async def assign_po_project(db: AsyncSession, po, project) -> dict:
             if line_pid in (None, old):
                 row["project_id"] = new
                 row["project_code"] = project.code if project is not None else None
+                if old_pr and str(row.get("source_pr_id") or "") == old_pr:
+                    row.pop("source_pr_id", None)
+                    row.pop("source_line_no", None)
                 moved += 1
         items.append(row)
     po.items = items
+    if old_pr and str(po.price_request_id or "") == old_pr:
+        po.price_request_id = None
     po.project_id = project.id if project is not None else None
 
     ids = {str(i.get("project_id")) for i in items

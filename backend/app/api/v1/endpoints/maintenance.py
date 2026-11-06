@@ -53,7 +53,7 @@ from app.models.inventory import InventoryItem, InventoryMovement
 from app.models.operation import DeliveryOrder, Drawing, Project, WorkOrder
 from app.models.price_request import PriceRequest
 from app.models.purchasing import (
-    PurchaseRequest, RFQ, SupplierPO, SupplierPriceRequest,
+    RFQ, PurchaseRequest, Supplier, SupplierContact, SupplierPO, SupplierPriceRequest,
 )
 from app.models.quotation import Quotation, QuotationItem
 from app.models.user import User
@@ -394,6 +394,12 @@ async def _execute_plan(db: AsyncSession, plan: dict) -> list[str]:
     await wipe(Quotation, Quotation.id, plan["quotes"])             # items cascade
     await wipe(PriceRequest, PriceRequest.id, plan["prs"])
     await wipe(Customer, Customer.id, plan["doomed"])               # contacts/activities/reminders cascade
+    # Last of the buy side: nothing of the supplier's is left by now. A portal
+    # login it had stays, unlinked, for the director to deal with.
+    if plan.get("suppliers"):
+        from app.models.user import User
+        await detach(User, User.linked_supplier_id, plan["suppliers"])
+        await wipe(Supplier, Supplier.id, plan["suppliers"])        # contacts cascade
     # Flat records, deleted last because nothing else waits on them.
     await wipe(InventoryItem, InventoryItem.id, plan.get("items") or set())  # movements cascade
     await wipe(Account, Account.id, plan.get("accounts") or set())
@@ -436,6 +442,9 @@ RECORD_TYPES: dict[str, dict] = {
     "supplier_price_request": {"model": SupplierPriceRequest,
                                "label": "Supplier price request", "num": "number"},
     "customer":      {"model": Customer,     "label": "Customer",      "num": "company_name"},
+    # A vendor, with what was bought from it — its POs, its quotes, its RFQs
+    # — as the database keeps none of those without it.
+    "supplier":      {"model": Supplier,     "label": "Supplier",      "num": "name"},
     # Flat records with nothing hanging off them. They are here because an
     # import is the main way they arrive in bulk, and a test batch you cannot
     # remove is a test you only get to run once.
@@ -475,6 +484,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     rfqs: set[UUID] = set()
     picked_sprs: set[UUID] = set()     # buy-side quotes named directly
     doomed: set[UUID] = set()          # customers
+    vendors: set[UUID] = set()         # suppliers
     parts: set[UUID] = set()           # inventory parts — nothing hangs off them
     accounts: set[UUID] = set()        # chart-of-accounts rows, likewise
 
@@ -482,7 +492,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         "price_request": prs, "quotation": quotes, "customer_po": cpos,
         "project": projects, "invoice": invoices, "supplier_po": spos,
         "purchase_request": preqs, "customer": doomed,
-        "supplier_price_request": picked_sprs,
+        "supplier_price_request": picked_sprs, "supplier": vendors,
         "inventory_item": parts, "account": accounts,
     }
     for t in targets:
@@ -497,6 +507,14 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         cpos |= await _ids(db, select(CustomerPO.id).where(CustomerPO.customer_id == cid))
         projects |= await _ids(db, select(Project.id).where(Project.customer_id == cid))
         invoices |= await _ids(db, select(Invoice.id).where(Invoice.customer_id == cid))
+
+    # A named supplier takes what the database keeps only with it: the POs
+    # placed with it, its quotes, its RFQs. The jobs those were for stay.
+    if vendors:
+        spos |= await _ids(db, select(SupplierPO.id).where(SupplierPO.supplier_id.in_(vendors)))
+        picked_sprs |= await _ids(db, select(SupplierPriceRequest.id).where(
+            SupplierPriceRequest.supplier_id.in_(vendors)))
+        rfqs |= await _ids(db, select(RFQ.id).where(RFQ.supplier_id.in_(vendors)))
 
     for _ in range(6):                 # deeper than the chain actually is
         before = (len(prs), len(quotes), len(cpos), len(projects),
@@ -554,6 +572,8 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
     # how many, because "12 delivery orders" is what a director recognises.
     contacts = await _ids(db, select(CustomerContact.id).where(
         CustomerContact.customer_id.in_(doomed)))
+    vendor_contacts = await _ids(db, select(SupplierContact.id).where(
+        SupplierContact.supplier_id.in_(vendors))) if vendors else set()
     work_orders = await _ids(db, select(WorkOrder.id).where(WorkOrder.project_id.in_(projects)))
     drawings = await _ids(db, select(Drawing.id).where(Drawing.project_id.in_(projects)))
     dos = await _ids(db, select(DeliveryOrder.id).where(DeliveryOrder.project_id.in_(projects)))
@@ -563,7 +583,8 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
         select(func.count(QuotationItem.id)).where(QuotationItem.quotation_id.in_(quotes))) or 0
 
     doomed_ids = (doomed | projects | quotes | prs | cpos | invoices | spos | preqs
-                  | rfqs | sprs | contacts | work_orders | drawings | dos)
+                  | rfqs | sprs | contacts | work_orders | drawings | dos
+                  | vendors | vendor_contacts)
     attachments = await _ids(db, select(Attachment.id).where(
         Attachment.owner_id.in_(doomed_ids)))
     comments = await _ids(db, select(EntityComment.id).where(
@@ -579,7 +600,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
 
     return {
         "keep_customers": set(), "by_rule": {},
-        "doomed": doomed,
+        "doomed": doomed, "suppliers": vendors,
         "items": parts, "accounts": accounts,
         "projects": projects, "quotes": quotes, "prs": prs, "cpos": cpos,
         "invoices": invoices, "spos": spos, "preqs": preqs, "rfqs": rfqs,
@@ -600,6 +621,7 @@ async def _closure(db: AsyncSession, targets: list[Target]) -> dict:
             "attachments": len(attachments), "discussion_messages": len(comments),
             "approval_requests": len(approvals),
             "inventory_items": len(parts), "accounts": len(accounts),
+            "suppliers": len(vendors), "supplier_contacts": len(vendor_contacts),
         },
     }
 
@@ -613,6 +635,7 @@ async def _describe(db: AsyncSession, plan: dict) -> list[dict]:
                       ("invoice", plan["invoices"]), ("supplier_po", plan["spos"]),
                       ("purchase_request", plan["preqs"]), ("customer", plan["doomed"]),
                       ("supplier_price_request", plan.get("sprs", set())),
+                      ("supplier", plan.get("suppliers", set())),
                       ("inventory_item", plan.get("items", set())),
                       ("account", plan.get("accounts", set()))):
         if not ids:

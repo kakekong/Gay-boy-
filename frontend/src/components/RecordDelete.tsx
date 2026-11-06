@@ -10,7 +10,7 @@ import { useT } from "@/store/lang";
 type Kind =
   | "price_request" | "quotation" | "customer_po" | "project"
   | "invoice" | "supplier_po" | "purchase_request" | "customer"
-  | "inventory_item" | "account";
+  | "supplier" | "inventory_item" | "account";
 
 interface Row {
   type: Kind; id: string; number: string | null; status: string | null;
@@ -37,6 +37,7 @@ const KINDS: [Kind, string, string][] = [
   ["supplier_po", "Supplier POs", "PO supplier"],
   ["purchase_request", "Purchase requests", "Permintaan pembelian"],
   ["customer", "Customers", "Pelanggan"],
+  ["supplier", "Suppliers", "Supplier"],
   ["inventory_item", "Parts", "Barang"],
   ["account", "Accounts", "Akun"],
 ];
@@ -63,6 +64,9 @@ const COUNT_LABEL: Record<string, [string, string]> = {
   rfqs: ["RFQs", "RFQ"],
   inventory_items: ["Parts", "Barang"],
   accounts: ["Accounts", "Akun"],
+  suppliers: ["Suppliers", "Supplier"],
+  supplier_contacts: ["Supplier contacts", "Kontak supplier"],
+  supplier_price_requests: ["Supplier quotes", "Penawaran supplier"],
 };
 
 const idr = (n: number) => "Rp " + Math.round(n || 0).toLocaleString("id-ID");
