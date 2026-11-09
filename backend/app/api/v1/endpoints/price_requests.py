@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.sku_codes import lock_lines
 from app.core.audit import record as audit_record
 from app.services.quotation_sync import sync_from_price_request
 from app.core.db import get_db
@@ -239,6 +240,8 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             # the right row and the link to find the part, and neither says
             # anything about price.
             "sku": it.get("sku"),
+            # A part the customer has had before: its code is fixed.
+            "sku_locked": bool(it.get("sku_locked")),
             "category": it.get("category"),
             # What the "other" is. Same audience as the category itself —
             # purchasing is the desk it exists for, since they are the ones
@@ -547,7 +550,8 @@ async def create_price_request(
         customer_id=payload.customer_id,
         sales_pic_id=cust.sales_pic_id or user.id,
         status="draft",
-        items=_norm_items(payload.items),
+        # A part the customer has had before takes its code, locked.
+        items=await lock_lines(db, payload.customer_id, _norm_items(payload.items)),
         notes=payload.notes,
         created_by=user.id, updated_by=user.id,
     )
@@ -730,7 +734,8 @@ async def update_price_request(
 
     before_items = list(pr.items or [])
     if payload.items is not None:
-        pr.items = _norm_items(payload.items, before_items)
+        pr.items = await lock_lines(db, pr.customer_id, _norm_items(payload.items, before_items),
+                                    {str(o.get("sku")) for o in before_items if o.get("sku")})
     if payload.notes is not None:
         pr.notes = payload.notes
     pr.updated_by = user.id
@@ -1299,7 +1304,8 @@ async def propose_revision(
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Costs aren't yours to set on a price request.")
 
-    proposed = _norm_items(payload.items, list(pr.items or []))
+    proposed = await lock_lines(db, pr.customer_id, _norm_items(payload.items, list(pr.items or [])),
+                                {str(o.get("sku")) for o in (pr.items or []) if o.get("sku")})
     n, req_id = await file_revision(
         db, pr, kind=kind, proposed=proposed,
         reason=payload.reason, notes=payload.notes, actor=user,

@@ -178,9 +178,21 @@ def _status(item: InventoryItem) -> str:
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
+@router.get("/code-for")
+async def code_for(customer_id: UUID, name: str = "", sku: str = "",
+                   db: AsyncSession = Depends(get_db)):
+    """The code a price request line will carry: this customer's part under
+    that name, locked — or none yet, when it is new to them."""
+    from app.services.sku_codes import lookup
+    hit = await lookup(db, customer_id, name, sku)
+    return {"sku": hit.sku if hit else None, "name": hit.name if hit else None,
+            "locked": hit is not None}
+
+
 @router.get("/suggest")
 async def suggest(q: str = "", limit: int = Query(20, ge=1, le=200),
                   offset: int = Query(0, ge=0),
+                  customer_id: UUID | None = None,
                   db: AsyncSession = Depends(get_db)):
     """Catalogue parts matching what is being typed, best first.
 
@@ -201,6 +213,10 @@ async def suggest(q: str = "", limit: int = Query(20, ge=1, le=200),
         return {"items": [], "total": 0}
     hay = func.concat(InventoryItem.name, " ", InventoryItem.sku)
     stmt = select(InventoryItem).where(InventoryItem.is_active.is_(True))
+    # On a customer's price request: only that customer's parts, so a line
+    # never takes another customer's code.
+    if customer_id:
+        stmt = stmt.where(InventoryItem.customer_id == customer_id)
     for w in words[:8]:
         stmt = stmt.where(hay.ilike(f"%{w}%"))
     whole = " ".join(words)
@@ -296,6 +312,47 @@ async def merge(payload: MergeIn, db: AsyncSession = Depends(get_db),
     return {"merged": len(done),
             "items_removed": sum(len(p["merge"]) for p in done),
             "documents": sum(len(p["documents"]) for p in done)}
+
+
+# ─── Reorganizing part codes ─────────────────────────────────────────────────
+# Each customer's series renumbered by the order its parts came in: MTP-0001,
+# MTP-0002 … (services/sku_codes). Director only, previewed in full.
+
+class RecodeIn(BaseModel):
+    customer_ids: list[UUID] = []
+
+
+@router.get("/recode", dependencies=[Depends(_merger)])
+async def recode_preview(db: AsyncSession = Depends(get_db)):
+    """Every customer's series as it is and as it would be — nothing renamed."""
+    from app.services.sku_codes import plan
+    return await plan(db)
+
+
+@router.post("/recode/preview", dependencies=[Depends(_merger)])
+async def recode_preview_for(payload: RecodeIn, db: AsyncSession = Depends(get_db)):
+    """The documents the chosen customers' renumbering would rewrite."""
+    from app.services.sku_codes import plan
+    if not payload.customer_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at least one customer")
+    return await plan(db, payload.customer_ids)
+
+
+@router.post("/recode", dependencies=[Depends(_merger)])
+async def recode(payload: RecodeIn, db: AsyncSession = Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    from app.core.audit import record as audit_record
+    from app.services.sku_codes import plan
+    if not payload.customer_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at least one customer")
+    res = await plan(db, payload.customer_ids, write=True, user=user)
+    await audit_record(db, actor=user, action="inventory.recode", entity="inventory_item",
+                       entity_id=None,
+                       after={"customers": [str(c) for c in payload.customer_ids],
+                              "renamed": res["renaming"],
+                              "documents": len(res["documents"])})
+    await db.commit()
+    return {"renamed": res["renaming"], "documents": len(res["documents"])}
 
 
 # Declared above `/{item_id}` — "reconcile" is a valid-looking UUID path
@@ -664,9 +721,14 @@ async def item_history(item_id: UUID,
 async def create_item(payload: ItemIn,
                       db: AsyncSession = Depends(get_db),
                       _u: User = Depends(_editor)):
-    existing = await db.scalar(select(InventoryItem).where(InventoryItem.sku == payload.sku))
-    if existing:
-        raise HTTPException(status.HTTP_409_CONFLICT, "SKU already exists.")
+    # One format: mtp-010 is stored as MTP-0010, and is refused when MTP-0010
+    # (in any spelling) is already a part. Blank → the next stock code.
+    from app.services.sku_codes import STOCK_PREFIX, canonical, next_code
+    typed = (payload.sku or "").strip()
+    payload.sku = canonical(typed) or typed or await next_code(db, STOCK_PREFIX)
+    from app.services.stock_sync import ItemIndex
+    if ItemIndex((await db.scalars(select(InventoryItem))).all()).find(payload.sku, None):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"SKU {payload.sku} already exists.")
     from app.services import item_accounts as ia
     try:
         await ia.validate(db, payload.model_dump())

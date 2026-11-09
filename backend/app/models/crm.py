@@ -53,6 +53,10 @@ class Customer(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     lifetime_value: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     lost_reason: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # The start of this customer's part codes: MTP for PT MANGOLE TIMBER
+    # PRODUCER → MTP-0001. From the initials; unique; the director can change
+    # it (services/sku_codes).
+    sku_code: Mapped[str | None] = mapped_column(String(12), unique=True)
 
     @property
     def external_code(self) -> str | None:

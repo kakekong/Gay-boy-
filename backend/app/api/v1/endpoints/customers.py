@@ -178,7 +178,34 @@ async def create_customer(
         ))
     await db.flush()
     await ensure_stage_tasks(db, obj, obj.stage)
+    # Its part code, from its initials (MTP → MTP-0001).
+    from app.services.sku_codes import ensure_code
+    await ensure_code(db, obj)
     return obj
+
+
+class SkuCodeIn(BaseModel):
+    code: str
+
+
+@router.post("/{customer_id}/sku-code")
+async def set_customer_sku_code(customer_id: UUID, payload: SkuCodeIn,
+                                db: AsyncSession = Depends(get_db),
+                                user: User = Depends(get_current_user)):
+    """The director sets the start of a customer's part codes. Parts already
+    on file take it when the codes are next reorganized."""
+    from app.core.audit import record as audit_record
+    from app.services.sku_codes import set_code
+    if Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the director can change a customer's code")
+    cust = await db.get(Customer, customer_id)
+    if cust is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+    before = cust.sku_code
+    code = await set_code(db, cust, payload.code)
+    await audit_record(db, actor=user, action="update", entity="customer", entity_id=cust.id,
+                       before={"sku_code": before}, after={"sku_code": code})
+    return {"id": str(cust.id), "sku_code": code}
 
 
 # ─── Who is in charge of which customer ──────────────────────────────────────

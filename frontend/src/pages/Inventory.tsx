@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Package, Plus, Search, AlertTriangle, CheckCircle2, ShoppingCart, Loader2,
-  Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw, Filter, Combine,
+  Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw, Filter, Combine, Hash,
 } from "lucide-react";
 import clsx from "clsx";
 import { Link } from "react-router-dom";
@@ -13,6 +13,7 @@ import { Modal } from "@/components/Modal";
 import { InventoryItemForm } from "@/components/forms/InventoryItemForm";
 import { AdjustStockForm } from "@/components/forms/AdjustStockForm";
 import { InventoryMergePanel } from "@/components/InventoryMergePanel";
+import { SkuRecodePanel } from "@/components/SkuRecodePanel";
 import { useAuthStore } from "@/store/auth";
 import { T, useT } from "@/store/lang";
 
@@ -60,6 +61,7 @@ export default function InventoryPage() {
   const isDirector = user?.role === "director";
   const [openReconcile, setOpenReconcile] = useState(false);
   const [openMerge, setOpenMerge] = useState(false);
+  const [openRecode, setOpenRecode] = useState(false);
   // What stock cost us is procurement's figure. Admin run the customer side
   // and sales quote the sell price — neither is shown the buy price
   // anywhere else in the app, and the server sends them null for it, so the
@@ -158,6 +160,10 @@ export default function InventoryPage() {
             <button className="btn-ghost" onClick={() => setOpenMerge(true)}>
               <Combine size={14} /> {t("Merge duplicates", "Gabungkan duplikat")}</button>
           )}
+          {isDirector && (
+            <button className="btn-ghost" onClick={() => setOpenRecode(true)}>
+              <Hash size={14} /> {t("Reorganize codes", "Rapikan kode")}</button>
+          )}
         </div>
       </div>
 
@@ -165,6 +171,7 @@ export default function InventoryPage() {
         <ReconcilePanel isDirector={!!isDirector} onClose={() => setOpenReconcile(false)} />
       )}
       {openMerge && <InventoryMergePanel onClose={() => setOpenMerge(false)} />}
+      {openRecode && <SkuRecodePanel onClose={() => setOpenRecode(false)} />}
 
       {/* Stat strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

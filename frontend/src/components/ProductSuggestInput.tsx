@@ -43,8 +43,11 @@ function Highlight({ text, words }: { text: string; words: string[] }) {
  * Keyboard: ↓/↑ move, Enter picks, Esc closes.
  */
 export function ProductSuggestInput({
-  value, onChange, onPick, ariaLabel, placeholder, className,
+  value, onChange, onPick, ariaLabel, placeholder, className, customerId,
 }: {
+  /** Only this customer's parts — a price request line never takes another
+   *  customer's code. */
+  customerId?: string | null;
   value: string;
   onChange: (v: string) => void;
   onPick: (hit: CatalogueHit) => void;
@@ -72,9 +75,9 @@ export function ProductSuggestInput({
   // from the button at the foot.
   const PAGE = 20;
   const hits = useInfiniteQuery({
-    queryKey: ["inventory-suggest", term.trim().toLowerCase()],
+    queryKey: ["inventory-suggest", term.trim().toLowerCase(), customerId ?? ""],
     queryFn: ({ pageParam }) => api.get("/inventory/suggest", {
-      params: { q: term.trim(), limit: PAGE, offset: pageParam },
+      params: { q: term.trim(), limit: PAGE, offset: pageParam, customer_id: customerId || undefined },
     }).then((r) => r.data as { items: CatalogueHit[]; total: number }),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => {

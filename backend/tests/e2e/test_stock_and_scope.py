@@ -141,8 +141,9 @@ async def main():
     have, sku = await stock_of(part)
     check("the part is still the one row the price request created",
           sku == sku_before, f"{sku} vs {sku_before}")
-    check("...with a generated SKU in the company's own series",
-          bool(sku) and sku.isdigit() and int(sku) > 100_000, str(sku))
+    import re as _re
+    check("...with a generated code in its customer's series (MTP-0001 …)",
+          bool(sku) and bool(_re.fullmatch(r"[A-Z][A-Z0-9]*-\d{4,}", sku)), str(sku))
     check("...and nothing on the shelf yet — stock enters on receiving",
           have == 0.0, str(have))
 

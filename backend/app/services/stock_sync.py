@@ -76,11 +76,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.inventory import InventoryItem, InventoryMovement
 from app.models.user import User
 
-# Where a generated SKU series starts when there is nothing to continue from.
-# Six digits from 100001 matches the numbering already in the company's list
-# (100036, 100062, 100174 …) so generated and hand-entered items sit in one
-# series rather than two.
-_SKU_START = 100_000
 
 
 def _key(name: str | None) -> str:
@@ -109,15 +104,24 @@ class ItemIndex:
         self.by_sku: dict[str, InventoryItem] = {}
         self.by_name: dict[str, InventoryItem] = {}
         self.by_loose: dict[str, InventoryItem] = {}
+        # MTP-0010 typed as mtp-010 or MTP10 is still MTP-0010.
+        self.by_canon: dict[str, InventoryItem] = {}
+        from app.services.sku_codes import canonical
         for i in items:
             if (i.sku or "").strip():
                 self.by_sku[(i.sku or "").strip()] = i
+                c = canonical(i.sku)
+                if c:
+                    self.by_canon.setdefault(c, i)
             self.by_name.setdefault(_key(i.name), i)
             self.by_loose.setdefault(loose_key(i.name), i)
         for i in items:                   # an item's own values beat an alias
             for a in (getattr(i, "aliases", None) or []):
                 if (a.get("sku") or "").strip():
                     self.by_sku.setdefault(a["sku"].strip(), i)
+                    c = canonical(a["sku"])
+                    if c:
+                        self.by_canon.setdefault(c, i)
                 if a.get("name"):
                     self.by_name.setdefault(_key(a["name"]), i)
                     self.by_loose.setdefault(loose_key(a["name"]), i)
@@ -126,6 +130,11 @@ class ItemIndex:
         wanted = (sku or "").strip()
         if wanted and wanted in self.by_sku:
             return self.by_sku[wanted]
+        if wanted:
+            from app.services.sku_codes import canonical
+            c = canonical(wanted)
+            if c and c in self.by_canon:
+                return self.by_canon[c]
         if name:
             hit = self.by_name.get(_key(name))
             if hit is None and loose_key(name):
@@ -134,20 +143,20 @@ class ItemIndex:
         return None
 
 
-async def _next_sku(db: AsyncSession) -> str:
-    """One past the highest numeric SKU in use.
-
-    Reads the maximum rather than counting rows: a count walks backwards the
-    moment an item is deleted and hands the next part a SKU that is still on
-    somebody's shelf label.
-    """
-    rows = (await db.scalars(select(InventoryItem.sku))).all()
-    highest = _SKU_START
-    for s in rows:
-        digits = (s or "").strip()
-        if digits.isdigit():
-            highest = max(highest, int(digits))
-    return str(highest + 1)
+async def po_customer(db: AsyncSession, po):
+    """The customer a supplier PO buys for — its job's, else its price
+    request's; None for stock."""
+    if getattr(po, "project_id", None):
+        from app.models.operation import Project
+        pj = await db.get(Project, po.project_id)
+        if pj and pj.customer_id:
+            return pj.customer_id
+    if getattr(po, "price_request_id", None):
+        from app.models.price_request import PriceRequest
+        pr = await db.get(PriceRequest, po.price_request_id)
+        if pr:
+            return pr.customer_id
+    return None
 
 
 def po_money(po) -> tuple[str, float | None]:
@@ -163,7 +172,7 @@ async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
                     unit_cost: float | None, category: str | None = None,
                     supplier_hint: str | None = None, sku: str | None = None,
                     link: str | None = None, currency: str | None = None,
-                    fx_rate: float | None = None) -> InventoryItem:
+                    fx_rate: float | None = None, customer_id=None) -> InventoryItem:
     """The inventory item this line is about, creating it if it is new.
 
     A stated SKU wins over the name: it is the identifier somebody chose,
@@ -173,7 +182,13 @@ async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
     """
     wanted = (sku or "").strip()
     items = (await db.scalars(select(InventoryItem))).all()
-    found = ItemIndex(items).find(wanted, name)
+    # A stated code finds its part anywhere. By name, a customer's line looks
+    # only among that customer's parts — the same name asked for by another
+    # customer is that customer's part, numbered in its series.
+    found = ItemIndex(items).find(wanted, None) if wanted else None
+    if found is None:
+        pool = [i for i in items if i.customer_id == customer_id] if customer_id else items
+        found = ItemIndex(pool).find(None, name)
     if found is not None:
         # A later order at a different price is the current price. Zero
         # means "not stated on this line", which must not wipe a price
@@ -193,8 +208,13 @@ async def _item_for(db: AsyncSession, *, name: str, uom: str | None,
         if link and not found.link:
             found.link = link[:1000]
         return found
+    # A new part's code is the next in its customer's series (MTP-0012), or
+    # in the stock series (STK-0004) when it is for no one — never a typed
+    # one, so the format holds (services/sku_codes).
+    from app.services.sku_codes import code_for_new_item
     item = InventoryItem(
-        sku=wanted[:40] or await _next_sku(db),
+        sku=await code_for_new_item(db, customer_id),
+        customer_id=customer_id,
         name=(name or "").strip()[:255],
         category=(category or None) and category[:120],
         uom=(uom or "pcs")[:20],
@@ -240,10 +260,12 @@ async def catalogue_from_price_request(db: AsyncSession, pr,
         item = await _item_for(
             db, name=name, uom=line.get("uom"), unit_cost=None,
             category=line.get("category"), sku=line.get("sku"),
-            link=line.get("link"),
+            link=line.get("link"), customer_id=pr.customer_id,
         )
-        if line.get("sku") != item.sku:
+        if line.get("sku") != item.sku or not line.get("sku_locked"):
             line["sku"] = item.sku
+            # In the catalogue now: the code is this part's, fixed.
+            line["sku_locked"] = True
             changed = True
         touched.append(item.sku)
     if changed:
@@ -310,6 +332,7 @@ async def receive_purchase_order(db: AsyncSession, po, user: User | None = None,
             category=line.get("category"), sku=line.get("sku"),
             link=line.get("link"),
             currency=po_money(po)[0], fx_rate=po_money(po)[1],
+            customer_id=await po_customer(db, po),
         )
         if move_stock:
             await _move(db, item, delta=qty, reason="po_in", reference=ref,
@@ -383,6 +406,7 @@ async def sync_received(db: AsyncSession, po, received: dict[int, float],
             category=line.get("category"), sku=line.get("sku"),
             link=line.get("link"),
             currency=po_money(po)[0], fx_rate=po_money(po)[1],
+            customer_id=await po_customer(db, po),
         )
         # A line whose part the PO has not moved yet contributes nothing, which
         # is the right starting point: the delta is then the whole receipt.
@@ -453,6 +477,7 @@ async def rebase_to_receipts(db: AsyncSession, user: User | None = None) -> dict
                     category=line.get("category"), sku=line.get("sku"),
                     link=line.get("link"),
                     currency=po_money(po)[0], fx_rate=po_money(po)[1],
+                    customer_id=await po_customer(db, po),
                 )
                 target[item.id] = target.get(item.id, 0.0) + qty_in
         have = await po_contribution(db, po)

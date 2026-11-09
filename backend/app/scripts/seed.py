@@ -636,6 +636,11 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS cost_fx_rate NUMERIC(18,6)",
     # Old SKUs and names of duplicates merged into an item.
     "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]'::jsonb",
+    # Part codes follow the customer: MTP-0001 … (services/sku_codes)
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS sku_code VARCHAR(12)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_customers_sku_code ON customers (sku_code)",
+    "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS ix_inventory_items_customer_id ON inventory_items (customer_id)",
 
     # ── Pending approvals follow the desk that now decides them ────────
     # Mark-won moved from the director to finance, and so did releasing a
@@ -1012,6 +1017,18 @@ async def ensure_schema() -> None:
                 "INSERT INTO data_fixes (key) VALUES ('po_project_ids_from_lines')"))
             await db.commit()
             print(f"Supplier POs listing every job they serve: {res}")
+        # Part codes follow the customer: every customer gets its code, and
+        # every part on file is tied to the customer it was for. Nothing is
+        # renumbered here — that is the director's Reorganize, previewed.
+        if not await db.scalar(text(
+                "SELECT 1 FROM data_fixes WHERE key = 'sku_codes_by_customer'")):
+            from app.services.sku_codes import ensure_all_codes, infer_owners
+            n = await ensure_all_codes(db)
+            owned = await infer_owners(db, write=True)
+            await db.execute(text(
+                "INSERT INTO data_fixes (key) VALUES ('sku_codes_by_customer')"))
+            await db.commit()
+            print(f"Customer part codes: {n} customers coded, {len(owned)} parts tied to one")
 
 
 async def main() -> None:

@@ -105,8 +105,10 @@ async def main():
           lines[CABLE]["category"] == "others", str(lines[CABLE]))
     check("...and the link", lines[CABLE]["link"] == "https://example.com/kabel-baja",
           str(lines[CABLE].get("link")))
-    check("...and the SKU sales already had",
-          lines[CABLE]["sku"] == MY_SKU, str(lines[CABLE].get("sku")))
+    # Codes follow the customer now (MTP-0001 …): one typed for a part new to
+    # the customer is not kept — it is issued on submit (test_sku_codes).
+    check("...a code typed for a part new to the customer is not kept",
+          lines[CABLE].get("sku") is None, str(lines[CABLE].get("sku")))
     check("...with the line that has no SKU left blank until submit",
           lines[CHAIN].get("sku") is None, str(lines[CHAIN].get("sku")))
 
@@ -163,10 +165,12 @@ async def main():
     check("the request submits", r.status_code == 200, f"{r.status_code} {J(r)}")
     submitted = J(r)
 
-    cable = await find_item(sku=MY_SKU)
+    cable = await find_item(name=CABLE)
     check("the product is now in the catalogue", cable is not None, str(cable))
-    check("...under the SKU sales chose", cable and cable["sku"] == MY_SKU,
-          str(cable))
+    import re as _re
+    check("...under a code in the customer's series", cable and bool(
+        _re.fullmatch(r"[A-Z][A-Z0-9]*-\d{4,}", cable["sku"] or "")), str(cable))
+    MY_SKU = cable["sku"] if cable else MY_SKU
     check("...with its name", cable and cable["name"] == CABLE, str(cable))
     check("...its category", cable and cable["category"] == "others",
           str(cable))
@@ -183,8 +187,9 @@ async def main():
     chain = await find_item(name=CHAIN)
     check("the line with no SKU got one from the series", chain is not None,
           str(chain))
-    check("...a number, continuing the series the POs use",
-          chain and (chain["sku"] or "").isdigit(), str(chain and chain["sku"]))
+    check("...the next in the customer's series",
+          chain and cable and (chain["sku"] or "").split("-")[0] == cable["sku"].split("-")[0]
+          and chain["sku"] != cable["sku"], str(chain and chain["sku"]))
     check("...and it is at zero too", chain and chain["current_stock"] == 0,
           str(chain))
     back = {i["description"]: i for i in submitted["items"]}

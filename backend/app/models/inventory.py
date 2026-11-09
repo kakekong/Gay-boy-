@@ -151,6 +151,11 @@ class InventoryItem(Base, UUIDPK, TimestampMixin):
     # line typed later from an old label or an old spelling still has to land
     # here rather than bring the duplicate back (see stock_sync.item_index).
     aliases: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # The customer whose part this is — its code is numbered in that
+    # customer's series (MTP-0001 …). None for stock bought for no one, and
+    # for parts on file before codes followed the customer (services/sku_codes).
+    customer_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), index=True)
     # The item's accounts — Accurate's Akun-Akun tab. Empty means the company
     # default (services/item_accounts). Receiving books the goods to
     # `acc_inventory` against `acc_unbilled` until the supplier invoices;

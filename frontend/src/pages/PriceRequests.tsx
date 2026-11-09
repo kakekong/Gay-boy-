@@ -13,6 +13,7 @@ import { QuotedMoney } from "@/components/QuotedMoney";
 import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
 import { ProductSuggestInput, type CatalogueHit } from "@/components/ProductSuggestInput";
+import { LineCode } from "@/components/LineCode";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
 import { useAuthStore } from "@/store/auth";
@@ -499,10 +500,9 @@ function CreateForm({
           {items.map((it, i) => (
             <div key={i} className="rounded-lg border border-ink-200 p-2 space-y-2">
               <div className="flex gap-2 items-center">
-                <input className="input w-32" placeholder={t("SKU no.", "No. SKU")}
-                  aria-label={`SKU ${i + 1}`} value={it.sku}
-                  onChange={(e) => setItem(i, "sku", e.target.value)} />
-                <ProductSuggestInput className="flex-1"
+                <LineCode className="w-36 justify-center" customerId={customerId} askCustomer
+                  name={it.description} sku={it.sku} />
+                <ProductSuggestInput className="flex-1" customerId={customerId}
                   placeholder={t("Product — start typing to find one already in the catalogue",
                                  "Produk — ketik untuk mencari yang sudah ada di katalog")}
                   ariaLabel={`Product ${i + 1}`} value={it.description}
@@ -1143,15 +1143,11 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
               return (
               <div key={i} className="grid grid-cols-12 gap-2 rounded-lg
                                       border border-ink-200 p-2">
-                <input
-                  className="input col-span-5 sm:col-span-3"
-                  placeholder={t("SKU no.", "No. SKU")}
-                  aria-label={`Edit SKU ${i + 1}`}
-                  value={row.sku}
-                  onChange={(e) => set("sku", e.target.value)}
-                />
+                <LineCode className="col-span-5 sm:col-span-3 justify-center"
+                  customerId={pr.customer_id} name={row.description} sku={row.sku} />
                 <ProductSuggestInput
                   className="col-span-6 sm:col-span-8"
+                  customerId={pr.customer_id}
                   placeholder={t("Product", "Produk")}
                   ariaLabel={`Edit product ${i + 1}`}
                   value={row.description}
