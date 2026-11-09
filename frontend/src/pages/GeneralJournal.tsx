@@ -25,6 +25,7 @@ import { AccountPicker } from "@/components/AccountPicker";
 import { ChartOfAccountsPanel } from "@/components/ChartOfAccountsPanel";
 import { LoadMore } from "@/components/LoadMore";
 import { useT, T, locale } from "@/store/lang";
+import { useAuthStore } from "@/store/auth";
 
 interface Line {
   line_no: number;
@@ -75,6 +76,7 @@ export default function GeneralJournalPage() {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const isDirector = useAuthStore((st) => st.user?.role) === "director";
 
   const [entryDate, setEntryDate] = useState(today);
   const [memo, setMemo] = useState("");
@@ -138,6 +140,24 @@ export default function GeneralJournalPage() {
     onError: (e: any) => setFlash({
       kind: "err",
       text: e?.response?.data?.detail ?? "Couldn't reverse that entry.",
+    }),
+  });
+
+  // The director deletes a journal that is its own record — typed here, or a
+  // cash correction. A reversed one goes with its reversal; the accounts move
+  // back as if neither was posted. The audit log keeps every line.
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/journals/${id}`),
+    onSuccess: () => {
+      refresh();
+      setOpen(null);
+      setFlash({ kind: "ok", text: t("Deleted — the accounts are back as they were.",
+                                     "Dihapus — saldo akun kembali seperti semula.") });
+    },
+    onError: (e: any) => setFlash({
+      kind: "err",
+      text: e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail
+            ?? t("Couldn't delete that entry.", "Gagal menghapus jurnal itu."),
     }),
   });
 
@@ -442,6 +462,22 @@ export default function GeneralJournalPage() {
                           }
                         }}>
                         <Undo2 size={11} /> {t("Reverse", "Balik")}
+                      </button>
+                    )}
+                    {isDirector && ["manual", "adjustment"].includes(e.source_type) && (
+                      <button className="btn-ghost py-0.5 px-2 text-[11px] text-red-600 hover:bg-red-50"
+                        disabled={remove.isPending}
+                        title={t("Delete it, as if it was never posted", "Hapus, seolah tidak pernah diposting")}
+                        onClick={() => {
+                          const pair = e.reversed_by_id || e.reverses_id;
+                          const ok = window.confirm(pair
+                            ? t(`Delete ${e.number} and its ${e.reversed_by_id ? "reversal" : "original"}? Both leave the books and the accounts move back as if neither was posted.`,
+                                `Hapus ${e.number} beserta ${e.reversed_by_id ? "jurnal pembaliknya" : "jurnal aslinya"}? Keduanya keluar dari buku dan saldo akun kembali seolah tidak pernah diposting.`)
+                            : t(`Delete ${e.number}? It leaves the books and the accounts move back as if it was never posted.`,
+                                `Hapus ${e.number}? Jurnal keluar dari buku dan saldo akun kembali seolah tidak pernah diposting.`));
+                          if (ok) remove.mutate(e.id);
+                        }}>
+                        <Trash2 size={11} /> {t("Delete", "Hapus")}
                       </button>
                     )}
                   </td>

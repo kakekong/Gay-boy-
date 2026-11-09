@@ -239,6 +239,57 @@ async def reverse_entry(db: AsyncSession, entry: JournalEntry, *,
     return mirror
 
 
+# Journals that are their own record: typed in the general journal, or a cash
+# correction. The rest belong to a document (a cash transaction, an asset, a
+# depreciation run) and are undone from there, or reversed.
+DELETABLE_SOURCES = ("manual", "adjustment")
+
+
+async def delete_posted(db: AsyncSession, entry: JournalEntry) -> list[str]:
+    """Take a posted journal off the books as if it was never posted.
+
+    Asked for: a reversed correction kept showing in the account's ledger —
+    the original on one date, its reversal on another, and the balance in
+    between short by the whole amount. Deleting removes the entry and, if
+    it was reversed (or is a reversal), the other half too: each account's
+    balance moves back by what the entry moved it, and the entry's rows in
+    the reporting journal go. Returns the numbers deleted.
+    """
+    from sqlalchemy import delete as sa_delete
+
+    from app.models.finance import LedgerEntry
+
+    pair = [entry]
+    other_id = entry.reversed_by_id or entry.reverses_id
+    if other_id:
+        other = await db.get(JournalEntry, other_id)
+        if other is not None:
+            pair.append(other)
+    for e in pair:
+        if e.source_type not in DELETABLE_SOURCES:
+            raise JournalError(
+                f"{e.number} was written by a {e.source_type} record — undo it "
+                "there, or reverse it here.")
+    for e in pair:
+        e.reversed_by_id = None
+        e.reverses_id = None
+    await db.flush()
+    gone = []
+    for e in pair:
+        if e.is_posted:
+            for line in e.lines:
+                acc = await db.scalar(select(Account).where(Account.account_no == line.account_no))
+                if acc is not None:
+                    acc.balance = float(acc.balance or 0) - signed_delta(
+                        line.account_type, line.debit, line.credit)
+            await db.execute(sa_delete(LedgerEntry).where(
+                LedgerEntry.source_id == e.id, LedgerEntry.source_ref == e.number))
+        gone.append(e.number)
+        await db.delete(e)
+    await db.flush()
+    return gone
+
+
 # The account a chart of accounts balances against when it is first written
 # down. Every accounting package has one under some name; here it is the
 # seeded "Equitas Saldo Awal".

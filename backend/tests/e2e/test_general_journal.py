@@ -275,7 +275,8 @@ async def main():
     check("...and says to reverse it instead", "revers" in str(J(r)).lower(),
           str(J(r))[:170])
     r = await c.delete(f"/journals/{entry['id']}", headers=fin)
-    check("...nor deleted", r.status_code == 409,
+    # Only the director deletes a posted entry (test_journal_delete).
+    check("...nor deleted by finance", r.status_code == 403,
           f"{r.status_code} {str(J(r))[:130]}")
 
     exp_now = await balance(expense["account_no"])

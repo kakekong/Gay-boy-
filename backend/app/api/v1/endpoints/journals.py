@@ -343,16 +343,33 @@ async def reverse_entry(entry_id: UUID,
 async def delete_entry(entry_id: UUID,
                        db: AsyncSession = Depends(get_db),
                        user: User = Depends(_KEEPERS)):
-    """Throw away a draft. A posted entry is never deleted — reverse it."""
+    """Throw away a draft — or, the director only, a posted entry.
+
+    A posted one is taken off as if never posted: the accounts move back and
+    its rows leave the ledgers. One that was reversed goes with its reversal,
+    so the pair no longer sits in the account's history on two dates with
+    the balance short in between. Only journals that are their own record
+    (typed here, or a cash correction); the audit log keeps every line."""
     e = await db.get(JournalEntry, entry_id)
     if not e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Journal entry not found")
     if e.is_posted:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"{e.number} is posted and stays on the record. Reverse it "
-            "instead — a deleted entry is a hole nobody can explain.",
-        )
+        if Role(user.role) != Role.DIRECTOR:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"{e.number} is posted. Only the director can delete a posted "
+                "entry — reverse it instead.")
+        snapshot = {"number": e.number, "date": str(e.entry_date), "memo": e.memo,
+                    "source_type": e.source_type, "source_ref": e.source_ref,
+                    "lines": [{"account_no": ln.account_no, "debit": float(ln.debit or 0),
+                               "credit": float(ln.credit or 0)} for ln in e.lines]}
+        try:
+            gone = await journal_svc.delete_posted(db, e)
+        except journal_svc.JournalError as err:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(err)) from err
+        await audit_record(db, actor=user, action="delete_posted", entity="journal_entry",
+                           entity_id=entry_id, before=snapshot, after={"deleted": gone})
+        return None
     before = {"number": e.number, "memo": e.memo}
     await db.delete(e)
     await db.flush()
