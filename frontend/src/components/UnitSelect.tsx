@@ -34,8 +34,9 @@ export function useUnits(): string[] {
 }
 
 export function UnitSelect({
-  value, onChange, label, className, allowBlank = true,
+  value, onChange, label, className, allowBlank = true, disabled = false,
 }: {
+  disabled?: boolean;
   value: string;
   onChange: (v: string) => void;
   label: string;
@@ -51,6 +52,7 @@ export function UnitSelect({
       className={className ?? "input"}
       aria-label={label}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
     >
       {allowBlank && <option value="">{tt("Unit…", "Satuan…")}</option>}

@@ -862,21 +862,47 @@ async def create_items_bulk(payload: BulkItemsIn,
     return {"pending_approval": True, "count": len(rows)}
 
 
+# Purchasing keeps the buying side of a part current: what it costs (and in
+# which currency) and its code — a temporary one replaced by the real one.
+# The rest of the record stays admin's and the director's.
+_PURCHASING_FIELDS = {"sku", "unit_cost", "cost_currency", "cost_fx_rate"}
+# Who may change a part's code: it is rewritten on every document.
+_RECODERS = (Role.DIRECTOR, Role.PURCHASING)
+
+
 @router.patch("/{item_id}")
 async def update_item(item_id: UUID,
                       payload: ItemPatch,
                       db: AsyncSession = Depends(get_db),
-                      _u: User = Depends(_editor)):
+                      _u: User = Depends(require(Role.ADMIN, Role.DIRECTOR, Role.PURCHASING))):
     r = await db.get(InventoryItem, item_id)
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     data = payload.model_dump(exclude_unset=True)
+    if Role(_u.role) == Role.PURCHASING:
+        # The edit form sends the whole record; what purchasing may not
+        # change is refused only when it actually differs.
+        def same(a, b) -> bool:
+            a, b = (None if x == "" else x for x in (a, b))
+            if isinstance(a, (int, float)) or isinstance(b, (int, float)):
+                try:
+                    return float(a or 0) == float(b or 0)
+                except (TypeError, ValueError):
+                    return False
+            return a == b
+        changed = {k for k, v in data.items() if k not in _PURCHASING_FIELDS
+                   and not same(v, getattr(r, k, None))}
+        if changed:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Purchasing edits a part's price and code — "
+                                "ask admin or the director for the rest.")
+        data = {k: v for k, v in data.items() if k in _PURCHASING_FIELDS}
     renamed = None
     new_sku = data.pop("sku", None)
     if new_sku is not None and new_sku.strip() != (r.sku or ""):
-        if Role(_u.role) != Role.DIRECTOR:
+        if Role(_u.role) not in _RECODERS:
             raise HTTPException(status.HTTP_403_FORBIDDEN,
-                                "Only the director can change a part's code")
+                                "Only the director or purchasing can change a part's code")
         from app.core.audit import record as audit_record
         from app.services.sku_codes import rename_item
         renamed = await rename_item(db, r, new_sku, user=_u)

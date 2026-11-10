@@ -5,6 +5,7 @@
   the one format; every document line with the old code takes the new one;
   the old code still finds the part.
 * Never another part's code, in any spelling. Admin edits parts but not codes.
+* Purchasing edits a part's price and code, at once — not the rest of it.
 * The cost carries its currency and rate; rupiah needs no rate.
 """
 import asyncio, os, sys, uuid
@@ -90,6 +91,27 @@ async def main():
     check("only a currency a PO is written in", r.status_code == 400, str(r.status_code))
     r = await c.patch(f"/inventory/{iid}", headers=adm, json={"cost_currency": "USD", "cost_fx_rate": 0})
     check("a rate is more than zero", r.status_code == 400, str(r.status_code))
+
+    print("\n── purchasing keeps the price and code current ──")
+    r = await c.patch(f"/inventory/{iid}", headers=pur, json={
+        "sku": f"Q{TAG}-0078", "unit_cost": 13, "cost_currency": "CNY", "cost_fx_rate": 2300})
+    it = await item(iid)
+    check("purchasing changes the code and the price, at once",
+          r.status_code == 200 and it.sku == f"Q{TAG}-0078" and float(it.unit_cost) == 13
+          and it.cost_currency == "CNY" and float(it.cost_fx_rate) == 2300,
+          f"{r.status_code} {it.sku} {it.unit_cost} {it.cost_currency} {J(r)}"[:200])
+    po_now = J(await c.get(f"/purchasing/po/{po['id']}", headers=d))
+    check("...and documents follow", po_now["items"][0].get("sku") == f"Q{TAG}-0078",
+          str(po_now["items"][0].get("sku")))
+    r = await c.patch(f"/inventory/{iid}", headers=pur, json={"name": "SOMETHING ELSE"})
+    check("...but not its name or the rest", r.status_code == 403, str(r.status_code))
+    # The edit form sends the whole record: unchanged fields pass.
+    r = await c.patch(f"/inventory/{iid}", headers=pur, json={
+        "name": it.name, "category": "", "uom": it.uom, "location": "", "notes": "",
+        "reorder_point": 0, "reorder_qty": 0, "unit_cost": 14, "is_active": True})
+    it = await item(iid)
+    check("...the whole form sent back unchanged, with a new price: fine",
+          r.status_code == 200 and float(it.unit_cost) == 14, f"{r.status_code} {J(r)}"[:160])
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

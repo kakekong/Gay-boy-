@@ -308,18 +308,19 @@ export default function InventoryPage() {
                             <ShoppingCart size={13} /> {T("Order")}</button>
                         )}
                         {canEdit && (
-                          <>
-                            <button className="btn-ghost"
-                              onClick={() => setAdjusting(i)}
-                              title={T("Adjust stock")}>
-                              <ArrowDownUp size={13} />
-                            </button>
-                            <button className="btn-ghost"
-                              onClick={() => { setEditing(i); setOpenNew(true); }}
-                              title={T("Edit item")}>
-                              <Pencil size={13} />
-                            </button>
-                          </>
+                          <button className="btn-ghost"
+                            onClick={() => setAdjusting(i)}
+                            title={T("Adjust stock")}>
+                            <ArrowDownUp size={13} />
+                          </button>
+                        )}
+                        {/* Purchasing keeps a part's price and code current. */}
+                        {(canEdit || user?.role === "purchasing") && (
+                          <button className="btn-ghost"
+                            onClick={() => { setEditing(i); setOpenNew(true); }}
+                            title={T("Edit item")}>
+                            <Pencil size={13} />
+                          </button>
                         )}
                       </div>
                     </td>
