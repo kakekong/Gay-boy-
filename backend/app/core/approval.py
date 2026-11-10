@@ -269,13 +269,24 @@ async def require_pr_approval(db: AsyncSession, *, pr, requester) -> bool:
         return False
     pr.status = "pending_approval"
     n = len(pr.items or [])
+    # What it would cost, when the lines carry a buying price — per currency.
+    totals: dict[str, float] = {}
+    for it in (pr.items or []):
+        if isinstance(it, dict) and it.get("amount") is not None:
+            cur = (it.get("currency") or "IDR").upper()
+            totals[cur] = totals.get(cur, 0.0) + float(it["amount"] or 0)
+    sym = {"IDR": "Rp", "CNY": "¥", "USD": "$"}
+    cost = ", ".join(f"{sym.get(c, c)} {v:,.0f}".replace(",", ".") for c, v in totals.items())
+    bits = [f"{n} item(s)"] if n else []
+    if cost:
+        bits.append(cost)
     await request_approval(
         db,
         target_type="purchase_request",
         target_id=pr.id,
         requested_by=requester.id,
         required_role=Role.DIRECTOR,
-        reason=f"Purchase request {pr.number}" + (f" ({n} item(s))" if n else ""),
+        reason=f"Purchase request {pr.number}" + (f" ({', '.join(bits)})" if bits else ""),
         payload={"action": "create"},
     )
     return True

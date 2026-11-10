@@ -253,7 +253,7 @@ function PRWorkspace() {
               <td className="td font-mono text-xs">{r.number}</td>
               <td className="td font-mono text-xs">{r.project_code ?? "—"}</td>
               <td className="td">{r.requested_by_name ?? "—"}</td>
-              <td className="td muted">{(r.items ?? []).length} {T("line(s)")}</td>
+              <td className="td"><PRLines items={r.items ?? []} /></td>
               <td className="td"><StatusChip status={r.status} /></td>
               <td className="td text-right">
                 {r.status === "open" && (
@@ -276,6 +276,47 @@ function PRWorkspace() {
           }}
           onError={(m) => setFlash({ kind: "err", text: m })}
         />
+      )}
+    </div>
+  );
+}
+
+// The lines a request asks for and, when the asker put one on, what each is
+// expected to cost — so purchasing sees the price they are working against.
+const PR_CUR: Record<string, string> = { IDR: "Rp", CNY: "¥", USD: "$" };
+function PRLines({ items }: { items: any[] }) {
+  const fmt = (n: number) => new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n);
+  const totals: Record<string, number> = {};
+  for (const it of items) {
+    if (it?.amount != null) {
+      const c = (it.currency || "IDR").toUpperCase();
+      totals[c] = (totals[c] ?? 0) + Number(it.amount || 0);
+    }
+  }
+  if (!items.length) return <span className="muted">—</span>;
+  return (
+    <div className="space-y-0.5 text-xs">
+      {items.map((it, i) => {
+        const cur = PR_CUR[(it.currency || "IDR").toUpperCase()] ?? it.currency;
+        const name = it.name || it.description || "—";
+        return (
+          <div key={i} className="flex gap-2 justify-between">
+            <span className="truncate max-w-[16rem]">
+              {it.sku && <span className="font-mono text-[10px] text-ink-500 mr-1">{it.sku}</span>}
+              {name} <span className="muted">· {it.qty} {it.uom ?? ""}</span>
+            </span>
+            {it.unit_price != null && (
+              <span className="tabular-nums whitespace-nowrap text-ink-600">
+                @ {cur} {fmt(Number(it.unit_price))}
+              </span>
+            )}
+          </div>
+        );
+      })}
+      {Object.keys(totals).length > 0 && (
+        <div className="pt-0.5 border-t border-ink-100 font-medium tabular-nums text-right">
+          {Object.entries(totals).map(([c, v]) => `${PR_CUR[c] ?? c} ${fmt(v)}`).join(" + ")}
+        </div>
       )}
     </div>
   );

@@ -100,6 +100,9 @@ class AdjustIn(BaseModel):
 class OrderIn(BaseModel):
     qty: float | None = None    # default = reorder_qty
     notes: str | None = None
+    # What we expect to pay per unit; default the item's last known cost.
+    unit_price: float | None = None
+    currency: str | None = None
 
 
 class FreeOrderLine(BaseModel):
@@ -107,12 +110,38 @@ class FreeOrderLine(BaseModel):
     qty: float
     uom: str = "pcs"
     supplier_hint: str | None = None
+    # The buying price per unit, when the one asking knows it.
+    unit_price: float | None = None
 
 
 class FreeOrderIn(BaseModel):
     items: list[FreeOrderLine] = []
     project_id: UUID | None = None
     notes: str | None = None
+    # The currency the prices are in — stock from China is bought in yuan.
+    currency: str = "IDR"
+
+
+# Who may put a buying price on a request: the desks that see what stock
+# costs. Sales quote the sell price and admin run the customer side — neither
+# is shown the buy price anywhere, so neither sets one (write follows read).
+_NO_COST_ROLES = (Role.SALES, Role.ADMIN)
+_ORDER_CURRENCIES = ("IDR", "CNY", "USD")
+
+
+def _order_price(user: User, price, currency) -> tuple[float | None, str]:
+    cur = (currency or "IDR").upper()
+    if cur not in _ORDER_CURRENCIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Currency must be one of {', '.join(_ORDER_CURRENCIES)}")
+    if price in (None, ""):
+        return None, cur
+    if Role(user.role) in _NO_COST_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Buying prices aren't yours to set.")
+    p = float(price)
+    if p < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A price can't be below zero")
+    return round(p, 4), cur
 
 
 class ItemOut(ItemIn):
@@ -881,13 +910,17 @@ async def request_order(item_id: UUID,
     if qty <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Quantity required (set reorder_qty or pass qty).")
+    price, cur = _order_price(user, payload.unit_price, payload.currency or r.cost_currency)
+    if price is None:
+        price, cur = float(r.unit_cost or 0), (r.cost_currency or "IDR").upper()
     pr = PurchaseRequest(
         number=await _next_pr_number(db),
         requested_by=user.id,
         items=[{
             "sku": r.sku, "name": r.name, "qty": qty, "uom": r.uom,
             "supplier_hint": r.supplier_hint,
-            "unit_cost": float(r.unit_cost or 0),
+            "unit_cost": price, "unit_price": price, "currency": cur,
+            "amount": round(price * qty, 2),
             "from_inventory_id": str(item_id),
         }],
         status="open",
@@ -915,14 +948,20 @@ async def request_order_freeform(payload: FreeOrderIn,
                             "Add at least one item with a name and a quantity.")
     if payload.project_id and not await db.get(Project, payload.project_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
+    rows = []
+    for ln in lines:
+        price, cur = _order_price(user, ln.unit_price, payload.currency)
+        row = {"name": ln.name.strip(), "qty": ln.qty, "uom": ln.uom,
+               "supplier_hint": ln.supplier_hint}
+        if price is not None:
+            row.update(unit_cost=price, unit_price=price, currency=cur,
+                       amount=round(price * ln.qty, 2))
+        rows.append(row)
     pr = PurchaseRequest(
         number=await _next_pr_number(db),
         requested_by=user.id,
         project_id=payload.project_id,
-        items=[{
-            "name": ln.name.strip(), "qty": ln.qty, "uom": ln.uom,
-            "supplier_hint": ln.supplier_hint,
-        } for ln in lines],
+        items=rows,
         status="open",
         notes=payload.notes,
     )

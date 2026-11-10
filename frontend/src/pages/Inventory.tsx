@@ -394,7 +394,7 @@ export default function InventoryPage() {
         subtitle={T("Raise a purchase request for materials — even ones not stocked yet. Purchasing picks it up.")}
         size="lg"
       >
-        <RequestOrderForm onClose={() => setOpenRequest(false)} />
+        <RequestOrderForm showCost={showCost} onClose={() => setOpenRequest(false)} />
       </Modal>
     </div>
   );
@@ -562,13 +562,23 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
   );
 }
 
-function RequestOrderForm({ onClose }: { onClose: () => void }) {
+type OrderLine = { name: string; qty: string; uom: string; price: string };
+const ORDER_CUR: Record<string, string> = { IDR: "Rp", CNY: "¥", USD: "$" };
+
+function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost: boolean }) {
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState("");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<{ name: string; qty: string; uom: string }[]>([
-    { name: "", qty: "", uom: "pcs" },
+  // The buying price is optional, and only for the desks that see what stock
+  // costs — sales and admin are never shown it, so they don't set it.
+  const [currency, setCurrency] = useState("IDR");
+  const [lines, setLines] = useState<OrderLine[]>([
+    { name: "", qty: "", uom: "pcs", price: "" },
   ]);
+  const money = (n: number) =>
+    `${ORDER_CUR[currency]} ${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n)}`;
+  const lineTotal = (l: OrderLine) => (Number(l.qty) || 0) * (Number(l.price) || 0);
+  const grand = lines.reduce((s, l) => s + lineTotal(l), 0);
   const [err, setErr] = useState<string | null>(null);
 
   const projects = useQuery({
@@ -581,9 +591,11 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
     mutationFn: () => api.post("/inventory/request-order", {
       project_id: projectId || null,
       notes: notes.trim() || null,
+      currency,
       items: lines
         .filter((l) => l.name.trim() && Number(l.qty) > 0)
-        .map((l) => ({ name: l.name.trim(), qty: Number(l.qty), uom: l.uom || "pcs" })),
+        .map((l) => ({ name: l.name.trim(), qty: Number(l.qty), uom: l.uom || "pcs",
+                       unit_price: showCost && l.price.trim() !== "" ? Number(l.price) : null })),
     }).then((r) => r.data),
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["pr-list"] });
@@ -596,7 +608,7 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
         ?? "Could not create the request."),
   });
 
-  const update = (i: number, k: "name" | "qty" | "uom", v: string) =>
+  const update = (i: number, k: keyof OrderLine, v: string) =>
     setLines(lines.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)));
 
   function attempt() {
@@ -630,16 +642,29 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
                 <input className="input" placeholder={T("Steel plate 10mm")}
                   value={l.name} onChange={(e) => update(i, "name", e.target.value)} />
               </label>
-              <label className="flex-1 block">
+              <label className="flex-1 min-w-[4.5rem] block">
                 {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("Qty")}</span>}
                 <input className="input" type="number" min={0} placeholder="0"
                   value={l.qty} onChange={(e) => update(i, "qty", e.target.value)} />
               </label>
-              <label className="flex-1 block">
+              <label className="flex-1 min-w-[5.5rem] block">
                 {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("UoM")}</span>}
                 <UnitSelect label={`Unit, line ${i + 1}`} value={l.uom}
                   onChange={(v) => update(i, "uom", v)} allowBlank={false} />
               </label>
+              {showCost && (
+                <label className="flex-[1.5] block">
+                  {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("Unit price")} ({ORDER_CUR[currency]})</span>}
+                  <input className="input text-right tabular-nums" type="number" min={0} step="any"
+                    placeholder={T("Optional")} aria-label={`Unit price, line ${i + 1}`}
+                    value={l.price} onChange={(e) => update(i, "price", e.target.value)} />
+                </label>
+              )}
+              {showCost && (
+                <div className="w-24 text-right text-xs tabular-nums text-ink-600 pb-2.5 shrink-0">
+                  {lineTotal(l) ? money(lineTotal(l)) : "—"}
+                </div>
+              )}
               <button type="button" className="btn-ghost text-red-600 shrink-0 mb-0.5"
                 onClick={() => setLines(lines.filter((_, idx) => idx !== i))}
                 aria-label={T("Remove line")} disabled={lines.length === 1}>
@@ -648,9 +673,26 @@ function RequestOrderForm({ onClose }: { onClose: () => void }) {
             </div>
           ))}
           <button type="button" className="btn-ghost text-xs"
-            onClick={() => setLines([...lines, { name: "", qty: "", uom: "pcs" }])}>
+            onClick={() => setLines([...lines, { name: "", qty: "", uom: "pcs", price: "" }])}>
             <Plus size={13} /> {T("Add line")}</button>
         </div>
+        {showCost && (
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink-100 pt-2">
+            <label className="flex items-center gap-2 text-xs text-ink-600">
+              {T("Prices in")}
+              <select className="input py-1 w-auto text-xs" value={currency}
+                aria-label={T("Currency")} onChange={(e) => setCurrency(e.target.value)}>
+                <option value="IDR">Rupiah (Rp)</option>
+                <option value="CNY">Yuan (¥)</option>
+                <option value="USD">Dollar ($)</option>
+              </select>
+            </label>
+            <div className="text-sm">
+              <span className="muted">{T("Total")} </span>
+              <span className="font-semibold tabular-nums">{grand ? money(grand) : "—"}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <label className="block">
