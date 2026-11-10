@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import { UnitSelect } from "@/components/UnitSelect";
-import { T } from "@/store/lang";
+import { T, useT } from "@/store/lang";
+import { useAuthStore } from "@/store/auth";
+import { CURRENCIES } from "@/lib/currency";
 
 interface Props {
   initial?: any;
@@ -12,7 +14,12 @@ interface Props {
 
 export function InventoryItemForm({ initial, onClose }: Props) {
   const qc = useQueryClient();
+  const t = useT();
   const editing = !!initial?.id;
+  // A temporary code is replaced by the real one — the director's to do,
+  // since every document carrying the old code is rewritten.
+  const isDirector = useAuthStore((st) => st.user?.role) === "director";
+  const skuLocked = editing && !isDirector;
 
   const [form, setForm] = useState({
     sku: initial?.sku ?? "",
@@ -20,6 +27,8 @@ export function InventoryItemForm({ initial, onClose }: Props) {
     category: initial?.category ?? "",
     uom: initial?.uom ?? "pcs",
     unit_cost: initial?.unit_cost ?? 0,
+    cost_currency: (initial?.cost_currency ?? "IDR") as string,
+    cost_fx_rate: initial?.cost_fx_rate ?? "",
     current_stock: initial?.current_stock ?? 0,
     reorder_point: initial?.reorder_point ?? 0,
     reorder_qty: initial?.reorder_qty ?? 0,
@@ -29,21 +38,29 @@ export function InventoryItemForm({ initial, onClose }: Props) {
     is_active: initial?.is_active ?? true,
   });
   const [err, setErr] = useState<string | null>(null);
+  const [renamed, setRenamed] = useState<number | null>(null);
 
   const save = useMutation({
     mutationFn: () => {
+      const rate = form.cost_currency === "IDR" || form.cost_fx_rate === ""
+        ? null : Number(form.cost_fx_rate);
       if (editing) {
-        const { sku, current_stock, ...patch } = form;
+        const { sku, current_stock, cost_fx_rate, ...rest } = form;
+        const patch: Record<string, any> = { ...rest, cost_fx_rate: rate };
+        if (isDirector && sku.trim() !== initial.sku) patch.sku = sku.trim();
         return api.patch(`/inventory/${initial.id}`, patch);
       }
-      return api.post(`/inventory`, form);
+      const { cost_fx_rate, ...rest } = form;
+      return api.post(`/inventory`, { ...rest, cost_fx_rate: rate });
     },
-    onSuccess: () => {
+    onSuccess: (r: any) => {
       qc.invalidateQueries({ queryKey: ["inventory"] });
+      const docs = r?.data?.documents?.length ?? 0;
+      if (docs) { setRenamed(docs); return; }
       onClose();
     },
     onError: (e: any) => {
-      setErr(e?.response?.data?.errors?.[0]?.message ?? "Failed to save");
+      setErr(e?.response?.data?.errors?.[0]?.message ?? e?.response?.data?.detail ?? "Failed to save");
     },
   });
 
@@ -51,10 +68,16 @@ export function InventoryItemForm({ initial, onClose }: Props) {
     <form onSubmit={(e) => { e.preventDefault(); setErr(null); save.mutate(); }}
           className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label={T("SKU *")}>
-          <input className="input" required disabled={editing} value={form.sku}
+        <Field label={T("SKU")}>
+          <input className="input font-mono" disabled={skuLocked} value={form.sku}
             onChange={(e) => setForm({ ...form, sku: e.target.value })}
-            placeholder={T("e.g. CHAIN-12IN-CS")} />
+            placeholder={editing ? "" : t("Blank → next stock code", "Kosong → kode stok berikutnya")} />
+          {editing && isDirector && form.sku.trim() !== initial.sku && (
+            <span className="block text-[11px] text-amber-700 mt-1">
+              {t(`Replaces ${initial.sku} on every document that carries it. ${initial.sku} still finds this part.`,
+                 `Menggantikan ${initial.sku} di setiap dokumen yang memakainya. ${initial.sku} tetap menemukan barang ini.`)}
+            </span>
+          )}
         </Field>
         <Field label={T("Name *")}>
           <input className="input" required value={form.name}
@@ -70,9 +93,29 @@ export function InventoryItemForm({ initial, onClose }: Props) {
           <UnitSelect label="Unit of measure" value={form.uom}
             onChange={(v) => setForm({ ...form, uom: v })} allowBlank={false} />
         </Field>
-        <Field label={T("Unit cost (IDR)")}>
-          <input type="number" min={0} step="any" className="input" value={form.unit_cost}
-            onChange={(e) => setForm({ ...form, unit_cost: parseFloat(e.target.value || "0") })} />
+        <Field label={T("Unit cost")}>
+          <div className="flex gap-2">
+            <select className="input w-24 shrink-0" aria-label={t("Currency", "Mata uang")}
+              value={form.cost_currency}
+              onChange={(e) => setForm({ ...form, cost_currency: e.target.value })}>
+              {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
+            </select>
+            <input type="number" min={0} step="any" className="input" value={form.unit_cost}
+              aria-label={t("Unit cost", "Harga satuan")}
+              onChange={(e) => setForm({ ...form, unit_cost: parseFloat(e.target.value || "0") })} />
+          </div>
+          {form.cost_currency !== "IDR" && (
+            <div className="flex items-center gap-2 mt-2">
+              <span className="w-24 shrink-0 text-[11px] text-ink-500">
+                {t(`Rp per 1 ${form.cost_currency}`, `Rp per 1 ${form.cost_currency}`)}
+              </span>
+              <input type="number" min={0} step="any" className="input"
+                aria-label={t("Rupiah rate", "Kurs rupiah")}
+                placeholder={t("Rate", "Kurs")}
+                value={form.cost_fx_rate}
+                onChange={(e) => setForm({ ...form, cost_fx_rate: e.target.value })} />
+            </div>
+          )}
         </Field>
         {!editing && (
           <Field label={T("Opening stock")}>
@@ -103,6 +146,12 @@ export function InventoryItemForm({ initial, onClose }: Props) {
           onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </Field>
 
+      {renamed !== null && (
+        <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 text-sm text-emerald-800 flex items-center justify-between gap-3">
+          <span>{t(`Saved. The new code is on ${renamed} document(s).`, `Tersimpan. Kode baru ada di ${renamed} dokumen.`)}</span>
+          <button type="button" className="btn-ghost text-xs" onClick={onClose}>{t("Close", "Tutup")}</button>
+        </div>
+      )}
       {err && (
         <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
           {err}

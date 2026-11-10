@@ -283,7 +283,7 @@ function PRWorkspace() {
 
 // The lines a request asks for and, when the asker put one on, what each is
 // expected to cost — so purchasing sees the price they are working against.
-const PR_CUR: Record<string, string> = { IDR: "Rp", CNY: "¥", USD: "$" };
+const PR_CUR: Record<string, string> = { IDR: "Rp", CNY: "CNY", USD: "USD", EUR: "EUR", SGD: "SGD", JPY: "JPY" };
 function PRLines({ items }: { items: any[] }) {
   const fmt = (n: number) => new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n);
   const totals: Record<string, number> = {};

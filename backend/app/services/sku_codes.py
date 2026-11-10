@@ -61,10 +61,11 @@ def valid_code(code: str | None) -> str | None:
 
 def parse(sku: str | None) -> tuple[str, int] | None:
     """("MTP", 10) for MTP-0010, mtp-010, MTP 10, mtp0010 — None for a plain
-    number or anything else. A code with a dash may have a digit in its
-    prefix (MTP2-0001); one without a dash is read as letters then digits."""
+    number or anything else. A code with a separator (dash, space, dot,
+    underscore) may have a digit in its prefix (MTP2-0001, mtp2 1); one
+    without is read as letters then digits."""
     s = (sku or "").strip()
-    m = re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)\s*-\s*(\d+)", s)
+    m = re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)\s*[-_./ ]\s*(\d+)", s)
     if not m:
         m = re.fullmatch(r"([A-Za-z]+)[\s_./]*(\d+)", s)
     if not m:
@@ -138,13 +139,16 @@ async def set_code(db: AsyncSession, customer, code: str) -> str:
 # ─── Issuing ─────────────────────────────────────────────────────────────────
 
 async def next_code(db: AsyncSession, prefix: str) -> str:
-    """One past the highest number in this prefix's series, in any spelling."""
+    """One past the highest number in this prefix's series, in any spelling —
+    old codes kept on renamed parts included, since those still find the part
+    and must not be handed to another."""
     from app.models.inventory import InventoryItem
     top = 0
-    for s in (await db.scalars(select(InventoryItem.sku))).all():
-        p = parse(s)
-        if p and p[0] == prefix:
-            top = max(top, p[1])
+    for sku, aliases in (await db.execute(select(InventoryItem.sku, InventoryItem.aliases))).all():
+        for code in [sku, *[(a or {}).get("sku") for a in (aliases or [])]]:
+            p = parse(code)
+            if p and p[0] == prefix:
+                top = max(top, p[1])
     return fmt(prefix, top + 1)
 
 
@@ -222,7 +226,6 @@ async def plan(db: AsyncSession, customer_ids: list[UUID] | None = None,
     """Each customer's series renumbered by entry date. With `write`, done."""
     from app.models.crm import Customer
     from app.models.inventory import InventoryItem, InventoryMovement
-    from app.services.inventory_merge import _model
 
     await ensure_all_codes(db)
     inferred = await infer_owners(db, write=write)
@@ -258,41 +261,48 @@ async def plan(db: AsyncSession, customer_ids: list[UUID] | None = None,
                        "duplicates": _dupes(its)})
     groups.sort(key=lambda g: (-g["changing"], g["code"]))
 
+    # A new number already held by a part outside the series being
+    # renumbered — another customer's left unticked, or a stock part — can't
+    # be given out: two parts would answer to one code. Said in the preview,
+    # and refused rather than half-done.
+    moving = {i.id for i in items if owner[i.id] and (wanted is None or owner[i.id] in wanted)}
+    held: dict[str, object] = {}
+    for i in items:
+        if i.id in moving or not (i.sku or "").strip():
+            continue
+        held.setdefault(i.sku.strip(), i)
+        c = canonical(i.sku)
+        if c:
+            held.setdefault(c, i)
+    blocked = []
+    for g in groups:
+        g["conflicts"] = []
+        if wanted is not None and UUID(g["customer_id"]) not in wanted:
+            continue
+        for row in g["items"]:
+            hit = held.get(row["new"])
+            if hit is not None and row["changes"]:
+                who = customers.get(owner[hit.id]) if owner[hit.id] else None
+                g["conflicts"].append({"code": row["new"], "held_by": hit.sku, "name": hit.name,
+                                       "customer": who.company_name if who else None})
+        if g["conflicts"]:
+            blocked.append(g)
+    if write and blocked:
+        from fastapi import HTTPException, status
+        first = blocked[0]["conflicts"][0]
+        whose = (f"{first['customer']}'s part {first['held_by']}" if first["customer"]
+                 else f"the stock part {first['held_by']}")
+        more = sum(len(g["conflicts"]) for g in blocked) - 1
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{first['code']} is already {whose} ({first['name']})"
+            + (f", and {more} more" if more else "")
+            + ". Tick that customer too, or give that part another code first.")
+
     # Document lines, rewritten through one old→new map so a swap
     # (0001↔0002) can't chain into a wrong code.
     old_to_new = {old: new for old, new in renames.values() if old}
-    documents = []
-
-    def fix(line: dict) -> bool:
-        s = (line.get("sku") or "").strip()
-        if s in old_to_new:
-            line["sku"] = old_to_new[s]
-            return True
-        return False
-
-    if old_to_new:
-        for path, label, link in _docs():
-            M = _model(path)
-            for doc in (await db.scalars(select(M))).all():
-                lines = [dict(x) if isinstance(x, dict) else x for x in (doc.items or [])]
-                n = sum(1 for ln in lines if isinstance(ln, dict) and fix(ln))
-                if not n:
-                    continue
-                if write:
-                    doc.items = lines
-                documents.append({"type": label, "number": getattr(doc, "number", None)
-                                  or str(doc.id)[:8], "link": link(doc), "lines": n})
-        from app.models.quotation import Quotation, QuotationItem
-        per_q: dict = defaultdict(int)
-        for it in (await db.scalars(select(QuotationItem)
-                                    .where(QuotationItem.sku.in_(list(old_to_new))))).all():
-            per_q[it.quotation_id] += 1
-            if write:
-                it.sku = old_to_new[it.sku.strip()] if it.sku.strip() in old_to_new else it.sku
-        for qid, n in per_q.items():
-            q = await db.get(Quotation, qid)
-            documents.append({"type": "Quotation", "number": q.number if q else str(qid)[:8],
-                              "link": f"/quotations/{qid}", "lines": n})
+    documents = await rewrite_codes(db, old_to_new, write=write)
 
     result = {"groups": groups, "renaming": len(renames), "documents": documents,
               "unowned": sum(1 for i in items if not owner[i.id])}
@@ -316,6 +326,87 @@ async def plan(db: AsyncSession, customer_ids: list[UUID] | None = None,
                                  notes=f"Code {old} → {new} (reorganized by entry date)"))
     await db.flush()
     return result
+
+
+async def rewrite_codes(db: AsyncSession, old_to_new: dict[str, str],
+                        *, write: bool) -> list[dict]:
+    """Every document line carrying an old code, given the new one. Returns
+    the documents touched; with `write`, rewrites them."""
+    from app.services.inventory_merge import _model
+    documents: list[dict] = []
+    if not old_to_new:
+        return documents
+
+    def fix(line: dict) -> bool:
+        s = (line.get("sku") or "").strip()
+        if s in old_to_new:
+            line["sku"] = old_to_new[s]
+            return True
+        return False
+
+    for path, label, link in _docs():
+        M = _model(path)
+        for doc in (await db.scalars(select(M))).all():
+            lines = [dict(x) if isinstance(x, dict) else x for x in (doc.items or [])]
+            n = sum(1 for ln in lines if isinstance(ln, dict) and fix(ln))
+            if not n:
+                continue
+            if write:
+                doc.items = lines
+            documents.append({"type": label, "number": getattr(doc, "number", None)
+                              or str(doc.id)[:8], "link": link(doc), "lines": n})
+    from app.models.quotation import Quotation, QuotationItem
+    per_q: dict = defaultdict(int)
+    for it in (await db.scalars(select(QuotationItem)
+                                .where(QuotationItem.sku.in_(list(old_to_new))))).all():
+        per_q[it.quotation_id] += 1
+        if write:
+            it.sku = old_to_new.get(it.sku.strip(), it.sku)
+    for qid, n in per_q.items():
+        q = await db.get(Quotation, qid)
+        documents.append({"type": "Quotation", "number": q.number if q else str(qid)[:8],
+                          "link": f"/quotations/{qid}", "lines": n})
+    return documents
+
+
+async def rename_item(db: AsyncSession, item, new_sku: str, *, user=None) -> dict:
+    """Give one part a new code — a temporary one replaced by the real one.
+
+    Stored in the one format when it is a prefixed code (mtp-12 → MTP-0012).
+    Refused when another part already answers to it, in any spelling or as an
+    old code. Every document line with the old code takes the new one, and
+    the old code stays on the part as an alias, so a label printed with it
+    still finds the part."""
+    from fastapi import HTTPException, status
+    from app.models.inventory import InventoryItem, InventoryMovement
+    from app.services.stock_sync import ItemIndex
+
+    typed = (new_sku or "").strip()
+    if not typed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A part needs a code")
+    new = canonical(typed) or typed
+    if len(new) > 40:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A code is at most 40 characters")
+    old = item.sku
+    if new == old:
+        return {"sku": old, "documents": []}
+    others = (await db.scalars(select(InventoryItem)
+                               .where(InventoryItem.id != item.id))).all()
+    clash = ItemIndex(others).find(new, None)
+    if clash is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"{new} is already {clash.sku} {clash.name}")
+    documents = await rewrite_codes(db, {old: new}, write=True)
+    item.sku = new
+    aliases = list(item.aliases or [])
+    if old and not any(a.get("sku") == old for a in aliases):
+        aliases.append({"sku": old, "name": item.name})
+    item.aliases = aliases
+    db.add(InventoryMovement(item_id=item.id, delta=0, reason="recode", reference=new,
+                             user_id=user.id if user else None,
+                             notes=f"Code {old} → {new}"))
+    await db.flush()
+    return {"sku": new, "was": old, "documents": documents}
 
 
 def _dupes(its) -> int:

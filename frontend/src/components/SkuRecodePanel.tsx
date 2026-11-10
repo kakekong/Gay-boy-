@@ -10,6 +10,7 @@ interface Row { id: string; name: string; old: string; new: string; changes: boo
 interface Group {
   customer_id: string; customer: string; code: string; items: Row[];
   changing: number; duplicates: number;
+  conflicts?: { code: string; held_by: string; name: string; customer: string | null }[];
 }
 interface Plan {
   groups: Group[]; renaming: number; unowned: number;
@@ -108,7 +109,10 @@ export function SkuRecodePanel({ onClose }: { onClose: () => void }) {
         <div className="p-6 text-sm muted flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t("Reading the codes…", "Membaca kode…")}</div>
       ) : (
         <div className="divide-y divide-ink-100">
-          {(plan.data?.groups ?? []).map((g) => {
+          {(plan.data?.groups ?? []).map((g0) => {
+            // Clashes depend on which customers are ticked, so the preview
+            // of the selection is what says them.
+            const g = { ...g0, conflicts: preview?.groups.find((x) => x.customer_id === g0.customer_id)?.conflicts ?? [] };
             const isOpen = open.has(g.customer_id);
             const rows = isOpen ? g.items : g.items.filter((r) => r.changes).slice(0, 5);
             return (
@@ -146,6 +150,21 @@ export function SkuRecodePanel({ onClose }: { onClose: () => void }) {
                                 : t("Already in order", "Sudah rapi")}
                   </span>
                 </div>
+                {(g.conflicts ?? []).length > 0 && (
+                  <div className="mt-2 ml-7 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 space-y-0.5">
+                    {g.conflicts!.slice(0, 4).map((c) => (
+                      <div key={c.code}>
+                        <span className="font-mono font-semibold">{c.code}</span>{" "}
+                        {c.customer
+                          ? t(`is already ${c.customer}'s part ${c.held_by} (${c.name}) — tick that customer too.`,
+                              `sudah dipakai barang ${c.customer} ${c.held_by} (${c.name}) — centang pelanggan itu juga.`)
+                          : t(`is already the stock part ${c.held_by} (${c.name}) — give it another code first.`,
+                              `sudah dipakai barang stok ${c.held_by} (${c.name}) — beri kode lain dulu.`)}
+                      </div>
+                    ))}
+                    {g.conflicts!.length > 4 && <div>{t(`…and ${g.conflicts!.length - 4} more`, `…dan ${g.conflicts!.length - 4} lagi`)}</div>}
+                  </div>
+                )}
                 {rows.length > 0 && (
                   <div className="mt-2 ml-7 overflow-x-auto">
                     <table className="text-xs w-full">
@@ -210,7 +229,9 @@ export function SkuRecodePanel({ onClose }: { onClose: () => void }) {
               {t(`Preview ${renaming} changes`, `Pratinjau ${renaming} perubahan`)}
             </button>
           ) : (
-            <button className="btn-primary" disabled={apply.isPending} onClick={() => apply.mutate()}>
+            <button className="btn-primary"
+              disabled={apply.isPending || preview.groups.some((x) => (x.conflicts ?? []).length > 0)}
+              onClick={() => apply.mutate()}>
               {apply.isPending && <Loader2 size={13} className="animate-spin" />}
               {t(`Renumber ${preview.renaming} parts`, `Nomori ulang ${preview.renaming} barang`)}
             </button>

@@ -1,6 +1,6 @@
 """Request order: a buying price per line.
 
-* Lines carry a unit price, in rupiah, yuan or dollars; each keeps its line
+* Lines carry a unit price, in a currency a PO is written in; each keeps its line
   total, and purchasing's list shows them.
 * A request waiting on the director says what it would cost.
 * Sales and admin never see buying prices, so they can't set one — they
@@ -71,9 +71,9 @@ async def main():
     r = await c.post("/inventory/request-order", headers=d, json={"items": [
         {"name": f"X {TAG}", "qty": 1, "uom": "pcs", "unit_price": -1}]})
     check("never below zero", r.status_code == 400, str(r.status_code))
-    r = await c.post("/inventory/request-order", headers=d, json={"currency": "EUR", "items": [
+    r = await c.post("/inventory/request-order", headers=d, json={"currency": "XYZ", "items": [
         {"name": f"X {TAG}", "qty": 1, "uom": "pcs", "unit_price": 1}]})
-    check("only rupiah, yuan or dollars", r.status_code == 400, str(r.status_code))
+    check("only the currencies a PO is written in", r.status_code == 400, str(r.status_code))
 
     print("\n── ordering a catalogue item ──")
     item = J(await c.post("/inventory", headers=d, json={"sku": "", "name": f"PULLEY {TAG}",

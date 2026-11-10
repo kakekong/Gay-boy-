@@ -37,11 +37,13 @@ _can_add = require(Role.PURCHASING, Role.ADMIN, Role.MANAGER, Role.DIRECTOR)
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 
 class ItemIn(BaseModel):
-    sku: str
+    sku: str = ""
     name: str
     category: str | None = None
     uom: str = "pcs"
     unit_cost: float = 0
+    cost_currency: str = "IDR"
+    cost_fx_rate: float | None = None
     current_stock: float = 0
     reorder_point: float = 0
     reorder_qty: float = 0
@@ -78,6 +80,12 @@ class BulkItemsIn(BaseModel):
 
 
 class ItemPatch(BaseModel):
+    # A new code — a temporary one replaced by the real one. Director only:
+    # it is rewritten on every document that carries the old one.
+    sku: str | None = None
+    # The currency the unit cost is in, and its rupiah rate (non-rupiah).
+    cost_currency: str | None = None
+    cost_fx_rate: float | None = None
     name: str | None = None
     category: str | None = None
     uom: str | None = None
@@ -126,7 +134,9 @@ class FreeOrderIn(BaseModel):
 # costs. Sales quote the sell price and admin run the customer side — neither
 # is shown the buy price anywhere, so neither sets one (write follows read).
 _NO_COST_ROLES = (Role.SALES, Role.ADMIN)
-_ORDER_CURRENCIES = ("IDR", "CNY", "USD")
+# The currencies a purchase order is written in (frontend lib/currency).
+ITEM_CURRENCIES = ("IDR", "USD", "CNY", "EUR", "SGD", "JPY")
+_ORDER_CURRENCIES = ITEM_CURRENCIES
 
 
 def _order_price(user: User, price, currency) -> tuple[float | None, str]:
@@ -758,6 +768,12 @@ async def create_item(payload: ItemIn,
     from app.services.stock_sync import ItemIndex
     if ItemIndex((await db.scalars(select(InventoryItem))).all()).find(payload.sku, None):
         raise HTTPException(status.HTTP_409_CONFLICT, f"SKU {payload.sku} already exists.")
+    payload.cost_currency = (payload.cost_currency or "IDR").upper()
+    if payload.cost_currency not in ITEM_CURRENCIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Currency must be one of {', '.join(ITEM_CURRENCIES)}")
+    if payload.cost_currency == "IDR":
+        payload.cost_fx_rate = None
     from app.services import item_accounts as ia
     try:
         await ia.validate(db, payload.model_dump())
@@ -854,9 +870,35 @@ async def update_item(item_id: UUID,
     r = await db.get(InventoryItem, item_id)
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    renamed = None
+    new_sku = data.pop("sku", None)
+    if new_sku is not None and new_sku.strip() != (r.sku or ""):
+        if Role(_u.role) != Role.DIRECTOR:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Only the director can change a part's code")
+        from app.core.audit import record as audit_record
+        from app.services.sku_codes import rename_item
+        renamed = await rename_item(db, r, new_sku, user=_u)
+        await audit_record(db, actor=_u, action="recode", entity="inventory_item",
+                           entity_id=r.id, before={"sku": renamed.get("was")},
+                           after={"sku": renamed["sku"],
+                                  "documents": len(renamed["documents"])})
+    if "cost_currency" in data:
+        cur = (data["cost_currency"] or "IDR").upper()
+        if cur not in ITEM_CURRENCIES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Currency must be one of {', '.join(ITEM_CURRENCIES)}")
+        data["cost_currency"] = cur
+        if cur == "IDR":
+            data["cost_fx_rate"] = None
+    if data.get("cost_fx_rate") is not None and float(data["cost_fx_rate"]) <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A rate is more than zero")
+    for k, v in data.items():
         setattr(r, k, v)
-    return {"id": str(r.id), "ok": True}
+    await db.flush()
+    return {"id": str(r.id), "ok": True, "sku": r.sku,
+            "documents": renamed["documents"] if renamed else []}
 
 
 @router.delete("/{item_id}", status_code=204)

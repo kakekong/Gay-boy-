@@ -14,6 +14,7 @@ import { InventoryItemForm } from "@/components/forms/InventoryItemForm";
 import { AdjustStockForm } from "@/components/forms/AdjustStockForm";
 import { InventoryMergePanel } from "@/components/InventoryMergePanel";
 import { SkuRecodePanel } from "@/components/SkuRecodePanel";
+import { CURRENCIES, money as fmtMoney } from "@/lib/currency";
 import { useAuthStore } from "@/store/auth";
 import { T, useT } from "@/store/lang";
 
@@ -563,7 +564,6 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
 }
 
 type OrderLine = { name: string; qty: string; uom: string; price: string };
-const ORDER_CUR: Record<string, string> = { IDR: "Rp", CNY: "¥", USD: "$" };
 
 function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost: boolean }) {
   const qc = useQueryClient();
@@ -575,8 +575,7 @@ function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost
   const [lines, setLines] = useState<OrderLine[]>([
     { name: "", qty: "", uom: "pcs", price: "" },
   ]);
-  const money = (n: number) =>
-    `${ORDER_CUR[currency]} ${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n)}`;
+  const money = (n: number) => fmtMoney(n, currency);
   const lineTotal = (l: OrderLine) => (Number(l.qty) || 0) * (Number(l.price) || 0);
   const grand = lines.reduce((s, l) => s + lineTotal(l), 0);
   const [err, setErr] = useState<string | null>(null);
@@ -654,7 +653,7 @@ function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost
               </label>
               {showCost && (
                 <label className="flex-[1.5] block">
-                  {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("Unit price")} ({ORDER_CUR[currency]})</span>}
+                  {i === 0 && <span className="block text-[10px] uppercase text-ink-500 mb-0.5">{T("Unit price")} ({currency})</span>}
                   <input className="input text-right tabular-nums" type="number" min={0} step="any"
                     placeholder={T("Optional")} aria-label={`Unit price, line ${i + 1}`}
                     value={l.price} onChange={(e) => update(i, "price", e.target.value)} />
@@ -682,9 +681,7 @@ function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost
               {T("Prices in")}
               <select className="input py-1 w-auto text-xs" value={currency}
                 aria-label={T("Currency")} onChange={(e) => setCurrency(e.target.value)}>
-                <option value="IDR">Rupiah (Rp)</option>
-                <option value="CNY">Yuan (¥)</option>
-                <option value="USD">Dollar ($)</option>
+                {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
               </select>
             </label>
             <div className="text-sm">

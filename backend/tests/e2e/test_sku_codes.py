@@ -52,8 +52,8 @@ async def main():
     check("a plain number is not a prefixed code", parse("100036") is None)
 
     print("\n── customer codes ──")
-    # Initials no other test customer has: the tag's letters as words.
-    words = " ".join(f"Q{ch}" for ch in TAG)
+    # Initials no other test customer has: a letter per hex digit of the tag.
+    words = " ".join(f"{chr(ord('A') + int(ch, 16))}X" for ch in TAG)
     ca = J(await c.post("/customers", headers=s1, json={"company_name": f"PT {words} TIMBER", "industry": "mining"}))
     cb = J(await c.post("/customers", headers=s1, json={"company_name": f"CV {words} TRADING", "industry": "mining"}))
     base = initials(f"PT {words} TIMBER")
@@ -131,6 +131,21 @@ async def main():
     pv = J(await c.post("/inventory/recode/preview", headers=d, json={"customer_ids": [ca["id"]]}))
     check("the documents it rewrites are named", any(x["number"] == pr2["number"] for x in pv["documents"])
           and any(x["number"] == pr1["number"] for x in pv["documents"]), str(pv["documents"])[:200])
+    # Another customer's part already holding one of the new numbers blocks it.
+    async with SessionLocal() as s:
+        stray = InventoryItem(sku=f"{code}-0004", name=f"STRAY {TAG}", uom="pcs",
+                              customer_id=uuid.UUID(cb["id"]))
+        s.add(stray); await s.commit(); stray_id = str(stray.id)
+    plan = J(await c.post("/inventory/recode/preview", headers=d, json={"customer_ids": [ca["id"]]}))
+    g = next((x for x in plan["groups"] if x["customer_id"] == ca["id"]), {})
+    check("a number held by a part outside the series is flagged",
+          [x["code"] for x in g.get("conflicts", [])] == [f"{code}-0004"], str(g.get("conflicts")))
+    r = await c.post("/inventory/recode", headers=d, json={"customer_ids": [ca["id"]]})
+    check("...and refused, saying which part — nothing half-done", r.status_code == 409
+          and f"STRAY {TAG}" in str(J(r)), f"{r.status_code} {J(r)}"[:200])
+    r = await c.patch(f"/inventory/{stray_id}", headers=d, json={"sku": f"STK{TAG}-1"})
+    check("give that part another code (the director edits it)", r.status_code == 200,
+          f"{r.status_code} {J(r)}"[:160])
     r = await c.post("/inventory/recode", headers=d, json={"customer_ids": [ca["id"]]})
     check("renumbered", r.status_code == 200 and J(r)["renamed"] == 4, f"{r.status_code} {J(r)}")
     async with SessionLocal() as s:
