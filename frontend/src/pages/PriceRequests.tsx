@@ -14,6 +14,9 @@ import { fetchAllCustomers } from "@/lib/fetchAll";
 import { UnitSelect } from "@/components/UnitSelect";
 import { ProductSuggestInput, type CatalogueHit } from "@/components/ProductSuggestInput";
 import { LineCode } from "@/components/LineCode";
+import { CURRENCIES } from "@/lib/currency";
+
+const COST_CURRENCIES = CURRENCIES.map((c) => c.code);
 import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
 import { useAuthStore } from "@/store/auth";
@@ -644,7 +647,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     onError: onErr,
   });
   const [draft, setDraft] = useState<
-    Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string }>
+    Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string; costCurrency?: string; costRate?: number }>
   >({});
   const [notes, setNotes] = useState("");
   // Repricing keeps its own working copy. On a request sitting at
@@ -652,7 +655,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   // time, and sharing one draft between them would let a half-finished
   // correction leak into an approval.
   const [reprice, setReprice] = useState<
-    Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string }> | null
+    Record<number, { cost?: number; sell?: number; costBasis?: string; sellBasis?: string; costCurrency?: string; costRate?: number }> | null
   >(null);
   const [repriceWhy, setRepriceWhy] = useState("");
   const [repriceDone, setRepriceDone] = useState<any | null>(null);
@@ -770,6 +773,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   const price = useMutation(mut(() => api.post(`/price-requests/${id}/price`, {
     items: Object.entries(draft).map(([ln, v]) => ({
       line_no: Number(ln), cost_price: v.cost ?? 0, basis: v.costBasis ?? "unit",
+      cost_currency: v.costCurrency ?? "IDR", cost_fx_rate: v.costRate ?? null,
     })),
     notes: notes || undefined,
   })));
@@ -777,6 +781,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     items: Object.entries(draft).map(([ln, v]) => ({
       line_no: Number(ln), sell_price: v.sell ?? 0, basis: v.sellBasis ?? "unit",
       cost_price: v.cost, cost_basis: v.costBasis ?? "unit",
+      cost_currency: v.costCurrency ?? "IDR", cost_fx_rate: v.costRate ?? null,
     })),
     notes: notes || undefined,
   })));
@@ -797,6 +802,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
       items: Object.entries(reprice ?? {}).map(([ln, v]) => ({
         line_no: Number(ln),
         cost_price: v.cost, cost_basis: v.costBasis ?? "unit",
+        cost_currency: v.costCurrency ?? "IDR", cost_fx_rate: v.costRate ?? null,
         sell_price: v.sell, sell_basis: v.sellBasis ?? "unit",
       })),
       reason: repriceWhy.trim(),
@@ -849,20 +855,46 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
       : which === "costrev" ? setCostRev : setDraft;
     // One cell renderer over three books that hold different halves: the
     // cost-revision book has no sell side because purchasing never sets one.
-    const v: { cost?: number; sell?: number; costBasis?: string; sellBasis?: string } =
+    const v: { cost?: number; sell?: number; costBasis?: string; sellBasis?: string;
+               costCurrency?: string; costRate?: number } =
       (book as any)[it.line_no] ?? {};
+    // A cost may be typed in the supplier's currency with its rupiah rate
+    // (not on purchasing's revision, which carries rupiah only).
+    const withCurrency = kind === "cost" && which !== "costrev";
+    const cur = withCurrency ? (v.costCurrency ?? it.cost_currency ?? "IDR") : "IDR";
+    const rate = v.costRate ?? it.cost_fx_rate ?? undefined;
     const amount = kind === "cost" ? v.cost : v.sell;
     const basis = (kind === "cost" ? v.costBasis : v.sellBasis) ?? "unit";
     const qty = Number(it.qty) || 0;
     const unit = basis === "total" ? (qty ? Number(amount || 0) / qty : 0) : Number(amount || 0);
     const total = basis === "total" ? Number(amount || 0) : Number(amount || 0) * qty;
+    // Writing a cost carries the line's currency and rate with it, so a figure
+    // retyped on a yuan line stays yuan unless the currency is changed.
     const setVal = (patch: any) =>
-      write((d: any) => ({ ...(d ?? {}), [it.line_no]: { ...(d ?? {})[it.line_no], ...patch } }));
+      write((d: any) => {
+        const prev = (d ?? {})[it.line_no] ?? {};
+        const keep = withCurrency
+          ? { costCurrency: prev.costCurrency ?? it.cost_currency ?? "IDR",
+              costRate: prev.costRate ?? it.cost_fx_rate ?? undefined } : {};
+        return { ...(d ?? {}), [it.line_no]: { ...keep, ...prev, ...patch } };
+      });
+    const typed = kind === "cost"
+      ? (withCurrency && it.cost_original != null ? it.cost_original : it.cost_price)
+      : it.sell_price;
+    const asIdr = (n: number) => (cur === "IDR" ? n : n * Number(rate || 0));
     return (
       <div className="flex flex-col items-end gap-1">
         <div className="flex items-center gap-1">
+          {withCurrency && (
+            <select className="input w-[64px] px-1 text-xs" value={cur}
+              aria-label={t(`Cost currency, line ${it.line_no}`, `Mata uang biaya, baris ${it.line_no}`)}
+              onChange={(e) => setVal({ costCurrency: e.target.value,
+                                        ...(v.cost == null ? { cost: Number(typed ?? 0) } : {}) })}>
+              {COST_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
           <input type="number" className="input w-28 text-right"
-            defaultValue={(kind === "cost" ? it.cost_price : it.sell_price) ?? ""}
+            defaultValue={typed ?? ""}
             onChange={(e) =>
               setVal(kind === "cost" ? { cost: Number(e.target.value) } : { sell: Number(e.target.value) })} />
           <select className="input w-[68px] px-1 text-xs" value={basis}
@@ -872,11 +904,24 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             <option value="total">{t("total", "total")}</option>
           </select>
         </div>
+        {withCurrency && cur !== "IDR" && (
+          <label className="flex items-center gap-1 text-[10px] text-ink-500">
+            Rp / 1 {cur}
+            <input type="number" min={0} step="any" className="input w-24 text-right py-1 text-xs"
+              aria-label={t(`Rate, line ${it.line_no}`, `Kurs, baris ${it.line_no}`)}
+              defaultValue={rate ?? ""}
+              onChange={(e) => setVal({ costRate: Number(e.target.value),
+                                        ...(v.cost == null ? { cost: Number(typed ?? 0) } : {}) })} />
+          </label>
+        )}
         {amount != null && qty > 0 && (
           <span className="text-[10px] muted tabular-nums">
-            {basis === "total"
-              ? `${idr(unit)} ${t("/unit", "/satuan")}`
-              : `= ${idr(total)} ${t("total", "total")}`}
+            {cur !== "IDR"
+              ? (rate ? `= ${idr(asIdr(unit))} ${t("/unit", "/satuan")} · ${idr(asIdr(total))} ${t("total", "total")}`
+                      : t("rate needed", "kurs diperlukan"))
+              : basis === "total"
+                ? `${idr(unit)} ${t("/unit", "/satuan")}`
+                : `= ${idr(total)} ${t("total", "total")}`}
           </span>
         )}
       </div>
@@ -1273,7 +1318,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
             {(pr.items ?? []).map((it: any) => (
               <tr key={it.line_no} className="border-t border-ink-100">
                 <td className="td muted">{it.line_no}</td>
-                <td className="td font-mono text-xs">
+                <td className="td font-mono text-xs whitespace-nowrap">
                   {it.sku || <span className="muted">{t("on submit", "saat dikirim")}</span>}
                 </td>
                 <td className="td">
@@ -1305,7 +1350,15 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                       : costRevising ? editCell(it, "cost", "costrev")
                       : canCost && (isPurchasing || isDirector)
                         ? editCell(it, "cost")
-                        : readCell(it.cost_price, it.cost_total, it.qty)}
+                        : (<>
+                            {readCell(it.cost_price, it.cost_total, it.qty)}
+                            {it.cost_currency && it.cost_original != null && (
+                              <div className="text-[10px] muted tabular-nums text-right">
+                                {it.cost_currency} {Number(it.cost_original).toLocaleString("en-US", { maximumFractionDigits: 4 })}
+                                {" × "}{Number(it.cost_fx_rate).toLocaleString("id-ID")}
+                              </div>
+                            )}
+                          </>)}
                   </td>
                 )}
                 {"sell_price" in it && (

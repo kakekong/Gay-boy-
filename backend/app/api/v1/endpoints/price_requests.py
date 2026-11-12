@@ -144,6 +144,9 @@ class CostLine(BaseModel):
     cost_price: float = 0
     # Whether cost_price is entered "per unit" or as the line "total".
     basis: str = "unit"
+    # The currency the cost is typed in, and its rupiah rate (non-rupiah).
+    cost_currency: str | None = None
+    cost_fx_rate: float | None = None
 
 
 class PricingIn(BaseModel):
@@ -157,6 +160,8 @@ class SellLine(BaseModel):
     basis: str = "unit"               # basis for sell_price ("unit" | "total")
     cost_price: float | None = None   # director may also correct the cost
     cost_basis: str = "unit"          # basis for the optional cost correction
+    cost_currency: str | None = None  # ...in this currency
+    cost_fx_rate: float | None = None # ...at this many rupiah to one
 
 
 class ApproveIn(BaseModel):
@@ -179,6 +184,8 @@ class RepriceLine(BaseModel):
     line_no: int
     cost_price: float | None = None
     cost_basis: str = "unit"
+    cost_currency: str | None = None
+    cost_fx_rate: float | None = None
     sell_price: float | None = None
     sell_basis: str = "unit"
 
@@ -202,6 +209,40 @@ def _to_unit(amount: float | None, basis: str | None, qty: float) -> float:
     if (basis or "unit") == "total" and qty:
         return amt / float(qty)
     return amt
+
+
+# The currencies a cost may be typed in — the ones a PO is written in.
+COST_CURRENCIES = ("IDR", "USD", "CNY", "EUR", "SGD", "JPY")
+
+
+def _set_cost(it: dict, amount, basis, currency, rate) -> float:
+    """Write a typed cost onto a line, returning the rupiah unit cost.
+
+    A cost may be typed in the currency the supplier quoted — yuan, dollars —
+    with its rupiah rate. The line keeps that figure and the rate beside it,
+    and `cost_price` stays the rupiah unit cost every margin, quotation and
+    report reads. Rupiah needs no rate."""
+    qty = float(it.get("qty") or 0)
+    unit = _to_unit(amount, basis, qty)
+    cur = (currency or "IDR").strip().upper()
+    if cur not in COST_CURRENCIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"A cost is in one of {', '.join(COST_CURRENCIES)}")
+    if cur == "IDR":
+        for k in ("cost_currency", "cost_fx_rate", "cost_original"):
+            it.pop(k, None)
+        it["cost_price"] = unit
+    else:
+        r = float(rate or 0)
+        if r <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Say how many rupiah one {cur} is — the rate.")
+        it["cost_currency"] = cur
+        it["cost_fx_rate"] = r
+        it["cost_original"] = round(unit, 6)
+        it["cost_price"] = round(unit * r, 2)
+    it["cost_basis"] = basis or "unit"
+    return it["cost_price"]
 
 
 def _can_see_cost(role: Role) -> bool:
@@ -262,6 +303,15 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
             # lines legitimately name different ones, so this is per line and
             # not a property of the request.
             row["cost_supplier"] = it.get("cost_supplier")
+            # Typed in another currency: the figure and its rate — shown only
+            # while they still make the rupiah cost (a later rupiah cost,
+            # from a supplier quote say, supersedes them).
+            cur, rate, orig = it.get("cost_currency"), it.get("cost_fx_rate"), it.get("cost_original")
+            if (cur and rate and orig is not None and it.get("cost_price") is not None
+                    and abs(float(orig) * float(rate) - float(it["cost_price"])) < 0.02):
+                row["cost_currency"] = cur
+                row["cost_fx_rate"] = float(rate)
+                row["cost_original"] = float(orig)
         if see_sell:
             row["sell_price"] = it.get("sell_price")
             row["sell_basis"] = it.get("sell_basis") or "unit"
@@ -870,9 +920,7 @@ async def fill_pricing(
     for it in items:
         c = costs.get(it.get("line_no"))
         if c is not None:
-            qty = float(it.get("qty") or 0)
-            it["cost_price"] = _to_unit(c.cost_price, c.basis, qty)
-            it["cost_basis"] = c.basis or "unit"
+            _set_cost(it, c.cost_price, c.basis, c.cost_currency, c.cost_fx_rate)
     pr.items = items
     pr.priced_by = user.id
     pr.priced_at = datetime.now(UTC)
@@ -910,8 +958,7 @@ async def approve_price_request(
             it["sell_price"] = _to_unit(s.sell_price, s.basis, qty)
             it["sell_basis"] = s.basis or "unit"
             if s.cost_price is not None:
-                it["cost_price"] = _to_unit(s.cost_price, s.cost_basis, qty)
-                it["cost_basis"] = s.cost_basis or "unit"
+                _set_cost(it, s.cost_price, s.cost_basis, s.cost_currency, s.cost_fx_rate)
     pr.items = items
     pr.approved_by = user.id
     pr.approved_at = datetime.now(UTC)
@@ -1023,11 +1070,16 @@ async def reprice_price_request(
         qty = float(it.get("qty") or 0)
         entry: dict = {"line_no": it["line_no"], "description": it.get("description")}
         if r.cost_price is not None:
-            new_cost = _to_unit(r.cost_price, r.cost_basis, qty)
-            if new_cost != (it.get("cost_price") or None):
+            was = (it.get("cost_price"), it.get("cost_currency"), it.get("cost_fx_rate"))
+            trial = dict(it)
+            new_cost = _set_cost(trial, r.cost_price, r.cost_basis, r.cost_currency, r.cost_fx_rate)
+            if (new_cost, trial.get("cost_currency"), trial.get("cost_fx_rate")) != was:
                 entry["cost_from"] = it.get("cost_price")
                 entry["cost_to"] = new_cost
-                it["cost_price"] = new_cost
+                if trial.get("cost_currency"):
+                    entry["cost_typed"] = (f"{trial['cost_currency']} {trial['cost_original']:g}"
+                                           f" × {trial['cost_fx_rate']:g}")
+                it.clear(); it.update(trial)
                 it["cost_basis"] = "unit"
         if r.sell_price is not None:
             new_sell = _to_unit(r.sell_price, r.sell_basis, qty)
