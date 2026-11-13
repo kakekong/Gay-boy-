@@ -1615,6 +1615,90 @@ async def change_currency(
     return out
 
 
+async def _undo_on_price_requests(db: AsyncSession, spr, user: User, reason: str | None,
+                                  spr_lines: list[dict] | None = None) -> tuple[list, list]:
+    """What a quote (or some of its lines) leaves on the price requests it
+    costed, undone. Returns (unlinked, withdrawn).
+
+    Lines whose cost came from it lose the link — the supplier and the quoted
+    currency — and keep their figure until the right quote is applied or the
+    director re-costs them; the request is noted to say so. A cost revision
+    the quote queued for the director is withdrawn: it proposed a price that
+    is no longer on offer. `spr_lines` limits it to those quote lines (removed
+    ones); None means the whole quote.
+    """
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+
+    supplier = await db.get(Supplier, spr.supplier_id)
+    why = (reason or "").strip()
+    only: set | None = None
+    if spr_lines is not None:
+        only = set()
+        for ln in spr_lines:
+            src = ln.get("source_pr_id") or (str(spr.price_request_id) if spr.price_request_id else None)
+            if src:
+                only.add((str(src), int(ln.get("source_line_no") or ln.get("line_no") or 0)))
+    pr_ids = {str(x) for x in (spr.source_pr_ids or [])}
+    if spr.price_request_id:
+        pr_ids.add(str(spr.price_request_id))
+    unlinked: list[dict] = []
+    withdrawn: list[dict] = []
+    for pid in pr_ids:
+        pr = await db.get(PriceRequest, UUID(pid))
+        if not pr:
+            continue
+        items = [dict(it) for it in (pr.items or [])]
+        lines = []
+        for it in items:
+            n = int(it.get("line_no") or 0)
+            if it.get("cost_source") == spr.number and (only is None or (pid, n) in only):
+                for k in ("cost_source", "cost_supplier", "cost_currency",
+                          "cost_fx_rate", "cost_original"):
+                    it.pop(k, None)
+                lines.append(n)
+        revs = [dict(r) for r in (pr.revisions or [])]
+        pulled = False
+        for r in revs:
+            if r.get("status") != "pending" or not (r.get("reason") or "").startswith(f"Cost from {spr.number}"):
+                continue
+            r["status"] = "withdrawn"
+            r["decided_at"] = datetime.now(UTC).isoformat()
+            r["decision_notes"] = f"{spr.number} changed: " + ("deleted" if only is None else "lines removed")
+            # Its card in the director's approvals: by the id it kept, else by
+            # the request and revision number it was filed for.
+            req = (await db.get(ApprovalRequest, UUID(r["approval_request_id"]))
+                   if r.get("approval_request_id") else None)
+            if req is None:
+                for cand in (await db.scalars(select(ApprovalRequest).where(
+                        ApprovalRequest.target_type == "price_request_revision",
+                        ApprovalRequest.target_id == pr.id,
+                        ApprovalRequest.status == ApprovalStatus.PENDING.value))).all():
+                    if int((cand.payload or {}).get("revision_n") or 0) == int(r.get("n") or 0):
+                        req = cand
+                        break
+            if req and req.status == ApprovalStatus.PENDING.value:
+                req.status = ApprovalStatus.REJECTED.value
+                req.decided_by = user.id
+                req.decided_at = datetime.now(UTC)
+                req.decision_notes = f"Withdrawn: {r['decision_notes']}"
+            withdrawn.append({"price_request": pr.number, "revision": r.get("n")})
+            pulled = True
+        if lines or pulled:
+            pr.items = items
+            pr.revisions = revs
+            what = "was deleted" if only is None else "had lines removed — the supplier can't supply them"
+            pr.notes = ((pr.notes or "") + f"\n[director] {spr.number}"
+                        + (f" ({supplier.name})" if supplier else "") + f" {what}"
+                        + (f": {why}" if why else "")
+                        + (f" — line {', '.join(map(str, lines))} took its cost from it; "
+                           "apply the right quote or re-cost it" if lines else "")
+                        + (" — the cost revision it sent was withdrawn; apply it again for "
+                           "what is still on offer" if pulled else "")).strip()
+            if lines:
+                unlinked.append({"price_request": pr.number, "lines": lines})
+    return unlinked, withdrawn
+
+
 @router.delete("/{spr_id}")
 async def delete_request(
     spr_id: UUID,
@@ -1626,16 +1710,10 @@ async def delete_request(
 
     A draft, by whoever can open it. One already sent, quoted, applied or
     closed only by the director — a quote applied with the wrong supplier or
-    price is the case: it has to go, so the right one can be applied.
-
-    What it leaves behind is undone too. Price request lines whose cost came
-    from it lose the link (the supplier and the quoted currency), keep the
-    number until a correct quote is applied or the director re-costs them,
-    and the request is noted to say so. A cost revision it queued for the
-    director is withdrawn. The audit log keeps the whole request.
+    price is the case: it has to go, so the right one can be applied. What it
+    left on the price requests is undone (`_undo_on_price_requests`), and the
+    audit log keeps the whole request.
     """
-    from app.models.approval import ApprovalRequest, ApprovalStatus
-
     spr = await _load(spr_id, db)
     if spr.status != "draft" and Role(user.role) != Role.DIRECTOR:
         raise HTTPException(
@@ -1644,61 +1722,9 @@ async def delete_request(
             "can delete it. Close it instead.",
         )
     supplier = await db.get(Supplier, spr.supplier_id)
-    unlinked: list[dict] = []
-    withdrawn: list[dict] = []
+    unlinked, withdrawn = ([], [])
     if spr.status != "draft":
-        why = (reason or "").strip()
-        pr_ids = {str(x) for x in (spr.source_pr_ids or [])}
-        if spr.price_request_id:
-            pr_ids.add(str(spr.price_request_id))
-        for pid in pr_ids:
-            pr = await db.get(PriceRequest, UUID(pid))
-            if not pr:
-                continue
-            items = [dict(it) for it in (pr.items or [])]
-            lines = []
-            for it in items:
-                if it.get("cost_source") == spr.number:
-                    for k in ("cost_source", "cost_supplier", "cost_currency",
-                              "cost_fx_rate", "cost_original"):
-                        it.pop(k, None)
-                    lines.append(int(it.get("line_no") or 0))
-            # A revision this quote filed is a proposal of the wrong price.
-            revs = [dict(r) for r in (pr.revisions or [])]
-            for r in revs:
-                if r.get("status") == "pending" and (r.get("reason") or "").startswith(f"Cost from {spr.number}"):
-                    r["status"] = "withdrawn"
-                    r["decided_at"] = datetime.now(UTC).isoformat()
-                    r["decision_notes"] = f"{spr.number} was deleted"
-                    # Its card in the director's approvals: by the id it kept,
-                    # else by the request and revision number it was filed for.
-                    req = (await db.get(ApprovalRequest, UUID(r["approval_request_id"]))
-                           if r.get("approval_request_id") else None)
-                    if req is None:
-                        for cand in (await db.scalars(select(ApprovalRequest).where(
-                                ApprovalRequest.target_type == "price_request_revision",
-                                ApprovalRequest.target_id == pr.id,
-                                ApprovalRequest.status == ApprovalStatus.PENDING.value))).all():
-                            if int((cand.payload or {}).get("revision_n") or 0) == int(r.get("n") or 0):
-                                req = cand
-                                break
-                    if req and req.status == ApprovalStatus.PENDING.value:
-                        req.status = ApprovalStatus.REJECTED.value
-                        req.decided_by = user.id
-                        req.decided_at = datetime.now(UTC)
-                        req.decision_notes = f"Withdrawn: {spr.number} was deleted"
-                    withdrawn.append({"price_request": pr.number, "revision": r.get("n")})
-            if lines or any(w["price_request"] == pr.number for w in withdrawn):
-                pr.items = items
-                pr.revisions = revs
-                pr.notes = ((pr.notes or "") + f"\n[director] {spr.number}"
-                            + (f" ({supplier.name})" if supplier else "")
-                            + " was deleted"
-                            + (f": {why}" if why else "")
-                            + (f" — line {', '.join(map(str, lines))} took its cost from it; "
-                               "apply the right quote or re-cost it" if lines else "")).strip()
-                if lines:
-                    unlinked.append({"price_request": pr.number, "lines": lines})
+        unlinked, withdrawn = await _undo_on_price_requests(db, spr, user, reason)
     await audit_record(db, actor=user, action="delete",
                        entity="supplier_price_request", entity_id=spr.id,
                        before={"number": spr.number, "status": spr.status,
@@ -1715,6 +1741,66 @@ async def delete_request(
         from fastapi import Response
         return Response(status_code=204)
     return {"deleted": spr.number, "unlinked": unlinked, "withdrawn": withdrawn}
+
+
+class RemoveLinesIn(BaseModel):
+    line_nos: list[int]
+    reason: str | None = None
+
+
+@router.post("/{spr_id}/remove-lines")
+async def remove_lines(
+    spr_id: UUID,
+    payload: RemoveLinesIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Take lines off a request the supplier turned out not to supply —
+    after it was quoted, applied, even closed. The director's.
+
+    The rest of the quote stands. What the removed lines left on the price
+    requests is undone the same way a deleted quote's is: their costs lose
+    the link and are noted for re-costing, and a revision the quote queued is
+    withdrawn (apply the quote again for what is still on offer). Removing
+    every line is deleting the request — use Delete for that.
+    """
+    spr = await _load(spr_id, db)
+    if spr.status != "draft" and Role(user.role) != Role.DIRECTOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only the director can take lines off a request already sent")
+    want = {int(n) for n in payload.line_nos}
+    if not want:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick the lines to remove")
+    items = [dict(i) for i in (spr.items or [])]
+    gone = [i for i in items if int(i.get("line_no") or 0) in want]
+    if len(gone) != len(want):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "This request has no such line — refresh and try again")
+    keep = [i for i in items if int(i.get("line_no") or 0) not in want]
+    if not keep:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "That would remove every line — delete the request instead")
+    unlinked, withdrawn = ([], [])
+    if spr.status != "draft":
+        unlinked, withdrawn = await _undo_on_price_requests(db, spr, user, payload.reason, gone)
+    spr.items = keep
+    # The jobs it still asks about, now that some lines are gone.
+    srcs = {str(i["source_pr_id"]) for i in keep if i.get("source_pr_id")}
+    if spr.source_pr_ids:
+        spr.source_pr_ids = sorted(srcs) or ([str(spr.price_request_id)] if spr.price_request_id else [])
+    why = (payload.reason or "").strip()
+    spr.notes = ((spr.notes or "") + f"\n[director] removed "
+                 + "; ".join(f"#{i.get('line_no')} {i.get('description')}" for i in gone)
+                 + (f" — {why}" if why else "")).strip()
+    await audit_record(db, actor=user, action="remove_lines",
+                       entity="supplier_price_request", entity_id=spr.id,
+                       before={"lines": gone},
+                       after={"reason": why or None, "unlinked": unlinked, "withdrawn": withdrawn})
+    await db.flush()
+    out = (await _decorate(db, [spr]))[0]
+    out["unlinked"] = unlinked
+    out["withdrawn"] = withdrawn
+    return out
 
 
 @router.get("/for-price-request/{pr_id}/compare")

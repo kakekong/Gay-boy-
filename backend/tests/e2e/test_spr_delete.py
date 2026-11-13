@@ -7,6 +7,9 @@
 * On a settled request, the cost revision a quote queued for the director
   is withdrawn with it.
 * A draft is still anyone's to throw away.
+* Lines the supplier can't supply come off after approval: the rest of the
+  quote stands, the costs taken from the removed lines lose the link, a
+  queued revision is withdrawn. Not purchasing's; never every line.
 """
 import asyncio, os, sys, uuid
 os.environ.update(DATABASE_URL="postgresql+asyncpg://postgres@127.0.0.1:55432/transmisi_test",
@@ -100,6 +103,34 @@ async def main():
     dr = J(await c.post(BASE, headers=pur, json={"supplier_ids": [right], "price_request_id": pr["id"]}))[0]
     r = await c.delete(f"{BASE}/{dr['id']}", headers=pur)
     check("a draft is still anyone's to throw away", r.status_code == 204, str(r.status_code))
+
+    print("\n── the supplier can't supply 2 of 3 ──")
+    pr3 = J(await c.post("/price-requests", headers=s1, json={"customer_id": cust, "items": [
+        {"description": f"GEAR {TAG}", "qty": 1, "uom": "pcs"},
+        {"description": f"SHAFT {TAG}", "qty": 1, "uom": "pcs"},
+        {"description": f"BUSH {TAG}", "qty": 1, "uom": "pcs"}]}))
+    await c.post(f"/price-requests/{pr3['id']}/submit", headers=s1)
+    q3 = J(await c.post(BASE, headers=pur, json={"supplier_ids": [right], "price_request_id": pr3["id"]}))[0]
+    await c.post(f"{BASE}/{q3['id']}/quote", headers=pur, json={"items": [
+        {"line_no": 1, "quoted_price": 10_000}, {"line_no": 2, "quoted_price": 20_000},
+        {"line_no": 3, "quoted_price": 30_000}]})
+    await c.post(f"{BASE}/{q3['id']}/apply", headers=pur)
+    await c.post(f"/price-requests/{pr3['id']}/approve", headers=d, json={"items": [
+        {"line_no": n, "sell_price": 50_000} for n in (1, 2, 3)]})
+    r = await c.post(f"{BASE}/{q3['id']}/remove-lines", headers=pur, json={"line_nos": [2, 3]})
+    check("purchasing can't take lines off once it has gone out", r.status_code == 403, str(r.status_code))
+    r = await c.post(f"{BASE}/{q3['id']}/remove-lines", headers=d, json={"line_nos": [1, 2, 3]})
+    check("...nor every line — that's a delete", r.status_code == 409, str(r.status_code))
+    r = await c.post(f"{BASE}/{q3['id']}/remove-lines", headers=d,
+                     json={"line_nos": [2, 3], "reason": "supplier can't supply"})
+    out = J(r)
+    check("the director takes lines 2 and 3 off the approved quote",
+          r.status_code == 200 and [i["line_no"] for i in out.get("items", [])] == [1]
+          and out.get("unlinked") == [{"price_request": pr3["number"], "lines": [2, 3]}], f"{r.status_code} {str(out)[:200]}")
+    L = {i["line_no"]: i for i in J(await c.get(f"/price-requests/{pr3['id']}", headers=d))["items"]}
+    check("...line 1 still costed from it, 2 and 3 no longer",
+          L[1].get("cost_source") == q3["number"] and not L[2].get("cost_source") and not L[3].get("cost_source")
+          and L[2].get("cost_price") == 20_000, str({k: v.get("cost_source") for k, v in L.items()}))
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

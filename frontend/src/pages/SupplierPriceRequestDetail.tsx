@@ -360,6 +360,29 @@ export default function SupplierPriceRequestDetailPage() {
     onError: onErr,
   });
 
+  // The director takes off lines the supplier can't supply, after the fact.
+  const removeLine = useMutation({
+    mutationFn: (v: { line: number; reason?: string }) =>
+      api.post(`/purchasing/price-requests/${id}/remove-lines`,
+               { line_nos: [v.line], reason: v.reason || null }),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ["supplier-price-requests"] });
+      qc.invalidateQueries({ queryKey: ["price-requests"] });
+      refresh();
+      const un = (res?.data?.unlinked ?? []) as { price_request: string; lines: number[] }[];
+      const wd = (res?.data?.withdrawn ?? []) as { price_request: string }[];
+      if (un.length || wd.length) {
+        window.alert([
+          ...un.map((u) => t(`${u.price_request}: line ${u.lines.join(", ")} took its cost from the removed line — apply the right quote or re-cost it.`,
+                             `${u.price_request}: baris ${u.lines.join(", ")} memakai biaya dari baris yang dihapus — terapkan penawaran yang benar atau ubah biayanya.`)),
+          ...wd.map((w) => t(`${w.price_request}: the cost revision this quote sent you was withdrawn — apply it again for what is still on offer.`,
+                             `${w.price_request}: revisi biaya dari penawaran ini ditarik — terapkan lagi untuk yang masih tersedia.`)),
+        ].join("\n"));
+      }
+    },
+    onError: onErr,
+  });
+
   const editLine = (lineNo: number, patch: Partial<Line>) =>
     setForm((f) => ({
       ...f,
@@ -402,6 +425,9 @@ export default function SupplierPriceRequestDetailPage() {
   // two Save buttons on one screen is an invitation to press the wrong one,
   // and a price typed against a line that is being reworded is a half-thought.
   const quoting = editable && !editing;
+  // Lines the supplier turned out not to supply come off — the director's,
+  // once the request has gone out (a draft is simply edited).
+  const canRemoveLines = isDirector && r.status !== "draft" && !editing;
   const everyLineAnswered = r.lines_total > 0 && r.lines_quoted === r.lines_total;
 
   return (
@@ -818,6 +844,7 @@ export default function SupplierPriceRequestDetailPage() {
               <th className="th text-right">{t("Their price", "Harga mereka")}</th>
               <th className="th text-right">{t("Lead days", "Hari kirim")}</th>
               <th className="th text-right">{t("Line total", "Total baris")}</th>
+              {canRemoveLines && <th className="th w-10" />}
             </tr>
           </thead>
           <tbody>
@@ -901,6 +928,25 @@ export default function SupplierPriceRequestDetailPage() {
                   <td className="td text-right tabular-nums font-medium">
                     {perUnit ? money(perUnit * (it.qty || 0), currency) : "—"}
                   </td>
+                  {canRemoveLines && (
+                    <td className="td text-right">
+                      <button className="btn-ghost text-red-600 px-1.5 py-1 disabled:opacity-30"
+                        disabled={removeLine.isPending || r.items.length <= 1}
+                        title={r.items.length <= 1
+                          ? t("The only line — delete the request instead", "Satu-satunya baris — hapus permintaannya saja")
+                          : t("The supplier can't supply this — remove it", "Pemasok tidak bisa memasok ini — hapus barisnya")}
+                        aria-label={`${t("Remove line", "Hapus baris")} ${it.line_no}`}
+                        onClick={() => {
+                          const why = window.prompt(t(
+                            `Remove line ${it.line_no} (${it.description})? A cost taken from it on the price request loses the link and keeps its figure until re-costed. Why?`,
+                            `Hapus baris ${it.line_no} (${it.description})? Biaya yang diambil darinya kehilangan tautan dan tetap angkanya sampai diubah. Mengapa?`),
+                            t("Supplier can't supply it", "Pemasok tidak bisa memasok"));
+                          if (why !== null) removeLine.mutate({ line: it.line_no, reason: why.trim() });
+                        }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}
