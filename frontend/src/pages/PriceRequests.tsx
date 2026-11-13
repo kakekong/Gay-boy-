@@ -659,6 +659,8 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
   >(null);
   const [repriceWhy, setRepriceWhy] = useState("");
   const [repriceDone, setRepriceDone] = useState<any | null>(null);
+  // What a cost change did to the supplier quotes behind it.
+  const [sprSync, setSprSync] = useState<any[] | null>(null);
   // Purchasing correcting a cost on a request that has already been approved.
   // Same inline cells as the director's reprice, but it files a revision
   // instead of applying one — the director decides, every time.
@@ -777,14 +779,15 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
     })),
     notes: notes || undefined,
   })));
-  const approve = useMutation(mut(() => api.post(`/price-requests/${id}/approve`, {
+  const approve = useMutation({ ...mut(() => api.post(`/price-requests/${id}/approve`, {
     items: Object.entries(draft).map(([ln, v]) => ({
       line_no: Number(ln), sell_price: v.sell ?? 0, basis: v.sellBasis ?? "unit",
       cost_price: v.cost, cost_basis: v.costBasis ?? "unit",
       cost_currency: v.costCurrency ?? "IDR", cost_fx_rate: v.costRate ?? null,
     })),
     notes: notes || undefined,
-  })));
+  })),
+    onSuccess: (r: any) => { refresh(); setSprSync(r?.data?.supplier_quotes ?? null); } });
   const reject = useMutation(mut(() => api.post(`/price-requests/${id}/reject`, { notes: notes || undefined })));
 
   // Anyone who can open the request can add to its notes, at any stage.
@@ -808,7 +811,7 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
       reason: repriceWhy.trim(),
     }).then((r) => r.data),
     onSuccess: (d) => {
-      setReprice(null); setRepriceWhy(""); setRepriceDone(d);
+      setReprice(null); setRepriceWhy(""); setRepriceDone(d); setSprSync(d?.supplier_quotes ?? null);
       qc.invalidateQueries({ queryKey: ["quotations"] });
       refresh();
     },
@@ -1446,6 +1449,22 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                         `Penawaran ${repriceDone.quotation.number} masih draf dan kini sudah sesuai.`)
               : " " + t(`Quotation ${repriceDone.quotation.number} has already gone out (${repriceDone.quotation.status}) and was left as it is — issue a revision if the customer needs the new price.`,
                         `Penawaran ${repriceDone.quotation.number} sudah keluar (${repriceDone.quotation.status}) dan dibiarkan — terbitkan revisi bila pelanggan perlu harga baru.`))}
+          </div>
+        )}
+
+        {sprSync && sprSync.length > 0 && (
+          <div className="mt-3 rounded-lg border border-ink-200 bg-ink-50 px-3 py-2 text-xs text-ink-700 space-y-0.5">
+            {sprSync.map((r: any, k: number) => (
+              <div key={k}>
+                {t(`Line ${r.line_no}: `, `Baris ${r.line_no}: `)}
+                {r.to != null
+                  ? t(`supplier quote ${r.spr} now says ${r.currency} ${Number(r.to).toLocaleString("en-US", { maximumFractionDigits: 4 })}.`,
+                      `penawaran supplier ${r.spr} kini ${r.currency} ${Number(r.to).toLocaleString("en-US", { maximumFractionDigits: 4 })}.`)
+                  : r.unchanged
+                    ? t(`supplier quote ${r.spr} already agrees.`, `penawaran supplier ${r.spr} sudah sesuai.`)
+                    : t(`supplier quote not updated — ${r.skipped}.`, `penawaran supplier tidak diperbarui — ${r.skipped}.`)}
+              </div>
+            ))}
           </div>
         )}
 

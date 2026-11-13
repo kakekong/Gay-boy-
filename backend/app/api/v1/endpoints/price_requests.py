@@ -951,6 +951,7 @@ async def approve_price_request(
                             f"Can't approve a request in status '{pr.status}'")
     sells = {s.line_no: s for s in payload.items}
     items = [dict(it) for it in (pr.items or [])]
+    cost_moved: set[int] = set()
     for it in items:
         s = sells.get(it.get("line_no"))
         if s is not None:
@@ -958,7 +959,10 @@ async def approve_price_request(
             it["sell_price"] = _to_unit(s.sell_price, s.basis, qty)
             it["sell_basis"] = s.basis or "unit"
             if s.cost_price is not None:
+                was = it.get("cost_price")
                 _set_cost(it, s.cost_price, s.cost_basis, s.cost_currency, s.cost_fx_rate)
+                if was is None or abs(float(was) - float(it["cost_price"])) >= 0.005:
+                    cost_moved.add(int(it["line_no"]))
     pr.items = items
     pr.approved_by = user.id
     pr.approved_at = datetime.now(UTC)
@@ -970,9 +974,14 @@ async def approve_price_request(
     # Re-approving at a different price is the most consequential change
     # there is: the quotation's line prices ARE these numbers.
     synced = await sync_from_price_request(db, pr, user)
+    # A cost the director changed follows to the supplier quote behind it.
+    from app.services.pr_spr_sync import push_costs_to_suppliers
+    spr_sync = await push_costs_to_suppliers(db, pr, cost_moved, user)
     out = await _serialize(db, pr, Role(user.role))
     if synced:
         out["quotations"] = synced
+    if spr_sync:
+        out["supplier_quotes"] = spr_sync
     return out
 
 
@@ -1158,10 +1167,16 @@ async def reprice_price_request(
             x.get("synced") and x.get("quotation_id") == quote_result["id"] for x in synced):
         # Same dict the price history holds, so the record says it too.
         quote_result["action"] = "updated"
+    # A cost the director changed follows to the supplier quote behind it.
+    from app.services.pr_spr_sync import push_costs_to_suppliers
+    spr_sync = await push_costs_to_suppliers(
+        db, pr, {int(c["line_no"]) for c in changes if "cost_to" in c}, user)
     out = {**await _serialize(db, pr, Role(user.role)),
            "changed_lines": len(changes), "quotation": quote_result}
     if synced:
         out["quotations"] = synced
+    if spr_sync:
+        out["supplier_quotes"] = spr_sync
     return out
 
 

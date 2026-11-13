@@ -1200,6 +1200,21 @@ async def record_quote(
     return (await _decorate(db, [spr]))[0]
 
 
+def _mark_cost_currency(it: dict, currency: str, rate: float | None, quoted) -> None:
+    """A cost applied from a foreign quote keeps the quote's figure and rate
+    beside its rupiah cost, so the price request reads — and is edited — in
+    the vendor's money (¥10 × 2.250), not as a rupiah number to convert back
+    by hand. A rupiah quote leaves a plain rupiah cost."""
+    cur = (currency or "IDR").upper()
+    if cur == "IDR" or quoted is None or not rate:
+        for k in ("cost_currency", "cost_fx_rate", "cost_original"):
+            it.pop(k, None)
+        return
+    it["cost_currency"] = cur
+    it["cost_fx_rate"] = float(rate)
+    it["cost_original"] = round(float(quoted), 6)
+
+
 @router.post("/{spr_id}/apply")
 async def apply_to_price_request(
     spr_id: UUID,
@@ -1278,6 +1293,9 @@ async def apply_to_price_request(
             continue
         want = {int(i.get("source_line_no") or i.get("line_no") or 0):
                 round(float(i["quoted_price"]) * rate, 2) for i in lines}
+        # ...and the figure as quoted, so the line reads in the vendor's money.
+        orig = {int(i.get("source_line_no") or i.get("line_no") or 0):
+                float(i["quoted_price"]) for i in lines}
 
         # A request the director has already settled does not take a new cost
         # quietly. The margin was approved against the old one, so moving it
@@ -1313,6 +1331,7 @@ async def apply_to_price_request(
                 it["cost_price"] = price
                 it["cost_basis"] = "unit"
                 it["cost_source"] = spr.number
+                _mark_cost_currency(it, currency, rate, orig.get(int(it.get("line_no") or 0)))
                 it["cost_supplier"] = supplier.name if supplier else None
                 touched += 1
             if not touched:
@@ -1358,6 +1377,7 @@ async def apply_to_price_request(
             # reads its lines, not this table. On a split job the lines
             # legitimately name different suppliers, which is the point.
             it["cost_source"] = spr.number
+            _mark_cost_currency(it, currency, rate, orig.get(int(it.get("line_no") or 0)))
             it["cost_supplier"] = supplier.name if supplier else None
             touched += 1
         pr.items = items
@@ -1548,6 +1568,8 @@ async def change_currency(
         for pr, lines in targets:
             want = {int(i.get("source_line_no") or i.get("line_no") or 0):
                     round(float(i["quoted_price"]) * rate, 2) for i in lines}
+            orig = {int(i.get("source_line_no") or i.get("line_no") or 0):
+                    float(i["quoted_price"]) for i in lines}
             items = [dict(it) for it in (pr.items or [])]
             touched = 0
             for it in items:
@@ -1557,6 +1579,7 @@ async def change_currency(
                 it["cost_price"] = price
                 it["cost_basis"] = "unit"
                 it["cost_source"] = spr.number
+                _mark_cost_currency(it, currency, rate, orig.get(int(it.get("line_no") or 0)))
                 touched += 1
             pr.items = items
             pr.notes = ((pr.notes or "")

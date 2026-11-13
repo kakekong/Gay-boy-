@@ -270,6 +270,7 @@ async def change_order_costs(project_id: UUID, payload: OrderCostsIn,
     p, pr = await _load(db, project_id)
     items = {int(it.get("line_no") or 0): dict(it) for it in (pr.items or [])}
     summary: list[str] = []
+    moved_lines: set[int] = set()
     for ln in payload.lines:
         it = items.get(int(ln.line_no))
         if it is None:
@@ -282,17 +283,26 @@ async def change_order_costs(project_id: UUID, payload: OrderCostsIn,
         if old is None or abs(float(old) - new) >= 0.005 or it.get("cost_basis") not in (None, "unit"):
             it["cost_price"] = new
             it["cost_basis"] = "unit"
+            # Typed in rupiah here: a foreign figure from before no longer
+            # makes this cost.
+            for k in ("cost_currency", "cost_fx_rate", "cost_original"):
+                it.pop(k, None)
+            moved_lines.add(int(ln.line_no))
             summary.append(f"Cost of “{it.get('description')}”: {_rp(old)} → {_rp(new)}")
     if not summary:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing changed")
     before = [dict(it) for it in (pr.items or [])]
     pr.items = [items[int(it.get("line_no") or 0)] for it in (pr.items or [])]
     synced = await sync_costs(db, pr)
+    # ...and to the supplier quote each line's cost came from.
+    from app.services.pr_spr_sync import push_costs_to_suppliers
+    spr_sync = await push_costs_to_suppliers(db, pr, moved_lines, user)
     await audit_record(db, actor=user, action="order_costs", entity="project", entity_id=p.id,
                        before={"items": before},
                        after={"summary": summary, "note": (payload.note or "").strip() or None})
     await db.flush()
-    return {"status": "applied", "summary": summary, "quotation_lines": synced}
+    return {"status": "applied", "summary": summary, "quotation_lines": synced,
+            "supplier_quotes": spr_sync}
 
 
 @router.post("/projects/{project_id}/order-change")
