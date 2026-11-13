@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api } from "@/api/client";
 import { money } from "@/lib/money";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
+import { FinanceCheckPanel } from "@/components/FinanceCheckPanel";
 import { useAuthStore } from "@/store/auth";
 import { T, t } from "@/store/lang";
 
@@ -21,6 +22,7 @@ const BUCKETS = [
 ];
 
 export default function FinancePage() {
+  const [checking, setChecking] = useState(false);
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -30,10 +32,14 @@ export default function FinancePage() {
           <p className="text-sm muted">{T("Outstanding receivables grouped by days past due.")}</p>
         </div>
         <div className="flex gap-2">
+          <button className="btn-ghost" onClick={() => setChecking(true)}>
+            <FileCheck2 size={15} /> {t("Finance check", "Pemeriksaan keuangan")}</button>
           <Link to="/finance/reports" className="btn-ghost">
             <BarChart3 size={15} /> {T("Financial reports")}</Link>
         </div>
       </div>
+
+      {checking && <FinanceCheckPanel onClose={() => setChecking(false)} />}
 
       <EFakturExport />
       <PendingInvoiceApprovals />

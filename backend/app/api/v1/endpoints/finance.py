@@ -1321,3 +1321,26 @@ async def pay_supplier(
             "bank_account_no": bank.account_no, "bank_name": bank.name,
             "bank_amount": bank_out, "fx_difference": float(pay.fx_difference or 0),
             "payable": float(po.payable_amount or 0)}
+
+
+# ─── Finance check ───────────────────────────────────────────────────────────
+# Where the money records disagree: unpaid invoices, payments missing from
+# the books, Piutang against the documents (services/finance_check). Reads
+# only. The Excel copy is for someone who can't log in to go through it.
+_CHECKERS = require(Role.DIRECTOR, Role.FINANCE, Role.MANAGER)
+
+
+@router.get("/check", dependencies=[Depends(_CHECKERS)])
+async def finance_check(db: AsyncSession = Depends(get_db)):
+    from app.services.finance_check import run
+    return await run(db)
+
+
+@router.get("/check.xlsx", dependencies=[Depends(_CHECKERS)])
+async def finance_check_xlsx(db: AsyncSession = Depends(get_db)):
+    from app.services.finance_check import run, to_xlsx
+    data = to_xlsx(await run(db))
+    name = f"finance-check-{date.today().isoformat()}.xlsx"
+    return Response(content=data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
