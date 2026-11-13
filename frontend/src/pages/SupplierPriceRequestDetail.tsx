@@ -27,6 +27,7 @@ import { SupplierRequestNotes } from "@/components/SupplierRequestNotes";
 import { DraftNotice } from "@/components/DraftNotice";
 import { useFormDraft } from "@/lib/draft";
 import { useT, T } from "@/store/lang";
+import { useAuthStore } from "@/store/auth";
 
 const idr = (n: number) =>
   "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
@@ -336,10 +337,24 @@ export default function SupplierPriceRequestDetailPage() {
     },
     onError: onErr,
   });
+  const isDirector = useAuthStore((st) => st.user?.role) === "director";
   const drop = useMutation({
-    mutationFn: () => api.delete(`/purchasing/price-requests/${id}`),
-    onSuccess: () => {
+    mutationFn: (reason?: string) => api.delete(`/purchasing/price-requests/${id}`,
+                                                { params: reason ? { reason } : undefined }),
+    onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ["supplier-price-requests"] });
+      qc.invalidateQueries({ queryKey: ["price-requests"] });
+      // Say what it undid: which costs lost their link, which revision went.
+      const un = (res?.data?.unlinked ?? []) as { price_request: string; lines: number[] }[];
+      const wd = (res?.data?.withdrawn ?? []) as { price_request: string }[];
+      if (un.length || wd.length) {
+        window.alert([
+          ...un.map((u) => t(`${u.price_request}: line ${u.lines.join(", ")} took its cost from this quote — apply the right quote or re-cost it.`,
+                             `${u.price_request}: baris ${u.lines.join(", ")} memakai biaya dari penawaran ini — terapkan penawaran yang benar atau ubah biayanya.`)),
+          ...wd.map((w) => t(`${w.price_request}: the cost revision it sent you was withdrawn.`,
+                             `${w.price_request}: revisi biaya yang dikirimnya ditarik.`)),
+        ].join("\n"));
+      }
       nav("/purchasing");
     },
     onError: onErr,
@@ -467,7 +482,7 @@ export default function SupplierPriceRequestDetailPage() {
                 </button>
                 <button className="btn-ghost text-red-600"
                   onClick={() => {
-                    if (window.confirm(t("Delete this draft?", "Hapus draf ini?"))) drop.mutate();
+                    if (window.confirm(t("Delete this draft?", "Hapus draf ini?"))) drop.mutate(undefined);
                   }}>
                   <Trash2 size={14} /> {t("Delete draft", "Hapus draf")}
                 </button>
@@ -494,6 +509,20 @@ export default function SupplierPriceRequestDetailPage() {
                   close.mutate(why);
                 }}>
                 <Archive size={14} /> {t("Close", "Tutup")}
+              </button>
+            )}
+            {/* The director removes one entered wrongly — wrong supplier, wrong
+                price — even once applied or closed, so the right one can go in. */}
+            {isDirector && r.status !== "draft" && (
+              <button className="btn-ghost text-red-600"
+                disabled={drop.isPending}
+                onClick={() => {
+                  const why = window.prompt(t(
+                    `Delete ${r.number}? Costs taken from it lose the link and keep their figure until the right quote is applied, and a cost revision it queued is withdrawn. Why is it being deleted?`,
+                    `Hapus ${r.number}? Biaya yang diambil darinya kehilangan tautan dan tetap angkanya sampai penawaran yang benar diterapkan, dan revisi biaya yang dikirimnya ditarik. Mengapa dihapus?`));
+                  if (why !== null) drop.mutate(why.trim() || undefined);
+                }}>
+                <Trash2 size={14} /> {t("Delete", "Hapus")}
               </button>
             )}
           </div>

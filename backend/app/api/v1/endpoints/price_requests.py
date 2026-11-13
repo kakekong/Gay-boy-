@@ -1318,7 +1318,10 @@ async def file_revision(
         payload={"revision_n": n, "kind": kind},
     )
     entry["approval_request_id"] = str(req.id)
-    pr.revisions = list(pr.revisions)      # re-assign so JSONB is flagged dirty
+    # Re-assign with fresh dicts so JSONB sees a change: `entry` was already
+    # in the list, so a copy of the list alone compared equal and the id was
+    # never saved.
+    pr.revisions = [dict(x) for x in (pr.revisions or [])]
     await db.flush()
     return n, req.id
 

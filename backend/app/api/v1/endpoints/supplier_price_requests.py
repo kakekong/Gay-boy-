@@ -1615,29 +1615,106 @@ async def change_currency(
     return out
 
 
-@router.delete("/{spr_id}", status_code=204)
-async def delete_draft(
+@router.delete("/{spr_id}")
+async def delete_request(
     spr_id: UUID,
+    reason: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Throw away a draft raised by mistake.
+    """Throw away a request raised by mistake.
 
-    Drafts only: once a request has been sent or answered it is part of the
-    record of how a price was arrived at, and that is not for tidying away.
-    Use close instead.
+    A draft, by whoever can open it. One already sent, quoted, applied or
+    closed only by the director — a quote applied with the wrong supplier or
+    price is the case: it has to go, so the right one can be applied.
+
+    What it leaves behind is undone too. Price request lines whose cost came
+    from it lose the link (the supplier and the quoted currency), keep the
+    number until a correct quote is applied or the director re-costs them,
+    and the request is noted to say so. A cost revision it queued for the
+    director is withdrawn. The audit log keeps the whole request.
     """
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+
     spr = await _load(spr_id, db)
-    if spr.status != "draft":
+    if spr.status != "draft" and Role(user.role) != Role.DIRECTOR:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"A '{spr.status}' request is part of the record — close it instead.",
+            f"A '{spr.status}' request is part of the record — only the director "
+            "can delete it. Close it instead.",
         )
+    supplier = await db.get(Supplier, spr.supplier_id)
+    unlinked: list[dict] = []
+    withdrawn: list[dict] = []
+    if spr.status != "draft":
+        why = (reason or "").strip()
+        pr_ids = {str(x) for x in (spr.source_pr_ids or [])}
+        if spr.price_request_id:
+            pr_ids.add(str(spr.price_request_id))
+        for pid in pr_ids:
+            pr = await db.get(PriceRequest, UUID(pid))
+            if not pr:
+                continue
+            items = [dict(it) for it in (pr.items or [])]
+            lines = []
+            for it in items:
+                if it.get("cost_source") == spr.number:
+                    for k in ("cost_source", "cost_supplier", "cost_currency",
+                              "cost_fx_rate", "cost_original"):
+                        it.pop(k, None)
+                    lines.append(int(it.get("line_no") or 0))
+            # A revision this quote filed is a proposal of the wrong price.
+            revs = [dict(r) for r in (pr.revisions or [])]
+            for r in revs:
+                if r.get("status") == "pending" and (r.get("reason") or "").startswith(f"Cost from {spr.number}"):
+                    r["status"] = "withdrawn"
+                    r["decided_at"] = datetime.now(UTC).isoformat()
+                    r["decision_notes"] = f"{spr.number} was deleted"
+                    # Its card in the director's approvals: by the id it kept,
+                    # else by the request and revision number it was filed for.
+                    req = (await db.get(ApprovalRequest, UUID(r["approval_request_id"]))
+                           if r.get("approval_request_id") else None)
+                    if req is None:
+                        for cand in (await db.scalars(select(ApprovalRequest).where(
+                                ApprovalRequest.target_type == "price_request_revision",
+                                ApprovalRequest.target_id == pr.id,
+                                ApprovalRequest.status == ApprovalStatus.PENDING.value))).all():
+                            if int((cand.payload or {}).get("revision_n") or 0) == int(r.get("n") or 0):
+                                req = cand
+                                break
+                    if req and req.status == ApprovalStatus.PENDING.value:
+                        req.status = ApprovalStatus.REJECTED.value
+                        req.decided_by = user.id
+                        req.decided_at = datetime.now(UTC)
+                        req.decision_notes = f"Withdrawn: {spr.number} was deleted"
+                    withdrawn.append({"price_request": pr.number, "revision": r.get("n")})
+            if lines or any(w["price_request"] == pr.number for w in withdrawn):
+                pr.items = items
+                pr.revisions = revs
+                pr.notes = ((pr.notes or "") + f"\n[director] {spr.number}"
+                            + (f" ({supplier.name})" if supplier else "")
+                            + " was deleted"
+                            + (f": {why}" if why else "")
+                            + (f" — line {', '.join(map(str, lines))} took its cost from it; "
+                               "apply the right quote or re-cost it" if lines else "")).strip()
+                if lines:
+                    unlinked.append({"price_request": pr.number, "lines": lines})
     await audit_record(db, actor=user, action="delete",
                        entity="supplier_price_request", entity_id=spr.id,
-                       after={"number": spr.number})
+                       before={"number": spr.number, "status": spr.status,
+                               "supplier": supplier.name if supplier else None,
+                               "currency": spr.currency,
+                               "fx_rate": str(spr.fx_rate) if spr.fx_rate is not None else None,
+                               "items": spr.items},
+                       after={"reason": (reason or "").strip() or None,
+                              "unlinked": unlinked, "withdrawn": withdrawn})
+    was_draft = spr.status == "draft"
     await db.delete(spr)
-    return None
+    await db.flush()
+    if was_draft:
+        from fastapi import Response
+        return Response(status_code=204)
+    return {"deleted": spr.number, "unlinked": unlinked, "withdrawn": withdrawn}
 
 
 @router.get("/for-price-request/{pr_id}/compare")
