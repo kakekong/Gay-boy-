@@ -13,7 +13,8 @@ Now the quote line moves with it:
   costed by hand has none named — then the one supplier request asking about
   that line, if there is exactly one. Several and none named: no guess; the
   line is reported as not synced.
-* **In the quote's own currency.** Typed in the same currency as the quote
+* **In the quote line's own currency** (or the quote's, when the line has
+  none). Typed in the same currency as the quote
   (¥12 on a yuan quote), the quote takes that figure. Otherwise the rupiah
   cost is turned back into the quote's currency at the quote's own rate. A
   foreign quote with no rate can't be converted, and says so.
@@ -76,8 +77,9 @@ async def push_costs_to_suppliers(db: AsyncSession, pr, line_nos, user=None) -> 
                         if not cands else "several supplier quotes — none named as its source"})
             continue
         spr, idx = pick
-        cur = (spr.currency or "IDR").upper()
-        rate = 1.0 if cur == "IDR" else (float(spr.fx_rate) if spr.fx_rate else None)
+        # The quote line's own currency when it has one, else the quote's.
+        from app.services.spr_money import line_money
+        cur, rate = line_money(spr, (spr.items or [])[idx])
         if it.get("cost_currency") and it["cost_currency"].upper() == cur and it.get("cost_original") is not None:
             quoted = float(it["cost_original"])
         elif cur == "IDR":

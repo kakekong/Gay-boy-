@@ -36,6 +36,7 @@ from app.core.audit import record as audit_record
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require
+from app.services.spr_money import is_mixed, line_money, total_in
 from app.models.price_request import PriceRequest
 from app.models.purchasing import Supplier, SupplierPriceRequest
 from app.models.user import User
@@ -150,6 +151,11 @@ class QuotedLine(BaseModel):
     basis: str = "unit"
     lead_days: int | None = None
     note: str | None = None
+    # This line's own currency and rate, when it isn't the quote's — one
+    # vendor quoting the chain in yuan and the shackles in rupiah. Left out,
+    # the line follows the quote's currency.
+    currency: str | None = None
+    fx_rate: float | None = None
 
 
 class QuoteIn(BaseModel):
@@ -229,7 +235,12 @@ def _out(spr: SupplierPriceRequest, supplier: Supplier | None,
         # What the whole basket comes to at the quoted prices — the number a
         # comparison is actually made on. Only meaningful once every line has
         # an answer, so it says so rather than quietly summing a partial quote.
-        "quoted_total": sum(_line_total(i) for i in items) if quoted else None,
+        "quoted_total": total_in(spr, items) if quoted and len(quoted) == len(items) else (
+            sum(_line_total(i) for i in items) if quoted and not is_mixed(spr, items) else None),
+        # Lines priced in more than one currency: the total is turned into the
+        # quote's currency (and rupiah) through each line's own rate.
+        "mixed_currency": is_mixed(spr, items),
+        "quoted_total_idr": total_in(spr, items, "IDR") if quoted and len(quoted) == len(items) else None,
         "lines_quoted": len(quoted),
         "lines_total": len(items),
         "created_at": spr.created_at,
@@ -610,8 +621,11 @@ async def supplier_requests_for_pr(db: AsyncSession, pr_id: UUID) -> list[dict]:
             # Only this request's lines, and only once every one of them has
             # an answer — a partial sum reads as a cheap quote when it is an
             # incomplete one.
-            "quoted_total": (sum(_line_total(i) for i in mine)
+            "quoted_total": (total_in(r, mine)
                              if mine and len(quoted) == len(mine) else None),
+            "quoted_total_idr": (total_in(r, mine, "IDR")
+                                 if mine and len(quoted) == len(mine) else None),
+            "mixed_currency": is_mixed(r, mine),
             "is_joint": len(r.source_pr_ids or []) > 1,
             "used_for_cost": r.number in used_numbers,
             # What purchasing wrote down about the quote — MOQ, what the
@@ -1184,6 +1198,24 @@ async def record_quote(
     # Rupiah is its own rate, so nobody is asked to type 1.
     if (spr.currency or "IDR").upper() == "IDR":
         spr.fx_rate = 1
+    # A line's own currency, now that the quote's is settled. The same as the
+    # quote's and no rate of its own: it simply follows the quote.
+    head = (spr.currency or "IDR").upper()
+    for it in items:
+        q = quoted.get(it.get("line_no"))
+        if q is None or q.currency is None:
+            continue
+        cur = q.currency.strip().upper()[:8] or head
+        if cur == head and q.fx_rate is None:
+            it.pop("currency", None); it.pop("fx_rate", None)
+            continue
+        if q.fx_rate is not None and float(q.fx_rate) <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Line {it.get('line_no')}: a rate is how many rupiah one "
+                                f"{cur} costs — a positive number.")
+        it["currency"] = cur
+        it["fx_rate"] = 1.0 if cur == "IDR" else (float(q.fx_rate) if q.fx_rate is not None else None)
+    spr.items = items
     if payload.quoted_lead_days is not None:
         spr.quoted_lead_days = payload.quoted_lead_days
     if payload.valid_until is not None:
@@ -1257,16 +1289,16 @@ async def apply_to_price_request(
     # on the way in — and refused if nobody has said at what rate. Applying
     # 1,800 CNY as Rp 1,800 is the kind of wrong that looks like a typo,
     # survives review, and sets a margin on a number that never existed.
-    currency = (spr.currency or "IDR").upper()
-    rate = float(spr.fx_rate) if spr.fx_rate is not None else None
-    if currency == "IDR":
-        rate = 1.0
-    elif not rate or rate <= 0:
+    # Each line in its own currency, when it has one (`line_money`).
+    no_rate = [(i.get("line_no"), line_money(spr, i)[0]) for i in priced
+               if line_money(spr, i)[1] is None]
+    if no_rate:
+        curs = sorted({c for _, c in no_rate})
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"{spr.number} is quoted in {currency} but has no exchange rate. "
-            "Say how many rupiah one "
-            f"{currency} costs, then apply it — otherwise the cost lands as "
+            f"{spr.number}: line {', '.join(str(n) for n, _ in no_rate)} is quoted in "
+            f"{'/'.join(curs)} with no exchange rate. Say how many rupiah one "
+            f"{curs[0]} costs, then apply it — otherwise the cost lands as "
             "though the supplier had quoted rupiah.")
 
     supplier = await db.get(Supplier, spr.supplier_id)
@@ -1291,11 +1323,11 @@ async def apply_to_price_request(
             results.append({"price_request_id": pr_id_str,
                             "skipped": "price request no longer exists"})
             continue
-        want = {int(i.get("source_line_no") or i.get("line_no") or 0):
-                round(float(i["quoted_price"]) * rate, 2) for i in lines}
+        key = lambda i: int(i.get("source_line_no") or i.get("line_no") or 0)
+        money_by = {key(i): line_money(spr, i) for i in lines}
+        want = {key(i): round(float(i["quoted_price"]) * money_by[key(i)][1], 2) for i in lines}
         # ...and the figure as quoted, so the line reads in the vendor's money.
-        orig = {int(i.get("source_line_no") or i.get("line_no") or 0):
-                float(i["quoted_price"]) for i in lines}
+        orig = {key(i): float(i["quoted_price"]) for i in lines}
 
         # A request the director has already settled does not take a new cost
         # quietly. The margin was approved against the old one, so moving it
@@ -1331,7 +1363,7 @@ async def apply_to_price_request(
                 it["cost_price"] = price
                 it["cost_basis"] = "unit"
                 it["cost_source"] = spr.number
-                _mark_cost_currency(it, currency, rate, orig.get(int(it.get("line_no") or 0)))
+                _mark_cost_currency(it, *money_by[int(it.get("line_no") or 0)], orig.get(int(it.get("line_no") or 0)))
                 it["cost_supplier"] = supplier.name if supplier else None
                 touched += 1
             if not touched:
@@ -1377,7 +1409,7 @@ async def apply_to_price_request(
             # reads its lines, not this table. On a split job the lines
             # legitimately name different suppliers, which is the point.
             it["cost_source"] = spr.number
-            _mark_cost_currency(it, currency, rate, orig.get(int(it.get("line_no") or 0)))
+            _mark_cost_currency(it, *money_by[int(it.get("line_no") or 0)], orig.get(int(it.get("line_no") or 0)))
             it["cost_supplier"] = supplier.name if supplier else None
             touched += 1
         pr.items = items
@@ -1536,7 +1568,10 @@ async def change_currency(
     # ── the money that already went out on the old rate ──────────────────
     recosted: list[dict] = []
     if spr.applied_at is not None:
-        priced = [i for i in (spr.items or []) if i.get("quoted_price") is not None]
+        # Only the lines that follow the quote's currency: a line priced in its
+        # own currency keeps its own rate.
+        priced = [i for i in (spr.items or []) if i.get("quoted_price") is not None
+                  and not i.get("currency")]
         by_pr: dict[str, list[dict]] = {}
         for i in priced:
             src = i.get("source_pr_id") or (str(spr.price_request_id)
@@ -1869,6 +1904,12 @@ async def coverage_for_price_request(
                     "supplier_id": str(r.supplier_id),
                     "supplier_name": sup.name if sup else None,
                     "quoted_price": i.get("quoted_price"),
+                    # In the line's own currency (or the quote's), and in
+                    # rupiah, so vendors quoting in different money compare.
+                    "currency": line_money(r, i)[0],
+                    "quoted_price_idr": (round(float(i["quoted_price"]) * line_money(r, i)[1], 2)
+                                         if i.get("quoted_price") is not None and line_money(r, i)[1]
+                                         else None),
                     "lead_days": i.get("lead_days"),
                     "is_applied": r.applied_at is not None,
                 })

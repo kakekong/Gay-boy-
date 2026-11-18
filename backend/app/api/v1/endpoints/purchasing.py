@@ -236,9 +236,9 @@ async def get_supplier(
                  if isinstance(l, dict) and l.get("description")), None),
             # Only once every line is answered; a partial sum reads as a cheap
             # quote when it is an incomplete one.
-            "quoted_total": float(sum(
-                float(l.get("quoted_price") or 0) * float(l.get("qty") or 0)
-                for l in quoted)) if quoted and len(quoted) == len(lines) else None,
+            # Lines in their own currency are turned into the quote's.
+            "quoted_total": _spr_total(x, [l for l in lines if isinstance(l, dict)])
+            if quoted and len(quoted) == len(lines) else None,
         })
     awaiting = [x for x in price_requests if x["status"] in ("draft", "sent")]
 
@@ -642,6 +642,11 @@ async def po_prefill(
     }
 
 
+def _spr_total(spr, lines: list[dict]):
+    from app.services.spr_money import total_in
+    return total_in(spr, lines)
+
+
 @router.get("/po/from-quote/{spr_id}")
 async def po_prefill_from_quote(
     spr_id: UUID,
@@ -695,10 +700,22 @@ async def po_prefill_from_quote(
             "project_code": proj.code if proj else None,
         }
 
+    # One PO is in one currency: the quote's. A line the vendor priced in
+    # another currency is turned into it through rupiah, and listed, so the
+    # buyer can see it was converted.
+    from app.services.spr_money import line_idr, line_money
+    po_cur = (spr.currency or "IDR").upper()
+    po_rate = 1.0 if po_cur == "IDR" else (float(spr.fx_rate) if spr.fx_rate else None)
+    converted: list[int] = []
     items, total = [], 0.0
     for it in (spr.items or []):
         qty = float(it.get("qty") or 0)
         unit = float(it.get("quoted_price") or 0)
+        if it.get("quoted_price") is not None and line_money(spr, it)[0] != po_cur:
+            idr = line_idr(spr, it)
+            if idr is not None and po_rate:
+                unit = round(idr / po_rate, 4)
+                converted.append(it.get("line_no"))
         amount = qty * unit
         total += amount
         src = project_for_pr.get(str(it.get("source_pr_id")), {})
@@ -729,6 +746,9 @@ async def po_prefill_from_quote(
         "quoted_lead_days": spr.quoted_lead_days,
         "items": items,
         "total": total,
+        "currency": po_cur,
+        "fx_rate": po_rate,
+        "converted_lines": converted,
         "projects": [{"id": p, "code": code} for p, code in projects],
         # Lines whose job could not be resolved — usually the deal has not
         # been won yet, so there is no project to point at. Said plainly

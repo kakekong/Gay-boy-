@@ -48,6 +48,9 @@ interface Line {
   quoted_price?: number | null;
   lead_days?: number | null;
   note?: string | null;
+  /** The line's own currency and rate, when it isn't the quote's. */
+  currency?: string | null;
+  fx_rate?: number | null;
   /** Where this line came from. Survives the job being split between vendors
    *  and several jobs being combined onto one, which is what lets a quote be
    *  applied back to exactly the right line of the right request. */
@@ -85,6 +88,8 @@ interface SPR {
   quoted_at: string | null;
   applied_at: string | null;
   quoted_total: number | null;
+  /** Lines priced in more than one currency. */
+  mixed_currency?: boolean;
   lines_quoted: number;
   lines_total: number;
   /** Where these lines no longer match the customer request they were copied
@@ -115,7 +120,9 @@ export default function SupplierPriceRequestDetailPage() {
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // What the supplier said, per line, as it is being typed. Kept separate from
   // the saved row so a half-finished call is never mistaken for a quote.
-  const [draft, setDraft] = useState<Record<number, { price: string; lead: string }>>({});
+  // `cur` empty: the line follows the quote's currency; otherwise its own,
+  // with `rate` (rupiah per one) when that isn't rupiah.
+  const [draft, setDraft] = useState<Record<number, { price: string; lead: string; cur?: string; rate?: string }>>({});
   const [basis, setBasis] = useState<"unit" | "total">("unit");
   // What the supplier answered in, and what a unit of it costs in rupiah.
   // A vendor answers in whatever they like regardless of the sheet they were
@@ -156,6 +163,8 @@ export default function SupplierPriceRequestDetailPage() {
     setDraft(Object.fromEntries(q.data.items.map((it) => [it.line_no, {
       price: it.quoted_price != null ? String(it.quoted_price) : "",
       lead: it.lead_days != null ? String(it.lead_days) : "",
+      cur: it.currency ?? "",
+      rate: it.fx_rate != null ? String(it.fx_rate) : "",
     }])));
     setLeadDays(q.data.quoted_lead_days != null ? String(q.data.quoted_lead_days) : "");
     setCurrency(q.data.currency || "IDR");
@@ -172,6 +181,8 @@ export default function SupplierPriceRequestDetailPage() {
     draft: Object.fromEntries(q.data.items.map((it) => [it.line_no, {
       price: it.quoted_price != null ? String(it.quoted_price) : "",
       lead: it.lead_days != null ? String(it.lead_days) : "",
+      cur: it.currency ?? "",
+      rate: it.fx_rate != null ? String(it.fx_rate) : "",
     }])),
     leadDays: q.data.quoted_lead_days != null ? String(q.data.quoted_lead_days) : "",
     quoteNote: "",
@@ -267,6 +278,9 @@ export default function SupplierPriceRequestDetailPage() {
           quoted_price: Number(v.price),
           basis,
           lead_days: v.lead === "" ? null : Number(v.lead),
+          // The line's own currency; the quote's (no rate) makes it follow.
+          currency: v.cur || currency,
+          fx_rate: v.cur && v.cur !== currency && v.cur !== "IDR" && v.rate ? Number(v.rate) : null,
         })),
       quoted_lead_days: leadDays === "" ? null : Number(leadDays),
       notes: quoteNote.trim() || null,
@@ -389,14 +403,24 @@ export default function SupplierPriceRequestDetailPage() {
       items: f.items.map((it) => (it.line_no === lineNo ? { ...it, ...patch } : it)),
     }));
 
+  // In the quote's currency; a line in another currency is turned into it
+  // through rupiah. NaN when a rate needed for that is missing.
   const typedTotal = useMemo(() => {
     if (!q.data) return 0;
+    const headRate = currency === "IDR" ? 1 : Number(fxRate);
     return q.data.items.reduce((sum, it) => {
-      const raw = Number(draft[it.line_no]?.price || 0);
+      const d = draft[it.line_no];
+      const raw = Number(d?.price || 0);
       const perUnit = basis === "total" && it.qty ? raw / it.qty : raw;
-      return sum + perUnit * (it.qty || 0);
+      const cur = d?.cur || currency;
+      let factor = 1;
+      if (cur !== currency && raw) {
+        const lineRate = cur === "IDR" ? 1 : Number(d?.rate);
+        factor = lineRate && headRate ? lineRate / headRate : NaN;
+      }
+      return sum + perUnit * (it.qty || 0) * factor;
     }, 0);
-  }, [draft, basis, q.data]);
+  }, [draft, basis, q.data, currency, fxRate]);
 
   if (q.isLoading) {
     return (
@@ -589,6 +613,11 @@ export default function SupplierPriceRequestDetailPage() {
                 confusion the exchange rate exists to resolve. */}
             <QuotedMoney amount={r.quoted_total} currency={r.currency}
               rate={r.fx_rate} align="left" />
+            {r.mixed_currency && (
+              <span className="block text-[10px] muted">
+                {t("lines in more than one currency, converted", "baris dalam beberapa mata uang, dikonversi")}
+              </span>
+            )}
           </Cell>
           <Cell label={t("Lead time", "Waktu kirim")}>
             {r.quoted_lead_days == null
@@ -894,19 +923,55 @@ export default function SupplierPriceRequestDetailPage() {
                   </td>
                   <td className="td text-right">
                     {quoting ? (
-                      <input
-                        className="input text-right tabular-nums w-36 ml-auto"
-                        inputMode="numeric"
-                        value={draft[it.line_no]?.price ?? ""}
-                        onChange={(e) => setDraft((cur) => ({
-                          ...cur,
-                          [it.line_no]: { ...(cur[it.line_no] ?? { lead: "" }), price: e.target.value },
-                        }))}
-                      />
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1">
+                          {/* The line's own currency — a vendor may price one
+                              item in yuan and another in rupiah. */}
+                          <select className="input w-[72px] px-1 text-xs"
+                            aria-label={`${t("Currency", "Mata uang")} ${it.line_no}`}
+                            value={draft[it.line_no]?.cur || currency}
+                            onChange={(e) => setDraft((cur) => ({
+                              ...cur,
+                              [it.line_no]: { ...(cur[it.line_no] ?? { price: "", lead: "" }),
+                                              cur: e.target.value === currency ? "" : e.target.value },
+                            }))}>
+                            {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
+                          </select>
+                          <input
+                            className="input text-right tabular-nums w-32"
+                            inputMode="numeric"
+                            aria-label={`${t("Their price", "Harga mereka")} ${it.line_no}`}
+                            value={draft[it.line_no]?.price ?? ""}
+                            onChange={(e) => setDraft((cur) => ({
+                              ...cur,
+                              [it.line_no]: { ...(cur[it.line_no] ?? { lead: "" }), price: e.target.value },
+                            }))}
+                          />
+                        </div>
+                        {(() => {
+                          const lc = draft[it.line_no]?.cur;
+                          return lc && lc !== currency && lc !== "IDR" ? (
+                            <label className="flex items-center gap-1 text-[10px] text-ink-500">
+                              Rp / 1 {lc}
+                              <input className="input w-24 text-right tabular-nums py-1 text-xs"
+                                inputMode="numeric"
+                                aria-label={`${t("Rate", "Kurs")} ${it.line_no}`}
+                                value={draft[it.line_no]?.rate ?? ""}
+                                onChange={(e) => setDraft((cur) => ({
+                                  ...cur,
+                                  [it.line_no]: { ...(cur[it.line_no] ?? { price: "", lead: "" }), rate: e.target.value },
+                                }))} />
+                            </label>
+                          ) : null;
+                        })()}
+                      </div>
                     ) : (
                       <span className="tabular-nums">
                         {it.quoted_price == null
-                          ? "—" : money(it.quoted_price, currency)}
+                          ? "—" : money(it.quoted_price, it.currency || currency)}
+                        {it.currency && it.currency !== currency && it.currency !== "IDR" && it.fx_rate != null && (
+                          <span className="block text-[10px] muted">× {Number(it.fx_rate).toLocaleString("id-ID")}</span>
+                        )}
                       </span>
                     )}
                   </td>
@@ -926,7 +991,8 @@ export default function SupplierPriceRequestDetailPage() {
                     )}
                   </td>
                   <td className="td text-right tabular-nums font-medium">
-                    {perUnit ? money(perUnit * (it.qty || 0), currency) : "—"}
+                    {perUnit ? money(perUnit * (it.qty || 0),
+                                     (quoting ? draft[it.line_no]?.cur : it.currency) || currency) : "—"}
                   </td>
                   {canRemoveLines && (
                     <td className="td text-right">
@@ -981,7 +1047,9 @@ export default function SupplierPriceRequestDetailPage() {
               </button>
               <span className="text-sm muted tabular-nums">
                 {t("Total as typed", "Total sesuai ketikan")}:{" "}
-                {money(typedTotal, currency)}
+                {Number.isNaN(typedTotal)
+                  ? t("— a line's rate is missing", "— kurs salah satu baris belum diisi")
+                  : money(typedTotal, currency)}
                 {currency !== "IDR" && Number(fxRate) > 0 && (
                   // What it becomes on the price request. Shown while it is
                   // being typed, because that is when a rate typed a decimal
