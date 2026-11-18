@@ -342,6 +342,15 @@ async def _serialize(db: AsyncSession, pr: PriceRequest, role: Role) -> dict:
     if _can_see_customer(role):
         out["customer_id"] = str(pr.customer_id) if pr.customer_id else None
         out["customer_name"] = cust.company_name if cust else None
+        # Which sales the request is for (the customer's rep), and who filed
+        # it when that was somebody else — the director or a colleague filing
+        # on the rep's behalf. db.get is cached per session, so a list of a
+        # rep's requests looks each person up once.
+        pic = await db.get(User, pr.sales_pic_id) if pr.sales_pic_id else None
+        filer = await db.get(User, pr.created_by) if pr.created_by else None
+        out["sales_pic_name"] = pic.full_name if pic else None
+        out["filed_by_name"] = (filer.full_name if filer and (not pic or filer.id != pic.id)
+                                else None)
     else:
         out["customer_name"] = f"Order {pr.number}"
     if see_sell:

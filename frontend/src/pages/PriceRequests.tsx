@@ -177,14 +177,28 @@ export default function PriceRequestsPage() {
   // question people actually have.
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  // Who each request belongs to. The director (and the other desks that see
+  // the customer) get a Sales column and can narrow the list to one rep;
+  // sales see only their own already, purchasing sees no customer side.
+  const showSales = role !== "sales" && role !== "purchasing";
+  const [salesFilter, setSalesFilter] = useState("");
+  const salesPeople = useMemo(() => {
+    const names = new Set<string>();
+    for (const pr of list.data ?? []) if (pr.sales_pic_name) names.add(pr.sales_pic_name);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [list.data]);
   const rows = useMemo(() => {
     let all: any[] = list.data ?? [];
     if (statusFilter) all = all.filter((pr) => pr.status === statusFilter);
+    if (salesFilter) all = all.filter((pr) => salesFilter === "__none"
+      ? !pr.sales_pic_name : pr.sales_pic_name === salesFilter);
     const needle = search.trim().toLowerCase();
     if (needle) {
       all = all.filter((pr) =>
         (pr.number ?? "").toLowerCase().includes(needle)
         || (pr.customer_name ?? "").toLowerCase().includes(needle)
+        || (pr.sales_pic_name ?? "").toLowerCase().includes(needle)
+        || (pr.filed_by_name ?? "").toLowerCase().includes(needle)
         || (pr.items ?? []).some((it: any) =>
              (it.description ?? "").toLowerCase().includes(needle)
              || (it.sku ?? "").toLowerCase().includes(needle))
@@ -192,7 +206,7 @@ export default function PriceRequestsPage() {
              (q.number ?? "").toLowerCase().includes(needle)));
     }
     return all;
-  }, [list.data, search, statusFilter]);
+  }, [list.data, search, statusFilter, salesFilter]);
 
   if (selected) {
     return (
@@ -265,6 +279,9 @@ export default function PriceRequestsPage() {
             placeholder={role === "purchasing"
               ? t("Search by request number, item or SKU…",
                   "Cari berdasarkan nomor permintaan, barang, atau SKU…")
+              : showSales
+              ? t("Search by request number, customer, sales, item, SKU or quotation…",
+                  "Cari berdasarkan nomor permintaan, pelanggan, sales, barang, SKU, atau penawaran…")
               : t("Search by request number, customer, item, SKU or quotation…",
                   "Cari berdasarkan nomor permintaan, pelanggan, barang, SKU, atau penawaran…")}
             className="input pl-9"
@@ -281,6 +298,20 @@ export default function PriceRequestsPage() {
             .filter((k) => !(role === "purchasing" && k === "draft"))
             .map((k) => <option key={k} value={k}>{sl(k)}</option>)}
         </select>
+        {showSales && (
+          <select
+            value={salesFilter}
+            onChange={(e) => setSalesFilter(e.target.value)}
+            aria-label={t("Sales", "Sales")}
+            className="input max-w-[200px]"
+          >
+            <option value="">{t("All sales", "Semua sales")}</option>
+            {salesPeople.map((n) => <option key={n} value={n}>{n}</option>)}
+            {(list.data ?? []).some((pr: any) => !pr.sales_pic_name) && (
+              <option value="__none">{t("No sales assigned", "Tanpa sales")}</option>
+            )}
+          </select>
+        )}
         <div className="text-xs muted tabular-nums">
           <Filter size={12} className="inline mr-1" />
           {rows.length} {t("of", "dari")} {(list.data ?? []).length} {t("price requests", "permintaan harga")}
@@ -298,6 +329,7 @@ export default function PriceRequestsPage() {
                   <th className="th">{t("Number", "Nomor")}</th>
                   <th className="th">{t("Date", "Tanggal")}</th>
                   <th className="th">{role === "purchasing" ? t("Order", "Pesanan") : t("Customer", "Pelanggan")}</th>
+                  {showSales && <th className="th">{t("Sales", "Sales")}</th>}
                   <th className="th">{t("Lines", "Baris")}</th>
                   <th className="th">{T("Status")}</th>
                   {role !== "purchasing" && <th className="th">{t("Quotation", "Penawaran")}</th>}
@@ -313,6 +345,16 @@ export default function PriceRequestsPage() {
                       {pr.created_at ? new Date(pr.created_at).toLocaleDateString(locale()) : "—"}
                     </td>
                     <td className="td">{pr.customer_name}</td>
+                    {showSales && (
+                      <td className="td whitespace-nowrap">
+                        {pr.sales_pic_name ?? <span className="muted">—</span>}
+                        {pr.filed_by_name && (
+                          <span className="block text-[11px] muted">
+                            {t("filed by", "diajukan oleh")} {pr.filed_by_name}
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td className="td muted">{pr.items?.length ?? 0}</td>
                     <td className="td">
                       <span className={clsx("chip capitalize", STATUS_CHIP[pr.status] ?? "bg-ink-100")}>
@@ -1031,7 +1073,15 @@ function PriceRequestDetail({ id, role, onBack }: { id: string; role: string; on
                 {sl(pr.status)}
               </span>
             </div>
-            <div className="text-sm muted mt-1">{pr.customer_name}</div>
+            <div className="text-sm muted mt-1">
+              {pr.customer_name}
+              {role !== "sales" && pr.sales_pic_name && (
+                <> · {tt("Sales", "Sales")}: <span className="text-ink-800 font-medium">{pr.sales_pic_name}</span></>
+              )}
+              {role !== "sales" && pr.filed_by_name && (
+                <> · {tt("filed by", "diajukan oleh")} {pr.filed_by_name}</>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {role !== "purchasing" && pr.customer_id && (
