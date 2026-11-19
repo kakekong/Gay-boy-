@@ -5,7 +5,7 @@ import {
   Pencil, ArrowDownUp, Boxes, Wrench, Trash2, RefreshCw, Filter, Combine, Hash,
 } from "lucide-react";
 import clsx from "clsx";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { money } from "@/lib/money";
 import { UnitSelect } from "@/components/UnitSelect";
@@ -56,6 +56,7 @@ const STATUS_META: Record<Item["stock_status"], { label: string; tone: string; I
 
 export default function InventoryPage() {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const user = useAuthStore((s) => s.user);
   const canEdit = user && (user.role === "admin" || user.role === "director");
   const canAdd = user && ["purchasing", "admin", "manager", "director"].includes(user.role);
@@ -131,7 +132,7 @@ export default function InventoryPage() {
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["inventory"] });
       setOrderFor(null);
-      alert(`Purchase Request created: ${data.number}${data.supplier_name ? ` — ${data.supplier_name}` : ""}`);
+      announceRequest(data, user?.role, nav);
     },
     onError: (e: any) => {
       alert(e?.response?.data?.errors?.[0]?.message ?? "Could not create order");
@@ -585,6 +586,22 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
 
 type OrderLine = { name: string; qty: string; uom: string; price: string };
 
+/** Say where a new purchase request went: Purchasing → Purchase requests —
+ *  and, for the desks that can open that tab, offer to go there. */
+function announceRequest(data: any, role: string | undefined, nav: (to: string) => void) {
+  const what = `${data.number}${data.supplier_name ? ` — ${data.supplier_name}` : ""}`;
+  const waiting = data.pending_approval
+    ? tt(" It waits for the director's approval first.", " Menunggu persetujuan direktur dahulu.") : "";
+  if (["purchasing", "manager", "director"].includes(role ?? "")) {
+    if (window.confirm(tt(`Purchase request ${what} created.${waiting}\n\nOpen Purchasing → Purchase requests?`,
+                          `Permintaan pembelian ${what} dibuat.${waiting}\n\nBuka Pembelian → Permintaan pembelian?`)))
+      nav("/purchasing?tab=requests");
+  } else {
+    alert(tt(`Purchase request ${what} created.${waiting} Purchasing will see it under Purchasing → Purchase requests.`,
+             `Permintaan pembelian ${what} dibuat.${waiting} Pembelian akan melihatnya di Pembelian → Permintaan pembelian.`));
+  }
+}
+
 /** The supplier list, to pick who an order goes to. */
 function useSuppliers() {
   return useQuery({
@@ -658,6 +675,8 @@ function RequestOrderForm({ onClose, showCost, mustPickSupplier }: {
   onClose: () => void; showCost: boolean; mustPickSupplier: boolean;
 }) {
   const qc = useQueryClient();
+  const nav = useNavigate();
+  const role = useAuthStore((s) => s.user?.role);
   const [projectId, setProjectId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [notes, setNotes] = useState("");
@@ -692,7 +711,7 @@ function RequestOrderForm({ onClose, showCost, mustPickSupplier }: {
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["pr-list"] });
       onClose();
-      alert(`Purchase Request created: ${data.number}`);
+      announceRequest(data, role, nav);
     },
     onError: (e: any) =>
       setErr(e?.response?.data?.errors?.[0]?.message

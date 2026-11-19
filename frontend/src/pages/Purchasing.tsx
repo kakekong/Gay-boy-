@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ModalCloseX } from "@/components/ModalCloseX";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ClipboardList, Send, Truck, PackageCheck, CheckCircle2, ArrowRight,
@@ -12,6 +12,7 @@ import { QuotedMoney } from "@/components/QuotedMoney";
 import { useAuthStore } from "@/store/auth";
 import { T, t } from "@/store/lang";
 import { CURRENCIES } from "@/lib/currency";
+import { PurchaseRequestsPanel, usePurchaseRequests } from "@/components/PurchaseRequestsPanel";
 import { PriceRequestLines, lineAmount } from "@/components/PriceRequestLines";
 
 interface PStage {
@@ -84,24 +85,36 @@ export default function PurchasingPage() {
   // What a vendor charges us is not theirs to read — the buy-side price
   // request is that and only that, so the tab does not exist for them.
   const seesBuySide = me?.role !== "admin";
+  // Purchase requests (from Inventory's Request order): the desks that act on
+  // them — the same ones the list endpoint serves.
+  const seesRequests = ["purchasing", "manager", "director"].includes(me?.role ?? "");
+  type Tab = "suppliers" | "prices" | "pos" | "requests";
+  const [params, setParams] = useSearchParams();
 
   const [openNew, setOpenNew] = useState(false);
   const [openPO, setOpenPO] = useState(false);
   const [openSPR, setOpenSPR] = useState(false);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Tab persisted across sessions so the user lands back where they left off.
-  const [tab, setTab] = useState<"suppliers" | "prices" | "pos">(() => {
+  const [tab, setTab] = useState<Tab>(() => {
+    // A link straight to a tab (/purchasing?tab=requests) wins over memory.
+    const asked = params.get("tab");
+    if (asked === "requests" && seesRequests) return "requests";
     const stored = localStorage.getItem("purchasing-tab");
+    if (stored === "requests") return seesRequests ? "requests" : "suppliers";
     // A remembered tab this role can no longer open would land them on a blank
     // page with no way to tell why.
     if (stored === "prices" && me?.role === "admin") return "suppliers";
     if (stored === "pos" || stored === "prices") return stored;
     return "suppliers";
   });
-  function pickTab(t: "suppliers" | "prices" | "pos") {
+  function pickTab(t: Tab) {
     setTab(t);
     localStorage.setItem("purchasing-tab", t);
+    if (params.get("tab")) { params.delete("tab"); setParams(params, { replace: true }); }
   }
+  const purchaseReqs = usePurchaseRequests();
+  const waitingReqs = (purchaseReqs.data ?? []).filter((r) => r.status !== "closed").length;
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],
@@ -225,6 +238,22 @@ export default function PurchasingPage() {
             <Truck size={14} /> {T("Purchase Orders")}{pos.data && (
               <span className="ml-1 text-[10px] font-semibold tabular-nums opacity-60">
                 {pos.data.length}
+              </span>
+            )}
+          </button>
+        )}
+        {seesRequests && (
+          <button
+            onClick={() => pickTab("requests")}
+            className={clsx(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium",
+              tab === "requests" ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-50",
+            )}
+          >
+            <ShoppingCart size={14} /> {t("Purchase requests", "Permintaan pembelian")}
+            {waitingReqs > 0 && (
+              <span className="ml-1 rounded-full bg-amber-100 text-amber-800 px-1.5 text-[10px] font-semibold tabular-nums">
+                {waitingReqs}
               </span>
             )}
           </button>
@@ -423,6 +452,8 @@ export default function PurchasingPage() {
         )}
       </div>
       )}
+
+      {tab === "requests" && seesRequests && <PurchaseRequestsPanel />}
 
       {/* Supplier POs — director-only to limit who sees the supplier⇄customer mapping */}
       {tab === "pos" && isDirector && (
