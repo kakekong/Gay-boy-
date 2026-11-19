@@ -16,7 +16,7 @@ import { InventoryMergePanel } from "@/components/InventoryMergePanel";
 import { SkuRecodePanel } from "@/components/SkuRecodePanel";
 import { CURRENCIES, money as fmtMoney } from "@/lib/currency";
 import { useAuthStore } from "@/store/auth";
-import { T, useT } from "@/store/lang";
+import { T, useT, t as tt } from "@/store/lang";
 
 interface Item {
   id: string;
@@ -68,6 +68,10 @@ export default function InventoryPage() {
   // anywhere else in the app, and the server sends them null for it, so the
   // column comes out rather than rendering "Rp 0" over a hidden number.
   const showCost = !!user && !["admin", "sales"].includes(user.role);
+  // Purchasing places the order, so their request names the supplier: the
+  // row's Order button asks for one first instead of filing straight away.
+  const mustPickSupplier = user?.role === "purchasing";
+  const [orderFor, setOrderFor] = useState<Item | null>(null);
 
   const [q, setQ] = useState("");
   // One status at a time, the way the other lists filter: "needs
@@ -121,12 +125,13 @@ export default function InventoryPage() {
   });
 
   const order = useMutation({
-    mutationFn: ({ id, qty }: { id: string; qty?: number }) =>
-      api.post(`/inventory/${id}/request-order`, { qty: qty ?? null })
+    mutationFn: ({ id, qty, supplierId }: { id: string; qty?: number; supplierId?: string }) =>
+      api.post(`/inventory/${id}/request-order`, { qty: qty ?? null, supplier_id: supplierId || null })
         .then((r) => r.data),
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["inventory"] });
-      alert(`Purchase Request created: ${data.number}`);
+      setOrderFor(null);
+      alert(`Purchase Request created: ${data.number}${data.supplier_name ? ` — ${data.supplier_name}` : ""}`);
     },
     onError: (e: any) => {
       alert(e?.response?.data?.errors?.[0]?.message ?? "Could not create order");
@@ -294,7 +299,7 @@ export default function InventoryPage() {
                           <button
                             className="btn-primary"
                             disabled={order.isPending}
-                            onClick={() => order.mutate({ id: i.id })}
+                            onClick={() => mustPickSupplier ? setOrderFor(i) : order.mutate({ id: i.id })}
                             title={`Create PR for ${i.reorder_qty || "?"} ${i.uom}`}
                           >
                             {order.isPending ? <Loader2 size={13} className="animate-spin" /> : <ShoppingCart size={13} />}
@@ -302,7 +307,7 @@ export default function InventoryPage() {
                         ) : (
                           <button
                             className="btn-ghost"
-                            onClick={() => order.mutate({ id: i.id })}
+                            onClick={() => mustPickSupplier ? setOrderFor(i) : order.mutate({ id: i.id })}
                             title={T("Reorder even though stock is OK")}
                           >
                             <ShoppingCart size={13} /> {T("Order")}</button>
@@ -396,7 +401,21 @@ export default function InventoryPage() {
         subtitle={T("Raise a purchase request for materials — even ones not stocked yet. Purchasing picks it up.")}
         size="lg"
       >
-        <RequestOrderForm showCost={showCost} onClose={() => setOpenRequest(false)} />
+        <RequestOrderForm showCost={showCost} mustPickSupplier={mustPickSupplier}
+          onClose={() => setOpenRequest(false)} />
+      </Modal>
+
+      <Modal
+        open={!!orderFor}
+        onClose={() => setOrderFor(null)}
+        title={tt("Order from which supplier?", "Pesan dari pemasok mana?")}
+        subtitle={orderFor ? `${orderFor.sku} · ${orderFor.name}` : undefined}
+      >
+        {orderFor && (
+          <ItemOrderForm item={orderFor} pending={order.isPending}
+            onCancel={() => setOrderFor(null)}
+            onSubmit={(qty, supplierId) => order.mutate({ id: orderFor.id, qty, supplierId })} />
+        )}
       </Modal>
     </div>
   );
@@ -566,9 +585,81 @@ function BulkAddForm({ isDirector, onClose }: { isDirector: boolean; onClose: ()
 
 type OrderLine = { name: string; qty: string; uom: string; price: string };
 
-function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost: boolean }) {
+/** The supplier list, to pick who an order goes to. */
+function useSuppliers() {
+  return useQuery({
+    queryKey: ["suppliers-min"],
+    queryFn: () => api.get("/purchasing/suppliers").then((r) => r.data as { id: string; name: string }[]),
+    staleTime: 5 * 60_000,
+  });
+}
+
+function SupplierSelect({ value, onChange, required }: {
+  value: string; onChange: (v: string) => void; required: boolean;
+}) {
+  const suppliers = useSuppliers();
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-ink-600 mb-1">
+        {required ? tt("Supplier", "Pemasok") : tt("Supplier (optional)", "Pemasok (opsional)")}
+        {required && <span className="text-red-600"> *</span>}
+      </span>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}
+        aria-label={tt("Supplier", "Pemasok")} required={required}>
+        <option value="">{required ? tt("Pick the supplier to order from…", "Pilih pemasok…")
+                                   : tt("Leave it to purchasing", "Serahkan ke pembelian")}</option>
+        {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
+/** Purchasing's Order button on a stock row: how many, and from whom. */
+function ItemOrderForm({ item, pending, onSubmit, onCancel }: {
+  item: Item; pending: boolean;
+  onSubmit: (qty: number, supplierId: string) => void; onCancel: () => void;
+}) {
+  const suppliers = useSuppliers();
+  const [qty, setQty] = useState(String(item.reorder_qty || ""));
+  const [supplierId, setSupplierId] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  // The item's usual supplier, when it names one on the list, is the default.
+  useEffect(() => {
+    if (supplierId || !item.supplier_hint) return;
+    const hit = (suppliers.data ?? []).find(
+      (s) => s.name.trim().toLowerCase() === item.supplier_hint!.trim().toLowerCase());
+    if (hit) setSupplierId(hit.id);
+  }, [suppliers.data, item.supplier_hint, supplierId]);
+  return (
+    <form className="space-y-4" onSubmit={(e) => {
+      e.preventDefault(); setErr(null);
+      if (!(Number(qty) > 0)) { setErr(tt("Enter how many to order.", "Isi jumlah yang dipesan.")); return; }
+      if (!supplierId) { setErr(tt("Pick the supplier to order from.", "Pilih pemasoknya.")); return; }
+      onSubmit(Number(qty), supplierId);
+    }}>
+      <label className="block">
+        <span className="block text-xs font-medium text-ink-600 mb-1">{tt("Quantity", "Jumlah")} ({item.uom})</span>
+        <input className="input" type="number" min={0} step="any" value={qty}
+          onChange={(e) => setQty(e.target.value)} />
+      </label>
+      <SupplierSelect value={supplierId} onChange={setSupplierId} required />
+      {err && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{err}</div>}
+      <div className="flex justify-end gap-2">
+        <button type="button" className="btn-ghost" onClick={onCancel}>{T("Cancel")}</button>
+        <button type="submit" className="btn-primary" disabled={pending}>
+          {pending ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
+          {T("Send request")}</button>
+      </div>
+    </form>
+  );
+}
+
+function RequestOrderForm({ onClose, showCost, mustPickSupplier }: {
+  onClose: () => void; showCost: boolean; mustPickSupplier: boolean;
+}) {
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState("");
+  const [supplierId, setSupplierId] = useState("");
   const [notes, setNotes] = useState("");
   // The buying price is optional, and only for the desks that see what stock
   // costs — sales and admin are never shown it, so they don't set it.
@@ -590,6 +681,7 @@ function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost
   const submit = useMutation({
     mutationFn: () => api.post("/inventory/request-order", {
       project_id: projectId || null,
+      supplier_id: supplierId || null,
       notes: notes.trim() || null,
       currency,
       items: lines
@@ -617,6 +709,10 @@ function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost
       setErr("Add at least one item with a name and a quantity.");
       return;
     }
+    if (mustPickSupplier && !supplierId) {
+      setErr(tt("Pick the supplier to order from.", "Pilih pemasoknya."));
+      return;
+    }
     submit.mutate();
   }
 
@@ -631,6 +727,8 @@ function RequestOrderForm({ onClose, showCost }: { onClose: () => void; showCost
           ))}
         </select>
       </label>
+
+      <SupplierSelect value={supplierId} onChange={setSupplierId} required={mustPickSupplier} />
 
       <div>
         <span className="block text-xs font-medium text-ink-600 mb-1">{T("Items")}</span>

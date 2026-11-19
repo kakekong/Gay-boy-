@@ -125,7 +125,7 @@ async def main():
           s_adm.get("stock_value") is None, str(s_adm.get("stock_value")))
 
     # It has to agree with the rows, or it is just a faster wrong answer.
-    everything = J(await c.get("/inventory", headers=d, params={"limit": 1000}))
+    everything = J(await c.get("/inventory", headers=d, params={"limit": 10000}))
     live = [x for x in everything["items"] if x["is_active"]]
     check("the count matches the rows it is counting",
           s["tracked"] == everything["total"],

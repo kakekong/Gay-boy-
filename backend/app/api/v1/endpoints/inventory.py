@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approval import request_approval, require_pr_approval
@@ -111,6 +111,9 @@ class OrderIn(BaseModel):
     # What we expect to pay per unit; default the item's last known cost.
     unit_price: float | None = None
     currency: str | None = None
+    # The supplier to order it from. Purchasing must name one — they are
+    # the desk placing the order; anyone else may leave it to purchasing.
+    supplier_id: UUID | None = None
 
 
 class FreeOrderLine(BaseModel):
@@ -125,6 +128,7 @@ class FreeOrderLine(BaseModel):
 class FreeOrderIn(BaseModel):
     items: list[FreeOrderLine] = []
     project_id: UUID | None = None
+    supplier_id: UUID | None = None   # see OrderIn
     notes: str | None = None
     # The currency the prices are in — stock from China is bought in yuan.
     currency: str = "IDR"
@@ -134,6 +138,24 @@ class FreeOrderIn(BaseModel):
 # costs. Sales quote the sell price and admin run the customer side — neither
 # is shown the buy price anywhere, so neither sets one (write follows read).
 _NO_COST_ROLES = (Role.SALES, Role.ADMIN)
+async def _order_supplier(db: AsyncSession, user: User, supplier_id: UUID | None):
+    """The supplier a request is to be ordered from, or None.
+
+    Purchasing raising a request is purchasing deciding to buy, so it names
+    where from — a request that reaches the PO desk without a vendor has to
+    be asked about again. Anyone else may leave it to purchasing."""
+    from app.models.purchasing import Supplier
+    if supplier_id is None:
+        if Role(user.role) == Role.PURCHASING:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Pick the supplier to order this from.")
+        return None
+    sup = await db.get(Supplier, supplier_id)
+    if sup is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown supplier")
+    return sup
+
+
 # The currencies a purchase order is written in (frontend lib/currency).
 ITEM_CURRENCIES = ("IDR", "USD", "CNY", "EUR", "SGD", "JPY")
 _ORDER_CURRENCIES = ITEM_CURRENCIES
@@ -491,8 +513,12 @@ async def list_items(
     total = await db.scalar(
         select(func.count()).select_from(stmt.subquery())
     ) or 0
+    # What is actually on the shelf comes first: items with stock, then the
+    # rest — each group by name. Paging follows the same order, so page one
+    # is the stock you can use.
+    in_stock_first = case((InventoryItem.current_stock > 0, 0), else_=1)
     rows = (await db.scalars(
-        stmt.order_by(InventoryItem.name.asc())
+        stmt.order_by(in_stock_first, InventoryItem.name.asc(), InventoryItem.id)
         .limit(max(1, min(limit, 10000))).offset(max(0, offset))
     )).all()
     show_cost = _may_see_cost(_u)
@@ -981,12 +1007,15 @@ async def request_order(item_id: UUID,
     price, cur = _order_price(user, payload.unit_price, payload.currency or r.cost_currency)
     if price is None:
         price, cur = float(r.unit_cost or 0), (r.cost_currency or "IDR").upper()
+    sup = await _order_supplier(db, user, payload.supplier_id)
     pr = PurchaseRequest(
         number=await _next_pr_number(db),
         requested_by=user.id,
         items=[{
             "sku": r.sku, "name": r.name, "qty": qty, "uom": r.uom,
-            "supplier_hint": r.supplier_hint,
+            "supplier_hint": sup.name if sup else r.supplier_hint,
+            "supplier_id": str(sup.id) if sup else None,
+            "supplier_name": sup.name if sup else None,
             "unit_cost": price, "unit_price": price, "currency": cur,
             "amount": round(price * qty, 2),
             "from_inventory_id": str(item_id),
@@ -998,6 +1027,7 @@ async def request_order(item_id: UUID,
     await db.flush()
     pending = await require_pr_approval(db, pr=pr, requester=user)
     return {"purchase_request_id": str(pr.id), "number": pr.number, "qty": qty,
+            "supplier_name": sup.name if sup else None,
             "pending_approval": pending}
 
 
@@ -1016,11 +1046,14 @@ async def request_order_freeform(payload: FreeOrderIn,
                             "Add at least one item with a name and a quantity.")
     if payload.project_id and not await db.get(Project, payload.project_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
+    sup = await _order_supplier(db, user, payload.supplier_id)
     rows = []
     for ln in lines:
         price, cur = _order_price(user, ln.unit_price, payload.currency)
         row = {"name": ln.name.strip(), "qty": ln.qty, "uom": ln.uom,
-               "supplier_hint": ln.supplier_hint}
+               "supplier_hint": sup.name if sup else ln.supplier_hint,
+               "supplier_id": str(sup.id) if sup else None,
+               "supplier_name": sup.name if sup else None}
         if price is not None:
             row.update(unit_cost=price, unit_price=price, currency=cur,
                        amount=round(price * ln.qty, 2))
@@ -1037,4 +1070,5 @@ async def request_order_freeform(payload: FreeOrderIn,
     await db.flush()
     pending = await require_pr_approval(db, pr=pr, requester=user)
     return {"purchase_request_id": str(pr.id), "number": pr.number,
+            "supplier_name": sup.name if sup else None,
             "pending_approval": pending}

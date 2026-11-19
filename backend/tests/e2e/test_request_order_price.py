@@ -51,7 +51,9 @@ async def main():
     check("...a line with no price stays without one", len(it) == 2 and it[1].get("unit_price") is None, str(it)[:200])
 
     print("\n── the director sees what it would cost ──")
-    r = await c.post("/inventory/request-order", headers=pur, json={"items": [
+    # Purchasing names the supplier it is ordering from (required for them).
+    sup = J(await c.post("/purchasing/suppliers", headers=d, json={"name": f"PT RANTAI {TAG}"}))["id"]
+    r = await c.post("/inventory/request-order", headers=pur, json={"supplier_id": sup, "items": [
         {"name": f"CHAIN RS60 {TAG}", "qty": 10, "uom": "meter", "unit_price": 125_000}]})
     num = J(r).get("number")
     data = J(await c.get("/approvals", headers=d, params={"status": "pending"}))
