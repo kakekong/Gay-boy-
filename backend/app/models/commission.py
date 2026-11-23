@@ -65,6 +65,15 @@ class CommissionClaim(Base, UUIDPK, TimestampMixin):
     )
     basis_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    # What the invoices said, before PPN, when the claim was approved. The
+    # commission is worked out on `basis_amount`, which is the same figure
+    # unless finance set the real selling price lower — a customer asks for
+    # 15.000 on paper while 10.000 is what the company actually keeps — and
+    # then why, by whom and when are kept with it.
+    invoiced_basis: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    basis_note: Mapped[str | None] = mapped_column(Text)
+    basis_set_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    basis_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
     decision_notes: Mapped[str | None] = mapped_column(Text)
     decided_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))

@@ -184,8 +184,9 @@ async def main():
     print("\n── the director decides ──")
     r = await c.post(f"/commissions/{claim['id']}/approve", headers=s1, json={})
     check("a rep cannot approve their own", r.status_code == 403, f"HTTP{r.status_code}")
-    r = await c.post(f"/commissions/{claim['id']}/approve", headers=fin, json={})
-    check("...nor finance", r.status_code == 403, f"HTTP{r.status_code}")
+    r = await c.post(f"/commissions/{claim['id']}/approve", headers=fin, json={"rate_pct": 3})
+    check("finance may approve, but not settle a different rate", r.status_code == 403,
+          f"HTTP{r.status_code}")
     r = await c.post(f"/commissions/{claim['id']}/approve", headers=d,
                      json={"rate_pct": 3, "notes": "brought the account in"})
     check("the director approves, at a rate of their choosing",

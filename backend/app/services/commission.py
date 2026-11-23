@@ -111,6 +111,13 @@ def claim_out(c: CommissionClaim | None) -> dict | None:
         "status": c.status,
         "rate_pct": float(c.rate_pct or 0),
         "basis_amount": float(c.basis_amount or 0),
+        # What was invoiced, and — when finance set the real price lower —
+        # why. Equal figures and no note mean commission is on the invoice.
+        "invoiced_basis": float(c.invoiced_basis) if c.invoiced_basis is not None else None,
+        "basis_note": c.basis_note,
+        "basis_set_at": c.basis_set_at,
+        "basis_adjusted": (c.invoiced_basis is not None
+                           and abs(float(c.invoiced_basis) - float(c.basis_amount or 0)) > 0.005),
         "amount": float(c.amount or 0),
         "notes": c.notes,
         "decision_notes": c.decision_notes,

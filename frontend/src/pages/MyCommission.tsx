@@ -2,11 +2,11 @@
  * A rep's own commission, in the order they actually care about it.
  *
  * The page answers one question — *where is my money right now?* — and the
- * four figures across the top follow it as a sequence: claimable, with the
- * director, agreed and waiting on payroll, paid. That ordering is the whole
+ * four figures across the top follow it as a sequence: claimable, with
+ * finance, approved and waiting to be paid, paid. That ordering is the whole
  * design. A rep who can see that a job is claimable, that a claim is sitting
- * with the director, and that an agreed one goes out with payroll never has
- * to ask anybody where it got to.
+ * with finance, and that an approved one is about to be paid never has to
+ * ask anybody where it got to.
  *
  * The gate is stated in words at the top rather than left to be discovered:
  * a job becomes claimable the day finance receives the last of its invoice.
@@ -51,6 +51,12 @@ interface Claim {
   status: "pending" | "approved" | "rejected" | "paid";
   rate_pct: number;
   basis_amount: number;
+  // What was invoiced; differs from basis_amount when finance set the real
+  // selling price lower (basis_note says why).
+  invoiced_basis?: number | null;
+  basis_adjusted?: boolean;
+  basis_note?: string | null;
+  basis_set_by_name?: string | null;
   amount: number;
   notes: string | null;
   decision_notes: string | null;
@@ -108,8 +114,8 @@ export default function MyCommissionPage() {
       qc.invalidateQueries({ queryKey: ["commission-summary"] });
       qc.invalidateQueries({ queryKey: ["nav-badges"] });
       setFlash(t(
-        `Claimed ${idr(row.amount)} on ${row.project_code}. It is with the director now.`,
-        `${idr(row.amount)} diklaim untuk ${row.project_code}. Sekarang di direktur.`));
+        `Claimed ${idr(row.amount)} on ${row.project_code}. It is with finance now.`,
+        `${idr(row.amount)} diklaim untuk ${row.project_code}. Sekarang di keuangan.`));
       setClaiming(null);
       setNote("");
       setErr(null);
@@ -206,7 +212,7 @@ export default function MyCommissionPage() {
         />
         <Chevron />
         <Stage
-          label={t("With the director", "Di direktur")}
+          label={t("With finance", "Di keuangan")}
           value={idr(tot.pending)}
           sub={t(`${tot.pending_claims} claim(s)`, `${tot.pending_claims} klaim`)}
         />
@@ -315,8 +321,8 @@ export default function MyCommissionPage() {
               <span className="chip bg-ink-100 text-ink-600">{s.filed.length}</span>
             </div>
             <div className="text-xs muted">
-              {t("Worked out on what was billed before tax — subtotal less discount, without PPN.",
-                 "Dihitung dari nilai tagihan sebelum pajak — subtotal dikurangi diskon, tanpa PPN.")}
+              {t("Worked out on what was billed before tax — subtotal less discount, without PPN — or on the real selling price, when finance sets it lower and says why.",
+                 "Dihitung dari nilai tagihan sebelum pajak — subtotal dikurangi diskon, tanpa PPN — atau dari harga jual sebenarnya, bila keuangan menetapkannya lebih rendah beserta alasannya.")}
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -385,8 +391,8 @@ export default function MyCommissionPage() {
       </section>
 
       <p className="text-xs text-ink-500 leading-relaxed max-w-3xl">
-        {t("Commission is agreed by the director before it is paid, and finance marks it paid when it goes out with payroll. If a receipt is reversed after you claim, the job stops being claimable until the money is back in — the claim waits rather than disappearing.",
-           "Komisi disetujui direktur sebelum dibayarkan, dan keuangan menandainya dibayar saat keluar bersama gaji. Kalau sebuah penerimaan dibalik setelah Anda mengklaim, pekerjaan itu berhenti bisa diklaim sampai uangnya masuk kembali — klaimnya menunggu, bukan hilang.")}
+        {t("Commission is approved by finance before it is paid, and finance marks it paid when it goes out. If a receipt is reversed after you claim, the job stops being claimable until the money is back in — the claim waits rather than disappearing.",
+           "Komisi disetujui keuangan sebelum dibayarkan, dan keuangan menandainya dibayar saat keluar. Kalau sebuah penerimaan dibalik setelah Anda mengklaim, pekerjaan itu berhenti bisa diklaim sampai uangnya masuk kembali — klaimnya menunggu, bukan hilang.")}
       </p>
 
       {/* Claim dialog */}
@@ -410,7 +416,7 @@ export default function MyCommissionPage() {
               onClick={() => claiming && claim.mutate(claiming)}
             >
               {claim.isPending && <Loader2 size={14} className="animate-spin" />}
-              {t("Send to the director", "Kirim ke direktur")}
+              {t("Send to finance", "Kirim ke keuangan")}
             </button>
           </div>
         }
@@ -440,7 +446,7 @@ export default function MyCommissionPage() {
 
             <div>
               <label htmlFor="claim-note" className="overline block">
-                {t("Note for the director", "Catatan untuk direktur")}
+                {t("Note for finance", "Catatan untuk keuangan")}
                 <span className="ml-1 normal-case tracking-normal font-normal text-ink-400">
                   {t("— optional", "— opsional")}
                 </span>
@@ -457,8 +463,8 @@ export default function MyCommissionPage() {
             </div>
 
             <p className="text-xs text-ink-500 leading-relaxed">
-              {t("This goes to the director to agree — it is not a payment yet. Commission is on the sale, not the tax: what was billed less any discount, without PPN.",
-                 "Ini dikirim ke direktur untuk disetujui — belum berupa pembayaran. Komisi dihitung dari penjualan, bukan pajaknya: nilai tagihan dikurangi diskon, tanpa PPN.")}
+              {t("This goes to finance to approve and pay — it is not a payment yet. Commission is on the sale, not the tax: what was billed less any discount, without PPN.",
+                 "Ini dikirim ke keuangan untuk disetujui dan dibayar — belum berupa pembayaran. Komisi dihitung dari penjualan, bukan pajaknya: nilai tagihan dikurangi diskon, tanpa PPN.")}
             </p>
 
             {err && (
@@ -525,7 +531,7 @@ const CHIP: Record<Claim["status"], string> = {
   paid:     "bg-emerald-50 text-emerald-700",
 };
 
-/** A filed claim, plus — when it was refused — the director's reason and the
+/** A filed claim, plus — when it was refused — finance's (or the director's) reason and the
  *  way back. A refusal without its reason is the thing reps chase people
  *  about, so it is on the row rather than behind a click. */
 function FiledRows({ c, again, t, onClaimAgain }: {
@@ -535,14 +541,14 @@ function FiledRows({ c, again, t, onClaimAgain }: {
   onClaimAgain: (row: Claimable) => void;
 }) {
   const label: Record<Claim["status"], string> = {
-    pending:  t("With the director", "Di direktur"),
+    pending:  t("With finance", "Di keuangan"),
     approved: t("Agreed · in payroll", "Disetujui · di penggajian"),
     rejected: t("Refused", "Ditolak"),
     paid:     t("Paid", "Dibayar"),
   };
   return (
     <>
-      <tr className={clsx("tr-hover", c.status !== "rejected" && "border-b border-ink-100")}>
+      <tr className={clsx("tr-hover", c.status !== "rejected" && !c.basis_adjusted && "border-b border-ink-100")}>
         <td className="td">
           <a href={`/projects/${c.project_id}`}
              className="font-mono text-xs text-brand-700 hover:underline">
@@ -551,7 +557,12 @@ function FiledRows({ c, again, t, onClaimAgain }: {
           <div className="text-sm text-ink-800 mt-0.5">{c.customer_name}</div>
         </td>
         <td className="td text-ink-600">{day(c.created_at)}</td>
-        <td className="td text-right tabular-nums text-ink-600">{idr(c.basis_amount)}</td>
+        <td className="td text-right tabular-nums text-ink-600">
+          {c.basis_adjusted && c.invoiced_basis != null && (
+            <div className="text-[11px] text-ink-400 line-through">{idr(c.invoiced_basis)}</div>
+          )}
+          <span className={clsx(c.basis_adjusted && "font-semibold text-accent-700")}>{idr(c.basis_amount)}</span>
+        </td>
         <td className={clsx("td text-right tabular-nums",
           c.rate_pct !== 2 ? "font-semibold text-accent-700" : "text-ink-500")}>
           {pct(c.rate_pct)}
@@ -564,6 +575,19 @@ function FiledRows({ c, again, t, onClaimAgain }: {
           <span className={clsx("chip", CHIP[c.status])}>{label[c.status]}</span>
         </td>
       </tr>
+      {c.basis_adjusted && c.status !== "rejected" && (
+        <tr className="border-b border-ink-100">
+          <td colSpan={6} className="px-4 pb-3.5">
+            <div className="border-l-2 border-accent-500 bg-accent-50 px-3.5 py-2.5 text-xs leading-relaxed text-ink-800">
+              {t(`Commission is on the real selling price, ${idr(c.basis_amount)} — the invoice said ${idr(c.invoiced_basis ?? 0)}.`,
+                 `Komisi dihitung dari harga jual sebenarnya, ${idr(c.basis_amount)} — di faktur ${idr(c.invoiced_basis ?? 0)}.`)}
+              {c.basis_note && (
+                <> <span className="font-semibold">{c.basis_set_by_name ? `${c.basis_set_by_name}: ` : ""}</span>{c.basis_note}</>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
       {c.status === "rejected" && (
         <tr className="border-b border-ink-100">
           <td colSpan={6} className="px-4 pb-3.5">

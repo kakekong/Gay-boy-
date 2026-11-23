@@ -839,6 +839,11 @@ COLUMN_MIGRATIONS: list[str] = [
         WHERE sp.created_by IS NULL
           AND ar.target_type = 'supplier_po' AND ar.target_id = sp.id
           AND ar.payload->>'action' = 'create'""",
+    # ── Commission on the real selling price, set by finance at approval ──
+    "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS invoiced_basis NUMERIC(18,2)",
+    "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS basis_note TEXT",
+    "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS basis_set_by UUID",
+    "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS basis_set_at TIMESTAMPTZ",
 ]
 
 

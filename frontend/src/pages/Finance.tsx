@@ -10,6 +10,7 @@ import { api } from "@/api/client";
 import { money } from "@/lib/money";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { FinanceCheckPanel } from "@/components/FinanceCheckPanel";
+import { CommissionClaimsPanel } from "@/components/CommissionClaimsPanel";
 import { useAuthStore } from "@/store/auth";
 import { T, t } from "@/store/lang";
 
@@ -23,6 +24,7 @@ const BUCKETS = [
 
 export default function FinancePage() {
   const [checking, setChecking] = useState(false);
+  const canCommission = ["finance", "director"].includes(useAuthStore((st) => st.user?.role) ?? "");
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -43,6 +45,8 @@ export default function FinancePage() {
 
       <EFakturExport />
       <PendingInvoiceApprovals />
+      {/* Commission claimed by sales comes to finance to approve and pay. */}
+      {canCommission && <CommissionClaimsPanel />}
       <MoneyIn />
       <Payables />
       <ArAging />

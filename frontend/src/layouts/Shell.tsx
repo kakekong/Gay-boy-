@@ -386,11 +386,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const pendingDocs = part("pending_documents");
   const claimableCommission = part("commission_claimable");
   const pendingDp = part("pending_dp");
+  const commissionToPay = part("commission_to_pay");
 
   const badges: Record<string, number> = {
     "chat-unread": unread.data ?? 0,
     "mentions-unread": mentions.data ?? 0,
-    "finance-pending": pendingInvoices.data ?? 0,
+    // Invoices to approve, and commission claims to approve or pay.
+    "finance-pending": (pendingInvoices.data ?? 0) + (commissionToPay.data ?? 0),
     "claims-pending": pendingClaims.data ?? 0,
     "approvals-pending": (pendingApprovals.data ?? 0) + (pendingDocs.data ?? 0),
     "dp-pending": pendingDp.data ?? 0,

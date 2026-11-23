@@ -74,6 +74,16 @@ async def badges(db: AsyncSession = Depends(get_db), me: User = Depends(get_curr
         await one("pending_invoices", invoices)
         await one("pending_claims", claims)
 
+    if role in (Role.FINANCE, Role.DIRECTOR):
+        # Commission claims waiting on finance: to approve, or approved and
+        # still to pay.
+        from app.models.commission import CommissionClaim
+
+        async def commission_queue():
+            return await db.scalar(select(func.count()).select_from(CommissionClaim)
+                                   .where(CommissionClaim.status.in_(("pending", "approved"))))
+        await one("commission_to_pay", commission_queue)
+
     if role in _APPROVERS:
         from app.api.v1.endpoints.approvals import inbox, pending_documents
 
