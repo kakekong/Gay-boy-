@@ -114,7 +114,7 @@ export default function PurchasingPage() {
     if (params.get("tab")) { params.delete("tab"); setParams(params, { replace: true }); }
   }
   const purchaseReqs = usePurchaseRequests();
-  const waitingReqs = (purchaseReqs.data ?? []).filter((r) => r.status !== "closed").length;
+  const waitingReqs = (purchaseReqs.data ?? []).filter((r) => r.status === "open" || r.status === "pending_approval").length;
 
   const suppliers = useQuery({
     queryKey: ["suppliers"],

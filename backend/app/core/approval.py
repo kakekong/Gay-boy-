@@ -268,6 +268,22 @@ async def require_pr_approval(db: AsyncSession, *, pr, requester) -> bool:
         pr.status = "open"
         return False
     pr.status = "pending_approval"
+    await request_approval(
+        db,
+        target_type="purchase_request",
+        target_id=pr.id,
+        requested_by=requester.id,
+        required_role=Role.DIRECTOR,
+        reason=pr_approval_reason(pr),
+        payload={"action": "create"},
+    )
+    return True
+
+
+def pr_approval_reason(pr) -> str:
+    """What the director's card says about a purchase request: its number,
+    how many lines, and what it would cost per currency. Rebuilt when the
+    request is edited while it waits, so the card never shows an old total."""
     n = len(pr.items or [])
     # What it would cost, when the lines carry a buying price — per currency.
     totals: dict[str, float] = {}
@@ -280,16 +296,7 @@ async def require_pr_approval(db: AsyncSession, *, pr, requester) -> bool:
     bits = [f"{n} item(s)"] if n else []
     if cost:
         bits.append(cost)
-    await request_approval(
-        db,
-        target_type="purchase_request",
-        target_id=pr.id,
-        requested_by=requester.id,
-        required_role=Role.DIRECTOR,
-        reason=f"Purchase request {pr.number}" + (f" ({', '.join(bits)})" if bits else ""),
-        payload={"action": "create"},
-    )
-    return True
+    return f"Purchase request {pr.number}" + (f" ({', '.join(bits)})" if bits else "")
 
 
 async def decide(

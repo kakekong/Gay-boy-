@@ -56,6 +56,7 @@ const CustomerPODetailPage    = lazy(() => import("@/pages/CustomerPODetail"));
 const PORecapPage             = lazy(() => import("@/pages/PORecap"));
 const OperationStagePage      = lazy(() => import("@/pages/OperationStage"));
 const PurchasingStagePage     = lazy(() => import("@/pages/PurchasingStage"));
+const PurchaseRequestDetailPage = lazy(() => import("@/pages/PurchaseRequestDetail"));
 const SupplierDetailPage      = lazy(() => import("@/pages/SupplierDetail"));
 const SupplierPriceRequestPage = lazy(() => import("@/pages/SupplierPriceRequestDetail"));
 const OperationPage        = lazy(() => import("@/pages/Operation"));
@@ -260,6 +261,9 @@ function MainApp() {
           <Route path="/purchasing" element={<PurchasingPage />} />
           <Route path="/purchasing/stage/:stage" element={<PurchasingStagePage />} />
           <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+          <Route path="/purchasing/requests/:id" element={
+            <RequireRole roles={["purchasing", "manager", "director"]}>
+              <PurchaseRequestDetailPage /></RequireRole>} />
           <Route path="/purchasing/price-requests/:id" element={
             <RequireRole roles={["purchasing", "manager", "director"]}>
               <SupplierPriceRequestPage /></RequireRole>} />

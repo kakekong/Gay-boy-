@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Package, Search, X } from "lucide-react";
 import clsx from "clsx";
@@ -19,10 +20,11 @@ export interface PurchaseRequestRow {
   items: any[]; notes: string | null; created_at: string;
 }
 
-const STATUS: Record<string, { en: string; id: string; tone: string }> = {
+export const PR_STATUS: Record<string, { en: string; id: string; tone: string }> = {
   pending_approval: { en: "Waiting for director", id: "Menunggu direktur", tone: "bg-amber-50 text-amber-800" },
   open:             { en: "Open · to order",      id: "Terbuka · perlu dipesan", tone: "bg-blue-50 text-blue-700" },
   closed:           { en: "Closed",               id: "Ditutup", tone: "bg-ink-100 text-ink-600" },
+  cancelled:        { en: "Rejected",             id: "Ditolak", tone: "bg-red-50 text-red-700" },
 };
 
 const fmt = (n: number) => new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n);
@@ -47,9 +49,10 @@ export function usePurchaseRequests() {
 
 export function PurchaseRequestsPanel() {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const role = useAuthStore((s) => s.user?.role) ?? "";
   const list = usePurchaseRequests();
-  const [status, setStatus] = useState<"active" | "pending_approval" | "open" | "closed" | "">("active");
+  const [status, setStatus] = useState<"active" | "pending_approval" | "open" | "closed" | "cancelled" | "">("active");
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -63,7 +66,7 @@ export function PurchaseRequestsPanel() {
   const all = list.data ?? [];
   const rows = useMemo(() => {
     let r = all;
-    if (status === "active") r = r.filter((x) => x.status !== "closed");
+    if (status === "active") r = r.filter((x) => x.status !== "closed" && x.status !== "cancelled");
     else if (status) r = r.filter((x) => x.status === status);
     const needle = q.trim().toLowerCase();
     if (needle) {
@@ -102,6 +105,7 @@ export function PurchaseRequestsPanel() {
             <option value="pending_approval">{t("Waiting for director", "Menunggu direktur")}</option>
             <option value="open">{t("Open · to order", "Terbuka · perlu dipesan")}</option>
             <option value="closed">{t("Closed", "Ditutup")}</option>
+            <option value="cancelled">{t("Rejected", "Ditolak")}</option>
             <option value="">{t("All", "Semua")}</option>
           </select>
           <span className="text-xs muted tabular-nums">{rows.length} {t("of", "dari")} {all.length}</span>
@@ -138,7 +142,7 @@ export function PurchaseRequestsPanel() {
             </thead>
             <tbody>
               {rows.map((r) => {
-                const st = STATUS[r.status] ?? { en: r.status, id: r.status, tone: "bg-ink-100 text-ink-600" };
+                const st = PR_STATUS[r.status] ?? { en: r.status, id: r.status, tone: "bg-ink-100 text-ink-600" };
                 const sups = prSuppliers(r.items);
                 const fromStock = (r.items ?? []).some((it: any) => it?.from_inventory_id);
                 const totals: Record<string, number> = {};
@@ -146,7 +150,8 @@ export function PurchaseRequestsPanel() {
                   const c = (it.currency || "IDR").toUpperCase(); totals[c] = (totals[c] ?? 0) + Number(it.amount || 0);
                 }
                 return (
-                  <tr key={r.id} className="border-t border-ink-100 align-top">
+                  <tr key={r.id} className="border-t border-ink-100 align-top hover:bg-ink-50/40 cursor-pointer"
+                    onClick={() => nav(`/purchasing/requests/${r.id}`)}>
                     <td className="td font-mono text-xs whitespace-nowrap">{r.number}
                       {fromStock && (
                         <span className="mt-1 flex items-center gap-1 text-[10px] font-sans text-ink-500">
@@ -189,7 +194,8 @@ export function PurchaseRequestsPanel() {
                     <td className="td text-right">
                       {mayClose && r.status === "open" && (
                         <button className="btn-ghost text-xs px-2 py-1" disabled={close.isPending}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             if (window.confirm(t(`Close ${r.number}? Do this once it's ordered or no longer needed.`,
                                                  `Tutup ${r.number}? Lakukan setelah dipesan atau tidak diperlukan lagi.`)))
                               close.mutate(r.id);

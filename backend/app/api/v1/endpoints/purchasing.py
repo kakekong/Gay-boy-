@@ -2149,6 +2149,12 @@ async def update_pr(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "status must be open or closed")
         # A PR awaiting the director's approval can't be opened from here —
         # that would bypass the gate require_pr_approval put it behind.
+        if pr.status == "cancelled":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The director rejected this purchase request — raise a new one "
+                "instead of reopening it.",
+            )
         if pr.status == "pending_approval" and Role(_u.role) != Role.DIRECTOR:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -2162,6 +2168,168 @@ async def update_pr(
         pr.notes = data["notes"]
     await db.flush()
     return {"id": str(pr.id), "number": pr.number, "status": pr.status}
+
+
+# ─── One purchase request: its own page ──────────────────────────────────────
+# A request raised from Inventory used to be a row nobody could open. Like a
+# price request, it now has a page: what is asked for, at what price and in
+# which currency, from which supplier — and purchasing can correct any of it
+# until the request is closed.
+
+_PR_CURRENCIES = ("IDR", "USD", "CNY", "EUR", "SGD", "JPY")
+_PR_FINAL = ("closed", "cancelled")
+
+
+class PRLineEdit(BaseModel):
+    name: str
+    qty: float
+    uom: str = "pcs"
+    unit_price: float | None = None
+    sku: str | None = None
+    # Kept as sent: the stock item a line was ordered for (Inventory's button).
+    from_inventory_id: str | None = None
+
+
+class PREdit(BaseModel):
+    items: list[PRLineEdit]
+    currency: str = "IDR"
+    supplier_id: UUID | None = None
+    project_id: UUID | None = None
+    notes: str | None = None
+
+
+async def _pr_detail(db: AsyncSession, pr) -> dict:
+    from app.models.approval import ApprovalRequest
+    from app.models.operation import Project
+    proj = await db.get(Project, pr.project_id) if pr.project_id else None
+    who = await db.get(User, pr.requested_by) if pr.requested_by else None
+    items = [dict(it) for it in (pr.items or []) if isinstance(it, dict)]
+    sup_id = next((it.get("supplier_id") for it in items if it.get("supplier_id")), None)
+    sup_name = next((it.get("supplier_name") or it.get("supplier_hint")
+                     for it in items if it.get("supplier_name") or it.get("supplier_hint")), None)
+    currency = next(((it.get("currency") or "IDR").upper() for it in items
+                     if it.get("unit_price") is not None), "IDR")
+    totals: dict[str, float] = {}
+    for it in items:
+        if it.get("amount") is not None:
+            c = (it.get("currency") or "IDR").upper()
+            totals[c] = round(totals.get(c, 0.0) + float(it["amount"] or 0), 2)
+    appr = await db.scalar(select(ApprovalRequest).where(
+        ApprovalRequest.target_type == "purchase_request",
+        ApprovalRequest.target_id == pr.id,
+    ).order_by(ApprovalRequest.created_at.desc()).limit(1))
+    return {
+        "id": str(pr.id), "number": pr.number, "status": pr.status,
+        "project_id": str(pr.project_id) if pr.project_id else None,
+        "project_code": proj.code if proj else None,
+        "requested_by_name": who.full_name if who else None,
+        "created_at": pr.created_at, "updated_at": pr.updated_at,
+        "notes": pr.notes, "items": items,
+        "supplier_id": sup_id, "supplier_name": sup_name,
+        "currency": currency, "totals": totals,
+        "from_inventory": any(it.get("from_inventory_id") for it in items),
+        "editable": pr.status not in _PR_FINAL,
+        "approval": ({"id": str(appr.id), "status": appr.status, "reason": appr.reason,
+                      "decision_notes": appr.decision_notes, "decided_at": appr.decided_at}
+                     if appr else None),
+    }
+
+
+@router.get("/pr/{pr_id}")
+async def get_pr(
+    pr_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(_purchasing_or_director),
+):
+    from app.models.purchasing import PurchaseRequest
+    pr = await db.get(PurchaseRequest, pr_id)
+    if not pr:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase request not found")
+    return await _pr_detail(db, pr)
+
+
+@router.put("/pr/{pr_id}")
+async def edit_pr(
+    pr_id: UUID,
+    payload: PREdit,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(_purchasing_or_director),
+):
+    """Correct a purchase request: its lines, quantities, units, prices, the
+    currency they are in, the supplier, project and notes. Not once it is
+    closed or cancelled. Edited while it waits for the director, the card in
+    their Approvals is brought up to date so it never shows an old total."""
+    from app.core.approval import pr_approval_reason
+    from app.models.approval import ApprovalRequest, ApprovalStatus
+    from app.models.inventory import UNITS, normalise_uom
+    from app.models.operation import Project
+    from app.models.purchasing import PurchaseRequest
+
+    pr = await db.get(PurchaseRequest, pr_id)
+    if not pr:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase request not found")
+    if pr.status in _PR_FINAL:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"{pr.number} is {pr.status} — reopen it before changing it.")
+    cur = (payload.currency or "IDR").upper()
+    if cur not in _PR_CURRENCIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Currency must be one of {', '.join(_PR_CURRENCIES)}")
+    lines = [ln for ln in payload.items if ln.name.strip()]
+    if not lines:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Keep at least one item with a name.")
+    sup = None
+    if payload.supplier_id:
+        sup = await db.get(Supplier, payload.supplier_id)
+        if not sup:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown supplier")
+    elif Role(user.role) == Role.PURCHASING:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick the supplier to order this from.")
+    if payload.project_id and not await db.get(Project, payload.project_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown project")
+
+    before = {"items": pr.items, "notes": pr.notes,
+              "project_id": str(pr.project_id) if pr.project_id else None}
+    rows = []
+    for i, ln in enumerate(lines, 1):
+        if ln.qty <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Line {i}: the quantity must be more than zero.")
+        if ln.unit_price is not None and ln.unit_price < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Line {i}: a price can't be negative.")
+        uom = normalise_uom(ln.uom) or (ln.uom or "").strip().lower()
+        if uom not in UNITS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Line {i}: “{ln.uom}” isn't a unit we count in. Use one of: {', '.join(UNITS)}.")
+        row = {"name": ln.name.strip(), "qty": ln.qty, "uom": uom,
+               "supplier_hint": sup.name if sup else None,
+               "supplier_id": str(sup.id) if sup else None,
+               "supplier_name": sup.name if sup else None}
+        if ln.sku:
+            row["sku"] = ln.sku.strip()
+        if ln.from_inventory_id:
+            row["from_inventory_id"] = ln.from_inventory_id
+        if ln.unit_price is not None:
+            row.update(unit_cost=ln.unit_price, unit_price=ln.unit_price, currency=cur,
+                       amount=round(ln.unit_price * ln.qty, 2))
+        rows.append(row)
+    pr.items = rows
+    pr.notes = (payload.notes or "").strip() or None
+    pr.project_id = payload.project_id
+    if pr.status == "pending_approval":
+        card = await db.scalar(select(ApprovalRequest).where(
+            ApprovalRequest.target_type == "purchase_request",
+            ApprovalRequest.target_id == pr.id,
+            ApprovalRequest.status == ApprovalStatus.PENDING.value))
+        if card:
+            card.reason = pr_approval_reason(pr)
+    await audit_record(db, actor=user, action="edit", entity="purchase_request",
+                       entity_id=pr.id, before=before,
+                       after={"items": rows, "notes": pr.notes,
+                              "project_id": str(pr.project_id) if pr.project_id else None})
+    await db.flush()
+    # updated_at is set by the database on write; read it back before use.
+    await db.refresh(pr)
+    return await _pr_detail(db, pr)
 
 
 # ─── RFQ (request for quotation) ─────────────────────────────────────────────
