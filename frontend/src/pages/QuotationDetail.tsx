@@ -27,7 +27,7 @@ import { useT, t as tt, T, locale } from "@/store/lang";
 const STATUS_LABEL_ID: Record<string, string> = {
   draft: "draft", pending_approval: "menunggu persetujuan",
   approved: "disetujui", rejected: "ditolak", sent: "terkirim",
-  won: "menang", lost: "kalah", superseded: "digantikan revisi",
+  won: "menang", partially_won: "menang sebagian", lost: "kalah", superseded: "digantikan revisi",
 };
 const CPO_STATUS_LABEL_ID: Record<string, string> = {
   draft: "draft", pending_approval: "menunggu persetujuan",
@@ -44,6 +44,7 @@ const STATUS_CHIP: Record<string, string> = {
   rejected:          "bg-red-50 text-red-700",
   sent:              "bg-blue-50 text-blue-700",
   won:               "bg-emerald-100 text-emerald-800",
+  partially_won:     "bg-teal-50 text-teal-800 ring-1 ring-teal-200",
   lost:              "bg-red-100 text-red-800",
   superseded:        "bg-ink-200 text-ink-600",
 };
@@ -254,7 +255,7 @@ export default function QuotationDetailPage() {
   // price request behind it is kept in step with it — so it is exactly the
   // one a customer rings up to change.
   const canRequestEdit = (isOwner || user?.role === "director")
-    && ["approved", "sent", "won"].includes(Q.status)
+    && ["approved", "sent", "won", "partially_won"].includes(Q.status)
     && !Q.won_pending && !Q.edit_pending;
   const canRevise = (isOwner || ["manager", "director", "admin"].includes(user?.role ?? ""))
     && ["approved", "sent", "rejected", "lost"].includes(Q.status)
@@ -450,7 +451,7 @@ export default function QuotationDetailPage() {
                 {Q.sales_pic_name
                   ? <UserLink id={Q.sales_pic_id} name={Q.sales_pic_name} />
                   : <span className="muted">{t("No sales rep", "Tanpa sales")}</span>}
-                {isDirector && !["won", "lost", "cancelled", "superseded"]
+                {isDirector && !["won", "partially_won", "lost", "cancelled", "superseded"]
                     .includes(Q.status) && (
                   <button className="text-xs text-brand-700 hover:underline"
                           onClick={() => setReassignOpen(true)}>
@@ -687,11 +688,12 @@ export default function QuotationDetailPage() {
       {/* The customer's PO. Shown from the moment the quotation is in the
           customer's hands, because that is when their order can arrive — and
           filing it is now what unlocks Mark won, not what follows it. */}
-      {["approved", "sent", "won"].includes(Q.status) && (
+      {["approved", "sent", "won", "partially_won"].includes(Q.status) && (
         <WonNextStepCard
           quotationId={Q.id}
           customerId={Q.customer_id}
-          quotationWon={Q.status === "won"}
+          quotationWon={Q.status === "won" || Q.status === "partially_won"}
+          quotationStatus={Q.status}
         />
       )}
 
@@ -763,7 +765,7 @@ export default function QuotationDetailPage() {
                 const blockedBeforeApproval =
                   looksLikeSend &&
                   Q.status !== "approved" && Q.status !== "sent" &&
-                  Q.status !== "won";
+                  Q.status !== "won" && Q.status !== "partially_won";
                 return (
                   <li
                     key={r.id}
@@ -1242,10 +1244,32 @@ interface CPORow {
   decided_at: string | null;
 }
 
+interface QuoteOrders {
+  status: string;
+  total: number;
+  ordered_total: number;
+  fully_ordered: boolean;
+  nothing_ordered: boolean;
+  lines: Array<{
+    line_no: number; description: string; uom: string | null;
+    quoted: number; ordered: number; open: number;
+    pos: Array<{ po_id: string; number: string; status: string; qty: number }>;
+  }>;
+}
+
+const qtyFmt = (n: number) => new Intl.NumberFormat(locale(), { maximumFractionDigits: 3 }).format(n || 0);
+
 function WonNextStepCard({
-  quotationId, customerId, quotationWon,
-}: { quotationId: string; customerId: string; quotationWon: boolean }) {
+  quotationId, customerId, quotationWon, quotationStatus,
+}: { quotationId: string; customerId: string; quotationWon: boolean; quotationStatus: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
+  // Per line: quoted, ordered by the POs so far, still open. A quotation can
+  // be ordered in batches — each PO its own project.
+  const orders = useQuery({
+    queryKey: ["quotation-orders", quotationId],
+    queryFn: () => api.get(`/quotations/${quotationId}/orders`).then((r) => r.data as QuoteOrders),
+  });
   const q = useQuery({
     queryKey: ["customer-pos-for-quote", quotationId],
     queryFn: () => api
@@ -1256,6 +1280,18 @@ function WonNextStepCard({
   const rows = q.data ?? [];
   const hasApproved = rows.some((p) => p.status === "approved");
   const pending = rows.filter((p) => p.status === "pending_approval");
+  const live = rows.filter((p) => !["rejected", "cancelled"].includes(p.status));
+  const O = orders.data;
+  // Lines picked from this quotation can be tracked batch by batch; a PO
+  // typed in fresh (no quotation lines behind it) can't, so no next batch.
+  const tracked = !!O && live.length > 0 && !O.nothing_ordered;
+  const openLines = (O?.lines ?? []).filter((l) => l.open > 1e-6);
+  const partial = tracked && openLines.length > 0;
+  // A PO the director sent back is fixed and resubmitted first.
+  // Ordered in full over more than one PO: say so, not "a project".
+  const batches = tracked && !partial && live.length > 1;
+  const canFileNext = partial && quotationStatus !== "lost"
+    && !rows.some((p) => p.status === "rejected");
 
   return (
     <div className="card p-5 space-y-3">
@@ -1263,14 +1299,26 @@ function WonNextStepCard({
         <div>
           <div className="text-xs uppercase tracking-wider muted">{T("Next step")}</div>
           <h3 className="text-base font-semibold mt-0.5">
-            {hasApproved
+            {partial
+              ? t(`Partially ordered — ${openLines.length} of ${O!.lines.length} lines still open`,
+                  `Dipesan sebagian — ${openLines.length} dari ${O!.lines.length} item masih terbuka`)
+              : batches
+              ? t(`Fully ordered — ${live.length} POs, each its own project`,
+                  `Dipesan semua — ${live.length} PO, masing-masing proyeknya sendiri`)
+              : hasApproved
               ? T("Customer PO approved — project created")
               : pending.length
                 ? T("Customer PO submitted — waiting on director approval")
                 : T("Submit the customer's PO")}
           </h3>
           <p className="text-sm muted mt-1 max-w-2xl">
-            {hasApproved
+            {partial
+              ? t("The customer has ordered part of this quotation. When their next PO arrives, file it here — the form fills in what is still open, and that PO becomes a project of its own. The quotation reads Partially won until every line is ordered, then Won.",
+                  "Pelanggan baru memesan sebagian dari penawaran ini. Saat PO berikutnya datang, catat di sini — formulir mengisi sisa yang masih terbuka, dan PO itu menjadi proyeknya sendiri. Penawaran berstatus Menang sebagian sampai semua item dipesan, lalu Menang.")
+              : batches
+              ? t("The customer ordered this quotation in batches and every line is now on a PO, so the quotation is Won. Each PO is its own project — open them from the table below.",
+                  "Pelanggan memesan penawaran ini secara bertahap dan semua item kini ada di PO, sehingga penawaran berstatus Menang. Setiap PO adalah proyeknya sendiri — buka dari tabel di bawah.")
+              : hasApproved
               ? T("The customer's PO has been approved by the director and the project is now active. Manage it from the Projects section.")
               : pending.length
                 ? T("The PO you submitted is queued for director approval. Once they sign off, the project is created automatically with the PO number, date and item totals you filed.")
@@ -1284,13 +1332,73 @@ function WonNextStepCard({
             </p>
           )}
         </div>
-        {/* One PO per deal — once one is on file (pending, approved or sent
-            back), it is fixed or deleted, not joined by a second. */}
-        {rows.length === 0 && (
+        {/* The first PO: once one is on file and sent back it is fixed or
+            deleted, not joined by another. Further batches — POs ordering
+            what the first left open — are filed while lines stay open. */}
+        {(rows.length === 0 || canFileNext) && (
           <button className="btn-primary" onClick={() => setOpen(true)}>
-            <CheckCircle2 size={14} /> {T("Submit customer PO")}</button>
+            <CheckCircle2 size={14} />
+            {rows.length === 0 ? T("Submit customer PO") : t("Submit next PO", "Kirim PO berikutnya")}
+          </button>
         )}
       </div>
+
+      {tracked && O && (
+        <div className="rounded-xl border border-ink-100 overflow-x-auto">
+          <div className="px-3 py-2 bg-ink-50/60 border-b border-ink-100 flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-xs font-semibold">{t("Ordered so far", "Sudah dipesan")}</span>
+            <span className="text-xs muted tabular-nums">
+              {"Rp " + new Intl.NumberFormat("id-ID").format(Math.round(O.ordered_total))}
+              {" "}{t("of", "dari")}{" "}
+              {"Rp " + new Intl.NumberFormat("id-ID").format(Math.round(O.total))}
+            </span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-[10px] uppercase tracking-wider muted">
+              <tr>
+                <th className="px-3 py-1.5 text-left w-10">#</th>
+                <th className="px-3 py-1.5 text-left">{t("Item", "Item")}</th>
+                <th className="px-3 py-1.5 text-right">{t("Quoted", "Ditawarkan")}</th>
+                <th className="px-3 py-1.5 text-right">{t("Ordered", "Dipesan")}</th>
+                <th className="px-3 py-1.5 text-right">{t("Open", "Sisa")}</th>
+                <th className="px-3 py-1.5 text-left">{t("On PO", "Pada PO")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {O.lines.map((l) => {
+                const done = l.open <= 1e-6;
+                const none = l.ordered <= 1e-6;
+                return (
+                  <tr key={l.line_no} className="border-t border-ink-100">
+                    <td className="px-3 py-1.5 muted tabular-nums">{l.line_no}</td>
+                    <td className="px-3 py-1.5">{l.description}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums muted">{qtyFmt(l.quoted)} {l.uom ?? ""}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{none ? "—" : qtyFmt(l.ordered)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      <span className={clsx("chip", done
+                        ? "bg-emerald-50 text-emerald-700"
+                        : none ? "bg-ink-100 text-ink-600" : "bg-amber-50 text-amber-800")}>
+                        {done ? t("ordered", "dipesan") : qtyFmt(l.open)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-xs">
+                      {l.pos.length
+                        ? l.pos.map((p, i) => (
+                          <span key={p.po_id + i}>
+                            {i > 0 && ", "}
+                            <Link to={`/customer-pos/${p.po_id}`} className="font-mono text-brand-700 hover:underline">{p.number}</Link>
+                            {l.pos.length > 1 && <span className="muted"> ({qtyFmt(p.qty)})</span>}
+                          </span>
+                        ))
+                        : <span className="muted">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {rows.length > 0 && (
         <div className="rounded-xl border border-ink-100 overflow-hidden">

@@ -1837,6 +1837,7 @@ const QUOTE_CHIP: Record<string, string> = {
   rejected:         "bg-red-50 text-red-700",
   sent:             "bg-blue-50 text-blue-700",
   won:              "bg-emerald-100 text-emerald-800",
+  partially_won:    "bg-teal-50 text-teal-800 ring-1 ring-teal-200",
   lost:             "bg-red-100 text-red-800",
   superseded:       "bg-ink-200 text-ink-600",
   cancelled:        "bg-ink-200 text-ink-600",

@@ -208,7 +208,90 @@ async def post_quotation(db: AsyncSession, q: Quotation) -> dict:
     return q.posted_snapshot
 
 
-async def _by_item_accounts(db: AsyncSession, q: Quotation, amounts: dict) -> dict:
+def _amounts_for_net(q: Quotation, net: float) -> dict:
+    """posting_amounts for part of a quotation: `net` of its lines before
+    discount, the discount taken in proportion, PPN at its rate."""
+    sub = float(q.subtotal or 0)
+    disc = round(float(q.discount_amount or 0) * min(1.0, net / sub), 2) if sub > 0 else 0.0
+    after = round(net - disc, 2)
+    tax = round(after * float(q.tax_pct or 0) / 100.0, 2)
+    return {"receivable": round(after + tax, 2), "revenue": round(net, 2),
+            "discount": -disc, "tax": tax}
+
+
+async def post_ordered(db: AsyncSession, q: Quotation, note: str = "posted") -> dict:
+    """Bring the quotation's posting up to what the customer has ordered.
+
+    A quotation ordered in batches is sold a batch at a time: each customer
+    PO adds its lines' revenue, receivable and PPN, and only those. So this
+    posts the difference between what is on the books for the quotation and
+    what its POs now order — the first batch posts its share, the next adds
+    its own, a rejected batch takes its share back. Everything ordered posts
+    exactly what `post_quotation` would. The snapshot keeps the running
+    figures per account, so `reverse_quotation` still undoes it all."""
+    from app.services.quotation_orders import is_fully_ordered, line_orders
+
+    _ensure_defaults(q)
+    orders = await line_orders(db, q)
+    full = await is_fully_ordered(db, q, orders)
+    ordered = {no: min(r["ordered"], r["quoted"]) for no, r in orders.items()}
+    if full:
+        amounts = posting_amounts(q)
+        weights_qty = None
+    else:
+        net = sum(ordered[no] * orders[no]["unit_price"] for no in orders)
+        amounts = _amounts_for_net(q, net)
+        weights_qty = ordered
+    legs: list[tuple[str, str | None, float]] = []
+    split = await _by_item_accounts(db, q, amounts, weights_qty)
+    for key in ("receivable", "revenue", "discount", "tax"):
+        if key in split:
+            legs += [(key, no, amt) for no, amt in split[key]]
+        else:
+            legs.append((key, getattr(q, f"account_{key}_no"), amounts[key]))
+    target: dict[tuple[str, str], float] = {}
+    for key, acc_no, amount in legs:
+        if acc_no:
+            target[(key, acc_no)] = round(target.get((key, acc_no), 0.0) + float(amount or 0), 2)
+    current: dict[tuple[str, str], float] = {}
+    if q.is_posted:
+        for m in (q.posted_snapshot or {}).get("movements", []):
+            k = (m.get("role"), m.get("account_no"))
+            current[k] = round(current.get(k, 0.0) + float(m.get("delta") or 0), 2)
+    entry_date = datetime.now(UTC).date()
+    movements = []
+    for (role, acc_no) in sorted(set(target) | set(current)):
+        want = target.get((role, acc_no), 0.0)
+        delta = round(want - current.get((role, acc_no), 0.0), 2)
+        acc = await db.scalar(select(Account).where(Account.account_no == acc_no))
+        if acc is None:
+            continue
+        if abs(delta) >= 0.005:
+            m = await _bump(db, acc_no, delta)
+            if m:
+                await journal_post(
+                    db, entry_date=entry_date, account_no=m["account_no"],
+                    account_type=m["account_type"], account_name=m["name"],
+                    amount=delta, source_type="quotation", source_id=q.id,
+                    source_ref=q.number, memo=f"Quotation {q.number} {note} ({role})",
+                    customer_id=q.customer_id, sales_pic_id=q.sales_pic_id)
+        if abs(want) >= 0.005:
+            movements.append({"account_no": acc_no, "name": acc.name,
+                              "account_type": acc.account_type, "delta": want,
+                              "new_balance": float(acc.balance or 0), "role": role})
+    q.is_posted = True
+    q.posted_at = q.posted_at or datetime.now(UTC)
+    q.posted_snapshot = {
+        "amounts": amounts, "movements": movements,
+        "ordered": {str(k): v for k, v in ordered.items()}, "full": full,
+        "posted_at": q.posted_at.isoformat(),
+    }
+    await db.flush()
+    return q.posted_snapshot
+
+
+async def _by_item_accounts(db: AsyncSession, q: Quotation, amounts: dict,
+                            qty_by_line: dict | None = None) -> dict:
     """Penjualan and Diskon Penjualan split by each line's item's own
     accounts (Akun Penjualan, Akun Disk. Penjualan) — where the quotation
     posts to the standard accounts; one set on the quotation by hand wins.
@@ -224,7 +307,9 @@ async def _by_item_accounts(db: AsyncSession, q: Quotation, amounts: dict) -> di
         return {}
     lines = (await db.scalars(select(QuotationItem).where(
         QuotationItem.quotation_id == q.id))).all()
-    values = [(it, float(it.qty or 0) * float(it.unit_price or 0)) for it in lines]
+    # Weighted by what was ordered when only part of it was (batch POs).
+    values = [(it, float((qty_by_line or {}).get(int(it.line_no or 0), it.qty) if qty_by_line is not None
+                         else it.qty or 0) * float(it.unit_price or 0)) for it in lines]
     whole = sum(v for _, v in values)
     if whole <= 0:
         return {}

@@ -79,7 +79,7 @@ const INVOICE_STATUS_LABEL_ID: Record<string, string> = {
 const QUOTE_STATUS_LABEL_ID: Record<string, string> = {
   draft: "draft", pending_approval: "menunggu persetujuan",
   approved: "disetujui", rejected: "ditolak", sent: "terkirim",
-  won: "menang", lost: "kalah",
+  won: "menang", partially_won: "menang sebagian", lost: "kalah",
 };
 const CUSTOMER_STAGE_LABEL_ID: Record<string, string> = {
   lead: "prospek", presentation: "presentasi", engineering: "rekayasa",
@@ -931,7 +931,7 @@ function NoProjectYet({
   // or something went wrong. Either way the director can open one.
   const quoteLink = po.quotation_id ? (
     <Link to={`/quotations/${po.quotation_id}`} className="text-brand-700 hover:underline">
-      {quoteStatus === "won"
+      {(quoteStatus === "won" || quoteStatus === "partially_won")
         ? t("Open the quotation", "Buka penawaran")
         : t("or mark the quotation Won", "atau tandai penawaran Menang")}
     </Link>

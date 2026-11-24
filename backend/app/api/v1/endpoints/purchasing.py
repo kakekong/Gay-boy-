@@ -563,6 +563,7 @@ async def po_prefill(
     from app.models.quotation import Quotation
 
     pr = None
+    project = None
     if price_request_id:
         pr = await db.get(PriceRequest, price_request_id)
     elif project_id:
@@ -592,6 +593,14 @@ async def po_prefill(
             _SPO.status != "cancelled",
         )
     )).all():
+        # For a project, only its own supplier orders: a quotation ordered in
+        # batches has a project per batch, and the first batch's order is not
+        # the second's.
+        if project is not None:
+            mine = {str(x) for x in (other.project_ids or []) if x} | (
+                {str(other.project_id)} if other.project_id else set())
+            if mine and str(project.id) not in mine:
+                continue
         for line in (other.items or []):
             key = line.get("line_no")
             if key is None:
@@ -603,11 +612,16 @@ async def po_prefill(
     # Lines the customer's PO didn't order are offered unticked and left out
     # of the total: a quotation of ten lines with a PO for three is three
     # lines to buy.
-    from app.services.ordered_lines import is_ordered, ordered_line_nos
-    _ordered = await ordered_line_nos(db, pr.id)
+    from app.services.ordered_lines import is_ordered, ordered_line_nos, project_po_lines
+    # For a project: its own batch, at its own quantities. Otherwise every
+    # line the deal ordered.
+    _mine = await project_po_lines(db, project) if project is not None else None
+    _ordered = set(_mine) if _mine is not None else await ordered_line_nos(db, pr.id)
     items, total, uncosted = [], 0.0, 0
     for it in (pr.items or []):
         qty = float(it.get("qty") or 0)
+        if _mine is not None and it.get("line_no") in _mine:
+            qty = float(_mine[it["line_no"]])
         unit_cost = float(it.get("cost_price") or 0)
         amount = unit_cost * qty
         customer_ordered = is_ordered(it.get("line_no"), _ordered)

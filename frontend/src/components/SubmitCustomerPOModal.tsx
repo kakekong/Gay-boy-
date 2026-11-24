@@ -14,6 +14,16 @@ interface WonQuoteLite {
   id: string;
   number: string;
   total: number;
+  status: string;
+}
+
+/** A quotation line as the deal's earlier POs left it. */
+interface LineOrder {
+  line_no: number;
+  quoted: number;
+  ordered: number;
+  open: number;
+  pos: Array<{ po_id: string; number: string; status: string; qty: number }>;
 }
 
 interface DraftItem {
@@ -24,6 +34,11 @@ interface DraftItem {
   /** The quotation line it came from — lets the deal check pair them. */
   line_no?: number;
   selected: boolean;
+  /** Earlier batches: quoted, already ordered, still open. */
+  quoted?: number;
+  ordered?: number;
+  open?: number;
+  orderedOn?: string[];
 }
 
 interface Props {
@@ -61,8 +76,9 @@ export function SubmitCustomerPOModal({
           id: string; number: string; status: string; total: number;
         }>;
         return all
-          .filter((x) => x.status === "won")
-          .map<WonQuoteLite>((x) => ({ id: x.id, number: x.number, total: x.total }));
+          // A partially won quotation still has lines open for the next batch.
+          .filter((x) => x.status === "won" || x.status === "partially_won")
+          .map<WonQuoteLite>((x) => ({ id: x.id, number: x.number, total: x.total, status: x.status }));
       }),
   });
 
@@ -74,22 +90,51 @@ export function SubmitCustomerPOModal({
   const [file, setFile] = useState<File | null>(null);
   const [isDp, setIsDp] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** POs already filed against this quotation (earlier batches). */
+  /** The picked quotation's number — shown even when it isn't Won yet
+   *  (the PO is what unlocks Mark won, so it can come first). */
+  const [pickedNo, setPickedNo] = useState<{ id: string; number: string; total: number } | null>(null);
+  const [earlier, setEarlier] = useState<Array<{ number: string; status: string; project_code: string | null }>>([]);
 
   async function loadQuotation(qid: string) {
     setQuotationId(qid);
     setItems([]);
+    setEarlier([]);
     if (!qid) return;
     try {
-      const res = await api.get(`/quotations/${qid}`);
+      const [res, ord] = await Promise.all([
+        api.get(`/quotations/${qid}`),
+        // What earlier batches already ordered; a missing answer just means
+        // the form behaves as it did before batches existed.
+        api.get(`/quotations/${qid}/orders`).catch(() => null),
+      ]);
+      setPickedNo({ id: qid, number: res.data?.number ?? "", total: Number(res.data?.total ?? 0) });
       const rawItems = res.data?.items ?? [];
-      setItems(rawItems.map((it: any) => ({
-        description: it.description ?? "",
-        qty: Number(it.qty ?? 1),
-        unit_price: Number(it.unit_price ?? 0),
-        uom: it.uom ?? undefined,
-        line_no: it.line_no ?? undefined,
-        selected: true,
+      const byLine = new Map<number, LineOrder>(
+        ((ord?.data?.lines ?? []) as LineOrder[]).map((l) => [Number(l.line_no), l]),
+      );
+      setEarlier(((ord?.data?.pos ?? []) as any[]).map((p) => ({
+        number: p.number, status: p.status, project_code: p.project_code ?? null,
       })));
+      setItems(rawItems.map((it: any) => {
+        const lo = it.line_no != null ? byLine.get(Number(it.line_no)) : undefined;
+        const quoted = Number(it.qty ?? 1);
+        // Pre-fill what is still open; a line fully ordered by an earlier
+        // batch starts unticked and can't be ticked.
+        const open = lo ? Number(lo.open) : quoted;
+        return {
+          description: it.description ?? "",
+          qty: open,
+          unit_price: Number(it.unit_price ?? 0),
+          uom: it.uom ?? undefined,
+          line_no: it.line_no ?? undefined,
+          selected: open > 0,
+          quoted,
+          ordered: lo ? Number(lo.ordered) : 0,
+          open,
+          orderedOn: lo ? lo.pos.map((p) => p.number) : [],
+        };
+      }));
     } catch {
       setErr(tt(
         "Couldn't fetch the quotation's items. Try picking it again.",
@@ -163,6 +208,8 @@ export function SubmitCustomerPOModal({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["incoming-customer-pos", customerId] });
       qc.invalidateQueries({ queryKey: ["quotation", quotationId] });
+      qc.invalidateQueries({ queryKey: ["quotation-orders", quotationId] });
+      qc.invalidateQueries({ queryKey: ["customer-pos-for-quote", quotationId] });
       onCreated?.();
       onClose();
     },
@@ -193,6 +240,17 @@ export function SubmitCustomerPOModal({
       setErr(tt(
         "Attach the customer's PO file. The director approves the PO based on the actual document.",
         "Lampirkan file PO pelanggan. Direktur menyetujui PO berdasarkan dokumen aslinya.",
+      ));
+      return;
+    }
+    // Only a line an earlier PO already ordered part of is capped; the
+    // first PO may differ from the quotation (the deal check flags that).
+    const over = items.find((it) => it.selected && it.open != null && (it.ordered ?? 0) > 0
+      && Number(it.qty || 0) > Number(it.open) + 1e-6);
+    if (over) {
+      setErr(tt(
+        `"${over.description}": ${over.qty} is more than is still open (${over.open} of ${over.quoted} left).`,
+        `"${over.description}": ${over.qty} melebihi sisa yang belum dipesan (${over.open} dari ${over.quoted} tersisa).`,
       ));
       return;
     }
@@ -239,16 +297,21 @@ export function SubmitCustomerPOModal({
               onChange={(e) => loadQuotation(e.target.value)}
             >
               <option value="">{t("— pick a Won quotation —", "— pilih penawaran Menang —")}</option>
+              {pickedNo && pickedNo.id === quotationId
+                && !(wonQuotes.data ?? []).some((qx) => qx.id === quotationId) && (
+                <option value={pickedNo.id}>{pickedNo.number} · {idr(pickedNo.total)}</option>
+              )}
               {(wonQuotes.data ?? []).map((qx) => (
                 <option key={qx.id} value={qx.id}>
                   {qx.number} · {idr(qx.total)}
+                  {qx.status === "partially_won" ? ` · ${tt("partially won", "menang sebagian")}` : ""}
                 </option>
               ))}
             </select>
             <span className="block text-[11px] text-ink-500 mt-1">
               {t(
-                "Only Won quotations can have a customer PO. Picking one fills its line items below; untick the ones the customer didn't actually order in this PO.",
-                "Hanya penawaran Menang yang bisa memiliki PO pelanggan. Memilih satu akan mengisi item-nya di bawah; hapus centang item yang tidak benar-benar dipesan pelanggan dalam PO ini.",
+                "Only Won or Partially won quotations can have a customer PO. Picking one fills the lines still open below; untick the ones the customer didn't order in this PO, or lower a quantity they ordered only part of. Each PO becomes its own project.",
+                "Hanya penawaran Menang atau Menang sebagian yang bisa memiliki PO pelanggan. Memilih satu akan mengisi item yang masih terbuka di bawah; hapus centang item yang tidak dipesan dalam PO ini, atau kurangi jumlah yang hanya dipesan sebagian. Setiap PO menjadi proyeknya sendiri.",
               )}
             </span>
           </label>
@@ -344,6 +407,29 @@ export function SubmitCustomerPOModal({
             </label>
           </div>
 
+          {earlier.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
+              <div className="font-semibold">
+                {t("Next batch of this quotation", "Batch berikutnya dari penawaran ini")}
+              </div>
+              <div className="mt-0.5">
+                {t("Already ordered on", "Sudah dipesan pada")}{" "}
+                {earlier.map((p, i) => (
+                  <span key={p.number}>
+                    {i > 0 && ", "}
+                    <span className="font-mono">{p.number}</span>
+                    {p.project_code ? ` → ${p.project_code}` : ` (${p.status})`}
+                  </span>
+                ))}
+                {". "}
+                {t(
+                  "Quantities below are what is still open. This PO becomes a project of its own.",
+                  "Jumlah di bawah adalah sisa yang belum dipesan. PO ini menjadi proyeknya sendiri.",
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Items */}
           <div className="card overflow-hidden">
             <div className="px-3 py-2 border-b border-ink-100 bg-ink-50/60 text-xs font-semibold flex justify-between items-center">
@@ -382,6 +468,7 @@ export function SubmitCustomerPOModal({
                         <input
                           type="checkbox"
                           checked={it.selected}
+                          disabled={it.open != null && it.open <= 0}
                           onChange={(e) => setItems((cur) => cur.map(
                             (x, j) => j === i ? { ...x, selected: e.target.checked } : x,
                           ))}
@@ -396,12 +483,22 @@ export function SubmitCustomerPOModal({
                             (x, j) => j === i ? { ...x, description: e.target.value } : x,
                           ))}
                         />
+                        {!!it.ordered && it.ordered > 0 && (
+                          <div className={"text-[11px] mt-0.5 " + ((it.open ?? 0) <= 0 ? "text-emerald-700" : "text-amber-700")}>
+                            {(it.open ?? 0) <= 0
+                              ? t(`Fully ordered — ${it.ordered} ${it.uom ?? ""} on ${(it.orderedOn ?? []).join(", ")}`,
+                                  `Sudah dipesan semua — ${it.ordered} ${it.uom ?? ""} pada ${(it.orderedOn ?? []).join(", ")}`)
+                              : t(`${it.ordered} of ${it.quoted} ${it.uom ?? ""} already on ${(it.orderedOn ?? []).join(", ")} · ${it.open} open`,
+                                  `${it.ordered} dari ${it.quoted} ${it.uom ?? ""} sudah pada ${(it.orderedOn ?? []).join(", ")} · ${it.open} tersisa`)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-1">
                         <input
                           type="number"
                           min={0}
                           step="any"
+                          max={(it.ordered ?? 0) > 0 ? it.open : undefined}
                           className="input py-1 text-right"
                           value={it.qty}
                           disabled={!it.selected}

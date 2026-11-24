@@ -424,10 +424,17 @@ async def project_full(project_id: UUID,
                 key=lambda ir: (pos.get(ir[1]["line_no"], len(order)), ir[0]))]
             # Lines the customer's PO didn't order: kept on the card, marked,
             # so purchasing doesn't source them (see services/ordered_lines).
-            from app.services.ordered_lines import is_ordered, ordered_line_nos
-            _ordered = await ordered_line_nos(db, pr.id)
+            # This project's own batch: what its customer PO orders, line by
+            # line and how much (a quotation ordered in batches has a project
+            # per batch). Without one, every line the deal ordered.
+            from app.services.ordered_lines import is_ordered, ordered_line_nos, project_po_lines
+            _mine = await project_po_lines(db, p)
+            _ordered = set(_mine) if _mine is not None else await ordered_line_nos(db, pr.id)
             for r in pr_items:
                 r["ordered"] = is_ordered(r.get("line_no"), _ordered)
+                if _mine is not None and r.get("line_no") in _mine \
+                        and abs(_mine[r["line_no"]] - float(r.get("qty") or 0)) > 1e-6:
+                    r["ordered_qty"] = _mine[r["line_no"]]
             price_request = {"id": str(pr.id), "number": pr.number,
                              "items": pr_items,
                              "custom_order": bool(order),

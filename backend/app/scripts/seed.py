@@ -844,6 +844,9 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS basis_note TEXT",
     "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS basis_set_by UUID",
     "ALTER TABLE commission_claims ADD COLUMN IF NOT EXISTS basis_set_at TIMESTAMPTZ",
+    # ── Batch POs: what has been ordered of a quotation ─────────────────
+    "ALTER TABLE quotations ADD COLUMN IF NOT EXISTS ordered_total NUMERIC(18,2) NOT NULL DEFAULT 0",
+    "UPDATE quotations SET ordered_total = total WHERE status = 'won' AND ordered_total = 0",
 ]
 
 

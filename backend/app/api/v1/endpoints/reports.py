@@ -18,7 +18,7 @@ from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.crm import Customer
 from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
-from app.models.quotation import Quotation
+from app.models.quotation import Quotation, won_amount, won_share, won_value
 from app.models.user import User
 
 # Reports are a director-only management surface. Gate the whole router.
@@ -207,7 +207,7 @@ async def sales_by_person(
         qstmt = select(Quotation).where(Quotation.sales_pic_id == u.id,
                                         Quotation.created_at >= since)
         quotes = (await db.scalars(qstmt)).all()
-        won = [q for q in quotes if q.status == "won"]
+        won = [q for q in quotes if q.status in ("won", "partially_won")]
         lost = [q for q in quotes if q.status == "lost"]
         decided = len(won) + len(lost)
         out.append({
@@ -219,7 +219,7 @@ async def sales_by_person(
             "win_rate": round(len(won) / decided, 3) if decided else 0,
             "pipeline_value": float(sum(float(q.total or 0) for q in quotes
                                         if q.status in ("draft", "pending_approval", "approved", "sent"))),
-            "won_revenue": float(sum(float(q.total or 0) for q in won)),
+            "won_revenue": float(sum(won_amount(q) for q in won)),
         })
     out.sort(key=lambda x: -x["won_revenue"])
     return {"range_days": range_days, "rows": out}

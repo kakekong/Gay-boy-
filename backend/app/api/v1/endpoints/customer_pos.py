@@ -265,7 +265,7 @@ async def create_customer_po(
     # caught up later, or didn't. So a PO may be filed against any quotation
     # the customer has actually been given: approved, sent, or already won
     # (won first, PO after — though only ever one PO per deal; see below).
-    _PO_READY = ("approved", "sent", "won")
+    _PO_READY = ("approved", "sent", "won", "partially_won")
     if quotation.status not in _PO_READY:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -276,21 +276,21 @@ async def create_customer_po(
     if not payload.number.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO number required")
 
-    # One PO per deal. A second one used to be allowed for staged orders, and
-    # in practice it was the same PO typed twice with a digit wrong — both
-    # approved, both hung off one project. Revisions of the quotation count as
-    # the same deal.
-    from app.services.customer_po_removal import existing_po_for_deal
-    already = await existing_po_for_deal(db, quotation.id)
-    if already is not None:
-        fix = ("fix that one and resubmit it"
-               if already.status == "rejected"
-               else "edit that one, or ask the director to delete it first")
+    # A quotation may be ordered in batches — three lines now, the rest next
+    # week; 60 m of 100 m now, 40 m later — each batch its own PO and its own
+    # project. What a batch may not do is order more of a line than is still
+    # open: that is how the same PO typed twice (which used to be the reason
+    # for allowing only one) is still caught. Revisions count as one deal.
+    from app.services.quotation_orders import check_po_lines, sent_back_po
+    # A PO the director sent back is fixed and resubmitted, not joined by a
+    # fresh copy of itself.
+    back = await sent_back_po(db, quotation.id)
+    if back is not None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"This quotation already has customer PO {already.number} "
-            f"({already.status.replace('_', ' ')}). A deal takes one PO — {fix}.",
-        )
+            f"This quotation has customer PO {back.number} sent back by the director. "
+            "Fix that one and resubmit it, or ask the director to delete it first.")
+    await check_po_lines(db, quotation, [it.model_dump() for it in payload.items])
 
     # Uniqueness scoped to the customer — two different customers using
     # the same PO number "001" is fine, but the same customer can't have
@@ -422,6 +422,13 @@ async def update_customer_po(
     if "po_date" in data:
         po.po_date = data["po_date"]
     if "items" in data and data["items"] is not None:
+        # The same rule as filing it: not more of a line than is still open,
+        # counting the deal's other POs but not this one.
+        if po.quotation_id:
+            from app.services.quotation_orders import check_po_lines
+            q_ = await db.get(Quotation, po.quotation_id)
+            if q_ is not None:
+                await check_po_lines(db, q_, [dict(i) for i in data["items"]], exclude_po_id=po.id)
         po.items = data["items"]
         po.total = _items_total(po.items)
     if "notes" in data:
@@ -572,7 +579,12 @@ async def delete_customer_po(
         ApprovalRequest.target_id == po.id,
         ApprovalRequest.status == ApprovalStatus.PENDING.value))
 
+    quote_id = po.quotation_id
     await db.delete(po)
+    await db.flush()
+    # A batch of a won quotation gone: what's open, its status and its
+    # revenue follow.
+    await settle_quotation(db, quote_id)
     await audit_record(db, actor=user, action="delete", entity="customer_po",
                        entity_id=po_id, before=snapshot, after=released)
     await db.commit()
@@ -815,6 +827,14 @@ async def resubmit_customer_po(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Only a rejected PO can be resubmitted — this one is '{po.status}'.")
+    # While it was sent back it didn't count; another batch may have taken
+    # some of what it orders since.
+    if po.quotation_id:
+        from app.services.quotation_orders import check_po_lines
+        q_ = await db.get(Quotation, po.quotation_id)
+        if q_ is not None:
+            await check_po_lines(db, q_, [dict(i) for i in (po.items or []) if isinstance(i, dict)],
+                                 exclude_po_id=po.id)
 
     is_director = Role(user.role) == Role.DIRECTOR
     if po.is_downpayment:
@@ -1108,9 +1128,11 @@ async def _spawn_project(
     caller that *is* that gate (finance recording the payment) overrides it.
     """
     from app.ai.orchestrator import emit
-    from app.services.project_factory import create_project, project_for_quotation
+    from app.services.project_factory import create_project, project_for_po
 
-    project = await project_for_quotation(db, po.quotation_id)
+    # Each PO its own project: a quotation ordered in batches is several jobs.
+    # The one a PO already has, or one made at Won that no PO holds yet.
+    project = await project_for_po(db, po)
     if project is not None:
         # Made at Won, before this PO was signed off. Give it the paperwork
         # it could not have had then, without overwriting anything set since.
@@ -1151,7 +1173,28 @@ async def _spawn_project(
         "customer_po_id": str(po.id),
         "project_id": str(project.id) if project else None,
     })
+    await settle_quotation(db, po.quotation_id)
     return project
+
+
+async def settle_quotation(db: AsyncSession, quotation_id) -> None:
+    """Once a deal is won, each batch PO moves it: Partially won while some of
+    it is still open, Won when everything is ordered — and its revenue
+    follows the lines ordered. Before Won, nothing: Won is still the call."""
+    if not quotation_id:
+        return
+    from app.models.quotation import WON_STATES
+    from app.services import ledger
+    from app.services.quotation_orders import refresh_status
+    q = await db.get(Quotation, quotation_id)
+    if q is None:
+        return
+    await refresh_status(db, q)
+    if q.status in WON_STATES:
+        try:
+            await ledger.post_ordered(db, q, note="batch ordered")
+        except Exception:      # missing accounts must not block the order
+            pass
 
 
 # ─── Order confirmation sheet ────────────────────────────────────────────────

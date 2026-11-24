@@ -45,14 +45,39 @@ async def ordered_line_nos(db: AsyncSession, price_request_id: UUID | str | None
     if quote_ids:
         conds.append(CustomerPO.quotation_id.in_(quote_ids))
     from sqlalchemy import or_
-    po = (await db.scalars(
-        select(CustomerPO).where(or_(*conds), CustomerPO.status != "rejected")
-        .order_by(CustomerPO.created_at.desc()).limit(1))).first()
-    if po is None:
+    # Every batch counts: a quotation ordered three lines now and seven next
+    # week has ten lines ordered.
+    pos = (await db.scalars(
+        select(CustomerPO).where(or_(*conds), CustomerPO.status.notin_(("rejected", "cancelled")))
+        .order_by(CustomerPO.created_at.asc()))).all()
+    if not pos:
         return None
-    nos = {int(it["line_no"]) for it in (po.items or [])
+    nos = {int(it["line_no"]) for po in pos for it in (po.items or [])
            if isinstance(it, dict) and it.get("line_no") not in (None, "")}
     return nos or None
+
+
+async def project_po_lines(db: AsyncSession, project) -> dict[int, float] | None:
+    """What this project's own customer PO orders, per price request line:
+    {line_no: qty}. A quotation ordered in batches has a project per batch,
+    and each project buys and bills its batch — 60 m of a 100 m line here,
+    the other 40 m on the next. None when it can't tell (no PO with lines
+    taken from the quotation): then the whole request is the job, as before."""
+    from app.models.customer_po import CustomerPO
+    if project is None:
+        return None
+    po = (await db.scalars(
+        select(CustomerPO).where(CustomerPO.project_id == project.id,
+                                 CustomerPO.status.notin_(("rejected", "cancelled")))
+        .order_by(CustomerPO.created_at.asc()).limit(1))).first()
+    if po is None:
+        return None
+    out: dict[int, float] = {}
+    for it in (po.items or []):
+        if isinstance(it, dict) and it.get("line_no") not in (None, ""):
+            n = int(it["line_no"])
+            out[n] = out.get(n, 0.0) + float(it.get("qty") or 0)
+    return out or None
 
 
 def is_ordered(line_no, ordered: set[int] | None) -> bool:

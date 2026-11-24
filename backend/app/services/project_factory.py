@@ -50,6 +50,32 @@ async def project_for_quotation(db: AsyncSession, quotation_id) -> Project | Non
     )
 
 
+async def project_for_po(db: AsyncSession, po: CustomerPO) -> Project | None:
+    """The project this customer PO belongs to.
+
+    Its own, once it has one. Otherwise a project already raised for its
+    quotation that no other PO holds — made at Won before this PO was
+    approved. A quotation ordered in batches gets a project per batch, so a
+    project another PO already holds is not this one's."""
+    if po.project_id:
+        p = await db.get(Project, po.project_id)
+        if p is not None and not p.is_deleted:
+            return p
+    if not po.quotation_id:
+        return None
+    candidates = (await db.scalars(
+        select(Project).where(Project.quotation_id == po.quotation_id,
+                              Project.is_deleted.is_(False))
+        .order_by(Project.created_at.asc()))).all()
+    for p in candidates:
+        held = await db.scalar(select(CustomerPO.id).where(
+            CustomerPO.project_id == p.id, CustomerPO.id != po.id,
+            CustomerPO.status.notin_(("rejected", "cancelled"))).limit(1))
+        if held is None:
+            return p
+    return None
+
+
 async def _backing_po(db: AsyncSession, quotation_id) -> CustomerPO | None:
     """The customer's order behind this quotation.
 
@@ -138,25 +164,32 @@ async def ensure_project_for_quotation(
     deposit — or when there is no customer order behind the quotation at all,
     which `mark_won` refuses anyway but this must not assume.
     """
-    existing = await project_for_quotation(db, q.id)
-    if existing:
-        return existing
-
-    po = await _backing_po(db, q.id)
-    if po is None:
-        return None
-    if po.is_downpayment:
-        # The deposit gate owns this one. Starting the job here would be the
-        # exact thing a down-payment exists to prevent.
-        return None
-
-    project = await create_project(
-        db, user=user, customer_id=q.customer_id, quotation_id=q.id,
-        price_request_id=q.price_request_id, po=po,
-    )
-    if po.project_id is None:
-        po.project_id = project.id
-    await emit(db, "quotation.won", {
-        "quotation_id": str(q.id), "project_id": str(project.id),
-    })
-    return project
+    # One project per customer PO: a quotation ordered in batches is several
+    # jobs. Each standing PO without one gets its own (down payments wait for
+    # their deposit). Returns the first.
+    pos = (await db.scalars(
+        select(CustomerPO).where(
+            CustomerPO.quotation_id == q.id,
+            CustomerPO.status.notin_(("rejected", "cancelled")),
+        ).order_by(CustomerPO.created_at.asc()))).all()
+    if not pos:
+        return await project_for_quotation(db, q.id)
+    first = None
+    for po in pos:
+        project = await project_for_po(db, po)
+        if project is None:
+            if po.is_downpayment:
+                # The deposit gate owns this one. Starting the job here would
+                # be the exact thing a down-payment exists to prevent.
+                continue
+            project = await create_project(
+                db, user=user, customer_id=q.customer_id, quotation_id=q.id,
+                price_request_id=q.price_request_id, po=po,
+            )
+            await emit(db, "quotation.won", {
+                "quotation_id": str(q.id), "project_id": str(project.id),
+            })
+        if po.project_id is None:
+            po.project_id = project.id
+        first = first or project
+    return first

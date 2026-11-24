@@ -1,4 +1,4 @@
-"""One customer PO per deal, and deleting a PO keeps its project.
+"""The same PO filed twice is refused, and deleting a PO keeps its project.
 
 The case that prompted it: one PO typed twice with a digit wrong (911805889 /
 9118005889). The only guard was the exact number, so both went in, both were
@@ -7,8 +7,10 @@ the delete tool treated the project as the PO's child and would have taken
 the job with it.
 
 Pinned here:
-* a second PO against the same quotation, or a revision of it, is refused and
-  names the one on file (a rejected one says to fix and resubmit it);
+* a second PO against the same quotation, or a revision of it, that orders
+  what is already ordered — or whose lines aren't picked from the quotation —
+  is refused and names the one on file (a rejected one says to fix and
+  resubmit it). A quotation ordered in batches is test_batch_customer_pos;
 * the director can delete a PO; sales cannot;
 * the project survives, and its printed PO number/date/value move to the PO
   that is left — or clear (value kept) when none is;
@@ -94,7 +96,7 @@ async def main():
 
     r = await file_po(cust, q["id"], typo)
     check("a second PO on the same quotation is refused — the 911805889 / 9118005889 case",
-          r.status_code == 409, f"{r.status_code} {why(r)}")
+          r.status_code in (400, 409), f"{r.status_code} {why(r)}")
     check("...and the refusal names the PO already on file",
           real in why(r), why(r)[:160])
 
@@ -107,7 +109,7 @@ async def main():
         await c.post(f"/quotations/{rev['id']}/approve", headers=d, json={"notes": ""})
         r = await file_po(cust2, rev["id"], f"REV2-{TAG}")
         check("a revision of the quotation is the same deal — a second PO there is refused too",
-              r.status_code == 409 and f"REV-{TAG}" in why(r), f"{r.status_code} {why(r)}")
+              r.status_code in (400, 409) and f"REV-{TAG}" in why(r), f"{r.status_code} {why(r)}")
     else:
         check("the quotation could be revised for the revision case", False, str(rev)[:160])
 

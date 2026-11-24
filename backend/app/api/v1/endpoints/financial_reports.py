@@ -32,7 +32,7 @@ from app.core.permissions import Role, require
 from app.models.account import Account
 from app.models.crm import Customer
 from app.models.finance import LedgerEntry
-from app.models.quotation import Quotation
+from app.models.quotation import Quotation, won_amount, won_share, won_value
 from app.models.user import User
 from app.services import financials as fin
 from app.services import journal as journal_svc
@@ -232,7 +232,7 @@ async def _sales_revenue_rows(
     """Won-quotation revenue per sales rep within the window (revenue =
     subtotal − discount, matching what posts to the ledger)."""
     stmt = select(Quotation).where(
-        Quotation.status == "won",
+        Quotation.status.in_(("won", "partially_won")),
         Quotation.created_at >= start,
         Quotation.created_at <= _end_of_day(end),
     )
@@ -244,10 +244,11 @@ async def _sales_revenue_rows(
         if not q.sales_pic_id:
             continue
         a = compute_amounts(q)
+        share = won_share(q)        # only what was ordered, when partially won
         d = agg.setdefault(q.sales_pic_id, {"deals_won": 0, "revenue": 0.0, "total": 0.0})
         d["deals_won"] += 1
-        d["revenue"] += a["revenue"]
-        d["total"] += float(q.total or 0)
+        d["revenue"] += a["revenue"] * share
+        d["total"] += won_amount(q)
     return agg
 
 
@@ -315,7 +316,7 @@ async def _r_salesperson(db: AsyncSession, start: date, end: date, user_id: UUID
     # Their won quotations
     quotes = (await db.scalars(
         select(Quotation).where(
-            Quotation.sales_pic_id == user_id, Quotation.status == "won",
+            Quotation.sales_pic_id == user_id, Quotation.status.in_(("won", "partially_won")),
             Quotation.created_at >= start, Quotation.created_at <= _end_of_day(end),
         ).order_by(Quotation.created_at.desc())
     )).all()
@@ -332,7 +333,8 @@ async def _r_salesperson(db: AsyncSession, start: date, end: date, user_id: UUID
         },
         "quotations": [
             {"number": q.number, "customer_name": names.get(q.customer_id),
-             "total": float(q.total or 0), "revenue": compute_amounts(q)["revenue"]}
+             "total": won_amount(q), "revenue": compute_amounts(q)["revenue"] * won_share(q),
+             "status": q.status}
             for q in quotes
         ],
         "transactions": tx["entries"],

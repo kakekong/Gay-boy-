@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
-from app.models.quotation import Quotation
+from app.models.quotation import Quotation, won_amount, won_share, won_value
 from app.models.sales_target import SalesTarget
 from app.models.user import User
 
@@ -54,12 +54,12 @@ async def _achieved(db: AsyncSession, user_id: UUID, period: str) -> float:
     rows = (await db.scalars(
         select(Quotation).where(
             Quotation.sales_pic_id == user_id,
-            Quotation.status == "won",
+            Quotation.status.in_(("won", "partially_won")),
             Quotation.updated_at >= start,
             Quotation.updated_at < end,
         )
     )).all()
-    return float(sum(float(q.total or 0) for q in rows))
+    return float(sum(won_amount(q) for q in rows))
 
 
 async def _serialize(db: AsyncSession, t: SalesTarget) -> dict:

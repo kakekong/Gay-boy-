@@ -15,7 +15,7 @@ from app.core.permissions import Role, require, require_min
 from app.core.security import hash_password
 from app.models.attendance import Attendance
 from app.models.crm import Activity, Customer
-from app.models.quotation import Quotation
+from app.models.quotation import Quotation, won_amount, won_share, won_value
 from app.models.tag import Tag, UserTagLink
 from app.models.user import User
 from app.schemas.auth import UserOut
@@ -305,7 +305,7 @@ async def employee_stats(
     ) or 0
     won = await db.scalar(
         select(func.count(Quotation.id)).where(
-            Quotation.sales_pic_id == user_id, Quotation.status == "won"
+            Quotation.sales_pic_id == user_id, Quotation.status.in_(("won", "partially_won"))
         )
     ) or 0
     lost = await db.scalar(
@@ -320,8 +320,8 @@ async def employee_stats(
         )
     )
     won_revenue = await db.scalar(
-        select(func.coalesce(func.sum(Quotation.total), 0)).where(
-            Quotation.sales_pic_id == user_id, Quotation.status == "won"
+        select(func.coalesce(func.sum(won_value()), 0)).where(
+            Quotation.sales_pic_id == user_id, Quotation.status.in_(("won", "partially_won"))
         )
     )
     activities_30d = await db.scalar(

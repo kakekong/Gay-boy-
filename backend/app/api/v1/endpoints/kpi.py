@@ -36,7 +36,7 @@ async def sales_kpi(range_days: int = 30,
 
     quotes_q = select(func.count(Quotation.id)).where(Quotation.created_at >= since)
     won_q = select(func.count(Quotation.id)).where(
-        Quotation.status == "won", Quotation.updated_at >= since
+        Quotation.status.in_(("won", "partially_won")), Quotation.updated_at >= since
     )
     if is_sales:
         # Quotation carries the sales rep directly (sales_pic_id).

@@ -113,7 +113,10 @@ async def _restate_posting(db: AsyncSession, q: Quotation, was_total: float) -> 
     if abs(now_total - was_total) < 0.005:
         return None
     await ledger.reverse_quotation(db, q)
-    await ledger.post_quotation(db, q)
+    if q.status == "partially_won":
+        await ledger.post_ordered(db, q)
+    else:
+        await ledger.post_quotation(db, q)
     return {"was": was_total, "now": now_total}
 
 
@@ -408,7 +411,7 @@ async def update_quotation(
                else "Raise a new quotation if it has come back to life."),
         )
     if q.status not in ("draft", "rejected") and not is_meta_only:
-        if q.status not in ("approved", "sent", "won"):
+        if q.status not in ("approved", "sent", "won", "partially_won"):
             # pending_approval: unsubmit first — editing under the
             # director's nose would decide a different document.
             raise HTTPException(
@@ -559,7 +562,7 @@ async def reassign_quotation(
     q = await _load(q_id, db)
     if not q:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Quotation not found")
-    if q.status in ("won", "lost", "cancelled", "superseded"):
+    if q.status in ("won", "partially_won", "lost", "cancelled", "superseded"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"A '{q.status}' quotation is closed — its owner is the record of "
@@ -759,7 +762,7 @@ async def revise_quotation(
             "A Mark-won request is pending with finance — wait for that "
             "decision before posting a revision.",
         )
-    if q.status in ("won", "cancelled", "superseded"):
+    if q.status in ("won", "partially_won", "cancelled", "superseded"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"A '{q.status}' quotation can't be revised"
@@ -883,7 +886,7 @@ async def approve_quotation(q_id: UUID, payload: QuotationDecide,
     # look live. Won/cancelled parents are history and stay untouched.
     if q.parent_id:
         parent = await db.get(Quotation, q.parent_id)
-        if parent and parent.status not in ("won", "cancelled", "superseded"):
+        if parent and parent.status not in ("won", "partially_won", "cancelled", "superseded"):
             parent.status = "superseded"
             await audit_record(db, actor=user, action="superseded",
                                entity="quotation", entity_id=parent.id,
@@ -943,7 +946,7 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
     # Won and Lost are mutually exclusive terminal outcomes — once one is
     # set (or superseded by a revision), the other can't be clicked.
-    if q.status in ("won", "lost", "cancelled", "superseded"):
+    if q.status in ("won", "partially_won", "lost", "cancelled", "superseded"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"A '{q.status}' quotation can't be marked Won.",
@@ -1053,15 +1056,49 @@ async def mark_won(q_id: UUID, db: AsyncSession = Depends(get_db),
         from app.core.stage_tasks import ensure_stage_tasks
         if bump_customer_stage(cust, "negotiation"):
             await ensure_stage_tasks(db, cust, "negotiation")
-    # Auto-post to the ledger (idempotent)
+    # Won — or Partially won, when the customer's POs order only part of it
+    # (a quotation ordered in batches). Revenue posts for what was ordered.
+    from app.services.quotation_orders import refresh_status
+    await refresh_status(db, q)
     try:
-        await ledger.post_quotation(db, q)
+        await ledger.post_ordered(db, q, note="won")
     except Exception:
         # Don't block the won flow if posting fails (e.g. missing accounts)
         pass
     await audit_record(db, actor=user, action="won", entity="quotation",
-                       entity_id=q.id, after={"status": "won", "total": float(q.total or 0)})
+                       entity_id=q.id, after={"status": q.status, "total": float(q.total or 0),
+                                              "ordered_total": float(q.ordered_total or 0)})
     return await _load(q.id, db)
+
+
+@router.get("/{q_id}/orders")
+async def quotation_orders(q_id: UUID, db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """How much of each line the customer's POs have ordered, and what is
+    still open — a quotation can be ordered in batches, each PO its own
+    project. Feeds the quotation page and the next PO's form."""
+    from app.models.customer_po import CustomerPO
+    from app.models.operation import Project
+    from app.services.quotation_orders import is_fully_ordered, line_orders, live_pos
+    q = await db.get(Quotation, q_id)
+    if not q:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not await _may_see(db, user, q):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Out of scope")
+    lines = list((await line_orders(db, q)).values())
+    pos = []
+    for po in await live_pos(db, q.id):
+        proj = await db.get(Project, po.project_id) if po.project_id else None
+        pos.append({"id": str(po.id), "number": po.number, "status": po.status,
+                    "total": float(po.total or 0), "lines": len(po.items or []),
+                    "project_id": str(proj.id) if proj else None,
+                    "project_code": proj.code if proj else None,
+                    "created_at": po.created_at})
+    return {"status": q.status, "total": float(q.total or 0),
+            "ordered_total": float(q.ordered_total or 0),
+            "lines": lines, "pos": pos,
+            "fully_ordered": await is_fully_ordered(db, q),
+            "nothing_ordered": all(r["ordered"] <= 1e-6 for r in lines)}
 
 
 @router.post("/{q_id}/lost", response_model=QuotationOut)
@@ -1087,7 +1124,7 @@ async def mark_lost(q_id: UUID, reason: str,
     # Won and Lost are mutually exclusive: a won/closed quote can't flip
     # to lost, and while a Mark-won request sits in finance's queue
     # the outcome is theirs to decide — Lost is blocked until then.
-    if q.status in ("won", "lost", "cancelled", "superseded"):
+    if q.status in ("won", "partially_won", "lost", "cancelled", "superseded"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"A '{q.status}' quotation can't be marked Lost.",
@@ -1855,12 +1892,13 @@ async def post_to_ledger(
     user: User = Depends(_ledger_viewer),
 ):
     q = await _scoped_quote(q_id, db, user)
-    # A quotation reaches the books when the deal is won — not before.
-    if q.status != "won":
+    # A quotation reaches the books when the deal is won — not before; and
+    # for what the customer ordered of it.
+    if q.status not in ("won", "partially_won"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"{q.number} isn't won — a quotation is posted when the deal is won.")
-    await ledger.post_quotation(db, q)
+    await ledger.post_ordered(db, q)
     return await _load(q.id, db)
 
 

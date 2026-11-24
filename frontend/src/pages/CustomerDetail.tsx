@@ -35,7 +35,7 @@ const LABEL_ID: Record<string, string> = {
   // quotation / approval statuses
   draft: "draf", pending_approval: "menunggu persetujuan",
   approved: "disetujui", rejected: "ditolak", sent: "terkirim",
-  won: "menang", lost: "kalah",
+  won: "menang", partially_won: "menang sebagian", lost: "kalah",
   // price-request statuses
   pending_purchasing: "menunggu purchasing", pending_director: "menunggu direktur",
   // project statuses
@@ -67,6 +67,7 @@ const QSTATUS: Record<string, string> = {
   rejected:          "bg-red-50 text-red-700",
   sent:              "bg-blue-50 text-blue-700",
   won:               "bg-emerald-100 text-emerald-800",
+  partially_won:     "bg-teal-50 text-teal-800 ring-1 ring-teal-200",
   lost:              "bg-red-100 text-red-800",
 };
 const PSTATUS: Record<string, string> = {

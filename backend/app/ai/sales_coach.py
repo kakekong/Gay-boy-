@@ -12,7 +12,7 @@ from app.models.quotation import Quotation
 async def advise(db: AsyncSession, user_id: UUID) -> dict:
     won = await db.scalar(
         select(func.count(Quotation.id)).where(
-            Quotation.sales_pic_id == user_id, Quotation.status == "won"
+            Quotation.sales_pic_id == user_id, Quotation.status.in_(("won", "partially_won"))
         )
     ) or 0
     lost = await db.scalar(

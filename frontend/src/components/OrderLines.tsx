@@ -26,6 +26,9 @@ interface Line {
   spec: string | null; cost_price?: number | null; sell_price?: number | null;
   /** False when the customer's PO left this line out — shown, not sourced. */
   ordered?: boolean;
+  /** How much of the line this project's PO orders, when it is not all of
+   *  it — a quotation ordered in batches splits a line across projects. */
+  ordered_qty?: number;
 }
 interface Draft {
   key: string; line_no: number | null; description: string; qty: string;
@@ -241,8 +244,8 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
 
       {!editing && items.some((it) => it.ordered === false) && (
         <div className="mx-5 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          {t(`The customer's PO orders ${items.filter((it) => it.ordered !== false).length} of these ${items.length} lines. The greyed-out ones weren't ordered: they stay here for reference, but aren't sent to suppliers or put on purchase orders unless picked by hand.`,
-             `PO pelanggan memesan ${items.filter((it) => it.ordered !== false).length} dari ${items.length} baris ini. Baris abu-abu tidak dipesan: tetap tampil sebagai referensi, tetapi tidak dikirim ke pemasok atau dimasukkan ke PO kecuali dipilih manual.`)}
+          {t(`This project's customer PO orders ${items.filter((it) => it.ordered !== false).length} of these ${items.length} lines. The greyed-out ones aren't on it — not ordered, or ordered on another PO of the same quotation, which has its own project. They stay here for reference, but aren't sent to suppliers or put on purchase orders unless picked by hand.`,
+             `PO pelanggan proyek ini memesan ${items.filter((it) => it.ordered !== false).length} dari ${items.length} baris ini. Baris abu-abu tidak ada di PO ini — tidak dipesan, atau dipesan pada PO lain dari penawaran yang sama, yang punya proyeknya sendiri. Tetap tampil sebagai referensi, tetapi tidak dikirim ke pemasok atau dimasukkan ke PO kecuali dipilih manual.`)}
         </div>
       )}
       {!editing ? (
@@ -268,9 +271,17 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
                   <td className="td">{it.description}
                     {it.ordered === false && (
                       <span className="ml-2 chip text-[10px] bg-ink-100 text-ink-600 whitespace-nowrap">
-                        {t("Not ordered", "Tidak dipesan")}</span>)}
+                        {t("Not on this PO", "Tidak ada di PO ini")}</span>)}
                   </td>
-                  <td className="td text-right tabular-nums">{it.qty}</td>
+                  <td className="td text-right tabular-nums whitespace-nowrap">
+                    {it.ordered !== false && it.ordered_qty != null ? (
+                      <span title={t("This project's PO orders part of the quoted quantity; the rest is on another batch or still open.",
+                                     "PO proyek ini memesan sebagian dari jumlah yang ditawarkan; sisanya ada di batch lain atau masih terbuka.")}>
+                        <span className="font-semibold">{it.ordered_qty}</span>
+                        <span className="muted"> {t("of", "dari")} {it.qty}</span>
+                      </span>
+                    ) : it.qty}
+                  </td>
                   <td className="td muted">{it.uom || "—"}</td>
                   <td className="td muted text-xs">{it.spec || "—"}</td>
                   {hasCost && (

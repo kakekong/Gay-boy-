@@ -85,7 +85,7 @@ async def drop_settled(db: AsyncSession, rows: list) -> list:
     projects = await load(Project, ids("project", "project_order"))
     customers = await load(Customer, ids("customer", "followup"))
 
-    quote_closed = ("won", "lost", "cancelled", "superseded")
+    quote_closed = ("won", "partially_won", "lost", "cancelled", "superseded")
     cpo_open = ("pending_approval", "pending_finance", "pending_payment_confirm")
 
     def settled(r) -> bool:
@@ -425,7 +425,7 @@ async def apply_to_target(
             # flips to 'superseded' so only one offer is ever live.
             if approve and q.parent_id:
                 parent = await db.get(Quotation, q.parent_id)
-                if parent and parent.status not in ("won", "cancelled", "superseded"):
+                if parent and parent.status not in ("won", "partially_won", "cancelled", "superseded"):
                     parent.status = "superseded"
                     applied["superseded"] = str(parent.id)
     elif req.target_type == "overtime":
@@ -533,6 +533,10 @@ async def apply_to_target(
                             applied["project_code"] = project.code
             else:
                 po.status = "rejected"
+                # A batch of a won quotation rejected: its share comes off the
+                # status and the books.
+                from app.api.v1.endpoints.customer_pos import settle_quotation
+                await settle_quotation(db, po.quotation_id)
             applied["new_status"] = po.status
     elif req.target_type == "supplier_po":
         # Every PO step needs director approval. The original request
@@ -820,7 +824,7 @@ async def apply_to_target(
         # to 'won' and posts to the ledger (idempotent, best-effort).
         from app.models.quotation import Quotation
         q = await db.get(Quotation, req.target_id)
-        if q and q.status in ("won", "lost", "cancelled", "superseded"):
+        if q and q.status in ("won", "partially_won", "lost", "cancelled", "superseded"):
             # Stale request: the quote already settled (e.g. the director
             # marked it Won directly, or a revision superseded it). Record
             # the decision but don't re-apply — re-winning a superseded quote
@@ -877,12 +881,16 @@ async def apply_to_target(
                 if cust and bump_customer_stage(cust, "negotiation"):
                     await ensure_stage_tasks(db, cust, "negotiation")
                     applied["customer_stage"] = "negotiation"
+            # Won, or Partially won while the customer's POs order only part
+            # of it; the revenue is what they ordered.
             from app.services import ledger
+            from app.services.quotation_orders import refresh_status
+            await refresh_status(db, q)
             try:
-                await ledger.post_quotation(db, q)
+                await ledger.post_ordered(db, q, note="won")
             except Exception:
                 pass
-            applied["new_status"] = "won"
+            applied["new_status"] = q.status
         elif q:
             # Rejected: the quote stays where it was (approved/sent).
             applied["new_status"] = q.status

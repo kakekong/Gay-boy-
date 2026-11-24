@@ -126,7 +126,7 @@ async def sync_from_price_request(
         # anyway — asking them to approve it a second time on the quotation
         # is the "it doesn't sync" people hit. So their edit carries through
         # to an approved, sent or won quotation too (a won one is re-posted).
-        if by_director and q.status in ("approved", "sent", "won"):
+        if by_director and q.status in ("approved", "sent", "won", "partially_won"):
             from app.api.v1.endpoints.quotations import _restate_posting
             was_total = float(q.total or 0)
             for it in existing:

@@ -9,6 +9,42 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
 from app.models.base import AuthorshipMixin, SoftDeleteMixin, TimestampMixin, UUIDPK
 
+# A quotation the customer has ordered against. "Won" is everything ordered;
+# "partially_won" is some of it — the customer orders in batches (three lines
+# now, seven next week) and each batch PO becomes its own project. Anything
+# that counts sales counts both, by what was ordered (see `won_value`).
+WON_STATES = ("won", "partially_won")
+
+
+def won_amount(q) -> float:
+    """Python twin of `won_value`: what this quotation counts for as sold."""
+    if q.status == "won":
+        return float(q.total or 0)
+    if q.status == "partially_won":
+        return float(q.ordered_total or 0)
+    return 0.0
+
+
+def won_share(q) -> float:
+    """The part of the quotation sold: 1 when won, ordered ÷ total when
+    partially won — to scale figures worked out on the whole of it."""
+    if q.status == "won":
+        return 1.0
+    if q.status == "partially_won" and float(q.total or 0) > 0:
+        return min(1.0, float(q.ordered_total or 0) / float(q.total))
+    return 0.0
+
+
+def won_value():
+    """SQL: what a quotation counts for in sales figures — its total when won,
+    what has been ordered of it when partially won, nothing otherwise."""
+    from sqlalchemy import case
+    return case(
+        (Quotation.status == "won", Quotation.total),
+        (Quotation.status == "partially_won", Quotation.ordered_total),
+        else_=0,
+    )
+
 
 class Product(Base, UUIDPK, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "products"
@@ -57,6 +93,9 @@ class Quotation(Base, UUIDPK, TimestampMixin, AuthorshipMixin, SoftDeleteMixin):
     discount_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     tax_pct: Mapped[float] = mapped_column(Numeric(6, 3), default=11, nullable=False)
     total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
+    # What the customer's POs have ordered of it, like `total` (after
+    # discount, PPN included). Equal to `total` once everything is ordered.
+    ordered_total: Mapped[float] = mapped_column(Numeric(18, 2), default=0, nullable=False)
     valid_until: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     # Why it was sent back. The reason used to go only to the audit log and

@@ -9,7 +9,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.permissions import Role, require, require_min
 from app.models.crm import Customer
-from app.models.quotation import Quotation
+from app.models.quotation import Quotation, won_amount, won_share, won_value
 from app.models.user import User
 
 router = APIRouter(
@@ -31,7 +31,7 @@ async def executive(
         )
     )
     won = await db.scalar(
-        select(func.coalesce(func.sum(Quotation.total), 0)).where(Quotation.status == "won")
+        select(func.coalesce(func.sum(won_value()), 0)).where(Quotation.status.in_(("won", "partially_won")))
     )
     top_customers = (await db.execute(
         select(Customer.company_name, Customer.lifetime_value)
@@ -195,6 +195,6 @@ async def _forecast_vs_reality(db: AsyncSession):
         )
     )
     reality = await db.scalar(
-        select(func.coalesce(func.sum(Quotation.total), 0)).where(Quotation.status == "won")
+        select(func.coalesce(func.sum(won_value()), 0)).where(Quotation.status.in_(("won", "partially_won")))
     )
     return {"forecast": float(forecast or 0), "reality": float(reality or 0)}

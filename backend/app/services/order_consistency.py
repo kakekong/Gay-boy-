@@ -53,7 +53,7 @@ from app.models.user import User
 _DEAD_CPO = ("rejected", "cancelled", "void")
 # Quotation states a line edit can reach at all (see `update_quotation`).
 _Q_DIRECT = ("draft", "rejected")
-_Q_VIA_DIRECTOR = ("approved", "sent", "won")
+_Q_VIA_DIRECTOR = ("approved", "sent", "won", "partially_won")
 _DEAD_SPO = ("cancelled", "rejected")
 
 

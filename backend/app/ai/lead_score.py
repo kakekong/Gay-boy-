@@ -91,7 +91,7 @@ async def _historical_conversion(db: AsyncSession, sales_pic_id) -> float:
         return 0.25
     won = await db.scalar(
         select(func.count(Quotation.id))
-        .where(Quotation.sales_pic_id == sales_pic_id, Quotation.status == "won")
+        .where(Quotation.sales_pic_id == sales_pic_id, Quotation.status.in_(("won", "partially_won")))
     )
     lost = await db.scalar(
         select(func.count(Quotation.id))

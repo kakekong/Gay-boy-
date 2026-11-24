@@ -36,6 +36,7 @@ const ACTION_TONE: Record<string, string> = {
   approve:      "bg-emerald-50 text-emerald-700",
   reject:       "bg-red-50 text-red-700",
   won:          "bg-emerald-100 text-emerald-800",
+  partially_won: "bg-teal-50 text-teal-800 ring-1 ring-teal-200",
   lost:         "bg-red-100 text-red-800",
   post_ledger:  "bg-violet-50 text-violet-700",
 };

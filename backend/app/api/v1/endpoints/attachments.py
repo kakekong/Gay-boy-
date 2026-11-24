@@ -661,7 +661,7 @@ async def _attachment_locked(db: AsyncSession, a: Attachment) -> str | None:
     if owner == "quotation":
         from app.models.quotation import Quotation
         q = await db.get(Quotation, oid)
-        if q and q.status == "won":
+        if q and q.status in ("won", "partially_won"):
             return (f"Quotation {q.number} is marked Won — its files are part "
                     "of the record now. Ask the director to remove one.")
         return None

@@ -16,6 +16,7 @@ const STATUS: Record<string, string> = {
   rejected:          "bg-red-50 text-red-700",
   sent:              "bg-blue-50 text-blue-700",
   won:               "bg-emerald-100 text-emerald-800",
+  partially_won:     "bg-teal-50 text-teal-800 ring-1 ring-teal-200",
   lost:              "bg-red-100 text-red-800",
 };
 
@@ -24,7 +25,7 @@ const STATUS: Record<string, string> = {
 const STATUS_LABEL_ID: Record<string, string> = {
   draft: "draft", pending_approval: "menunggu persetujuan",
   approved: "disetujui", rejected: "ditolak", sent: "terkirim",
-  won: "menang", lost: "kalah",
+  won: "menang", partially_won: "menang sebagian", lost: "kalah",
 };
 
 export default function QuotationsPage() {

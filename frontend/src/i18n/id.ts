@@ -1214,6 +1214,7 @@ export const ID_RUNTIME: Record<string, string> = {
   "warehousing": "pergudangan",
   "wfh": "wfh",
   "won": "menang",
+  "partially won": "menang sebagian",
 };
 
 export const ID: Record<string, string> = { ...ID_STATIC, ...ID_RUNTIME };

@@ -29,7 +29,7 @@ from app.models.crm import Activity, Customer, CustomerContact, Reminder
 from app.services import reminders as reminders_svc
 from app.models.finance import Invoice, OUTSTANDING_INVOICE_STATUSES, Payment
 from app.models.operation import Project
-from app.models.quotation import Quotation
+from app.models.quotation import Quotation, won_amount, won_share, won_value
 from app.models.user import User
 from app.services import storage
 from app.schemas.common import Page
@@ -853,13 +853,13 @@ async def _build_summary(db: AsyncSession, c: Customer,
         select(Quotation).where(Quotation.customer_id == c.id)
         .order_by(Quotation.created_at.desc())
     )).all()
-    won  = [q for q in quotes if q.status == "won"]
+    won  = [q for q in quotes if q.status in ("won", "partially_won")]
     lost = [q for q in quotes if q.status == "lost"]
     open_states = ("draft", "pending_approval", "approved", "sent")
     open_q = [q for q in quotes if q.status in open_states]
     decided = len(won) + len(lost)
     total_quoted = float(sum(float(q.total or 0) for q in quotes))
-    won_revenue  = float(sum(float(q.total or 0) for q in won))
+    won_revenue  = float(sum(won_amount(q) for q in won))
     pipeline_val = float(sum(float(q.total or 0) for q in open_q))
 
     # Projects
