@@ -678,11 +678,17 @@ async def create_requests(
                                 f"Price request {pid} not found")
         prs[pid] = pr
 
+    # "Everything in scope" means everything the customer ordered: a line
+    # their PO left out isn't sent to suppliers unless it is picked by name.
+    from app.services.ordered_lines import is_ordered, ordered_line_nos
+    ordered = {pid: await ordered_line_nos(db, pid) for pid in scope_ids}
+
     def lines_for(refs: list[LineRef]) -> list[dict]:
         """Resolve line references into copied lines, renumbered 1..n."""
         chosen = refs or [
             LineRef(price_request_id=pid, line_no=int(it.get("line_no") or 0))
             for pid in scope_ids for it in (prs[pid].items or [])
+            if is_ordered(it.get("line_no"), ordered[pid])
         ]
         out: list[dict] = []
         for ref in chosen:
@@ -1069,11 +1075,16 @@ async def refresh_from_source(
 
     added: list[dict] = []
     if want_new:
+        from app.services.ordered_lines import is_ordered, ordered_line_nos
         next_no = max([int(i.get("line_no") or 0) for i in items] or [0]) + 1
         for pr in prs.values():
+            ordered = await ordered_line_nos(db, pr.id)
             for it in (pr.items or []):
                 key = (str(pr.id), int(it.get("line_no") or 0))
                 if key in held:
+                    continue
+                # Not on the customer's PO: not added to a supplier's request.
+                if not is_ordered(it.get("line_no"), ordered):
                     continue
                 row = _copy_line(pr, it, next_no)
                 items.append(row)

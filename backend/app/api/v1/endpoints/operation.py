@@ -422,9 +422,16 @@ async def project_full(project_id: UUID,
             pr_items = [r for _, r in sorted(
                 enumerate(pr_items),
                 key=lambda ir: (pos.get(ir[1]["line_no"], len(order)), ir[0]))]
+            # Lines the customer's PO didn't order: kept on the card, marked,
+            # so purchasing doesn't source them (see services/ordered_lines).
+            from app.services.ordered_lines import is_ordered, ordered_line_nos
+            _ordered = await ordered_line_nos(db, pr.id)
+            for r in pr_items:
+                r["ordered"] = is_ordered(r.get("line_no"), _ordered)
             price_request = {"id": str(pr.id), "number": pr.number,
                              "items": pr_items,
-                             "custom_order": bool(order)}
+                             "custom_order": bool(order),
+                             "not_ordered": sum(1 for r in pr_items if not r["ordered"])}
             # Does the order on this page still say what the deal says?
             #
             # The card reads the request live, so it is right whenever the
@@ -2699,8 +2706,25 @@ async def issue_invoice(
     # sibling defaults from the PO total (Σ qty × unit_price, net).
     # Quotation.total is GROSS (after_discount + PPN), so defaulting from it
     # put tax inside the DPP and then added PPN again on top.
+    # What the customer actually ordered: the lines on their PO, not every
+    # line that was quoted. A quotation of ten lines with a PO for three used
+    # to be invoiced for all ten. The quotation's discount is applied in
+    # proportion to the part of it that was ordered.
+    from app.models.customer_po import CustomerPO as _CPO
+    _po = (await db.scalars(
+        select(_CPO).where(_CPO.project_id == p.id, _CPO.status != "rejected")
+        .order_by(_CPO.created_at.desc()).limit(1))).first()
+    _po_net = (sum(float(i.get("qty") or 0) * float(i.get("unit_price") or 0)
+                   for i in (_po.items or []) if isinstance(i, dict))
+               if _po is not None else 0.0)
     if amount is not None:
         inv_amount = float(amount)
+    elif _po_net > 0:
+        inv_amount = _po_net
+        q_sub = float(quotation.subtotal or 0) if quotation is not None else 0.0
+        q_disc = float(quotation.discount_amount or 0) if quotation is not None else 0.0
+        if q_sub > 0 and q_disc > 0:
+            inv_amount = round(_po_net - q_disc * min(1.0, _po_net / q_sub), 2)
     elif quotation is not None:
         inv_amount = float(quotation.subtotal or 0) - float(quotation.discount_amount or 0)
     else:

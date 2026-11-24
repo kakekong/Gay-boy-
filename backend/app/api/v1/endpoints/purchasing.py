@@ -600,14 +600,21 @@ async def po_prefill(
                 continue
             already.setdefault(key, []).append(other.number)
 
+    # Lines the customer's PO didn't order are offered unticked and left out
+    # of the total: a quotation of ten lines with a PO for three is three
+    # lines to buy.
+    from app.services.ordered_lines import is_ordered, ordered_line_nos
+    _ordered = await ordered_line_nos(db, pr.id)
     items, total, uncosted = [], 0.0, 0
     for it in (pr.items or []):
         qty = float(it.get("qty") or 0)
         unit_cost = float(it.get("cost_price") or 0)
         amount = unit_cost * qty
-        total += amount
-        if not unit_cost:
-            uncosted += 1
+        customer_ordered = is_ordered(it.get("line_no"), _ordered)
+        if customer_ordered:
+            total += amount
+            if not unit_cost:
+                uncosted += 1
         key = it.get("line_no")
         if key is None:
             key = (it.get("description") or "").strip().lower()
@@ -628,6 +635,8 @@ async def po_prefill(
             "costed": bool(unit_cost),
             # Which POs already cover this line. Empty is the ordinary case.
             "ordered_on": sorted(set(already.get(key, []))),
+            # False when the customer's PO left this line out.
+            "customer_ordered": customer_ordered,
         })
     return {
         "price_request_id": str(pr.id),

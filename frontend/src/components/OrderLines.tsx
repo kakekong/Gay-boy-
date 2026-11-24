@@ -24,6 +24,8 @@ import { useT, locale } from "@/store/lang";
 interface Line {
   line_no: number; description: string; qty: number; uom: string | null;
   spec: string | null; cost_price?: number | null; sell_price?: number | null;
+  /** False when the customer's PO left this line out — shown, not sourced. */
+  ordered?: boolean;
 }
 interface Draft {
   key: string; line_no: number | null; description: string; qty: string;
@@ -237,6 +239,12 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
         </div>
       )}
 
+      {!editing && items.some((it) => it.ordered === false) && (
+        <div className="mx-5 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {t(`The customer's PO orders ${items.filter((it) => it.ordered !== false).length} of these ${items.length} lines. The greyed-out ones weren't ordered: they stay here for reference, but aren't sent to suppliers or put on purchase orders unless picked by hand.`,
+             `PO pelanggan memesan ${items.filter((it) => it.ordered !== false).length} dari ${items.length} baris ini. Baris abu-abu tidak dipesan: tetap tampil sebagai referensi, tetapi tidak dikirim ke pemasok atau dimasukkan ke PO kecuali dipilih manual.`)}
+        </div>
+      )}
       {!editing ? (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -253,10 +261,15 @@ export function OrderLines({ projectId, items }: { projectId: string; items: Lin
             </thead>
             <tbody>
               {items.map((it, i) => (
-                <tr key={it.line_no} className="border-t border-ink-100">
+                <tr key={it.line_no} className={clsx("border-t border-ink-100",
+                  it.ordered === false && "opacity-50")}>
                   <td className="td muted" title={t(`Line ${it.line_no} on the price request`,
                                                      `Baris ${it.line_no} pada permintaan harga`)}>{i + 1}</td>
-                  <td className="td">{it.description}</td>
+                  <td className="td">{it.description}
+                    {it.ordered === false && (
+                      <span className="ml-2 chip text-[10px] bg-ink-100 text-ink-600 whitespace-nowrap">
+                        {t("Not ordered", "Tidak dipesan")}</span>)}
+                  </td>
                   <td className="td text-right tabular-nums">{it.qty}</td>
                   <td className="td muted">{it.uom || "—"}</td>
                   <td className="td muted text-xs">{it.spec || "—"}</td>

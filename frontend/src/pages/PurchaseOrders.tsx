@@ -458,7 +458,9 @@ function NewPOModal({
     setPrItems(prefillItems.map((it) => ({ ...it })));
     setPicked(new Set(
       prefillItems.map((_, i) => i)
-        .filter((i) => !(prefillItems[i].ordered_on ?? []).length),
+        .filter((i) => !(prefillItems[i].ordered_on ?? []).length
+          // Not on the customer's PO: offered, but not ticked.
+          && prefillItems[i].customer_ordered !== false),
     ));
   }, [prKey, linkedPR, prefillItems]);
 

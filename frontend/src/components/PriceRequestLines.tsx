@@ -13,6 +13,8 @@ export interface PrLine {
   costed?: boolean;
   /** PO numbers that already cover this line, if any. */
   ordered_on?: string[];
+  /** False when the customer's PO left this line out. */
+  customer_ordered?: boolean;
 }
 
 interface Props {
@@ -141,6 +143,12 @@ export function PriceRequestLines({
                       <span className="block text-[10px] text-amber-700 inline-flex items-center gap-1 mt-0.5">
                         <AlertCircle size={10} className="shrink-0" />
                         {T("already on")} {(it.ordered_on ?? []).join(", ")}
+                      </span>
+                    )}
+                    {it.customer_ordered === false && (
+                      <span className="mt-0.5 flex items-center gap-1 text-[10px] text-ink-500">
+                        <AlertCircle size={10} className="shrink-0" />
+                        {tt("Not on the customer's PO", "Tidak ada di PO pelanggan")}
                       </span>
                     )}
                   </td>

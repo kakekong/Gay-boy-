@@ -2291,7 +2291,7 @@ export default function ProjectDetailPage() {
                 ) : null;
               })()}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input className="input" placeholder={t("Amount (blank = quotation total)", "Jumlah (kosong = total penawaran)")}
+                <input className="input" placeholder={t("Amount before PPN (blank = what the customer PO ordered)", "Jumlah sebelum PPN (kosong = nilai PO pelanggan)")}
                   value={invAmount} onChange={(e) => setInvAmount(e.target.value)} />
               </div>
               {/* No file to upload any more: both sheets are generated from
