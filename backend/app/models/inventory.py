@@ -18,7 +18,10 @@ from app.models.base import TimestampMixin, UUIDPK
 # quoted and cut in links, and quoting it "per pcs" leaves the reader with
 # no idea how much chain is meant — one piece of a hundred links, or one
 # link.
-UNITS = ("pcs", "meter", "set", "roll", "link")
+#
+# `box` is for goods bought and kept by the box (bolts, pins, consumables)
+# where the box, not the piece inside it, is what is counted.
+UNITS = ("pcs", "meter", "set", "roll", "link", "box")
 
 _UOM_SYNONYMS = {
     "pc": "pcs", "pcs": "pcs", "piece": "pcs", "pieces": "pcs", "pce": "pcs",
@@ -32,8 +35,9 @@ _UOM_SYNONYMS = {
     # sells — a conveyor chain quoted "per pcs" says nothing about how much
     # chain that is. Not to be confused with the URL field also called
     # `link` on a price-request line; this one is a unit of measure.
-    "link": "link", "links": "link", "lnk": "link", "mata": "link",
+    "link": "link", "links": "link", "lnk": "link", "lik": "link", "mata": "link",
     "mata rantai": "link", "pitch": "link", "pitches": "link",
+    "box": "box", "boxes": "box", "bx": "box", "dus": "box", "kotak": "box",
 }
 
 

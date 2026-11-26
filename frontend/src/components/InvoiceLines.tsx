@@ -35,7 +35,7 @@ interface InvoiceForLines {
 
 // What an invoice usually says — offered, not enforced: this sheet is the
 // customer's, and some of them buy by the LOT or the UNIT.
-const UNIT_HINTS = ["pcs", "meter", "set", "roll", "link", "unit", "lot"];
+const UNIT_HINTS = ["pcs", "meter", "set", "roll", "link", "box", "unit", "lot"];
 
 const idr = (n: number) => "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n || 0));
 const lineTotal = (l: Draft) => (Number(l.qty) || 0) * (Number(l.unit_price) || 0);

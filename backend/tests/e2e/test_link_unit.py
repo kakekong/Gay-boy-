@@ -34,7 +34,7 @@ def why(r):
     return str(b.get("detail")
                or (b.get("errors") or [{}])[0].get("message", "")).lower()
 
-UNITS = ["pcs", "meter", "set", "roll", "link"]
+UNITS = ["pcs", "meter", "set", "roll", "link", "box"]
 
 
 async def main():
@@ -122,7 +122,7 @@ async def main():
     check("...and prints the unit, so 240 means 240 links",
           "LINK" in text.upper(), text[:400])
 
-    items = J(await c.get("/inventory", headers=d, params={"limit": 300}))
+    items = J(await c.get("/inventory", headers=d, params={"q": TAG, "limit": 300}))
     rows = items if isinstance(items, list) else items.get("items", [])
     chain = next((x for x in rows
                   if f"Conveyor Chain C2060H {TAG}" in (x.get("name") or "")), None)

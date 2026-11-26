@@ -64,7 +64,7 @@ async def main():
               "Sprocket", "Roller conveyor", "Others"],
           str([x.get("label") for x in cat.get("categories", [])]))
     check("...and the units come with them, from the same place",
-          cat.get("units") == ["pcs", "meter", "set", "roll", "link"],
+          cat.get("units") == ["pcs", "meter", "set", "roll", "link", "box"],
           str(cat.get("units")))
 
     # ══ saving one ═══════════════════════════════════════════════════════
@@ -177,7 +177,7 @@ async def main():
     print("\n── and follows the part into stock ──")
     r = await c.post(f"/price-requests/{pr['id']}/submit", headers=s1)
     check("the request submits", r.status_code == 200, f"{r.status_code} {why(r)}")
-    items = J(await c.get("/inventory", headers=d, params={"limit": 300}))
+    items = J(await c.get("/inventory", headers=d, params={"q": TAG, "limit": 300}))
     rows = items if isinstance(items, list) else items.get("items", [])
     mine = [x for x in rows if TAG in (x.get("name") or "")]
     check("the catalogue row carries the category, not free text",

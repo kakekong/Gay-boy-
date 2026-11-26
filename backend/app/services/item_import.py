@@ -22,6 +22,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.models.inventory import normalise_uom
+
 COLUMNS = {
     "sku": ["kode barang", "item code"],
     "name": ["nama barang", "item name"],
@@ -139,7 +141,9 @@ def map_items(header: list[str], rows: list[list[str]]) -> tuple[list[MappedItem
             category=cell(row, "category"),
             # The unit is displayed everywhere alongside quantities, and the
             # app's own default is lowercase "pcs"; the export shouts "PCS".
-            uom=(cell(row, "uom") or "pcs").lower(),
+            # MTR → meter, LIK/LNK → link, BOX → box: the units the rest of
+            # the app counts in. One it doesn't know is kept as written.
+            uom=normalise_uom(cell(row, "uom")) or (cell(row, "uom") or "pcs").lower(),
             unit_cost=cost,
             sell_price=sell,
             reorder_point=_num(cell(row, "reorder_point")),

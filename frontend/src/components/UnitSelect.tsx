@@ -21,7 +21,7 @@ import { api } from "@/api/client";
 import { t as tt } from "@/store/lang";
 
 /** Until the catalog answers. Kept in step with `UNITS` on the server. */
-export const FALLBACK_UNITS = ["pcs", "meter", "set", "roll", "link"];
+export const FALLBACK_UNITS = ["pcs", "meter", "set", "roll", "link", "box"];
 
 export function useUnits(): string[] {
   const q = useQuery({
